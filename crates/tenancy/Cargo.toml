@@ -1,0 +1,10 @@
+[package]
+name = "tetsu-tenancy"
+description = "Control plane: tenant identity and the tenant context every operation carries."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
