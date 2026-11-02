@@ -8,3 +8,4 @@ an accepted ADR's decision; supersede it with a new one.
 | ADR | Decision | Status |
 |---|---|---|
 | [0001](0001-modular-monolith-with-hexagonal-ports.md) | Modular monolith with hexagonal ports | Accepted |
+| [0002](0002-tenant-isolation.md) | Tenant isolation: pooled schema, row-level security, typed tenant context | Proposed |

@@ -4,16 +4,17 @@
 //! [`TenantContext`]. There is no way to build one without a [`TenantId`], so
 //! "forgot to scope the query" becomes a compile error instead of a data leak.
 //! Postgres row-level security enforces the same rule a second time in the
-//! database (ADR-0002, to come).
+//! database (ADR-0002, `docs/adr/0002-tenant-isolation.md`).
 
 use std::fmt;
 use std::str::FromStr;
 
 /// Identifies one tenant (for the fitness vertical, one studio brand).
 ///
-/// A tenant ID is a 128-bit UUID. Tetsu never mints IDs itself: Postgres
-/// generates them when a tenant row is inserted (the format and generator are
-/// decided in ADR-0002). This type only carries, formats and parses them.
+/// A tenant ID is a version 7 UUID. Tetsu never mints IDs itself: Postgres 18's
+/// `uuidv7()` generates them when a tenant row is inserted (ADR-0002). This
+/// type only carries, formats and parses them. A tenant ID is an identifier,
+/// not a secret: knowing one never grants access.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TenantId(u128);
 
