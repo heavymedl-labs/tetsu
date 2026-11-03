@@ -11,6 +11,7 @@ number, and add a row below. Never renumber.
 | [0003](0003-architecture.md) | Architecture | Proposed |
 | [0004](0004-security.md) | Security | Proposed |
 | [0005](0005-testing-and-performance.md) | Testing and performance | Proposed |
+| [0006](0006-diagrams.md) | Diagrams | Accepted |
 
 ## Open decisions
 

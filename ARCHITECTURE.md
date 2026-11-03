@@ -11,21 +11,20 @@ shipped as one binary, `tetsu`, backed by PostgreSQL
 ([ADR-0003](docs/adr/0003-architecture.md)). A small kernel defines the module
 contract, and the binary wires the modules together.
 
-```text
-                 tetsu (composition root)
-                           |
-     +---------------------+---------------------+
-     |                     |                     |
-control plane      shared capabilities      edge adapters
-tenancy            scheduling, booking      payments
-identity, access   catalog, pricing         notifications
-audit              orders, subscriptions    public API
-                   ledger
-     \                     |                     /
-      +-------- use cases, domain events --------+
-                           |
-                       verticals
-                   fitness (first)
+```mermaid
+flowchart LR
+    tetsu["tetsu<br/>composition root"]
+    verticals["Verticals<br/>fitness first"]
+
+    subgraph platform[Platform]
+        control["Control plane<br/><br/>tenancy<br/>identity and access<br/>audit"]
+        shared["Shared capabilities<br/><br/>scheduling, booking<br/>catalog, pricing<br/>orders, subscriptions<br/>ledger"]
+        edge["Edge adapters<br/><br/>payments<br/>notifications<br/>public API"]
+    end
+
+    tetsu -- wires --> verticals
+    tetsu -- wires --> platform
+    verticals -- use cases and domain events --> platform
 ```
 
 [ADR-0002](docs/adr/0002-platform-and-verticals.md) decides what belongs in
