@@ -1,7 +1,7 @@
 # 0005. Testing and performance
 
-- Status: Proposed
-- Date: 2026-11-02
+- Status: Accepted
+- Date: 2026-11-03
 
 ## Context
 
@@ -21,7 +21,7 @@ the testing pyramid allows, and performance to improve over time.
 
   | Tier | Areas | Bar |
   | --- | --- | --- |
-  | 1 | Identity and access, money, tenant isolation | 100% branch coverage; mutation testing with no surviving mutants; property-based tests for invariants such as a balanced ledger; negative tests at every authorization and isolation boundary; maintainer review plus an independent agent review in a fresh context; no `unsafe`. |
+  | 1 | Identity and access, money, tenant isolation | 100% branch coverage; mutation testing with no surviving mutants, except ones the pull request documents as equivalent; property-based tests for invariants such as a balanced ledger; negative tests at every authorization and isolation boundary; maintainer review plus an independent agent review in a fresh context; no `unsafe`. |
   | 2 | Booking, scheduling, and any module not listed | At least 90% branch coverage; tests for domain rules, including concurrency and capacity. |
   | 3 | UI | Coverage never goes down; end-to-end tests for critical journeys. |
 

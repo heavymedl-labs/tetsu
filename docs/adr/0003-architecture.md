@@ -1,7 +1,7 @@
 # 0003. Architecture
 
-- Status: Proposed
-- Date: 2026-11-02
+- Status: Accepted
+- Date: 2026-11-03
 
 ## Context
 

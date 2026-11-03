@@ -1,7 +1,7 @@
 # 0004. Security
 
-- Status: Proposed
-- Date: 2026-11-02
+- Status: Accepted
+- Date: 2026-11-03
 
 ## Context
 
@@ -23,7 +23,9 @@ vulnerabilities, and touching card data puts a system in full PCI DSS scope.
 ## Consequences
 
 Payment flows depend on the processor's tokenization. Which processors to
-support is an open decision.
+support is an open decision. Dependency vulnerability and license checks,
+secrets handling, and a target OWASP ASVS level each get their own ADR when the
+implementation phase opens.
 
 ## Sources
 

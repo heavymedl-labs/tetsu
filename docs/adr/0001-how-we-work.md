@@ -1,7 +1,7 @@
 # 0001. How we work
 
-- Status: Proposed
-- Date: 2026-11-02
+- Status: Accepted
+- Date: 2026-11-03
 
 ## Context
 
@@ -13,7 +13,8 @@ durable record, and every agent needs the same rules.
 - **Decisions.** Significant decisions are ADRs in `docs/adr`, citing reputable
   sources. Adopting a framework, library, service, or tool counts. Agents write
   ADRs as `Proposed`; only the maintainer accepts them. An accepted ADR changes
-  only by being superseded.
+  only by being superseded, except for editorial fixes such as typos, links,
+  and wording that leaves the decision unchanged.
 - **Quality bar.** Testing, rigor tiers, and performance follow
   [ADR-0005](0005-testing-and-performance.md).
 - **Tooling.** CI runs on GitHub Actions with every action pinned to a commit

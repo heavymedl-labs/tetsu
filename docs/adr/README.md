@@ -6,11 +6,11 @@ number, and add a row below. Never renumber.
 
 | ADR | Title | Status |
 | --- | --- | --- |
-| [0001](0001-how-we-work.md) | How we work | Proposed |
-| [0002](0002-platform-and-verticals.md) | Platform and verticals | Proposed |
-| [0003](0003-architecture.md) | Architecture | Proposed |
-| [0004](0004-security.md) | Security | Proposed |
-| [0005](0005-testing-and-performance.md) | Testing and performance | Proposed |
+| [0001](0001-how-we-work.md) | How we work | Accepted |
+| [0002](0002-platform-and-verticals.md) | Platform and verticals | Accepted |
+| [0003](0003-architecture.md) | Architecture | Accepted |
+| [0004](0004-security.md) | Security | Accepted |
+| [0005](0005-testing-and-performance.md) | Testing and performance | Accepted |
 | [0006](0006-diagrams.md) | Diagrams | Accepted |
 
 ## Open decisions
