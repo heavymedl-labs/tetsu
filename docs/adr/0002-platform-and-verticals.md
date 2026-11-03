@@ -17,8 +17,10 @@ wellness, salon and spa from one product.
   more than one vertical. The capability map in
   [Platform implications](../research/market-scan/platform-implications.md) is
   the starting list.
-- Each platform capability is designed against at least two industries:
-  fitness and one other.
+- Each platform capability is designed against two industries: boutique
+  fitness and salons and spas. Salons and spas test the platform where
+  fitness is light: one-to-one appointments, staff and room resources, retail,
+  and tips.
 - A vertical module holds only what is specific to its industry, and builds on
   platform use cases and events.
 - The platform never depends on, imports, or names a vertical. Platform code

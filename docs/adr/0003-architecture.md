@@ -11,8 +11,11 @@ Tetsu must run on any cloud or our own hardware.
 ## Decision
 
 - **Modular monolith, microkernel style.** A small kernel defines the module
-  contract. Platform and vertical modules plug in. The `tetsu` binary is the
-  composition root.
+  contract: the traits and types every module implements. Platform and
+  vertical modules plug in at compile time, and the `tetsu` binary, the
+  composition root, registers them. The kernel is a contract, not a framework:
+  no runtime plug-in loading and no module registry beyond the composition
+  root.
 - **Hexagonal modules.** Each module's domain sits at the center. Other
   modules and inbound adapters (HTTP API, staff app, server-rendered pages)
   call its use cases. It calls out through driven ports, Rust traits that

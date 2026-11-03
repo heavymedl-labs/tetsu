@@ -17,7 +17,7 @@ Proposals, not decisions. The open ones are listed in the [ADR index](../../adr/
 
 ## Platform capabilities
 
-Three groups, named as in the [glossary](../../GLOSSARY.md): the **control plane** (tenants and access), **shared capabilities** that several verticals reuse, and **edge adapters**. Each vertical's industry-specific code sits on top.
+Three groups, named as in the [glossary](../../GLOSSARY.md): the **control plane** (tenants and access), **shared capabilities** that several verticals reuse, and **connectors**. Each vertical's industry-specific code sits on top.
 
 | Group | Capability | Role | Pattern |
 | --- | --- | --- | --- |
@@ -44,12 +44,12 @@ Three groups, named as in the [glossary](../../GLOSSARY.md): the **control plane
 | Shared capability | Segments | Domain module | Saved queries over Party and Analytics read models |
 | Shared capability | Workflows | Domain module | Process managers triggered by domain events |
 | Shared capability | Analytics | Domain module | CQRS read models projected from domain events |
-| Edge adapter | Payments | Driven port | One adapter per processor behind an anti-corruption layer; idempotent handling of processor webhooks; card data stays with the processor |
-| Edge adapter | Notifications | Driven port | One adapter per channel; sends dispatched from the transactional outbox |
-| Edge adapter | Media (new) | Driven port | Adapter for object storage or a video provider |
-| Edge adapter | Integrations | Driven port | Anti-corruption layer per partner (ClassPass, Zoom, accounting tools) |
-| Edge adapter | Public API | Inbound adapter | REST over the same use cases the staff app uses; OpenAPI generated from Rust types; keys, rate limits, versioning |
-| Edge adapter | Webhooks | Outbound adapter | Signed, at-least-once delivery from the outbox, with retries; mapped as "Public API, Domain events" |
+| Connector | Payments | Driven port | One adapter per processor behind an anti-corruption layer; idempotent handling of processor webhooks; card data stays with the processor |
+| Connector | Notifications | Driven port | One adapter per channel; sends dispatched from the transactional outbox |
+| Connector | Media (new) | Driven port | Adapter for object storage or a video provider |
+| Connector | Integrations | Driven port | Anti-corruption layer per partner (ClassPass, Zoom, accounting tools) |
+| Connector | Public API | Inbound adapter | REST over the same use cases the staff app uses; OpenAPI generated from Rust types; keys, rate limits, versioning |
+| Connector | Webhooks | Outbound adapter | Signed, at-least-once delivery from the outbox, with retries; mapped as "Public API, Domain events" |
 
 ## Sources
 

@@ -15,23 +15,24 @@ records one significant decision, its alternatives, and its sources.
 **Composition root.** The `tetsu` binary, which wires modules together. The
 only place that knows every module.
 
+**Connectors.** The group of platform modules that connect Tetsu to outside
+systems, such as payments, notifications, and the public API. Not to be
+confused with adapters, which sit at the edge of every module.
+
 **Control plane.** The platform modules that run Tetsu itself, such as
 tenancy, identity and access, and audit.
 
 **Domain event.** A record that something happened in a module, published for
 other modules to react to. Past tense, such as `BookingCancelled`.
 
-**Edge adapters.** The group of platform modules that connect Tetsu to outside
-systems, such as payments, notifications, and the public API.
-
-**Kernel.** The small core that defines the module contract. It has no domain
-knowledge.
+**Kernel.** The small core that defines the module contract: traits and types,
+with no domain knowledge and no runtime plug-in loading.
 
 **Module.** A Cargo crate that plugs into the kernel and owns at most one
 Postgres schema. Platform capabilities and verticals are both modules.
 
 **Platform.** Everything that is not a vertical: the kernel, the control plane,
-shared capabilities, and edge adapters.
+shared capabilities, and connectors.
 
 **Port.** A Rust trait a module calls out through, also called a driven port.
 Outbound adapters implement it.
@@ -50,4 +51,5 @@ other tenant's.
 call it; together with domain events, use cases are how modules talk.
 
 **Vertical.** A module for one industry. It holds only what is specific to
-that industry and builds on the platform. Boutique fitness is the first.
+that industry and builds on the platform. Boutique fitness is the first;
+salons and spas are the second industry every capability is designed against.

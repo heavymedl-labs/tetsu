@@ -31,6 +31,12 @@ option for most of them.
 - [Payroll: build or integrate](https://github.com/HeavyMedl/tetsu/issues/15)
 - [Server stack: HTTP, async runtime, database, HTML templating](https://github.com/HeavyMedl/tetsu/issues/16)
 - [First hosting environment and deploy pipeline](https://github.com/HeavyMedl/tetsu/issues/18)
+- [Time zones and recurring schedules](https://github.com/HeavyMedl/tetsu/issues/21)
+- [Data export, retention, and deletion](https://github.com/HeavyMedl/tetsu/issues/22)
+- [How businesses sign up and pay for Tetsu](https://github.com/HeavyMedl/tetsu/issues/23)
+- [Support access to tenant accounts](https://github.com/HeavyMedl/tetsu/issues/24)
+- [Money: currencies, rounding, and tax](https://github.com/HeavyMedl/tetsu/issues/26)
+- [Operations: observability, backups, and recovery](https://github.com/HeavyMedl/tetsu/issues/27)
 
 ## Finding sources
 

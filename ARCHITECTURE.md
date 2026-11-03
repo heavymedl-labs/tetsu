@@ -125,7 +125,7 @@ platform use cases, or per-tenant configuration.
 ```mermaid
 flowchart TB
     accTitle: Components of the Tetsu server
-    accDescr: Inbound adapters, server-rendered HTML pages and a JSON HTTP API, call use cases of the modules, one crate each: verticals, shared capabilities, control plane, and edge adapters. Verticals call use cases of shared capabilities. Modules call driven ports that outbound adapters implement, reaching their own Postgres schema, object storage, and outside systems. Modules publish domain events, which are delivered to other modules. Delivery is decided in #11. Modules implement the kernel's module contract, and the composition root registers them.
+    accDescr: Inbound adapters, server-rendered HTML pages and a JSON HTTP API, call use cases of the modules, one crate each: verticals, shared capabilities, control plane, and connectors. Verticals call use cases of shared capabilities. Modules call driven ports that outbound adapters implement, reaching their own Postgres schema, object storage, and outside systems. Modules publish domain events, which are delivered to other modules. Delivery is decided in #11. Modules implement the kernel's module contract, and the composition root registers them.
 
     subgraph inbound[Inbound adapters]
         pages["Server-rendered pages<br/>HTML"] ~~~ api["HTTP API<br/>JSON, OpenAPI"]
@@ -133,7 +133,7 @@ flowchart TB
 
     subgraph modules[Modules, one crate each]
         verticals[Verticals] -- call use cases of --> shared[Shared capabilities]
-        shared ~~~ control[Control plane] ~~~ edge[Edge adapters]
+        shared ~~~ control[Control plane] ~~~ connectors[Connectors]
     end
 
     subgraph out[Outside the modules]
@@ -155,7 +155,7 @@ flowchart TB
     classDef core fill:#ede9fe,stroke:#7c3aed,color:#3b0764
     classDef store fill:#dcfce7,stroke:#16a34a,color:#14532d
     classDef external fill:#f5f5f4,stroke:#78716c,color:#292524
-    class pages,api,verticals,control,shared,edge ours
+    class pages,api,verticals,control,shared,connectors ours
     class kernel,events,root core
     class db,files store
     class outside external
