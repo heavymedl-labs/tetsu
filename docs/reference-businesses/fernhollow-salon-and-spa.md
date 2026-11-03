@@ -95,7 +95,7 @@ explain, or losing client notes.
 ## Minimum sellable product
 
 What Fernhollow needs before it switches. Going live with it is
-[milestone 3](https://github.com/HeavyMedl/tetsu/milestones), after Tallow
+[milestone 3](https://github.com/heavymedl-labs/tetsu/milestones), after Tallow
 Street.
 
 **Needed to go live:**

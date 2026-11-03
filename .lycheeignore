@@ -1,4 +1,4 @@
 # Private GitHub Project: returns 404 without auth.
-^https://github\.com/users/HeavyMedl/projects/
+^https://github\.com/orgs/heavymedl-labs/projects/
 # Private repository issues: also 404 without auth.
-^https://github\.com/HeavyMedl/tetsu/issues/
+^https://github\.com/heavymedl-labs/tetsu/issues/

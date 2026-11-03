@@ -108,7 +108,7 @@ being unable to take the data out.
 ## Minimum sellable product
 
 What Tallow Street needs before it switches. Going live with it is
-[milestone 2](https://github.com/HeavyMedl/tetsu/milestones).
+[milestone 2](https://github.com/heavymedl-labs/tetsu/milestones).
 
 **Needed to go live:**
 

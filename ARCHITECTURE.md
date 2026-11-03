@@ -120,7 +120,7 @@ another's use cases, except that the platform never calls a vertical. Modules
 reach storage and outside systems through driven ports, talk through domain
 events, and implement the kernel's contract. The composition root registers
 every module. How a vertical changes platform behavior, such as a late-cancel
-fee, is open ([#7](https://github.com/HeavyMedl/tetsu/issues/7)): policy
+fee, is open ([#7](https://github.com/heavymedl-labs/tetsu/issues/7)): policy
 ports the platform defines, verticals wrapping platform use cases, or
 per-tenant configuration.
 
@@ -208,10 +208,10 @@ flowchart LR
 ### Tenancy
 
 Provisional until tenant isolation is decided
-([#8](https://github.com/HeavyMedl/tetsu/issues/8)). A tenant is one business:
+([#8](https://github.com/heavymedl-labs/tetsu/issues/8)). A tenant is one business:
 a brand and all its locations. Every request resolves its tenant, and every
 query is scoped to it. Customer accounts belong to their business
-([#9](https://github.com/HeavyMedl/tetsu/issues/9)). The leading option for
+([#9](https://github.com/heavymedl-labs/tetsu/issues/9)). The leading option for
 storage is shared tables with a tenant ID on every row, enforced by Postgres
 row-level security.
 
@@ -247,9 +247,9 @@ flowchart TB
 
 Provisional: one booking, end to end. Tokens, tenant resolution, and event
 delivery follow the leading options for
-[#9](https://github.com/HeavyMedl/tetsu/issues/9),
-[#8](https://github.com/HeavyMedl/tetsu/issues/8), and
-[#11](https://github.com/HeavyMedl/tetsu/issues/11).
+[#9](https://github.com/heavymedl-labs/tetsu/issues/9),
+[#8](https://github.com/heavymedl-labs/tetsu/issues/8), and
+[#11](https://github.com/heavymedl-labs/tetsu/issues/11).
 
 ```mermaid
 sequenceDiagram
@@ -285,7 +285,7 @@ sequenceDiagram
 ### Deployment
 
 Provisional until hosting is decided
-([#18](https://github.com/HeavyMedl/tetsu/issues/18)). Here "instances" are
+([#18](https://github.com/heavymedl-labs/tetsu/issues/18)). Here "instances" are
 running copies of the `tetsu` OCI image, not C4 containers.
 
 ```mermaid
@@ -333,7 +333,7 @@ flowchart TB
 
 - Every surface, web or native, feels fast and intuitive. Performance budgets
   and an accessibility target come with the front-end decision
-  ([#14](https://github.com/HeavyMedl/tetsu/issues/14)).
+  ([#14](https://github.com/heavymedl-labs/tetsu/issues/14)).
 - Identity, money, and tenant isolation get the highest testing rigor, and hot
   paths are benchmarked on every change
   ([ADR-0005](docs/adr/0005-testing-and-performance.md)).

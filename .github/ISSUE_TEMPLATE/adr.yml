@@ -1,7 +1,7 @@
 name: Decision needed
 description: A decision that needs an ADR before work depends on it.
 labels: [adr]
-projects: ["HeavyMedl/1"]
+projects: ["heavymedl-labs/1"]
 body:
   - type: textarea
     id: question

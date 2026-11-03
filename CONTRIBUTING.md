@@ -6,7 +6,7 @@ People and coding agents follow the same workflow and the rules in
 ## Workflow
 
 1. Pick or open an issue on the
-   [Tetsu project](https://github.com/users/HeavyMedl/projects/1). Use the
+   [Tetsu project](https://github.com/orgs/heavymedl-labs/projects/1). Use the
    **Task** form for work and **Decision needed** for anything that needs an
    ADR.
 2. Branch from `main` with a short name and a type prefix, such as
@@ -21,7 +21,7 @@ and 5 return when a second contributor joins.
 
 ## Project board
 
-The [Tetsu project](https://github.com/users/HeavyMedl/projects/1) README
+The [Tetsu project](https://github.com/orgs/heavymedl-labs/projects/1) README
 explains its fields. Keep the board true as work moves:
 
 - Give every new issue a milestone, priority, and tier, and place it in the

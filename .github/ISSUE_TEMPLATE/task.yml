@@ -1,7 +1,7 @@
 name: Task
 description: A unit of work small enough for one pull request.
 labels: [task]
-projects: ["HeavyMedl/1"]
+projects: ["heavymedl-labs/1"]
 body:
   - type: textarea
     id: goal
