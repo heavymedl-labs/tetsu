@@ -60,45 +60,45 @@ Of 40 feature areas, 25 are platform or platform with config, 3 are fitness-spec
 
 | Area | Feature | Tag | Platform capability | Notes |
 | --- | --- | --- | --- | --- |
-| Identity | Staff profiles, logins, role permissions (e.g. who can refund or edit memberships) | Platform | Identity, Authorization |  |
-| Identity | Client accounts; option to disable self check-in | Platform | Identity |  |
+| Identity | Staff profiles, logins, role permissions (e.g. who can refund or edit memberships) | Platform | Identity, Authorization | |
+| Identity | Client accounts; option to disable self check-in | Platform | Identity | |
 | Org structure | Enterprise Cloud: parent and HQ accounts, cross-location visits, multi-location reporting | Platform | Tenancy, Entitlements, Analytics | Enterprise |
-| Customers | Client profiles, history, document attachments | Platform | Party |  |
-| Customers | Online waivers; contracts with control over re-signing | Platform | Documents |  |
-| Customers | Custom forms and surveys at registration, booking, purchase | Platform | Documents |  |
-| Scheduling | Online booking for appointments, classes, events | Platform + config | Scheduling, Booking |  |
-| Scheduling | Events and workshops managed end to end | Platform | Scheduling, Catalog |  |
+| Customers | Client profiles, history, document attachments | Platform | Party | |
+| Customers | Online waivers; contracts with control over re-signing | Platform | Documents | |
+| Customers | Custom forms and surveys at registration, booking, purchase | Platform | Documents | |
+| Scheduling | Online booking for appointments, classes, events | Platform + config | Scheduling, Booking | |
+| Scheduling | Events and workshops managed end to end | Platform | Scheduling, Catalog | |
 | Scheduling | Book-a-Spot: equipment with its own schedule | Vertical | Scheduling, Booking | Modelled as bookable assets |
-| Scheduling | Appointment types; option to hide duration | Platform + config | Scheduling |  |
-| Booking | Waitlists for classes and events | Platform + config | Booking |  |
+| Scheduling | Appointment types; option to hide duration | Platform + config | Scheduling | |
+| Booking | Waitlists for classes and events | Platform + config | Booking | |
 | Booking | Reserve with Google | Integration | Booking | No extra fee |
-| Booking | ClassPass, Wellhub, FitReserve | Integration | Booking |  |
-| Attendance | Self check-in; attendance web app | Platform + config | Attendance |  |
-| Attendance | Brivo door access | Integration | Attendance |  |
-| Commerce | Purchase options: passes, memberships, contracts | Platform | Subscriptions, Entitlements |  |
-| Commerce | Discount codes across services and store | Platform | Pricing |  |
-| Commerce | POS, online store, shopping cart | Platform | Orders, Catalog |  |
+| Booking | ClassPass, Wellhub, FitReserve | Integration | Booking | |
+| Attendance | Self check-in; attendance web app | Platform + config | Attendance | |
+| Attendance | Brivo door access | Integration | Attendance | |
+| Commerce | Purchase options: passes, memberships, contracts | Platform | Subscriptions, Entitlements | |
+| Commerce | Discount codes across services and store | Platform | Pricing | |
+| Commerce | POS, online store, shopping cart | Platform | Orders, Catalog | |
 | Payments | Integrated processing; mobile card reader | Integration | Payments | Paragon or Nuvei only |
 | Payments | Debt collection service | Integration | Ledger | Aldous & Associates |
-| Finance | QuickBooks sync | Integration | Ledger |  |
-| Messaging | Message Center for two-way SMS | Platform | Notifications |  |
+| Finance | QuickBooks sync | Integration | Ledger | |
+| Messaging | Message Center for two-way SMS | Platform | Notifications | |
 | Marketing | Marketing Suite: email and SMS automations | Platform | Segments, Workflows | Business+; AI features are an add-on |
-| Marketing | Direct-mail postcards | Integration | Notifications |  |
-| Marketing | Customer reviews shared online | Platform + config | Party |  |
+| Marketing | Direct-mail postcards | Integration | Notifications | |
+| Marketing | Customer reviews shared online | Platform + config | Party | |
 | Loyalty | Rewards points redeemable for prizes | Vertical | Domain events, Ledger | Business+ |
-| Staff | Staff management and payroll | Platform | Staff, Ledger |  |
-| Insights | Advanced reporting | Platform + config | Analytics |  |
-| AI | Isaac business intelligence and churn predictor | Platform + config | Analytics, Domain events |  |
-| AI | CAASI 24/7 AI front-desk sales agent | Integration | Notifications |  |
+| Staff | Staff management and payroll | Platform | Staff, Ledger | |
+| Insights | Advanced reporting | Platform + config | Analytics | |
+| AI | Isaac business intelligence and churn predictor | Platform + config | Analytics, Domain events | |
+| AI | CAASI 24/7 AI front-desk sales agent | Integration | Notifications | |
 | Fitness | FitBUILDER workout builder | Vertical | None | Programming content |
-| Fitness | Spivi heart-rate leaderboards; AccuroFit tracking | Integration | Integrations |  |
-| Virtual | Go Virtual: live and on-demand without third parties | (new) | Media |  |
+| Fitness | Spivi heart-rate leaderboards; AccuroFit tracking | Integration | Integrations | |
+| Virtual | Go Virtual: live and on-demand without third parties | (new) | Media | |
 | Platform | Achieve client app; white-label version | Platform + config | Theming | White-label on BusinessPro |
-| Platform | Elevate staff app | Platform + config | Public API |  |
+| Platform | Elevate staff app | Platform + config | Public API | |
 | Platform | Presence website builder | Platform + config | Theming | Extra fee |
-| Platform | Website widgets | Platform + config | Public API |  |
+| Platform | Website widgets | Platform + config | Public API | |
 | Platform | API with OpenAPI spec and SDKs | Platform | Public API | Gated |
-| Integrations | Zapier | Integration | Public API |  |
+| Integrations | Zapier | Integration | Public API | |
 | Verticals | Salon, spa, med spa, music, tattoo, swim (HIPAA-verified) | (new) | None | Same platform, many verticals |
 
 ## Sources

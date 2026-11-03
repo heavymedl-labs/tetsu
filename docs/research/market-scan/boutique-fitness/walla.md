@@ -56,36 +56,36 @@ Of 30 feature areas, 23 are platform or platform with config, 4 are fitness-spec
 
 | Area | Feature | Tag | Platform capability | Notes |
 | --- | --- | --- | --- | --- |
-| Identity | Staff roles; a protected "sensitive info" tab; edit rights on others' notes | Platform | Authorization |  |
-| Org structure | Multi-location management | Platform | Tenancy |  |
-| Customers | Client profiles, details shown on rosters, unique emails enforced | Platform | Party |  |
-| Customers | Digital waivers with roster alerts | Platform | Documents |  |
-| Customers | Client milestones celebrated | Vertical | Domain events |  |
-| Scheduling | Classes, appointments, private sessions, events | Platform + config | Scheduling |  |
-| Booking | Waitlists | Platform + config | Booking |  |
+| Identity | Staff roles; a protected "sensitive info" tab; edit rights on others' notes | Platform | Authorization | |
+| Org structure | Multi-location management | Platform | Tenancy | |
+| Customers | Client profiles, details shown on rosters, unique emails enforced | Platform | Party | |
+| Customers | Digital waivers with roster alerts | Platform | Documents | |
+| Customers | Client milestones celebrated | Vertical | Domain events | |
+| Scheduling | Classes, appointments, private sessions, events | Platform + config | Scheduling | |
+| Booking | Waitlists | Platform + config | Booking | |
 | Booking | Book-a-Spot | Vertical | Booking | Core plan |
-| Booking | Buddy and guest passes | Vertical | Booking, Entitlements |  |
+| Booking | Buddy and guest passes | Vertical | Booking, Entitlements | |
 | Booking | No unpaid reservations; comp passes instead | Platform + config | Booking, Entitlements | A strict invariant |
-| Attendance | Self check-in | Platform + config | Attendance |  |
-| Attendance | Automated late-cancel and no-show fees | Vertical | Booking, Ledger |  |
-| Commerce | Plans and packages, recurring plans, start on first visit | Platform | Subscriptions, Entitlements |  |
-| Commerce | Discounts and promotions | Platform | Pricing |  |
+| Attendance | Self check-in | Platform + config | Attendance | |
+| Attendance | Automated late-cancel and no-show fees | Vertical | Booking, Ledger | |
+| Commerce | Plans and packages, recurring plans, start on first visit | Platform | Subscriptions, Entitlements | |
+| Commerce | Discounts and promotions | Platform | Pricing | |
 | Commerce | POS, retail, rentals; retail report | Platform | Orders, Catalog | Inventory was thin per older reviews |
-| Payments | Integrated processing with merchant support | Integration | Payments |  |
-| Messaging | Automatic confirmations, reminders, payment alerts | Platform | Notifications |  |
+| Payments | Integrated processing with merchant support | Integration | Payments | |
+| Messaging | Automatic confirmations, reminders, payment alerts | Platform | Notifications | |
 | Messaging | Two-way texting | Platform | Notifications | Pro |
 | Marketing | Marketing suite, custom automations, unlimited segments | Platform | Segments, Workflows | Pro |
-| Sales | Lead tracker and sales tools; Google and Meta lead forms | Platform | Party, Segments |  |
-| Reputation | Ratings and reviews | Platform + config | Notifications |  |
-| Staff | Pay rates by class, shift and headcount bonus; commissions; time clock; pay stubs | Platform + config | Staff, Ledger |  |
-| Staff | Payroll exports for external providers (no processing) | Platform | Staff |  |
-| Insights | Reporting and AI dashboards | Platform + config | Analytics |  |
-| Insights | WallaPredict: performance against goals, drop-off prediction | Platform + config | Analytics, Domain events |  |
-| Platform | Branded client app and web experience | Platform + config | Theming |  |
-| Platform | Walla Websites (separate design team) | Platform + config | Theming |  |
-| Platform | Public API and webhooks | Platform | Public API, Domain events |  |
-| Video | Zoom livestreams, on-demand library, Vimeo | Integration | Integrations |  |
-| Integrations | ClassPass, Referrizer, Zapier | Integration | Integrations |  |
+| Sales | Lead tracker and sales tools; Google and Meta lead forms | Platform | Party, Segments | |
+| Reputation | Ratings and reviews | Platform + config | Notifications | |
+| Staff | Pay rates by class, shift and headcount bonus; commissions; time clock; pay stubs | Platform + config | Staff, Ledger | |
+| Staff | Payroll exports for external providers (no processing) | Platform | Staff | |
+| Insights | Reporting and AI dashboards | Platform + config | Analytics | |
+| Insights | WallaPredict: performance against goals, drop-off prediction | Platform + config | Analytics, Domain events | |
+| Platform | Branded client app and web experience | Platform + config | Theming | |
+| Platform | Walla Websites (separate design team) | Platform + config | Theming | |
+| Platform | Public API and webhooks | Platform | Public API, Domain events | |
+| Video | Zoom livestreams, on-demand library, Vimeo | Integration | Integrations | |
+| Integrations | ClassPass, Referrizer, Zapier | Integration | Integrations | |
 
 ## Sources
 

@@ -57,47 +57,47 @@ Of 46 feature areas, 33 are platform or platform with config, 6 are fitness-spec
 | Identity | Staff login locations | Platform | Authorization | Which sites a staffer can work from |
 | Identity | Consumer account on the Mindbody app, shared across businesses | (new) | Identity | 2025 shared-login change partly rolled back |
 | Org structure | Multi-location (datashare) with central staff and reporting | Platform | Tenancy, Analytics | Two setup options |
-| Customers | Client profiles, notes, photos | Platform | Party |  |
-| Customers | Liability waivers signed in the Business app | Platform | Documents |  |
+| Customers | Client profiles, notes, photos | Platform | Party | |
+| Customers | Liability waivers signed in the Business app | Platform | Documents | |
 | Customers | SOAP notes | Vertical | Documents | For massage, physical therapy; not fitness |
-| Scheduling | Classes, appointments and events on one screen, overlaps allowed | Platform + config | Scheduling |  |
-| Scheduling | Courses and workshops with enrollment | Platform | Scheduling, Catalog |  |
+| Scheduling | Classes, appointments and events on one screen, overlaps allowed | Platform + config | Scheduling | |
+| Scheduling | Courses and workshops with enrollment | Platform | Scheduling, Catalog | |
 | Scheduling | Room and resource management, rentals | Platform + config | Scheduling | Accelerate+ |
 | Scheduling | Recurring appointments | Platform + config | Scheduling | Staff or client booked |
-| Scheduling | Buffer times and notice periods per service | Platform + config | Booking |  |
+| Scheduling | Buffer times and notice periods per service | Platform + config | Booking | |
 | Booking | Capacity, with separate online vs. total limits | Platform + config | Booking | Holds spots for walk-ins |
-| Booking | Booking and cancellation rules, who can book | Platform + config | Booking |  |
-| Booking | Automated waitlists with notify or auto-promote | Platform + config | Booking, Notifications |  |
+| Booking | Booking and cancellation rules, who can book | Platform + config | Booking | |
+| Booking | Automated waitlists with notify or auto-promote | Platform + config | Booking, Notifications | |
 | Booking | Pick-a-Spot with numbered room layouts | Vertical | Booking | Accelerate+ |
 | Booking | Multichannel booking: website widgets, branded app, Mindbody app, Facebook | Platform + config | Public API | Changes sync everywhere |
-| Attendance | Self check-in by tablet, barcode or client ID | Platform + config | Attendance |  |
+| Attendance | Self check-in by tablet, barcode or client ID | Platform + config | Attendance | |
 | Attendance | Late-cancel and no-show fees | Vertical | Booking, Ledger | All plans |
-| Commerce | Memberships, contracts, class packs | Platform | Subscriptions, Entitlements |  |
-| Commerce | Intro offers | Vertical | Catalog, Entitlements |  |
-| Commerce | Dynamic pricing for peak and off-peak | Platform + config | Pricing |  |
+| Commerce | Memberships, contracts, class packs | Platform | Subscriptions, Entitlements | |
+| Commerce | Intro offers | Vertical | Catalog, Entitlements | |
+| Commerce | Dynamic pricing for peak and off-peak | Platform + config | Pricing | |
 | Commerce | Promo codes | Platform | Pricing | Accelerate+ |
-| Commerce | POS, retail, inventory, purchase orders and receiving | Platform | Orders, Inventory |  |
-| Commerce | Online store | Platform | Catalog, Orders |  |
+| Commerce | POS, retail, inventory, purchase orders and receiving | Platform | Orders, Inventory | |
+| Commerce | Online store | Platform | Catalog, Orders | |
 | Payments | Mindbody Payments (Stripe-powered), POS hardware | Integration | Payments | Optional |
-| Messaging | Automatic confirmations and reminders; staff get copies | Platform | Notifications |  |
+| Messaging | Automatic confirmations and reminders; staff get copies | Platform | Notifications | |
 | Marketing | Email and SMS campaigns, automations, smart lists, intro-offer sequences | Platform | Segments, Workflows | Ultimate or add-on; built with Attentive |
-| Marketing | Client referral program with offers | Vertical | Segments, Pricing |  |
-| Marketing | Reviews shown in the Mindbody app | Platform + config | Party, Notifications |  |
+| Marketing | Client referral program with offers | Vertical | Segments, Pricing | |
+| Marketing | Reviews shown in the Mindbody app | Platform + config | Party, Notifications | |
 | Sales | Lead pipeline; Google Ads lead forms | Platform | Party, Segments | Ultimate |
-| Staff | Profiles, bios, schedules, self-managed availability | Platform | Staff |  |
-| Staff | Substitutions requested by text, quick sub from schedule | Vertical | Staff, Notifications |  |
-| Staff | Time clock, hourly pay, commissions, tips; payroll export to ADP, Paychex | Platform | Staff, Ledger |  |
+| Staff | Profiles, bios, schedules, self-managed availability | Platform | Staff | |
+| Staff | Substitutions requested by text, quick sub from schedule | Vertical | Staff, Notifications | |
+| Staff | Time clock, hourly pay, commissions, tips; payroll export to ADP, Paychex | Platform | Staff, Ledger | |
 | Staff | Staff contests and KPIs | Platform + config | Analytics | Insights add-on |
-| Insights | Reports, dashboards, scheduled report delivery | Platform + config | Analytics |  |
+| Insights | Reports, dashboards, scheduled report delivery | Platform + config | Analytics | |
 | Insights | AI Insights: churn and spend predictions, benchmarks vs. about 40K businesses | Platform + config | Analytics, Domain events | Advanced on higher tiers |
 | Platform | Customized website built by Playlist | Platform + config | Theming | All plans |
 | Platform | Branded mobile app | Platform + config | Theming | Add-on |
-| Platform | Business app for staff | Platform + config | Public API |  |
+| Platform | Business app for staff | Platform + config | Public API | |
 | Platform | Public API v6 and webhooks | Platform | Public API, Domain events | Developer account |
 | AI | AI front desk for calls and messages | Integration | Notifications | Ultimate or add-on |
 | Distribution | Consumer marketplace (3M+ users) | (new) | Tenancy (cross-tenant exception) | 20% of first purchase, capped at $30 |
-| Integrations | ClassPass (owned) and Reserve with Google | Integration | Booking |  |
-| Integrations | Partner marketplace: door access, payroll, reviews, streaming, waivers | Integration | Integrations |  |
+| Integrations | ClassPass (owned) and Reserve with Google | Integration | Booking | |
+| Integrations | Partner marketplace: door access, payroll, reviews, streaming, waivers | Integration | Integrations | |
 | Finance | Mindbody Capital business loans | (new) | None | A financial service |
 
 ## Sources

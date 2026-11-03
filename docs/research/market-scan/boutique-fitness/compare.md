@@ -6,7 +6,7 @@ The seven boutique fitness players side by side: business model and API first, t
 
 Four of the seven belong to three private-equity-backed owners; WellnessLiving, Arketa and Walla are independent. API access runs from gated review to fully self-serve.
 
-|  | Mindbody | Mariana Tek | ABC Glofox | WellnessLiving | Momence | Arketa | Walla |
+| | Mindbody | Mariana Tek | ABC Glofox | WellnessLiving | Momence | Arketa | Walla |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Owner | Playlist (merged with EGYM) | Xplor | ABC Fitness (Thoma Bravo) | Founder-led | Xplor | Venture-backed | Venture-backed |
 | Entry price (USD/month) | $79 per location | Quote | From $99 | $69 | $0 plus 5% fee | Quote | $320 |

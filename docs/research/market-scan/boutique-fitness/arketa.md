@@ -52,50 +52,50 @@ Of 44 feature areas, 31 are platform or platform with config, 6 are fitness-spec
 
 | Area | Feature | Tag | Platform capability | Notes |
 | --- | --- | --- | --- | --- |
-| Identity | Team permissions | Platform | Authorization |  |
-| Org structure | Multi-location brands | Platform | Tenancy |  |
-| Customers | Client profiles and notes | Platform | Party |  |
-| Customers | Liability waivers | Platform | Documents |  |
-| Customers | Loyalty milestones (e.g. an email on the 100th class) | Vertical | Domain events |  |
+| Identity | Team permissions | Platform | Authorization | |
+| Org structure | Multi-location brands | Platform | Tenancy | |
+| Customers | Client profiles and notes | Platform | Party | |
+| Customers | Liability waivers | Platform | Documents | |
+| Customers | Loyalty milestones (e.g. an email on the 100th class) | Vertical | Domain events | |
 | Scheduling | Classes built from service-type templates; recurring series | Platform + config | Scheduling, Catalog | Template sets duration, capacity, location |
-| Scheduling | Events: workshops, retreats, pop-ups; drop-in by default | Platform | Scheduling, Catalog |  |
-| Scheduling | Appointments against staff availability | Platform + config | Scheduling |  |
-| Scheduling | Teacher trainings and courses | Platform | Scheduling, Catalog |  |
-| Scheduling | Livestream classes via Zoom | Integration | Integrations |  |
-| Booking | Waitlists | Platform + config | Booking |  |
-| Booking | Mat or spot selection | Vertical | Booking |  |
-| Booking | Cancellation policy | Platform + config | Booking |  |
-| Booking | Booking embedded on the studio's own site | Platform + config | Public API |  |
-| Attendance | Check-in screen | Platform + config | Attendance |  |
-| Attendance | No-show fees | Vertical | Booking, Ledger |  |
-| Commerce | Drop-in price per service type | Platform | Pricing, Catalog |  |
-| Commerce | Class packages (credits) | Platform | Entitlements |  |
-| Commerce | Memberships, unlimited or credit-based | Platform | Subscriptions, Entitlements |  |
-| Commerce | Intro offers (a flag on any pricing option) | Vertical | Catalog |  |
-| Commerce | Bundles across service types | Platform | Pricing |  |
-| Commerce | Invoices for private or non-standard services | Platform | Orders, Ledger |  |
+| Scheduling | Events: workshops, retreats, pop-ups; drop-in by default | Platform | Scheduling, Catalog | |
+| Scheduling | Appointments against staff availability | Platform + config | Scheduling | |
+| Scheduling | Teacher trainings and courses | Platform | Scheduling, Catalog | |
+| Scheduling | Livestream classes via Zoom | Integration | Integrations | |
+| Booking | Waitlists | Platform + config | Booking | |
+| Booking | Mat or spot selection | Vertical | Booking | |
+| Booking | Cancellation policy | Platform + config | Booking | |
+| Booking | Booking embedded on the studio's own site | Platform + config | Public API | |
+| Attendance | Check-in screen | Platform + config | Attendance | |
+| Attendance | No-show fees | Vertical | Booking, Ledger | |
+| Commerce | Drop-in price per service type | Platform | Pricing, Catalog | |
+| Commerce | Class packages (credits) | Platform | Entitlements | |
+| Commerce | Memberships, unlimited or credit-based | Platform | Subscriptions, Entitlements | |
+| Commerce | Intro offers (a flag on any pricing option) | Vertical | Catalog | |
+| Commerce | Bundles across service types | Platform | Pricing | |
+| Commerce | Invoices for private or non-standard services | Platform | Orders, Ledger | |
 | Commerce | Pricing options linked to the service types they can book | Platform | Entitlements | Explicit eligibility |
-| Commerce | Direct purchase links | Platform + config | Orders |  |
-| Commerce | POS, retail, inventory | Platform | Orders, Inventory |  |
-| Commerce | Discounts and promo codes | Platform | Pricing |  |
-| Commerce | Rewards program | Vertical | Ledger |  |
+| Commerce | Direct purchase links | Platform + config | Orders | |
+| Commerce | POS, retail, inventory | Platform | Orders, Inventory | |
+| Commerce | Discounts and promo codes | Platform | Pricing | |
+| Commerce | Rewards program | Vertical | Ledger | |
 | Payments | Stripe processing | Integration | Payments | 2.9% + $0.30 |
-| On-demand | Video library with categories, collections, rentals | (new) | Media, Catalog |  |
-| Messaging | In-app texting and phone calls with clients | Platform | Notifications |  |
-| Marketing | Email and SMS broadcasts, automations, workflows | Platform | Segments, Workflows |  |
-| Marketing | Lead management, conversion tracking, campaign revenue attribution | Platform | Party, Analytics |  |
-| Marketing | Review collection | Platform + config | Notifications |  |
-| Staff | Instructors, permissions, time tracking | Platform | Staff |  |
-| Staff | Substitute management | Vertical | Staff, Scheduling |  |
-| Staff | Pay rules: per class, per head, revenue share, hourly, salary, commission, tips | Platform + config | Staff, Ledger |  |
-| Staff | Direct deposit and payroll tax filing (W-2, 1099) | Integration | Staff |  |
+| On-demand | Video library with categories, collections, rentals | (new) | Media, Catalog | |
+| Messaging | In-app texting and phone calls with clients | Platform | Notifications | |
+| Marketing | Email and SMS broadcasts, automations, workflows | Platform | Segments, Workflows | |
+| Marketing | Lead management, conversion tracking, campaign revenue attribution | Platform | Party, Analytics | |
+| Marketing | Review collection | Platform + config | Notifications | |
+| Staff | Instructors, permissions, time tracking | Platform | Staff | |
+| Staff | Substitute management | Vertical | Staff, Scheduling | |
+| Staff | Pay rules: per class, per head, revenue share, hourly, salary, commission, tips | Platform + config | Staff, Ledger | |
+| Staff | Direct deposit and payroll tax filing (W-2, 1099) | Integration | Staff | |
 | Finance | Arketa Accounting: bank feeds, categorization, P&L, balance sheet, cash flow | (new) | Ledger | Optional bookkeeper |
-| Insights | Reporting and peer benchmarking | Platform + config | Analytics |  |
-| AI | Assistant for plain-English data questions; churn prediction | Platform + config | Analytics |  |
-| Platform | Branded client app; business app | Platform + config | Theming, Public API |  |
+| Insights | Reporting and peer benchmarking | Platform + config | Analytics | |
+| AI | Assistant for plain-English data questions; churn prediction | Platform + config | Analytics | |
+| Platform | Branded client app; business app | Platform + config | Theming, Public API | |
 | Platform | Public API with self-serve keys | Platform | Public API | No sandbox |
 | Platform | MCP server for the help center | (new) | None | AI assistants can query their docs |
-| Integrations | ClassPass, Mailchimp, Klaviyo, HubSpot, Flodesk, Google Calendar, Squarespace, Zapier | Integration | Integrations |  |
+| Integrations | ClassPass, Mailchimp, Klaviyo, HubSpot, Flodesk, Google Calendar, Squarespace, Zapier | Integration | Integrations | |
 
 ## Sources
 

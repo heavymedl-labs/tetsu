@@ -53,51 +53,51 @@ Of 46 feature areas, 36 are platform or platform with config, 4 are fitness-spec
 | Area | Feature | Tag | Platform capability | Notes |
 | --- | --- | --- | --- | --- |
 | Identity | Staff roles (Super Admin, Admin, Receptionist, Trainer) with a granular permission matrix | Platform | Identity, Authorization | Trainers can be limited to their own classes |
-| Identity | Hierarchical access across linked branches | Platform | Authorization, Tenancy |  |
+| Identity | Hierarchical access across linked branches | Platform | Authorization, Tenancy | |
 | Org structure | Branches, linked branches, multi-site member access | Platform | Tenancy | Every API call is branch-scoped |
 | Org structure | Bulk multi-location configuration of classes, memberships, settings | Platform | Tenancy | Elite |
-| Customers | Client profiles, global search, post-migration login | Platform | Party |  |
-| Customers | Family accounts | Platform | Party |  |
+| Customers | Client profiles, global search, post-migration login | Platform | Party | |
+| Customers | Family accounts | Platform | Party | |
 | Customers | Lead capture forms and lead management | Platform | Party, Segments | Boost |
 | Customers | E-agreements and contracts | Platform | Documents | Boost |
-| Scheduling | Classes | Platform + config | Scheduling |  |
+| Scheduling | Classes | Platform + config | Scheduling | |
 | Scheduling | Multi-week courses | Platform | Scheduling, Catalog | Priced and booked as a unit |
-| Scheduling | Appointments with trainer-managed availability and conflict checks | Platform + config | Scheduling, Staff |  |
-| Scheduling | Facilities (rooms, courts, saunas) with their own schedules and prices | Platform + config | Scheduling |  |
-| Scheduling | Categories for classes, facilities and trainers | Platform | Catalog |  |
-| Booking | Booking windows, cancellation rules, price and eligibility rules | Platform + config | Booking, Pricing |  |
+| Scheduling | Appointments with trainer-managed availability and conflict checks | Platform + config | Scheduling, Staff | |
+| Scheduling | Facilities (rooms, courts, saunas) with their own schedules and prices | Platform + config | Scheduling | |
+| Scheduling | Categories for classes, facilities and trainers | Platform | Catalog | |
+| Booking | Booking windows, cancellation rules, price and eligibility rules | Platform + config | Booking, Pricing | |
 | Booking | Waitlists that auto-book and auto-charge when a spot opens | Platform + config | Booking, Payments | Staff step in if no credit or card |
-| Booking | Spot management | Vertical | Booking |  |
-| Booking | Guest bookings | Vertical | Booking |  |
-| Booking | Free class bookings | Platform + config | Pricing |  |
-| Attendance | Check-in from staff app; access control | Platform + config | Attendance |  |
-| Attendance | Late-cancel and no-show reporting | Vertical | Analytics |  |
-| Commerce | Single and recurring memberships | Platform | Subscriptions |  |
-| Commerce | Trial, private, restricted-services and consecutive memberships | Platform + config | Subscriptions, Entitlements |  |
-| Commerce | Service credit packs | Platform | Entitlements |  |
+| Booking | Spot management | Vertical | Booking | |
+| Booking | Guest bookings | Vertical | Booking | |
+| Booking | Free class bookings | Platform + config | Pricing | |
+| Attendance | Check-in from staff app; access control | Platform + config | Attendance | |
+| Attendance | Late-cancel and no-show reporting | Vertical | Analytics | |
+| Commerce | Single and recurring memberships | Platform | Subscriptions | |
+| Commerce | Trial, private, restricted-services and consecutive memberships | Platform + config | Subscriptions, Entitlements | |
+| Commerce | Service credit packs | Platform | Entitlements | |
 | Commerce | Store and retail products | Platform | Catalog, Orders | Boost |
-| Commerce | Price breakdown endpoint with discounts and taxes | Platform | Pricing |  |
-| Commerce | VAT-aware billing | Platform | Ledger |  |
-| Payments | Glofox Payments on Stripe; Apple Pay, Google Pay | Integration | Payments |  |
-| Payments | Direct debit (GoCardless); BLIK in Poland | Integration | Payments |  |
-| Payments | Non-sufficient funds fee | Platform + config | Ledger |  |
-| Payments | Change payment method on a recurring membership | Platform | Subscriptions, Payments |  |
-| Messaging | Automated email preferences | Platform | Notifications |  |
+| Commerce | Price breakdown endpoint with discounts and taxes | Platform | Pricing | |
+| Commerce | VAT-aware billing | Platform | Ledger | |
+| Payments | Glofox Payments on Stripe; Apple Pay, Google Pay | Integration | Payments | |
+| Payments | Direct debit (GoCardless); BLIK in Poland | Integration | Payments | |
+| Payments | Non-sufficient funds fee | Platform + config | Ledger | |
+| Payments | Change payment method on a recurring membership | Platform | Subscriptions, Payments | |
+| Messaging | Automated email preferences | Platform | Notifications | |
 | Marketing | XLerate: email, SMS, push, dynamic tags, segmentation | Platform | Segments, Workflows | Add-on; included on Elite |
 | Marketing | Targeted communications and staff tasks | Platform | Segments | Boost |
 | Engagement | Community content in the member app | Vertical | Notifications | Boost |
 | Staff | Staff setup, permissions and payroll | Platform | Staff, Ledger | Essential |
 | Insights | Reporting; advanced reporting | Platform + config | Analytics | Advanced on Boost |
-| Insights | AI churn predictor | Platform + config | Analytics, Domain events |  |
-| AI | ABC AI Agents for calls and chat | Integration | Notifications |  |
+| Insights | AI churn predictor | Platform + config | Analytics, Domain events | |
+| AI | ABC AI Agents for calls and chat | Integration | Notifications | |
 | Platform | Glofox member app; standalone custom-branded app | Platform + config | Theming | Branded is an add-on or Elite |
 | Platform | App localization (17 languages) | Platform | Theming | Elite |
-| Platform | Pro staff app | Platform + config | Public API |  |
-| Platform | Web portal embeds for Wix, Duda, Webflow, Framer, GoDaddy, Shopify | Platform + config | Public API |  |
+| Platform | Pro staff app | Platform + config | Public API | |
+| Platform | Web portal embeds for Wix, Duda, Webflow, Framer, GoDaddy, Shopify | Platform + config | Public API | |
 | Platform | Public API with OpenAPI spec and signed CDC webhooks | Platform | Public API, Domain events | Access by email request |
 | Live and on-demand | Livestream and on-demand classes | Integration | Integrations | External stream URLs |
-| Integrations | ClassPass, Gympass (Wellhub) | Integration | Booking |  |
-| Integrations | ABC Trainerize coaching, Zapier | Integration | Integrations |  |
+| Integrations | ClassPass, Gympass (Wellhub) | Integration | Booking | |
+| Integrations | ABC Trainerize coaching, Zapier | Integration | Integrations | |
 
 ## Sources
 

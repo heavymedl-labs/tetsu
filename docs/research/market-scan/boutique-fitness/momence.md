@@ -61,44 +61,44 @@ Of 38 feature areas, 29 are platform or platform with config, 2 are fitness-spec
 
 | Area | Feature | Tag | Platform capability | Notes |
 | --- | --- | --- | --- | --- |
-| Identity | Staff access levels (front desk and up) | Platform | Identity, Authorization |  |
-| Identity | Two-factor authentication | Platform | Identity |  |
+| Identity | Staff access levels (front desk and up) | Platform | Identity, Authorization | |
+| Identity | Two-factor authentication | Platform | Identity | |
 | Identity | One customer login across every Momence studio ("your hosts") | (new) | Identity | Platform-owned customer identity |
-| Org structure | Franchise and corporate dashboard, multi-location | Platform | Tenancy, Analytics |  |
-| Customers | Profiles, notes, tags, CRM filters and segments | Platform | Party, Segments |  |
-| Customers | Child accounts, with subscriptions shared by the studio | Platform | Party, Entitlements |  |
-| Customers | Document signing: waivers, contracts, privacy policy | Platform | Documents |  |
-| Scheduling | Classes, events, private events | Platform + config | Scheduling |  |
-| Scheduling | Appointments by service, venue and staff; Zoom for appointments | Platform + config | Scheduling, Booking |  |
-| Scheduling | Recurring bookings | Platform + config | Booking |  |
-| Booking | Waitlists | Platform + config | Booking |  |
-| Booking | Cancellation policies per class | Platform + config | Booking |  |
-| Booking | Pay later; unpaid appointments paid afterwards | Platform + config | Orders |  |
-| Attendance | Self check-in; check-in and undo | Platform + config | Attendance |  |
-| Commerce | Subscriptions and packs, with minimum-renewal contracts | Platform | Subscriptions, Entitlements |  |
+| Org structure | Franchise and corporate dashboard, multi-location | Platform | Tenancy, Analytics | |
+| Customers | Profiles, notes, tags, CRM filters and segments | Platform | Party, Segments | |
+| Customers | Child accounts, with subscriptions shared by the studio | Platform | Party, Entitlements | |
+| Customers | Document signing: waivers, contracts, privacy policy | Platform | Documents | |
+| Scheduling | Classes, events, private events | Platform + config | Scheduling | |
+| Scheduling | Appointments by service, venue and staff; Zoom for appointments | Platform + config | Scheduling, Booking | |
+| Scheduling | Recurring bookings | Platform + config | Booking | |
+| Booking | Waitlists | Platform + config | Booking | |
+| Booking | Cancellation policies per class | Platform + config | Booking | |
+| Booking | Pay later; unpaid appointments paid afterwards | Platform + config | Orders | |
+| Attendance | Self check-in; check-in and undo | Platform + config | Attendance | |
+| Commerce | Subscriptions and packs, with minimum-renewal contracts | Platform | Subscriptions, Entitlements | |
 | Commerce | Freeze; transfer to another membership at renewal | Platform | Subscriptions | Incompatible bookings auto-cancelled |
-| Commerce | Money credits vs. class and appointment credits | Platform | Entitlements, Ledger |  |
-| Commerce | Activation on first booking | Platform + config | Entitlements |  |
-| Commerce | Intro offers | Vertical | Catalog, Entitlements |  |
-| Commerce | Discount codes with usage limits | Platform | Pricing |  |
-| Commerce | Sliding-scale pricing | Platform + config | Pricing |  |
-| Commerce | Products, retail, inventory, barcodes | Platform | Catalog, Inventory |  |
-| Commerce | Gift cards | Platform | Ledger |  |
-| Commerce | Refunds | Platform | Ledger |  |
+| Commerce | Money credits vs. class and appointment credits | Platform | Entitlements, Ledger | |
+| Commerce | Activation on first booking | Platform + config | Entitlements | |
+| Commerce | Intro offers | Vertical | Catalog, Entitlements | |
+| Commerce | Discount codes with usage limits | Platform | Pricing | |
+| Commerce | Sliding-scale pricing | Platform + config | Pricing | |
+| Commerce | Products, retail, inventory, barcodes | Platform | Catalog, Inventory | |
+| Commerce | Gift cards | Platform | Ledger | |
+| Commerce | Refunds | Platform | Ledger | |
 | Payments | Embedded processing with platform fees | Integration | Payments | Fees vary by plan |
-| Messaging | Two-way SMS, email, unified inbox | Platform | Notifications |  |
-| Marketing | Automations, sequences, lead management | Platform | Segments, Workflows |  |
-| Marketing | Facebook Pixel, Meta and Google integrations | Integration | Analytics |  |
-| Engagement | Customer referrals with rewards; "SuperFans" | Vertical | Segments |  |
-| Staff | Payroll reporting; staff mobile apps | Platform | Staff |  |
-| Insights | Reports, class profitability meter, location reporting | Platform + config | Analytics |  |
+| Messaging | Two-way SMS, email, unified inbox | Platform | Notifications | |
+| Marketing | Automations, sequences, lead management | Platform | Segments, Workflows | |
+| Marketing | Facebook Pixel, Meta and Google integrations | Integration | Analytics | |
+| Engagement | Customer referrals with rewards; "SuperFans" | Vertical | Segments | |
+| Staff | Payroll reporting; staff mobile apps | Platform | Staff | |
+| Insights | Reports, class profitability meter, location reporting | Platform + config | Analytics | |
 | AI | AI Agent and sales agent for email, SMS and inbox | Integration | Notifications | $399 a month |
-| On-demand | Video library, collections, courses, rentals, scheduled drops, tiered video memberships | (new) | Media, Catalog |  |
-| Platform | Customizable checkout pages; multiple languages | Platform + config | Theming |  |
-| Platform | Consumer app (multi-studio) and staff apps | Platform + config | Public API |  |
-| Platform | Public API v2 (Host and Member), self-serve OAuth | Platform | Public API, Authorization |  |
-| Integrations | ClassPass, Gympass | Integration | Booking |  |
-| Integrations | Zoom, Shopify, Xero, QuickBooks, Kisi, Zapier, Calendly | Integration | Integrations |  |
+| On-demand | Video library, collections, courses, rentals, scheduled drops, tiered video memberships | (new) | Media, Catalog | |
+| Platform | Customizable checkout pages; multiple languages | Platform + config | Theming | |
+| Platform | Consumer app (multi-studio) and staff apps | Platform + config | Public API | |
+| Platform | Public API v2 (Host and Member), self-serve OAuth | Platform | Public API, Authorization | |
+| Integrations | ClassPass, Gympass | Integration | Booking | |
+| Integrations | Zoom, Shopify, Xero, QuickBooks, Kisi, Zapier, Calendly | Integration | Integrations | |
 
 ## Sources
 

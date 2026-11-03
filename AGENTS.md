@@ -30,10 +30,11 @@ Run these before opening a pull request:
 
 ```bash
 scripts/check-adrs.sh
-npx markdownlint-cli2 "**/*.md"
+npx markdownlint-cli2@0.24.0 "**/*.md"
 ```
 
-CI also checks links and lints workflows.
+CI also checks links and lints workflows. Keep the markdownlint-cli2 version
+matched to the one the CI action bundles.
 
 ## Writing
 

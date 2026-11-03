@@ -64,29 +64,29 @@ Of 37 feature areas from the help center, 25 are platform or platform with confi
 | Booking | Bring-a-guest | Vertical | Booking, Party | Lead capture via a guest reservation |
 | Attendance | Check-in (front desk, self, geo) and rosters | Platform + config | Attendance | Geo check-in is an adapter |
 | Attendance | Late-cancel and no-show penalty fees | Vertical | Booking, Ledger | Fitness policy on generic billing |
-| Commerce | Retail products, rentals, inventory, barcodes | Platform | Catalog, Inventory |  |
+| Commerce | Retail products, rentals, inventory, barcodes | Platform | Catalog, Inventory | |
 | Commerce | Point of sale, quick sale at check-in | Platform | Orders | Stripe terminal |
 | Commerce | Add-ons pre-ordered with a reservation | Vertical | Orders, Booking | Composes Orders and Booking |
-| Commerce | Memberships: sell, renew, freeze, cancel, autopay | Platform | Subscriptions |  |
+| Commerce | Memberships: sell, renew, freeze, cancel, autopay | Platform | Subscriptions | |
 | Commerce | Credit packages | Platform | Entitlements | Prepaid units with expiry |
 | Commerce | Intro offers | Vertical | Catalog, Entitlements | An eligibility rule |
-| Commerce | Discounts, promo codes, bundles | Platform | Pricing |  |
+| Commerce | Discounts, promo codes, bundles | Platform | Pricing | |
 | Commerce | Gift cards | Platform | Ledger | Stored value |
-| Commerce | Refunds and returns | Platform | Ledger, Orders |  |
+| Commerce | Refunds and returns | Platform | Ledger, Orders | |
 | Payments | Card processing, terminal, wallets | Integration | Payments | Stripe only |
-| Payments | Payouts, reconciliation, chargebacks | Integration | Payments, Ledger |  |
+| Payments | Payouts, reconciliation, chargebacks | Integration | Payments, Ledger | |
 | Messaging | Transactional email and SMS | Platform | Notifications | SMS via Twilio registration |
 | Marketing | Segments, automations, campaigns, landing pages (Xplor Growth) | Platform | Segments, Workflows | Runs as a separate system |
-| Engagement | Milestones, gamification, loyalty, referrals, NPS | Vertical | Domain events, Segments |  |
-| Staff | Employees, shifts, pay rates | Platform | Staff |  |
-| Staff | Instructor pay; payroll with direct deposit | Platform + config | Staff, Ledger |  |
+| Engagement | Milestones, gamification, loyalty, referrals, NPS | Vertical | Domain events, Segments | |
+| Staff | Employees, shifts, pay rates | Platform | Staff | |
+| Staff | Instructor pay; payroll with direct deposit | Platform + config | Staff, Ledger | |
 | Insights | Sales, finance, utilization, marketing reports | Platform + config | Analytics | Largest help collection |
-| Platform | Branded client app, Biz staff app, buy pages | Platform + config | Theming, Public API |  |
+| Platform | Branded client app, Biz staff app, buy pages | Platform + config | Theming, Public API | |
 | Platform | Seven APIs, webhooks, data export | Platform | Public API | Gated partner review |
 | Integrations | Livestream and on-demand partners | Integration | Integrations | Forte, Tribe, Intelivideo |
-| Integrations | ClassPass, Gympass | Integration | Booking |  |
+| Integrations | ClassPass, Gympass | Integration | Booking | |
 | Integrations | Ad attribution (Google, Meta) | Integration | Analytics | Xplor Ads |
-| Migration | Importers from Mindbody, zingfit, ClubReady | (new) | Import |  |
+| Migration | Importers from Mindbody, zingfit, ClubReady | (new) | Import | |
 
 ## Sources
 
