@@ -104,3 +104,29 @@ history.
 
 Rowan would leave over surprise fees, an outage during the morning rush, or
 being unable to take the data out.
+
+## Minimum sellable product
+
+What Tallow Street needs before it switches. Going live with it is
+[milestone 2](https://github.com/HeavyMedl/tetsu/milestones).
+
+**Needed to go live:**
+
+- Import from the incumbent, as described in [Moving to Tetsu](#moving-to-tetsu).
+- Recurring classes at three locations in two time zones, with rooms,
+  instructors, and substitutes.
+- Booking from a phone browser, bike selection, the waitlist rules, and
+  late-cancel and no-show fees.
+- Front-desk check-in.
+- Every offer in [What it sells](#what-it-sells) except retail stock counts,
+  with card payments, failed-payment retries, and freezes.
+- Waivers, including a guardian signing for a minor.
+- Booking, waitlist, and payment messages by email and text.
+- Revenue that reconciles with processor payouts, attendance by location, and
+  an instructor pay report.
+- Staff roles, data export and deletion, support access, and a Tetsu bill
+  Rowan understands.
+
+**Can wait:** stock counts, native apps, self-serve sign-up (we provision
+Tallow Street ourselves), partner API access, payroll integration, marketing
+tools, and analytics beyond the reports above.

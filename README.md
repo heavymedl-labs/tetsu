@@ -24,5 +24,5 @@ phase, and nothing is built yet.
 - [CONTRIBUTING.md](CONTRIBUTING.md): how work moves from issue to merge
 - [AGENTS.md](AGENTS.md): rules for coding agents, and the checks to run
 - [Milestones](https://github.com/HeavyMedl/tetsu/milestones): the roadmap,
-  from walking skeleton to first customer
+  from walking skeleton to each reference business going live
 - [Tetsu project](https://github.com/users/HeavyMedl/projects/1): tracked work

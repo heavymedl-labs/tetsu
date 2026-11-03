@@ -14,8 +14,10 @@ same concrete cases to check against.
 
 - **Decisions.** Each Decision needed issue says how its options play for
   both businesses.
-- **Milestones.** Each milestone ends with a walkthrough of both businesses,
-  as owner, staff, and customer. Friction found there becomes issues.
+- **Milestones.** After the walking skeleton, each milestone is one business
+  going live with its minimum sellable product, defined on its page. Every
+  milestone ends with a walkthrough of both businesses, as owner, staff, and
+  customer. Friction found there becomes issues.
 - **Tests.** When implementation opens, the tables on these pages become data
   files, and a seed loader creates both businesses through public use cases.
   Scenario tests, cross-tenant isolation tests, benchmarks, and demo tenants

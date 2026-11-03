@@ -91,3 +91,31 @@ future appointments, package balances, and outstanding gift card balances.
 
 Avery would leave over double bookings, deposit disputes the software cannot
 explain, or losing client notes.
+
+## Minimum sellable product
+
+What Fernhollow needs before it switches. Going live with it is
+[milestone 3](https://github.com/HeavyMedl/tetsu/milestones), after Tallow
+Street.
+
+**Needed to go live:**
+
+- Import of clients, notes and formulas, future appointments, package
+  balances, and gift card balances, as described in
+  [Moving to Tetsu](#moving-to-tetsu).
+- Staff shifts and time off.
+- Online and front-desk booking of every service in
+  [What it sells](#what-it-sells), with every staff member and resource it
+  needs, processing gaps, room resets, and prices by staff level.
+- Deposits, forfeits, and the no-show rule.
+- Packages, the Monthly Massage membership with rollover, gift cards, and
+  retail with tax and stock counts.
+- Card, cash, and guest checkout, with tips split between staff.
+- Private client notes.
+- Appointment reminders by email and text.
+- A commission and tip report for payroll.
+- Data export and deletion, support access, and a Tetsu bill Avery
+  understands.
+
+**Can wait:** native apps, self-serve sign-up, partner API access, payroll
+integration, and marketing tools.
