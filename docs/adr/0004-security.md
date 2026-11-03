@@ -1,0 +1,31 @@
+# 0004. Security
+
+- Status: Proposed
+- Date: 2026-11-02
+
+## Context
+
+Tetsu handles credentials and payments. Home-grown cryptography causes severe
+vulnerabilities, and touching card data puts a system in full PCI DSS scope.
+
+## Decision
+
+- Cryptography uses vetted, maintained crates, each chosen through an ADR. We
+  never implement primitives or protocols ourselves.
+- The payment processor's hosted page or iframe fields collect card data. Card
+  data never reaches Tetsu servers, logs, or databases; Tetsu stores only
+  processor tokens.
+
+## Alternatives considered
+
+- **Handle card data directly.** Full PCI DSS scope for no product benefit.
+
+## Consequences
+
+Payment flows depend on the processor's tokenization. Which processors to
+support is an open decision.
+
+## Sources
+
+- OWASP Cryptographic Storage Cheat Sheet; ASVS 5.0, Cryptography chapter.
+- PCI Security Standards Council, PCI DSS v4.0.1, SAQ A.

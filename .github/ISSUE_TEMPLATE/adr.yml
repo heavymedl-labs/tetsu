@@ -1,0 +1,28 @@
+name: Decision needed
+description: A decision that needs an ADR before work depends on it.
+labels: [adr]
+projects: ["HeavyMedl/1"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: The decision to make, stated as a question.
+    validations:
+      required: true
+  - type: textarea
+    id: forces
+    attributes:
+      label: Forces
+      description: Requirements and constraints that shape the answer.
+    validations:
+      required: true
+  - type: textarea
+    id: options
+    attributes:
+      label: Options to evaluate
+  - type: textarea
+    id: blocks
+    attributes:
+      label: Blocks
+      description: Work that waits on this decision.

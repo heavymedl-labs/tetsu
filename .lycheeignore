@@ -1,0 +1,2 @@
+# Private GitHub Project: returns 404 without auth.
+^https://github\.com/users/HeavyMedl/projects/

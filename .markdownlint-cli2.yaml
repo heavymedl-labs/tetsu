@@ -1,0 +1,5 @@
+config:
+  # Line length is a style choice; tables and links run long.
+  MD013: false
+ignores:
+  - "node_modules/**"

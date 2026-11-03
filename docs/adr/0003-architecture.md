@@ -1,0 +1,46 @@
+# 0003. Architecture
+
+- Status: Proposed
+- Date: 2026-11-02
+
+## Context
+
+Tenancy, money, and each vertical need hard boundaries. The team is small, and
+Tetsu must run on any cloud or our own hardware.
+
+## Decision
+
+- **Modular monolith, microkernel style.** A small kernel defines the module
+  contract. Platform and vertical modules plug in. The `tetsu` binary is the
+  composition root.
+- **Hexagonal modules.** Each module's domain sits at the center. Other
+  modules and inbound adapters (HTTP API, staff app, server-rendered pages)
+  call its use cases. It calls out through driven ports, Rust traits that
+  outbound adapters implement (Postgres, payment processor, SMS).
+- **Isolation.** Each module is its own crate and owns at most one Postgres
+  schema. Modules talk only through each other's use cases and domain
+  events, never through another module's internals or tables.
+- **Deployment.** One Rust binary in an OCI image, backed by PostgreSQL, with
+  configuration from the environment and no provider-specific services.
+
+## Alternatives considered
+
+- **Microservices.** Strong boundaries, but network calls and operating cost
+  arrive before independent scaling is needed.
+- **Layered monolith.** Cheap to start; boundaries erode.
+- **Shared schema across modules.** Easy joins, no enforcement.
+
+## Consequences
+
+The crate graph enforces code boundaries; schema boundaries need their own
+enforcement, decided with tenant isolation. Cross-module reporting uses read
+models built from events. New infrastructure needs are met with Postgres or
+added behind a port.
+
+## Sources
+
+- Alistair Cockburn, "Hexagonal Architecture," 2005.
+- Mark Richards and Neal Ford, *Fundamentals of Software Architecture*,
+  O'Reilly, 2020, ch. 12: microkernel.
+- Chris Richardson, "Pattern: Database per service," microservices.io.
+- Adam Wiggins, "The Twelve-Factor App," 12factor.net.
