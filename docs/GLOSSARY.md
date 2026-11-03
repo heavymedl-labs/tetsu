@@ -15,14 +15,14 @@ records one significant decision, its alternatives, and its sources.
 **Composition root.** The `tetsu` binary, which wires modules together. The
 only place that knows every module.
 
-**Control plane.** The platform modules that run Tetsu itself: tenancy,
-identity and access, and audit.
+**Control plane.** The platform modules that run Tetsu itself, such as
+tenancy, identity and access, and audit.
 
 **Domain event.** A record that something happened in a module, published for
 other modules to react to. Past tense, such as `BookingCancelled`.
 
 **Edge adapters.** The group of platform modules that connect Tetsu to outside
-systems: payments, notifications, and the public API.
+systems, such as payments, notifications, and the public API.
 
 **Kernel.** The small core that defines the module contract. It has no domain
 knowledge.
@@ -40,7 +40,7 @@ Outbound adapters implement it.
 set by [ADR-0005](adr/0005-testing-and-performance.md).
 
 **Shared capability.** Industry-neutral behavior the platform builds up front
-for more than one vertical, such as scheduling, booking, or billing.
+for more than one vertical, such as scheduling, booking, or the ledger.
 
 **Tenant.** A customer business using Tetsu, such as a boutique fitness
 brand, together with all of its locations. Tenant data is isolated from every

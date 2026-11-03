@@ -19,7 +19,8 @@ contract, and the binary wires the modules together.
 control plane      shared capabilities      edge adapters
 tenancy            scheduling, booking      payments
 identity, access   catalog, pricing         notifications
-audit              orders, billing, ledger  public API
+audit              orders, subscriptions    public API
+                   ledger
      \                     |                     /
       +-------- use cases, domain events --------+
                            |
