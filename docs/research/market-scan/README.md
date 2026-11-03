@@ -49,4 +49,4 @@ A row whose capability is **None** has no platform home: it is vertical-only or 
 
 - **Uneven depth:** Mindbody's and Walla's help centers aren't public, so those maps lean on feature pages, blog posts and reviews. Walla's is the thinnest.
 - **Competitor-written sources:** Vibefam, Arketa, Pabau and Supergood. They are flagged where used.
-- **Not yet done:** interviews with studio owners. That is the main gap before scoping v1.
+- **Not yet done:** interviews with studio owners. They would strengthen these findings but are optional; v1 scoping does not wait for them.
