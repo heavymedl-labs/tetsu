@@ -26,11 +26,11 @@ the testing pyramid allows, and performance to improve over time.
   | 3 | UI | Coverage never goes down; end-to-end tests for critical journeys. |
 
   Code that moves or records money, including pricing, orders, and payments, is
-  Tier 1.
-- **Performance.** Each module lists its hot paths, such as request handling,
-  availability and booking under contention, checkout, and database queries.
-  Hot paths have micro-benchmarks, and end-to-end flows have load tests with
-  latency budgets.
+  Tier 1. Changes to docs or tooling only have no tier.
+- **Performance.** Each module's crate README lists its hot paths, such as
+  request handling, availability and booking under contention, checkout, and
+  database queries. Hot paths have micro-benchmarks, and end-to-end flows have
+  load tests with latency budgets.
 - **Benchmarks.** Benchmarks run on every pull request that touches a hot path,
   and nightly. Results are stored so trends are visible. A regression of more
   than 5% fails the build; an improvement becomes the new baseline.

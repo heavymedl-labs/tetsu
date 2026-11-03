@@ -17,6 +17,8 @@ wellness, salon and spa from one product.
   more than one vertical. The capability map in
   [Platform implications](../research/market-scan/platform-implications.md) is
   the starting list.
+- Each platform capability is designed against at least two industries:
+  fitness and one other.
 - A vertical module holds only what is specific to its industry, and builds on
   platform use cases and events.
 - The platform never depends on, imports, or names a vertical. Platform code
@@ -34,9 +36,8 @@ wellness, salon and spa from one product.
 ## Consequences
 
 Platform capabilities take longer to design, and a wrong abstraction would
-affect every vertical. To limit that risk, each capability is designed against
-at least two domains, fitness and one other. How verticals extend platform
-behavior is an open decision.
+affect every vertical; designing against two industries limits that risk. How
+verticals extend platform behavior is an open decision.
 
 ## Sources
 

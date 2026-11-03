@@ -34,7 +34,15 @@ for file in "$dir"/[0-9][0-9][0-9][0-9]-*.md; do
   for section in "${sections[@]}"; do
     grep -qx "$section" "$file" || fail "$name: missing section '$section'"
   done
-  grep -q "($name)" "$index" || fail "$name: not listed in docs/adr/README.md"
+  row="$(grep -F "($name)" "$index" || true)"
+  if [[ -z "$row" ]]; then
+    fail "$name: not listed in docs/adr/README.md"
+    continue
+  fi
+  status="$(sed -n 's/^- Status: //p' "$file" | head -n 1)"
+  if [[ "$row" != *"| $status |" ]]; then
+    fail "$name: index status does not match '$status'"
+  fi
 done
 
 if ((errors > 0)); then

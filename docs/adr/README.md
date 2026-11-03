@@ -14,21 +14,22 @@ number, and add a row below. Never renumber.
 
 ## Open decisions
 
-To work on one, open a **Decision needed** issue; it becomes an ADR once
-decided. The
+Each is a **Decision needed** issue and becomes an ADR once decided. Work
+that depends on one waits for it. The
 [Market Scan](../research/market-scan/platform-implications.md) has a leading
 option for most of them.
 
-- How verticals extend platform behavior.
-- Tenant isolation in Postgres.
-- Identity and customer accounts.
-- Payment processors and adapters.
-- Domain event delivery.
-- Public API design.
-- Data import from competitors.
-- Client apps: one responsive web app or native branded apps.
-- Payroll: build tax filing or integrate a provider.
-- HTTP framework, database layer, async runtime, and WebAssembly UI framework.
+- [How verticals extend platform behavior](https://github.com/HeavyMedl/tetsu/issues/7)
+- [Tenant isolation in Postgres](https://github.com/HeavyMedl/tetsu/issues/8)
+- [Identity and customer accounts](https://github.com/HeavyMedl/tetsu/issues/9)
+- [Payment processors and adapters](https://github.com/HeavyMedl/tetsu/issues/10)
+- [Domain event delivery](https://github.com/HeavyMedl/tetsu/issues/11)
+- [Public API design](https://github.com/HeavyMedl/tetsu/issues/12)
+- [Data import from competitors](https://github.com/HeavyMedl/tetsu/issues/13)
+- [Client apps: web or native](https://github.com/HeavyMedl/tetsu/issues/14)
+- [Payroll: build or integrate](https://github.com/HeavyMedl/tetsu/issues/15)
+- [HTTP framework, database layer, async runtime, and WebAssembly UI
+  framework](https://github.com/HeavyMedl/tetsu/issues/16)
 
 ## Finding sources
 

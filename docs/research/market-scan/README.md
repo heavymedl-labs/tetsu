@@ -2,7 +2,7 @@
 
 Last reviewed 2026-11-01 by Kurt Medley. Prices, ownership and features change quickly, so recheck a figure before relying on it. Copied from the Claude Docs original on 2026-11-02; this repository copy is now the source of truth.
 
-A scan of vertical software markets, used to shape Tetsu (working name), our domain-agnostic Rust SaaS platform. Each vertical gets a folder here; what repeats across verticals belongs in the platform.
+A scan of vertical software markets, used to shape Tetsu (working name), our industry-neutral Rust SaaS platform. Each vertical gets a folder here; what repeats across verticals belongs in the platform.
 
 This is research, not a decision. Where it disagrees with an ADR, the ADR wins.
 

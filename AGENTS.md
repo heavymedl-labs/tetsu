@@ -22,6 +22,9 @@ implementation phase.
   ([ADR-0001](docs/adr/0001-how-we-work.md)).
 - Meet the rigor tier and performance rules for the area you change
   ([ADR-0005](docs/adr/0005-testing-and-performance.md)).
+- Settle an [open decision](docs/adr/README.md#open-decisions) only when its
+  issue is your task, by proposing an ADR. Otherwise raise it on that issue
+  and wait.
 - Follow the workflow in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Checks

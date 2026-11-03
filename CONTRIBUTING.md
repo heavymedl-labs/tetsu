@@ -18,7 +18,9 @@ People and coding agents follow the same workflow and the rules in
 ## Commits
 
 Write the subject in the imperative, under 72 characters, and say why in the
-body when it is not obvious. One logical change per commit.
+body when it is not obvious. One logical change per commit. Commits and pull
+requests carry no agent attribution, such as `Co-Authored-By` trailers or
+"Generated with" footers.
 
 ## Review
 

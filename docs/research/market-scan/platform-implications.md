@@ -17,7 +17,7 @@ Proposals, not decisions. The open ones are listed in the [ADR index](../../adr/
 
 ## Platform capabilities
 
-Three groups: the **control plane** (tenants and access), **shared domain** capabilities that several verticals reuse, and **adapters** at the edge. Each vertical's own core domain sits on top.
+Three groups, named as in the [glossary](../../GLOSSARY.md): the **control plane** (tenants and access), **shared capabilities** that several verticals reuse, and **edge adapters**. Each vertical's industry-specific code sits on top.
 
 | Group | Capability | Role | Pattern |
 | --- | --- | --- | --- |
@@ -27,29 +27,29 @@ Three groups: the **control plane** (tenants and access), **shared domain** capa
 | Control plane | Theming | Domain module | Per-tenant configuration read by the presentation adapters |
 | Control plane | Audit | Domain module | Append-only log of actor, tenant and action; not in the competitor maps, but required for us |
 | Control plane | Import (new) | Domain module + driven port | One anti-corruption adapter per source system; idempotent, resumable batch import |
-| Shared domain | Party | Domain module | Party pattern: one record for people and organizations, with roles |
-| Shared domain | Documents | Domain module + driven port (storage) | Immutable versions; each signature records the exact version signed |
-| Shared domain | Scheduling | Domain module | Temporal expressions for recurrence and exceptions |
-| Shared domain | Booking | Domain module | Aggregate per session enforcing capacity, waitlist and payment invariants; optimistic concurrency |
-| Shared domain | Attendance | Domain module | Check-ins, late cancels and no-shows recorded as domain events |
-| Shared domain | Catalog | Domain module | Service types with explicitly linked offerings |
-| Shared domain | Entitlements | Domain module | Specification pattern for eligibility; credits kept as an account of movements |
-| Shared domain | Pricing | Domain module | Pure price-breakdown function; Strategy for discount and tax rules |
-| Shared domain | Orders | Domain module | Aggregate; idempotency key on every write |
-| Shared domain | Inventory | Domain module | Account pattern: stock as a ledger of movements |
-| Shared domain | Subscriptions | Domain module | Explicit state machine (active, frozen, cancelled); scheduled renewals |
-| Shared domain | Ledger | Domain module | Double-entry, append-only accounting; corrections by reversal; Money as integer minor units with currency |
-| Shared domain | Staff | Domain module | Pay rules as Strategy (per class, per head, revenue share, hourly) |
-| Shared domain | Domain events | Domain module | Events stored in the same transaction as the state change (transactional outbox), then consumed by Analytics, Workflows and webhooks |
-| Shared domain | Segments | Domain module | Saved queries over Party and Analytics read models |
-| Shared domain | Workflows | Domain module | Process managers triggered by domain events |
-| Shared domain | Analytics | Domain module | CQRS read models projected from domain events |
-| Adapters | Payments | Driven port | One adapter per processor behind an anti-corruption layer; idempotent handling of processor webhooks; card data stays with the processor |
-| Adapters | Notifications | Driven port | One adapter per channel; sends dispatched from the transactional outbox |
-| Adapters | Media (new) | Driven port | Adapter for object storage or a video provider |
-| Adapters | Integrations | Driven port | Anti-corruption layer per partner (ClassPass, Zoom, accounting tools) |
-| Adapters | Public API | Inbound adapter | REST over the same use cases the staff app uses; OpenAPI generated from Rust types; keys, rate limits, versioning |
-| Adapters | Webhooks | Outbound adapter | Signed, at-least-once delivery from the outbox, with retries; mapped as "Public API, Domain events" |
+| Shared capability | Party | Domain module | Party pattern: one record for people and organizations, with roles |
+| Shared capability | Documents | Domain module + driven port (storage) | Immutable versions; each signature records the exact version signed |
+| Shared capability | Scheduling | Domain module | Temporal expressions for recurrence and exceptions |
+| Shared capability | Booking | Domain module | Aggregate per session enforcing capacity, waitlist and payment invariants; optimistic concurrency |
+| Shared capability | Attendance | Domain module | Check-ins, late cancels and no-shows recorded as domain events |
+| Shared capability | Catalog | Domain module | Service types with explicitly linked offerings |
+| Shared capability | Entitlements | Domain module | Specification pattern for eligibility; credits kept as an account of movements |
+| Shared capability | Pricing | Domain module | Pure price-breakdown function; Strategy for discount and tax rules |
+| Shared capability | Orders | Domain module | Aggregate; idempotency key on every write |
+| Shared capability | Inventory | Domain module | Account pattern: stock as a ledger of movements |
+| Shared capability | Subscriptions | Domain module | Explicit state machine (active, frozen, cancelled); scheduled renewals |
+| Shared capability | Ledger | Domain module | Double-entry, append-only accounting; corrections by reversal; Money as integer minor units with currency |
+| Shared capability | Staff | Domain module | Pay rules as Strategy (per class, per head, revenue share, hourly) |
+| Shared capability | Domain events | Domain module | Events stored in the same transaction as the state change (transactional outbox), then consumed by Analytics, Workflows and webhooks |
+| Shared capability | Segments | Domain module | Saved queries over Party and Analytics read models |
+| Shared capability | Workflows | Domain module | Process managers triggered by domain events |
+| Shared capability | Analytics | Domain module | CQRS read models projected from domain events |
+| Edge adapter | Payments | Driven port | One adapter per processor behind an anti-corruption layer; idempotent handling of processor webhooks; card data stays with the processor |
+| Edge adapter | Notifications | Driven port | One adapter per channel; sends dispatched from the transactional outbox |
+| Edge adapter | Media (new) | Driven port | Adapter for object storage or a video provider |
+| Edge adapter | Integrations | Driven port | Anti-corruption layer per partner (ClassPass, Zoom, accounting tools) |
+| Edge adapter | Public API | Inbound adapter | REST over the same use cases the staff app uses; OpenAPI generated from Rust types; keys, rate limits, versioning |
+| Edge adapter | Webhooks | Outbound adapter | Signed, at-least-once delivery from the outbox, with retries; mapped as "Public API, Domain events" |
 
 ## Sources
 
