@@ -37,6 +37,11 @@ shared capabilities, and connectors.
 **Port.** A Rust trait a module calls out through, also called a driven port.
 Outbound adapters implement it.
 
+**Reference business.** A fictional business that adopts Tetsu, used to check
+decisions, milestones, and tests from a customer's side. There is one for each
+industry in ADR-0002, described in
+[reference-businesses](reference-businesses/README.md).
+
 **Rigor tier.** The testing and review bar for an area, from 1 (highest) to 3,
 set by [ADR-0005](adr/0005-testing-and-performance.md).
 

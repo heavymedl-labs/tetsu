@@ -22,6 +22,11 @@ body:
     attributes:
       label: Options to evaluate
   - type: textarea
+    id: reference-businesses
+    attributes:
+      label: Reference businesses
+      description: How the options play for each reference business (docs/reference-businesses).
+  - type: textarea
     id: blocks
     attributes:
       label: Blocks
