@@ -6,7 +6,7 @@ Tetsu (working name) is a multi-tenant platform in Rust that includes:
 
 - **scheduling and booking** with waitlists and check-in
 - **memberships, sales, and payments** on a double-entry ledger
-- **client profiles**, messaging, and reports
+- **customer profiles**, messaging, and reports
 - a **public API** with a sandbox and webhooks
 
 Each industry adds only what is specific to it. The project is in its design

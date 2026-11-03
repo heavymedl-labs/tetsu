@@ -17,8 +17,8 @@ Tetsu must run on any cloud or our own hardware.
   no runtime plug-in loading and no module registry beyond the composition
   root.
 - **Hexagonal modules.** Each module's domain sits at the center. Other
-  modules and inbound adapters (HTTP API, staff app, server-rendered pages)
-  call its use cases. It calls out through driven ports, Rust traits that
+  modules and inbound adapters (HTTP API, server-rendered pages) call its use
+  cases. It calls out through driven ports, Rust traits that
   outbound adapters implement (Postgres, payment processor, SMS).
 - **Isolation.** Each module is its own crate and owns at most one Postgres
   schema. Modules talk only through each other's use cases and domain

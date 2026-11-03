@@ -4,7 +4,7 @@ The project's shared vocabulary. Use these terms in code, docs, issues, and
 conversation. Add a term when it first matters; change one only with care,
 because code will follow it.
 
-**Adapter.** Code at a module's edge. An inbound adapter (HTTP API, staff app,
+**Adapter.** Code at a module's edge. An inbound adapter (HTTP API,
 server-rendered pages) calls the module's use cases. An outbound adapter
 implements a driven port with a specific technology, such as Postgres or a
 payment processor.
@@ -28,6 +28,10 @@ other modules to react to. Past tense, such as `BookingCancelled`.
 **Kernel.** The small core that defines the module contract: traits and types,
 with no domain knowledge and no runtime plug-in loading.
 
+**Minimum sellable product.** The least a reference business needs before it
+switches to Tetsu. Each reference business's page defines its own, and going
+live with it is a milestone.
+
 **Module.** A Cargo crate that plugs into the kernel and owns at most one
 Postgres schema. Platform capabilities and verticals are both modules.
 
@@ -48,8 +52,8 @@ set by [ADR-0005](adr/0005-testing-and-performance.md).
 **Shared capability.** Industry-neutral behavior the platform builds up front
 for more than one vertical, such as scheduling, booking, or the ledger.
 
-**Tenant.** A customer business using Tetsu, such as a boutique fitness
-brand, together with all of its locations. Tenant data is isolated from every
+**Tenant.** A business using Tetsu, such as a boutique fitness brand,
+together with all of its locations. Tenant data is isolated from every
 other tenant's.
 
 **Use case.** An operation a module offers. Other modules and inbound adapters
@@ -58,3 +62,7 @@ call it; together with domain events, use cases are how modules talk.
 **Vertical.** A module for one industry. It holds only what is specific to
 that industry and builds on the platform. Boutique fitness is the first;
 salons and spas are the second industry every capability is designed against.
+
+**Walking skeleton.** The first thin slice through every layer, from sign-in
+to production, built to prove the architecture before feature work. It is the
+first milestone.

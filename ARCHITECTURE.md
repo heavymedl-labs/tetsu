@@ -66,8 +66,9 @@ flowchart TB
 ### Containers
 
 Tetsu's separately running parts are blue and green. The server renders each
-business's booking pages and Tetsu's own marketing site, and serves the API. PostgreSQL holds records, and object storage holds
-files such as signed documents and media. Card details go from the apps
+business's booking pages and Tetsu's own marketing site, and serves the API.
+PostgreSQL holds records, and object storage holds files such as signed
+documents and media. Card details go from the apps
 straight to the processor's hosted fields and never reach Tetsu
 ([ADR-0004](docs/adr/0004-security.md)).
 
@@ -119,8 +120,9 @@ another's use cases, except that the platform never calls a vertical. Modules
 reach storage and outside systems through driven ports, talk through domain
 events, and implement the kernel's contract. The composition root registers
 every module. How a vertical changes platform behavior, such as a late-cancel
-fee, is open ([#7](https://github.com/HeavyMedl/tetsu/issues/7)): policy ports the platform defines, verticals wrapping
-platform use cases, or per-tenant configuration.
+fee, is open ([#7](https://github.com/HeavyMedl/tetsu/issues/7)): policy
+ports the platform defines, verticals wrapping platform use cases, or
+per-tenant configuration.
 
 ```mermaid
 flowchart TB
@@ -205,11 +207,13 @@ flowchart LR
 
 ### Tenancy
 
-Provisional until tenant isolation is decided ([#8](https://github.com/HeavyMedl/tetsu/issues/8)). A tenant is one
-business: a brand and all its locations. Every request resolves its tenant, and
-every query is scoped to it. Customer accounts belong to their business
-([#9](https://github.com/HeavyMedl/tetsu/issues/9)). The leading option for storage is shared tables with a tenant ID on
-every row, enforced by Postgres row-level security.
+Provisional until tenant isolation is decided
+([#8](https://github.com/HeavyMedl/tetsu/issues/8)). A tenant is one business:
+a brand and all its locations. Every request resolves its tenant, and every
+query is scoped to it. Customer accounts belong to their business
+([#9](https://github.com/HeavyMedl/tetsu/issues/9)). The leading option for
+storage is shared tables with a tenant ID on every row, enforced by Postgres
+row-level security.
 
 ```mermaid
 flowchart TB
@@ -328,7 +332,8 @@ flowchart TB
 ## Quality goals
 
 - Every surface, web or native, feels fast and intuitive. Performance budgets
-  and an accessibility target come with the front-end decision ([#14](https://github.com/HeavyMedl/tetsu/issues/14)).
+  and an accessibility target come with the front-end decision
+  ([#14](https://github.com/HeavyMedl/tetsu/issues/14)).
 - Identity, money, and tenant isolation get the highest testing rigor, and hot
   paths are benchmarked on every change
   ([ADR-0005](docs/adr/0005-testing-and-performance.md)).
