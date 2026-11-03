@@ -19,6 +19,19 @@ While the maintainer is the only contributor, changes go straight to `main`
 instead: run the checks, commit, push, and close the issue by hand. Steps 2, 3,
 and 5 return when a second contributor joins.
 
+## Project board
+
+The [Tetsu project](https://github.com/users/HeavyMedl/projects/1) README
+explains its fields. Keep the board true as work moves:
+
+- Give every new issue a milestone, priority, and tier, and place it in the
+  **Roadmap** view where it will be worked, top first.
+- When an issue closes, set its status to Done and move it below open work.
+- Post a status update (On track, At risk, or Off track) whenever an issue
+  closes or a milestone's scope changes. Say what finished, what is next, and
+  any risk.
+- Update the project README when milestones or field meanings change.
+
 ## Commits
 
 Write the subject in the imperative, under 72 characters, and say why in the
