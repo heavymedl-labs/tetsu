@@ -15,6 +15,10 @@ People and coding agents follow the same workflow and the rules in
 4. Run the [checks](AGENTS.md#checks).
 5. Open a pull request with the template filled in and `Closes #N`.
 
+While the maintainer is the only contributor, changes go straight to `main`
+instead: run the checks, commit, push, and close the issue by hand. Steps 2, 3,
+and 5 return when a second contributor joins.
+
 ## Commits
 
 Write the subject in the imperative, under 72 characters, and say why in the

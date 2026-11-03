@@ -29,7 +29,7 @@ implementation phase.
 
 ## Checks
 
-Run these before opening a pull request:
+Run these before you push to `main` or open a pull request:
 
 ```bash
 scripts/check-adrs.sh
