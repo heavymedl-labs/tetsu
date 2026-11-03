@@ -26,10 +26,10 @@ option for most of them.
 - [Domain event delivery](https://github.com/HeavyMedl/tetsu/issues/11)
 - [Public API design](https://github.com/HeavyMedl/tetsu/issues/12)
 - [Data import from competitors](https://github.com/HeavyMedl/tetsu/issues/13)
-- [Client apps: web or native](https://github.com/HeavyMedl/tetsu/issues/14)
+- [Front ends: staff app framework, customer web or native](https://github.com/HeavyMedl/tetsu/issues/14)
 - [Payroll: build or integrate](https://github.com/HeavyMedl/tetsu/issues/15)
-- [HTTP framework, database layer, async runtime, and WebAssembly UI
-  framework](https://github.com/HeavyMedl/tetsu/issues/16)
+- [Server stack: HTTP, async runtime, database, HTML templating](https://github.com/HeavyMedl/tetsu/issues/16)
+- [First hosting environment and deploy pipeline](https://github.com/HeavyMedl/tetsu/issues/18)
 
 ## Finding sources
 
