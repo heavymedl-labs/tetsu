@@ -20,8 +20,10 @@ Tetsu must run on any cloud or our own hardware.
 - **Isolation.** Each module is its own crate and owns at most one Postgres
   schema. Modules talk only through each other's use cases and domain
   events, never through another module's internals or tables.
-- **Deployment.** One Rust binary in an OCI image, backed by PostgreSQL, with
-  configuration from the environment and no provider-specific services.
+- **Deployment.** One Rust binary in an OCI image. PostgreSQL holds records,
+  and S3-compatible object storage holds files such as signed documents and
+  media. Configuration comes from the environment, and nothing depends on
+  provider-specific services.
 
 ## Alternatives considered
 
