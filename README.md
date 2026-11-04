@@ -1,4 +1,9 @@
-# Tetsu
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/tetsu-wordmark-dark.svg">
+    <img alt="Tetsu" src="docs/brand/tetsu-wordmark-light.svg" width="360">
+  </picture>
+</h1>
 
 Software for businesses that sell scheduled time and memberships.
 
