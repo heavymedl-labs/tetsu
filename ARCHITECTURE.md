@@ -352,12 +352,12 @@ flowchart TB
 
 What we expect to reach as Tetsu grows, most likely first. Nothing here is measured yet:
 each is an estimate until a capacity run tests it
-([hosting research](docs/research/hosting.md#benchmarking-each-host)).
+([ADR-0012](docs/adr/0012-first-hosting-and-deploys.md#benchmarking)).
 
 | Limit | What happens | Planned response | Where it is decided |
 | --- | --- | --- | --- |
 | Outside services | Payment processors and SMS providers limit our rate during bursts such as waitlist messages or monthly renewals | Send through a queue with pacing and retries | [#11](https://github.com/heavymedl-labs/tetsu/issues/11) |
-| Peaks at the same moment | Businesses share popular times, and bookings can open at a set moment, so load does not average out | Test with many simulated tenants, and consider staggering when bookings open | [#18](https://github.com/heavymedl-labs/tetsu/issues/18) and booking design |
+| Peaks at the same moment | Businesses share popular times, and bookings can open at a set moment, so load does not average out | Test with many simulated tenants, and consider staggering when bookings open | [ADR-0012](docs/adr/0012-first-hosting-and-deploys.md) and booking design |
 | One tenant affecting others | Shared deployments mean a heavy report, a bad deploy, or a slow migration reaches every tenant | Per-tenant rate limits, timeouts, staged rollouts, and the option of separate [cells](docs/GLOSSARY.md) | [#8](https://github.com/heavymedl-labs/tetsu/issues/8) |
 | Database connections | Instances times pool size reaches the host's limit, sooner if transactions hold connections longer | No outside calls inside a transaction, and keep the app near Postgres | [ADR-0011](docs/adr/0011-server-stack-guardrails.md) |
 | Popular resources | Many customers compete for the same spots at once, so those requests slow down or fail | Concurrency tests and a tested locking choice | [ADR-0005](docs/adr/0005-testing-and-performance.md) and booking design |

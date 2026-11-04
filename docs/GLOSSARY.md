@@ -56,6 +56,9 @@ set by [ADR-0005](adr/0005-testing-and-performance.md).
 **Shared capability.** Industry-neutral behavior the platform builds up front
 for more than one vertical, such as scheduling, booking, or the ledger.
 
+**Surface.** A way people reach Tetsu: booking pages in a browser, hosted or embedded,
+the staff app, native apps, or the public API. Every surface uses the same use cases.
+
 **Tenant.** A business using Tetsu, such as a boutique fitness brand,
 together with all of its locations. Tenant data is isolated from every
 other tenant's.

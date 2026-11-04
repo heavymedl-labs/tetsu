@@ -14,6 +14,18 @@ This is research, not a decision. Where it disagrees with an ADR, the ADR wins.
 
 Seven studio-software platforms, scanned for our first vertical. The market is consolidating, the loudest complaints are about business model rather than features, and no one pairs an open API with reliable engineering. That leaves room for an independent, engineering-led entrant.
 
+### Platforms
+
+Ordered by relevance: our benchmark first, then the boutique challengers, then the broad incumbents.
+
+- [Mariana Tek](boutique-fitness/mariana-tek.md): the premium boutique specialist and our benchmark; quote-only and Stripe-only.
+- [Momence](boutique-fitness/momence.md): the modern challenger with a free tier and self-serve API, now owned by Xplor.
+- [Arketa](boutique-fitness/arketa.md): the venture-backed all-in-one reaching into payroll and accounting; wins on support.
+- [Walla](boutique-fitness/walla.md): the premium, focused boutique platform selling retention insight and polish.
+- [Mindbody](boutique-fitness/mindbody.md): the broadest platform and largest two-sided network, now moving down-market at $79.
+- [ABC Glofox](boutique-fitness/abc-glofox.md): the franchise and multi-country specialist inside ABC Fitness, with the best-engineered API.
+- [WellnessLiving](boutique-fitness/wellnessliving.md): the founder-led generalist across many verticals; published prices, locked-in processor.
+
 ### Findings
 
 1. **Consolidation.** Xplor owns Mariana Tek and Momence, ABC Fitness owns Glofox, and Mindbody's parent Playlist merged with EGYM in March 2026. Worse support after an acquisition is the most consistent complaint (Mindbody, Glofox, Momence).
@@ -27,7 +39,7 @@ Seven studio-software platforms, scanned for our first vertical. The market is c
 - **Win on trust:** published flat pricing, a choice of payment processor, and customer data owned by the studio.
 - **Match the table stakes, resist the sprawl:** build the roughly 20 capabilities every player has, and integrate payroll, accounting and video rather than building them.
 
-Switching, the API and processor choice are covered in [Platform implications](platform-implications.md), which lists proposed platform changes from every vertical. Tables are in [Compare](boutique-fitness/compare.md) and each player's detail under [Boutique fitness](boutique-fitness/README.md).
+Switching, the API and processor choice are covered in [Platform implications](platform-implications.md), which lists proposed platform changes from every vertical. Tables are in [Compare](boutique-fitness/compare.md) and each player's detail under [Boutique fitness](#platforms).
 
 ## Method
 

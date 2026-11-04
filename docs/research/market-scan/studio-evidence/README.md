@@ -82,14 +82,6 @@ drop-in, and gift certificates.
 
 ![Ride Culture's memberships](buying/ride-memberships.webp)
 
-| | Intent | Ride Culture |
-| --- | --- | --- |
-| Single class | $25 | $32 |
-| Packs | 5 for $105, 10 for $170, 20 for $300 | 5 for $145, 10 for $280 |
-| Monthly | $119 autopay, 3-month minimum, guest pass, 15% off retail. $150 without autopay | $189 unlimited, 8 for $169, 4 for $89 |
-| Annual | $1,300 | Not seen |
-| New customers | $30 for 2 weeks unlimited | New rider offers and a promo code |
-
 ## Account
 
 Four tabs: Reservations, Memberships and Credits, Purchases, and Personal Information.

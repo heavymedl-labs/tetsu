@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-04
+- Migration runner trigger reviewed in [ADR-0012](0012-first-hosting-and-deploys.md)
 
 ## Context
 

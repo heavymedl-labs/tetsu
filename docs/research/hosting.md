@@ -95,8 +95,8 @@ These are compared, not pass or fail.
 The decision is [ADR-0012](../adr/0012-first-hosting-and-deploys.md).
 
 Read 2026-11-04. **Start on Render's free web service and Neon's free Postgres, at no cost
-and with no card on Render, then move to a paid plan before a real business depends on
-Tetsu.** Render leads among the paid options, so moving may not change the app's host.
+and with no card on Render, then [move to a paid plan](../adr/0012-first-hosting-and-deploys.md#moving-to-paid)
+before a real business depends on Tetsu.** Render leads among the paid options, so moving may not change the app's host.
 None of this has run yet, so both choices are provisional, and the usage and health
 evidence is thin.
 
@@ -188,7 +188,8 @@ needs to allow for this.
 
 ### Free phase usage and health
 
-Render's own record is under [Weighed criteria](#weighed-criteria). The evidence here is
+This table was written while Cloud Run was the pick. Render's own record is under
+[Weighed criteria](#weighed-criteria). The evidence here is
 weak to moderate. We found no first-hand report of Axum or
 `tokio-postgres` on Cloud Run with Neon, and no reliable adoption figure for any of the
 three products.
@@ -260,40 +261,16 @@ How we would use them:
   MCP server, which we could not confirm or date. Agents read logs and rows that outsiders
   can influence, and that content must be treated as data.
 
-### When we move to paid
+## Benchmarking findings
 
-Move when any of these is true:
-
-- A real business is about to store customer data or take payments. This is before
-  milestone 2 begins, and the walking skeleton stays on free tiers with fictional tenants.
-- We reach a free limit two months running.
-- Sleeping or the 0.1 CPU limit gets in the way of what we need to show, such as promoting
-  the marketing site or a walkthrough.
-
-## Benchmarking each host
-
-**Not required in the free phase.** It starts when we prepare to move a real business onto
-Tetsu, and the move does not go ahead until a capacity run has passed. After that, each
-host has its own limits, so we measure them there, at two levels:
-
-| Run | When | What |
-| --- | --- | --- |
-| **Capacity** | A new host, plan, size, or region, and when a hot path changes | Raise the load in steps until the latency budget breaks or errors appear. Record the peak, what ran out first (app CPU, database CPU, connections, or a platform limit), and the image digest |
-| **Check** | Every deploy | About a minute at a fixed low rate. Compare latency and errors with the last deploy on that host, and report a regression |
-
-Capacity runs do not fit every deploy:
+The rule is in [ADR-0012](../adr/0012-first-hosting-and-deploys.md#benchmarking). What shaped it:
 
 - **Provider rules.** Vercel allows load tests only on Enterprise, and Supabase asks Team
   and Enterprise customers for two weeks' notice of heavy tests. We found no policy for
   Render. AWS has stress test rules for EC2. Check before running on any new host.
-- **Real customers.** Saturating production could cause the morning rush outage Rowan
-  would leave over, so capacity runs go to a matching staging setup.
 - **Load generator.** A 2-CPU GitHub runner may hit its own limit first
   ([ADR-0008](../adr/0008-benchmark-harness.md)), so each result must show it was not the
   limit.
-
-Results are stored by host, plan, region, and date, and the
-[ADR-0005](../adr/0005-testing-and-performance.md) rules for benchmarks apply.
 
 ## Paid options
 
@@ -426,17 +403,6 @@ creates then. Expect under $20 if the resources are deleted afterward.
 9. **Waking from idle, free setup only:** connect after each sleep, at least 50 times.
    Record the time, any hang, and whether the pool's `create` timeout stops it. Also check
    that pooled connections recover after the service wakes.
-
-## What this decides for other work
-
-- **Migrations** run as a job before the rollout, so a `tetsu migrate` command fits. That
-  fires the migration runner trigger in ADR-0011. [ADR-0012](../adr/0012-first-hosting-and-deploys.md)
-  keeps our runner over goose and dbmate.
-- **Postgres TLS** is needed on Neon and on either finalist, so a TLS crate needs its own
-  ADR before the first deploy.
-- **Migrations in the free phase** run from GitHub Actions against Neon's direct endpoint,
-  because nothing there depends on a host's pre-deploy feature.
-- **Infrastructure code** needs its own ADR if AWS is chosen.
 
 ## Sources
 
