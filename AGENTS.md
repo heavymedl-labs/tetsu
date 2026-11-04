@@ -30,6 +30,7 @@ implementation phase. The one exception is the benchmark harness in
   issue is your task, by proposing an ADR. Otherwise raise it on that issue
   and wait.
 - Follow the workflow in [CONTRIBUTING.md](CONTRIBUTING.md).
+- Write commit messages in the [Conventional Commits](CONTRIBUTING.md#commits) format.
 
 ## Checks
 

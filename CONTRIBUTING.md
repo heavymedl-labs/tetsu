@@ -34,10 +34,42 @@ explains its fields. Keep the board true as work moves:
 
 ## Commits
 
-Write the subject in the imperative, under 72 characters, and say why in the
-body when it is not obvious. One logical change per commit. Commits and pull
-requests carry no agent attribution, such as `Co-Authored-By` trailers or
-"Generated with" footers.
+Messages follow [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/),
+the format [Commitizen](https://commitizen-tools.github.io/commitizen/) checks by default:
+
+```text
+<type>(<optional scope>): <description>
+
+<optional body>
+
+<optional footers>
+```
+
+| Type | Use it for |
+| --- | --- |
+| `feat` | New product behavior |
+| `fix` | A bug fix in product behavior or tooling |
+| `docs` | Documentation, including ADRs and research |
+| `test` | Tests and benchmarks |
+| `refactor` | A code change that keeps behavior the same |
+| `perf` | A code change that makes Tetsu faster |
+| `style` | Formatting with no effect on meaning |
+| `build` | The build, dependencies, or container image |
+| `ci` | CI workflows and checks |
+| `chore` | Other repository upkeep |
+| `revert` | Undoing an earlier commit |
+
+- **Scope** is optional and names the area changed, such as `adr`, `research`,
+  `benchmarks`, or a module's name. Use one when a change stays in one area.
+- **Description** is lowercase and imperative, and the whole first line stays under
+  72 characters.
+- **Breaking changes** add `!` before the colon and a `BREAKING CHANGE:` footer.
+- **The body** says why when it is not obvious.
+
+For example: `docs(adr): accept first hosting and deploys`.
+
+One logical change per commit. Commits and pull requests carry no agent attribution,
+such as `Co-Authored-By` trailers or "Generated with" footers.
 
 ## Review
 
