@@ -22,6 +22,8 @@ implementation phase. The one exception is the benchmark harness in
 - Adopting a framework, library, service, or tool needs a `Proposed` ADR
   first. Only the maintainer accepts ADRs
   ([ADR-0001](docs/adr/0001-how-we-work.md)).
+- Evaluate what you adopt through the steps in
+  [ADR-0010](docs/adr/0010-evaluating-technology.md).
 - Meet the rigor tier and performance rules for the area you change
   ([ADR-0005](docs/adr/0005-testing-and-performance.md)).
 - Settle an [open decision](docs/adr/README.md#open-decisions) only when its

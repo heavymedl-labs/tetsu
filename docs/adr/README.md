@@ -15,6 +15,7 @@ number, and add a row below. Never renumber.
 | [0007](0007-server-stack.md) | Server stack | Accepted |
 | [0008](0008-benchmark-harness.md) | Benchmark harness | Accepted |
 | [0009](0009-defer-generated-queries.md) | Defer generated queries | Accepted |
+| [0010](0010-evaluating-technology.md) | Evaluating technology | Accepted |
 
 ## Open decisions
 
