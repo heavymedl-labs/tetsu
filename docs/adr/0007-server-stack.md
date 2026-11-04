@@ -27,13 +27,19 @@ The stack has to:
 
 ## Decision
 
-- **Async runtime: Tokio 1.x.** io_uring runtimes did not beat it, and every
-  other choice here builds on it. Domain code stays runtime-agnostic.
-- **HTTP: Axum 0.8.** It measured no slower than raw hyper, and its middleware
-  comes from Tower. Each module exposes its inbound adapters as an Axum
-  `Router`, and the composition root merges them.
+- **Async runtime: Tokio 1.x.** io_uring runtimes used more CPU per request and
+  served fewer requests, and every other choice here builds on Tokio. Domain
+  code stays runtime-agnostic.
+- **HTTP: Axum 0.8.** It uses 11 to 13% more server CPU per request than raw
+  hyper on trivial handlers, about 1 to 3 µs, and that buys routing, extractors,
+  and Tower middleware. A list transaction alone costs about 120 µs of client
+  CPU. Each module exposes its inbound adapters as an Axum `Router`, and the
+  composition root merges them.
+- **JSON responses: our own response type on `serde_json::to_vec`.**
+  `axum::Json` uses about 30% more server CPU per JSON request than this small
+  type with identical output. A lint rejects `axum::Json` once code exists.
 - **Postgres driver: `tokio-postgres` 0.7 with a `deadpool-postgres` 0.14
-  pool.** It served 50% more requests than SQLx end to end. Statements are
+  pool.** It served 27% more requests than SQLx end to end. Statements are
   prepared once per connection and cached. A transaction pipelines statements
   that do not depend on each other's results, such as setting the tenant and
   running the query.
@@ -58,19 +64,23 @@ version needs no new ADR unless it changes a decision above.
 
 ## Alternatives considered
 
-- **monoio, compio, or glommio.** Thread-per-core runtimes on io_uring. They
-  matched or trailed Tokio on one core, monoio and glommio have not released
-  since 2024, and they cut us off from the Tokio ecosystem.
-- **actix-web.** Within noise of Axum, with fewer active contributors and its
-  own middleware model instead of Tower.
-- **Salvo.** Within noise of Axum and actively developed, but much smaller,
-  and 1.1 raised its minimum Rust version a day after release.
-- **Raw hyper with our own routing.** No faster than Axum, and we would own
-  routing, extraction, and middleware.
-- **SQLx.** Compile-time checks and a migrator in one crate, but the slowest
-  driver measured, no pipelining, and thin maintenance: 781 open issues and a
-  lead maintainer with 10 commits in the last year.
-- **Diesel with diesel-async.** The healthiest project, but no faster than SQLx
+- **monoio or compio.** Thread-per-core runtimes on io_uring. On one core they
+  used about 12% more CPU per request than Tokio and served 7% fewer requests.
+  monoio has not released since 2024, and both cut us off from the Tokio
+  ecosystem. glommio, not benchmarked, has the same drawbacks.
+- **actix-web.** The closest to raw hyper, using 7 to 8% less CPU than Axum with
+  our JSON type, about 1 to 2 µs per request. That does not outweigh fewer
+  active contributors and its own middleware model instead of Tower.
+- **Salvo.** Uses 21% more CPU than raw hyper on plain text and nearly twice as
+  much with its built-in JSON response. It is also much smaller, and 1.1 raised
+  its minimum Rust version a day after release.
+- **Raw hyper with our own routing.** The cheapest measured, but we would own
+  routing, extraction, and middleware to save a few microseconds. Its benchmark
+  only matches paths, so a real router would give back part of that saving.
+- **SQLx.** Compile-time checks and a migrator in one crate, but slower than
+  `tokio-postgres` on every workload, no pipelining, and thin maintenance: 781
+  open issues and a lead maintainer with 10 commits in the last year.
+- **Diesel with diesel-async.** The healthiest project, but slower than SQLx
   here, and its query DSL hides the SQL that row-level security and tuning
   need.
 - **SeaORM.** Built on SQLx, so it inherits the driver cost, and it hides SQL.
@@ -85,8 +95,8 @@ version needs no new ADR unless it changes a decision above.
   database round trip, with a much smaller user base.
 - **Maud.** Templates are Rust macros, harder for designers to edit, and it
   has not released since February 2025.
-- **Homegrown templates.** Slower than every library, and escaping depends on
-  remembering to call it.
+- **Homegrown templates.** Slower than Askama and Sailfish, and escaping depends
+  on remembering to call it.
 
 ## Consequences
 
@@ -103,9 +113,10 @@ one main maintainer; it is small and could be replaced or vendored.
 Tenant isolation ([#8](https://github.com/heavymedl-labs/tetsu/issues/8)),
 identity ([#9](https://github.com/heavymedl-labs/tetsu/issues/9)), and the
 public API ([#12](https://github.com/heavymedl-labs/tetsu/issues/12)) build on
-Axum and `tokio-postgres`. The benchmarks here were on a laptop over loopback;
-ADR-0005's benchmark suite repeats them on production-like hardware once the
-walking skeleton runs.
+Axum and `tokio-postgres`. The benchmarks here ran over loopback on a laptop and
+2-CPU CI runners ([ADR-0008](0008-benchmark-harness.md)), so they show neither
+real network latency nor many-core behavior. ADR-0005's benchmark suite repeats
+them on production-like hardware once the walking skeleton runs.
 
 ## Sources
 
