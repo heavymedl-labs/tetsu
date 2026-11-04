@@ -8,12 +8,12 @@
   <br>
 </h1>
 
-Software for businesses that sell scheduled time and memberships.
+Software for businesses whose customers book time and resources.
 
 Tetsu (working name) is a multi-tenant platform in Rust that includes:
 
-- **scheduling and booking** with waitlists and check-in
-- **memberships, sales, and payments** on a double-entry ledger
+- **scheduling and booking**, with options such as waitlists and check-in
+- **sales and payments**, including memberships, on a double-entry ledger
 - **customer profiles**, messaging, and reports
 - a **public API** with a sandbox and webhooks
 

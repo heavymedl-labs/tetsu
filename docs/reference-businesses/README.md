@@ -40,5 +40,5 @@ product decision, not a test fix.
 ## Not covered yet
 
 Neither business exercises these, so decisions must consider them on their
-own: more than one currency, prices that include VAT, franchises, and more
-than one brand in a tenant.
+own: more than one currency, prices that include VAT, franchises, more than
+one brand in a tenant, and bookings that span several nights.
