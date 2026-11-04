@@ -215,11 +215,91 @@ A 50-row schedule page, 7 KB, with strings that need escaping, 100,000 renders.
 
 Maud's result is noisy, and it beat Askama locally, so its rank is not settled.
 
+## Community review
+
+On 2026-11-04 we compared the stack with common practice. No survey of what
+teams run turned up, so this rests on blog posts, project docs, source code, and
+crates.io downloads. Most of the stack matches common practice, and no choice
+needs reversing. Recent downloads favor Axum (151M) over actix-web (13M). Askama
+is the usual pick for type-checked templates. [Svix](https://www.svix.com/blog/row-level-security-defense-in-depth/)
+runs the same tenant pattern on Axum: `set_config(..., true)` inside a
+transaction.
+
+### Departures from common practice
+
+- **`tokio-postgres` instead of SQLx.** SQLx is the usual default. The throughput
+  gap above was measured on loopback, which exaggerates driver CPU, so speed is
+  a weaker argument than the table suggests.
+- **No build-time query checks.** ADR-0007 asks for mistakes to be caught at
+  compile time, and [ADR-0009](../adr/0009-defer-generated-queries.md) gives that
+  up for queries through the walking skeleton. SQLx would provide it today.
+- **Our own migration runner.** Teams usually adopt a tool. The Rust libraries
+  still fall short: refinery closed its
+  [request to run outside a transaction](https://github.com/rust-db/refinery/issues/277)
+  as not planned. We did not evaluate dbmate, goose, or Atlas, which run as
+  separate tools. [Rust on Nails](https://cloak.pages.dev/blog/rust-on-nails)
+  pairs dbmate with Axum and Cornucopia.
+
+### Rules for the walking skeleton
+
+1. **The migration runner polls for its lock.** A second runner waiting in
+   `pg_advisory_lock` deadlocks with `CREATE INDEX CONCURRENTLY`, because the
+   index build waits for the waiting session. In our test Postgres aborted the
+   build and left an invalid index. Polling `pg_try_advisory_lock` succeeded.
+   [golang-migrate](https://github.com/golang-migrate/migrate/issues/960) has the
+   same reported problem.
+2. **No `SELECT *`, and no in-place column type changes.** After a schema change,
+   a cached statement can fail with `cached plan must not change result type`.
+   Results of our test:
+
+   | Schema change | `SELECT *` | Explicit columns |
+   | --- | --- | --- |
+   | Add a column | Fails | Works |
+   | Drop a column the query does not use | Fails | Works |
+   | Change the type of a selected column | Fails | Fails |
+
+3. **Row mapping uses `Row::try_get`.** `Row::get` panics on a type mismatch.
+4. **The pool has timeouts.** `deadpool` sets none by default, so requests in a
+   burst could wait indefinitely instead of failing fast.
+5. **Dynamic queries skip the statement cache.** The `deadpool-postgres` cache is
+   a plain `HashMap`, and we saw no size limit, so varying SQL text could grow it
+   on every connection.
+
+We ran both tests on one local PostgreSQL 14.24 with `psql`, using SQL-level
+`PREPARE`. Neither has been repeated on PostgreSQL 18 or through
+`tokio-postgres`.
+
+### Open items
+
+- **Postgres TLS.** ADRs 0003 to 0009 do not mention it, and `tokio-postgres`
+  needs a separate TLS crate, which needs its own ADR. Raised on
+  [#18](https://github.com/heavymedl-labs/tetsu/issues/18).
+- **The `axum::Json` lint.** A lint on the path would also reject the request
+  extractor, which we did not benchmark. Narrow the lint, or make our type handle
+  both directions.
+- **Axum server timeouts.** Axum's unreleased changelog adds a default header read
+  timeout, which suggests 0.8.9 applies none. We set our own.
+- **When migrations run.** Practitioner guides favor a pre-deploy job over running
+  at startup. A `tetsu migrate` command would fit that and keep migrations in the
+  binary. Raised on #18.
+- **Connection poolers.** PgBouncer's `max_prepared_statements` tracks
+  protocol-level prepared statements in transaction mode, which should cover our
+  cached statements, but we have not tested it. The runner's session-level
+  advisory lock needs a direct connection. Raised on #18.
+- **The query checking revisit.** It should weigh SQLx as well as Cornucopia and
+  rerun the driver comparison with real network latency. Raised on
+  [#28](https://github.com/heavymedl-labs/tetsu/issues/28).
+
 ## Sources
 
 - Benchmarks and code reading described above, 2026-11-03. Raw results are in
   the `benchmark-report` artifact of each run.
 - crates.io API and GitHub contributor statistics, read 2026-11-03.
+- Community review sources, read 2026-11-04: `deadpool` source, the Axum changelog,
+  [`tokio-postgres` `Row` docs](https://docs.rs/tokio-postgres/latest/tokio_postgres/row/struct.Row.html),
+  [PgBouncer configuration](https://www.pgbouncer.org/config.html),
+  [Encore's Axum and Postgres guide](https://encore.dev/articles/add-postgres-to-axum),
+  and [a guide to running migrations on deploy](https://pandastack.io/blog/run-database-migrations-on-deploy).
 - SQLx 0.9.0 release discussion, github.com/transact-rs/sqlx, discussion 4271.
 - SQLx 0.9 source: `sqlx-postgres` `migrate.rs` and `sqlx-core` config
   reference.
