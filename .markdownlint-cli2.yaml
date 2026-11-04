@@ -3,7 +3,7 @@ config:
   MD013: false
   # The README header switches the logo for light and dark themes.
   MD033:
-    allowed_elements: [h1, picture, source, img]
+    allowed_elements: [h1, br, picture, source, img]
 ignores:
   - "node_modules/**"
   - "benchmarks/target/**"
