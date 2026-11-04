@@ -12,8 +12,8 @@ number, and add a row below. Never renumber.
 | [0004](0004-security.md) | Security | Accepted |
 | [0005](0005-testing-and-performance.md) | Testing and performance | Accepted |
 | [0006](0006-diagrams.md) | Diagrams | Accepted |
-| [0007](0007-server-stack.md) | Server stack | Proposed |
-| [0008](0008-benchmark-harness.md) | Benchmark harness | Proposed |
+| [0007](0007-server-stack.md) | Server stack | Accepted |
+| [0008](0008-benchmark-harness.md) | Benchmark harness | Accepted |
 
 ## Open decisions
 
@@ -31,7 +31,6 @@ option for most of them.
 - [Data import from competitors](https://github.com/heavymedl-labs/tetsu/issues/13)
 - [Front ends: staff app framework, customer web or native](https://github.com/heavymedl-labs/tetsu/issues/14)
 - [Payroll: build or integrate](https://github.com/heavymedl-labs/tetsu/issues/15)
-- [Server stack: HTTP, async runtime, database, HTML templating](https://github.com/heavymedl-labs/tetsu/issues/16)
 - [First hosting environment and deploy pipeline](https://github.com/heavymedl-labs/tetsu/issues/18)
 - [Time zones and recurring schedules](https://github.com/heavymedl-labs/tetsu/issues/21)
 - [Data export, retention, and deletion](https://github.com/heavymedl-labs/tetsu/issues/22)
