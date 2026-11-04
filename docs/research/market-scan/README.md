@@ -6,6 +6,10 @@ A scan of vertical software markets, used to shape Tetsu (working name), our ind
 
 This is research, not a decision. Where it disagrees with an ADR, the ADR wins.
 
+## Customer channels
+
+[How competitors let customers book and pay](customer-channels.md): booking pages, websites, branded apps, and marketplaces.
+
 ## Boutique fitness
 
 Seven studio-software platforms, scanned for our first vertical. The market is consolidating, the loudest complaints are about business model rather than features, and no one pairs an open API with reliable engineering. That leaves room for an independent, engineering-led entrant.
