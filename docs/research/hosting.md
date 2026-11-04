@@ -92,7 +92,7 @@ These are compared, not pass or fail.
 
 ## Where it stands
 
-The proposal is [ADR-0012](../adr/0012-first-hosting-and-deploys.md).
+The decision is [ADR-0012](../adr/0012-first-hosting-and-deploys.md).
 
 Read 2026-11-04. **Start on Render's free web service and Neon's free Postgres, at no cost
 and with no card on Render, then move to a paid plan before a real business depends on
@@ -429,9 +429,9 @@ creates then. Expect under $20 if the resources are deleted afterward.
 
 ## What this decides for other work
 
-- **Migrations** run as a job before the rollout, so a `tetsu migrate` command fits.
-  That fires the migration runner trigger in ADR-0011, which is a chance to weigh goose
-  and dbmate.
+- **Migrations** run as a job before the rollout, so a `tetsu migrate` command fits. That
+  fires the migration runner trigger in ADR-0011. [ADR-0012](../adr/0012-first-hosting-and-deploys.md)
+  keeps our runner over goose and dbmate.
 - **Postgres TLS** is needed on Neon and on either finalist, so a TLS crate needs its own
   ADR before the first deploy.
 - **Migrations in the free phase** run from GitHub Actions against Neon's direct endpoint,

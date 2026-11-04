@@ -284,17 +284,19 @@ sequenceDiagram
 
 ### Deployment
 
-Provisional until hosting is decided
-([#18](https://github.com/heavymedl-labs/tetsu/issues/18)). Here "instances" are
-running copies of the `tetsu` OCI image, not C4 containers.
+The shape stays the same as we grow. The first environment runs on free tiers of Render
+and Neon with fictional data, and moves to paid before a real business depends on Tetsu
+([ADR-0012](docs/adr/0012-first-hosting-and-deploys.md)). Here "instances" are running
+copies of the `tetsu` OCI image, not C4 containers.
 
 ```mermaid
 flowchart TB
     accTitle: Deployment
-    accDescr: GitHub Actions builds and tests Tetsu and produces an OCI image, which is pushed to a container registry. One or more tetsu instances on a hosting platform pull the image from it. Apps and browsers reach the instances over HTTPS through TLS and a load balancer, which forwards to them. Secrets and environment config configure the instances. Instances use PostgreSQL over SQL, object storage over the S3 API, and outside systems over HTTPS.
+    accDescr: GitHub Actions builds and tests Tetsu and produces an OCI image, which is pushed to a container registry. GitHub Actions then runs tetsu migrate against PostgreSQL, and a failure stops the deploy. One or more tetsu instances on a hosting platform pull the image from it. Apps and browsers reach the instances over HTTPS through TLS and a load balancer, which forwards to them. Secrets and environment config configure the instances. Instances use PostgreSQL over SQL, object storage over the S3 API, and outside systems over HTTPS.
 
     subgraph ci[GitHub Actions]
         build[Build and test] -- produces --> image[OCI image]
+        migrate[tetsu migrate<br/>a failure stops the deploy]
     end
 
     registry[(Container registry)]
@@ -308,11 +310,12 @@ flowchart TB
         config -- configures --> app
     end
 
-    pg[("PostgreSQL<br/>managed or self-run, backups")]
+    pg[("PostgreSQL<br/>managed, backups")]
     files[("Object storage<br/>S3 compatible")]
     outside([Outside systems])
 
     image -- pushed to --> registry
+    migrate -- changes schema, SQL --> pg
     registry -- image pulled by --> app
     clients -- sends requests, HTTPS --> lb
     app -- reads and writes, SQL --> pg
@@ -324,7 +327,7 @@ flowchart TB
     classDef store fill:#dcfce7,stroke:#16a34a,color:#14532d
     classDef external fill:#f5f5f4,stroke:#78716c,color:#292524
     class clients actor
-    class build,image,app,lb,config ours
+    class build,image,migrate,app,lb,config ours
     class pg,registry,files store
     class outside external
 ```

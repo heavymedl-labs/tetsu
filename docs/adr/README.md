@@ -17,7 +17,7 @@ number, and add a row below. Never renumber.
 | [0009](0009-defer-generated-queries.md) | Defer generated queries | Accepted |
 | [0010](0010-evaluating-technology.md) | Evaluating technology | Accepted |
 | [0011](0011-server-stack-guardrails.md) | Server stack guardrails | Accepted |
-| [0012](0012-first-hosting-and-deploys.md) | First hosting and deploys | Proposed |
+| [0012](0012-first-hosting-and-deploys.md) | First hosting and deploys | Accepted |
 
 ## Open decisions
 
@@ -35,7 +35,6 @@ option for most of them.
 - [Data import from competitors](https://github.com/heavymedl-labs/tetsu/issues/13)
 - [Front ends: staff app framework, customer web or native](https://github.com/heavymedl-labs/tetsu/issues/14)
 - [Payroll: build or integrate](https://github.com/heavymedl-labs/tetsu/issues/15)
-- [First hosting environment and deploy pipeline](https://github.com/heavymedl-labs/tetsu/issues/18)
 - [Time zones and recurring schedules](https://github.com/heavymedl-labs/tetsu/issues/21)
 - [Data export, retention, and deletion](https://github.com/heavymedl-labs/tetsu/issues/22)
 - [How businesses sign up and pay for Tetsu](https://github.com/heavymedl-labs/tetsu/issues/23)

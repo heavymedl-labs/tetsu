@@ -1,6 +1,6 @@
 # 0012. First hosting and deploys
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-04
 
 ## Context
@@ -44,6 +44,12 @@ Rollback deploys the previous digest, which works because schema changes follow 
 contract. Secrets stay out of the repository: GitHub Actions holds the deploy key and
 migration URL, and Render holds the app's database URL and a registry read token. Keys are
 as narrow as each provider allows.
+
+`tetsu migrate` is the runner [ADR-0007](0007-server-stack.md) chose, run as its own command.
+Choosing a job fires ADR-0011's trigger to revisit that runner, and we keep it. goose's
+polling lock is only a Go library option, which would add Go to a Rust project. dbmate's lock
+looks exposed to the deadlock ADR-0011 rules out. Migrations also ship inside the image, so
+code and schema stay matched.
 
 ### Agent tooling
 
@@ -123,13 +129,14 @@ the only Render-specific code.
 **Next.**
 
 - A Postgres TLS crate needs its own ADR before the first deploy, because Neon requires TLS.
-- Running migrations as a job fires ADR-0011's migration runner trigger, so goose and dbmate
-  get weighed with `tetsu migrate`.
 - The first deploy runs the connection and wake tests in the research page, and shows whether
   a free Cloudflare cache can hide the slow wake. Adopting that needs its own check.
-- ARCHITECTURE.md's deployment view and the open decisions list change when this is accepted.
 
-**Revisit** when a [move to paid](#moving-to-paid) condition is met, or if the wake tests show
+**Revisit** the runner if a runner bug fails a deploy, as ADR-0011 says. goose is the
+alternative, and plain SQL migrations would mostly need its annotations added. This rests on
+earlier research and the tools' READMEs, with no new tests, and the runner is not built yet.
+
+**Revisit** hosting when a [move to paid](#moving-to-paid) condition is met, or if the wake tests show
 hangs that the pool's `create` timeout cannot stop, or if either provider changes these free
 terms.
 
