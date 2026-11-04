@@ -59,11 +59,22 @@ The stack has to:
 - **HTML: Askama 0.16.** Templates are Jinja-style files compiled into Rust,
   type-checked against their context structs, and HTML-escaped by default.
 
+- **Technology stays at the edges.** Axum, `tokio-postgres`, Cornucopia, and
+  Askama types appear only in adapters and the composition root, never in the
+  domain model, use cases, or driven ports. Handlers parse the request, call a
+  use case, and shape the response. We do not wrap these crates in abstractions
+  of our own: replacing one means rewriting the adapters that use it. Adapters
+  stay in their module's crate, so the compiler cannot enforce this rule; lints
+  and review do, with the checks chosen when the walking skeleton is built.
+
 Exact versions are pinned in `Cargo.lock`. Moving to a new major or 0.x minor
 version needs no new ADR unless it changes a decision above.
 
 ## Alternatives considered
 
+- **A separate crate for each module's HTTP adapters.** The compiler would keep
+  Axum out of the domain, but the number of crates would about double, and
+  [ADR-0003](0003-architecture.md) makes each module one crate.
 - **monoio or compio.** Thread-per-core runtimes on io_uring. On one core they
   used about 12% more CPU per request than Tokio and served 7% fewer requests.
   monoio has not released since 2024, and both cut us off from the Tokio
@@ -109,6 +120,20 @@ We own two pieces of infrastructure: the migration runner and any Cornucopia
 fixes. The runner is small but touches every schema, so it gets tests for
 locking, checksum drift, and non-transactional files. `deadpool-postgres` has
 one main maintainer; it is small and could be replaced or vendored.
+
+Replacing a choice costs different amounts at each layer. These are estimates;
+no swap has been tried.
+
+| Layer | What a swap changes | What keeps it cheap |
+| --- | --- | --- |
+| Domain and use cases | Nothing | No framework or driver types |
+| HTTP | Inbound adapters and custom middleware | Thin handlers, request and response types separate from domain types, Tower layers before custom middleware, tests over real HTTP |
+| Templates | Template files | Templates take plain view structs and hold no business logic |
+| Query checking | Generated code and outbound adapters | SQL stays in `.sql` files, and ports return domain types |
+| Postgres driver | Outbound adapters and the pool | Ports name no driver types, including for transactions and tenant context, which is the hardest part |
+| Migrations | The runner | Migrations stay plain SQL files |
+| Tokio | Nearly everything; not planned | Spawning and timers stay out of domain code |
+| PostgreSQL | Schemas, queries, and row-level security; not planned | Nothing: we use its features directly |
 
 Tenant isolation ([#8](https://github.com/heavymedl-labs/tetsu/issues/8)),
 identity ([#9](https://github.com/heavymedl-labs/tetsu/issues/9)), and the
