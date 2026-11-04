@@ -338,6 +338,21 @@ flowchart TB
   paths are benchmarked on every change
   ([ADR-0005](docs/adr/0005-testing-and-performance.md)).
 
+## Known limits
+
+What we expect to reach as Tetsu grows, most likely first. Nothing here is measured yet:
+each is an estimate until a capacity run tests it
+([hosting research](docs/research/hosting.md#benchmarking-each-host)).
+
+| Limit | What happens | Planned response | Where it is decided |
+| --- | --- | --- | --- |
+| Outside services | Payment processors and SMS providers limit our rate during bursts such as waitlist texts or monthly renewals | Send through a queue with pacing and retries | [#11](https://github.com/heavymedl-labs/tetsu/issues/11) |
+| Peaks at the same moment | Businesses share class times, and booking opens on the hour, so load does not average out | Test with many simulated tenants, and consider staggering booking opens | [#18](https://github.com/heavymedl-labs/tetsu/issues/18) and booking design |
+| One tenant affecting others | Shared deployments mean a heavy report, a bad deploy, or a slow migration reaches every tenant | Per-tenant rate limits, timeouts, staged rollouts, and the option of separate [cells](docs/GLOSSARY.md) | [#8](https://github.com/heavymedl-labs/tetsu/issues/8) |
+| Database connections | Instances times pool size reaches the host's limit, sooner if transactions hold connections longer | No outside calls inside a transaction, and keep the app near Postgres | [ADR-0011](docs/adr/0011-server-stack-guardrails.md) |
+| Popular classes | Many customers compete for the same seats at once, so those requests slow down or fail | Concurrency tests and a tested locking choice | [ADR-0005](docs/adr/0005-testing-and-performance.md) and booking design |
+| Postgres writes and growth | One primary takes all writes, and the ledger and audit log grow forever | Partition by time early, start indexes with tenant ID, and shard by tenant if ever needed | [#8](https://github.com/heavymedl-labs/tetsu/issues/8) |
+
 ## Invariants
 
 A change that breaks one needs a superseding ADR.

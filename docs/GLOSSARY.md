@@ -12,6 +12,10 @@ payment processor.
 **ADR.** Architecture Decision Record: a short document in `docs/adr` that
 records one significant decision, its alternatives, and its sources.
 
+**Cell.** One complete, independent deployment of Tetsu serving some of its
+tenants, so a failure in one cell does not reach the others. Whether Tetsu uses
+cells is [undecided](https://github.com/heavymedl-labs/tetsu/issues/8).
+
 **Composition root.** The `tetsu` binary, which wires modules together. The
 only place that knows every module.
 
