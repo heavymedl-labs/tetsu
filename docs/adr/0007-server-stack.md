@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-03
 - Query checking superseded by [ADR-0009](0009-defer-generated-queries.md)
+- Rules and revisit triggers added by [ADR-0011](0011-server-stack-guardrails.md)
 
 ## Context
 

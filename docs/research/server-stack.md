@@ -240,45 +240,152 @@ transaction.
   separate tools. [Rust on Nails](https://cloak.pages.dev/blog/rust-on-nails)
   pairs dbmate with Axum and Cornucopia.
 
-### Rules for the walking skeleton
+### Failure tests
 
-1. **The migration runner polls for its lock.** A second runner waiting in
-   `pg_advisory_lock` deadlocks with `CREATE INDEX CONCURRENTLY`, because the
-   index build waits for the waiting session. In our test Postgres aborted the
-   build and left an invalid index. Polling `pg_try_advisory_lock` succeeded.
-   [golang-migrate](https://github.com/golang-migrate/migrate/issues/960) has the
-   same reported problem.
-2. **No `SELECT *`, and no in-place column type changes.** After a schema change,
-   a cached statement can fail with `cached plan must not change result type`.
-   Results of our test:
+Run 2026-11-04 on PostgreSQL 18.6 in a local container, through `tokio-postgres`
+0.7 and `deadpool-postgres` 0.14. The test code was throwaway and is not in this
+repository. Each case ran once and none ran in CI. An earlier `psql` pass on
+PostgreSQL 14.24 agreed on the cached statement and lock results. The rules these
+tests lead to are in [ADR-0011](../adr/0011-server-stack-guardrails.md).
 
-   | Schema change | `SELECT *` | Explicit columns |
-   | --- | --- | --- |
-   | Add a column | Fails | Works |
-   | Drop a column the query does not use | Fails | Works |
-   | Change the type of a selected column | Fails | Fails |
+**Cached statements across schema changes.** The failure is
+`0A000 cached plan must not change result type`.
 
-3. **Row mapping uses `Row::try_get`.** `Row::get` panics on a type mismatch.
-4. **The pool has timeouts.** `deadpool` sets none by default, so requests in a
-   burst could wait indefinitely instead of failing fast.
-5. **Dynamic queries skip the statement cache.** The `deadpool-postgres` cache is
-   a plain `HashMap`, and we saw no size limit, so varying SQL text could grow it
-   on every connection.
+| Schema change | `SELECT *` | Explicit columns |
+| --- | --- | --- |
+| Add a column | Fails | Works |
+| Drop a column the query does not use | Fails | Works |
+| Change the type of a selected column | Fails | Fails |
 
-We ran both tests on one local PostgreSQL 14.24 with `psql`, using SQL-level
-`PREPARE`. Neither has been repeated on PostgreSQL 18 or through
-`tokio-postgres`.
+The failure does not clear. Repeating the statement, calling `prepare_cached`
+again, and returning the connection to the pool all still failed. Only
+`statement_caches.clear()` recovered.
+
+**Migration lock.** A runner blocked in `pg_advisory_lock` deadlocks with another
+runner's `CREATE INDEX CONCURRENTLY`, as
+[golang-migrate](https://github.com/golang-migrate/migrate/issues/960) reports.
+Which side loses depends on timing:
+
+| When the build starts | Build | Second runner | Index |
+| --- | --- | --- | --- |
+| Under `deadlock_timeout` after the other runner starts waiting | Succeeds | `40P01` deadlock error | Valid |
+| Over `deadlock_timeout` after the other runner starts waiting | `40P01` deadlock error | Gets the lock | Invalid, left behind |
+| Other runner polls `pg_try_advisory_lock` | Succeeds | Gets the lock | Valid |
+
+**Pool and connection behavior.**
+
+| Case | Result |
+| --- | --- |
+| Pool full, default config | Still waiting after 2 s; no timeout by default |
+| Pool full, `wait` of 100 ms | Timeout error after 102 ms |
+| Database accepts TCP but never answers, default config | Still waiting after 2 s |
+| Same, `create` of 100 ms | Timeout error |
+| Same, driver `connect_timeout` of 1 s | Still waiting after 3 s, so it does not cover this case |
+| Backends killed, connection reused after 50 ms | Works; the pool replaced it |
+| Backends killed, connection reused immediately | `connection closed` error |
+| Request future dropped during a 2 s query | Query kept running; the next user of that connection waited 1.8 s |
+| Same query with a `statement_timeout` of 300 ms | `57014` after 313 ms; the next user waited 1.5 ms |
+
+**Tenant context on a reused connection.** The tenant setting did not survive a
+commit, a panic inside a transaction, or a dropped request future. The panic came
+from `Row::get` on a type mismatch; `Row::try_get` returned an error instead.
+
+A reused connection differs from a fresh one, though. After `SET LOCAL` or
+`set_config(..., true)` ends, `current_setting` returns an empty string, not
+null. With no tenant set, a policy casting it with `::bigint` returned no rows on
+a fresh connection and failed with `22P02` on a reused one. `nullif(..., '')`
+returned no rows on both. Both fail closed, but the error would surface as an
+outage. This is an input to
+[tenant isolation](https://github.com/heavymedl-labs/tetsu/issues/8).
+
+**Statement cache growth.** 5,000 distinct statements gave a client cache of 5,000
+and 5,001 prepared statements on the server, so we saw no limit. Backend memory
+rose from about 1 MB to 18 MB, roughly 3.4 KB per trivial statement.
+
+### Project health and security
+
+Read 2026-11-04 from crates.io, GitHub, and RustSec. Contributors and the top
+contributor's share cover the last 52 weeks of commits to the whole repository,
+including bots.
+
+| Project | Latest release | License | Minimum Rust | Recent downloads | Contributors | Top share |
+| --- | --- | --- | --- | --- | --- | --- |
+| tokio | 1.54.1, Oct 2026 | MIT | 1.85 | 290M | 35 | 32% |
+| axum | 0.8.9, Apr 2026 | MIT | 1.80 | 152M | 25 | 20% |
+| hyper | 1.12.0, Oct 2026 | MIT | 1.63 | 266M | 12 | 58% |
+| tower | 0.5.3, Jan 2026 | MIT | 1.64 | 225M | 6 | 46% of 13 commits |
+| tower-http | 0.7.1, Aug 2026 | MIT | 1.65 | 204M | Not read | Not read |
+| tokio-postgres | 0.7.18, Jun 2026 | MIT or Apache-2.0 | 1.85 | 25M | 9 | 72% |
+| deadpool-postgres | 0.14.2, Aug 2026 | MIT or Apache-2.0 | 1.85 | 8M | 13 | 69% |
+| askama | 0.16.1, Sep 2026 | MIT or Apache-2.0 | 1.88 | 17M | 17 | 61% |
+| Squawk | 2.71.0, Oct 2026 | Apache-2.0 | Not read | Not read | 16 | 91% |
+
+All licenses are permissive. The driver and the pool lean most on one person, and
+tower has the least recent activity, though it is widely used.
+
+Every RustSec advisory for these crates is patched in the versions our benchmark
+lockfile uses:
+
+| Advisory | Crate | Severity | Issue | Patched in | Locked |
+| --- | --- | --- | --- | --- | --- |
+| RUSTSEC-2026-0179 | `postgres-protocol` | High | Unbounded SCRAM iterations from a malicious server | 0.6.12 | 0.6.12 |
+| RUSTSEC-2026-0180 | `postgres-protocol` | Medium | Panic on a malformed `hstore` value | 0.6.12 | 0.6.12 |
+| RUSTSEC-2026-0178 | `tokio-postgres` | Medium | Panic on a `DataRow` with too few fields | 0.7.18 | 0.7.18 |
+| RUSTSEC-2026-0384 | `tokio` | None listed | Race in `time::Interval` on 1.54.0 | 1.54.1 | 1.54.1 |
+| RUSTSEC-2026-0386 | `tokio` | Informational | `AsyncFd::new` unsoundness | 1.53.3 | 1.54.1 |
+
+Older advisories exist for tokio, hyper, h2, http, axum-core, and tower-http, all
+patched well below our versions. One exception sits outside the chosen stack: the
+lockfile's `h2` 0.3.27 comes through actix-web, and RUSTSEC-2026-0258 is patched in
+0.4.16. Axum's HTTP/2 support would need `h2` 0.4, so the skeleton should check
+that version.
+
+### Options not evaluated earlier
+
+**Templates.** A local run on an Apple M1 Max rendered the same 7 KB page with the
+same template file, over three rounds. These runs did not use the CI setup, and
+Askama took 6.1 µs here against 3.9 µs on CI.
+
+| Engine | Render time | Time vs Askama | Checked at compile time | Notes |
+| --- | --- | --- | --- | --- |
+| Askama 0.16 | 6.1 µs | 1.0 | Yes | Rebuild on each template change |
+| MiniJinja 3.0 | 28.5 µs | 4.6 | No | Reloads without a rebuild; Apache-2.0; 15M recent downloads; 79% one contributor |
+| Tera 2.4 | 38.9 µs | 6.4 | No | MIT; 8M recent downloads; 92% one contributor |
+
+Both runtime engines fail ADR-0007's requirement to catch mistakes at compile
+time, so they lose whatever the speed. MiniJinja's reload is the real attraction,
+and it may matter once designers edit templates.
+
+**Connection pool.** bb8 is healthy enough (10M recent downloads, 0.9.1 in
+November 2025) and sets a connection timeout by default, which deadpool does not.
+But `bb8-postgres` last released in December 2024 and has no statement cache, so we
+would write and own one. We did not benchmark it, since that missing cache decides
+the matter. `deadpool-postgres` stays.
+
+**Migration tools.** These run as separate Go binaries, so a job can use them but
+the `tetsu` binary cannot embed them.
+
+| Tool | License | Outside a transaction | Per-module table | Lock |
+| --- | --- | --- | --- | --- |
+| goose | MIT | `-- +goose NO TRANSACTION` | `-table` | Polls `pg_try_advisory_lock`, as a Go library option |
+| dbmate | MIT | `transaction:false` | `--migrations-table` | Blocks in `pg_advisory_lock`, so it looks exposed to the deadlock above; not tested |
+| Atlas | Apache-2.0 for a minimal build | `txmode none` | Not read | Not read |
+
+goose is the strongest alternative to our runner. Atlas's community build leaves
+out row-level security and migration linting, and the default binary is proprietary
+with a paid tier, so it is out. We keep our runner for now and decide with
+[#18](https://github.com/heavymedl-labs/tetsu/issues/18), which sets when migrations
+run. Choosing a tool there would need a new ADR.
 
 ### Open items
 
 - **Postgres TLS.** ADRs 0003 to 0009 do not mention it, and `tokio-postgres`
   needs a separate TLS crate, which needs its own ADR. Raised on
   [#18](https://github.com/heavymedl-labs/tetsu/issues/18).
-- **The `axum::Json` lint.** A lint on the path would also reject the request
-  extractor, which we did not benchmark. Narrow the lint, or make our type handle
-  both directions.
 - **Axum server timeouts.** Axum's unreleased changelog adds a default header read
-  timeout, which suggests 0.8.9 applies none. We set our own.
+  timeout, which suggests 0.8.9 applies none. We have not tested this.
+- **Advisory checks in CI.** Nothing checks advisories automatically yet. A tool
+  for it needs its own ADR once code exists.
 - **When migrations run.** Practitioner guides favor a pre-deploy job over running
   at startup. A `tetsu migrate` command would fit that and keep migrations in the
   binary. Raised on #18.
@@ -295,6 +402,9 @@ We ran both tests on one local PostgreSQL 14.24 with `psql`, using SQL-level
 - Benchmarks and code reading described above, 2026-11-03. Raw results are in
   the `benchmark-report` artifact of each run.
 - crates.io API and GitHub contributor statistics, read 2026-11-03.
+- RustSec advisory database, rustsec.org, and project pages for goose, dbmate,
+  bb8, MiniJinja, and Tera, read 2026-11-04.
+- [Atlas community edition](https://atlasgo.io/community-edition), read 2026-11-04.
 - Community review sources, read 2026-11-04: `deadpool` source, the Axum changelog,
   [`tokio-postgres` `Row` docs](https://docs.rs/tokio-postgres/latest/tokio_postgres/row/struct.Row.html),
   [PgBouncer configuration](https://www.pgbouncer.org/config.html),
