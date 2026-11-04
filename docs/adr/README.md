@@ -14,6 +14,7 @@ number, and add a row below. Never renumber.
 | [0006](0006-diagrams.md) | Diagrams | Accepted |
 | [0007](0007-server-stack.md) | Server stack | Accepted |
 | [0008](0008-benchmark-harness.md) | Benchmark harness | Accepted |
+| [0009](0009-defer-generated-queries.md) | Defer generated queries | Accepted |
 
 ## Open decisions
 
