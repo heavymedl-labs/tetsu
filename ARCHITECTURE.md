@@ -68,22 +68,28 @@ flowchart TB
 Tetsu's separately running parts are blue and green. The server renders each
 business's booking pages and Tetsu's own marketing site, and serves the API.
 PostgreSQL holds records, and object storage holds files such as signed
-documents and media. Card details go from the apps
+documents and media. Card details go from the browser or app
 straight to the processor's hosted fields and never reach Tetsu
 ([ADR-0004](docs/adr/0004-security.md)).
+
+Customers use the booking pages in a browser, on Tetsu's address or the business's
+own domain, and later embedded in the business's own site. These are server-rendered
+HTML. The staff app and any native customer apps call the API. Their technology is
+open ([#14](https://github.com/heavymedl-labs/tetsu/issues/14)), with WebAssembly the
+intended choice for the staff app. Every surface goes through the same use cases.
 
 ```mermaid
 flowchart TB
     accTitle: Containers
-    accDescr: Staff run the business and customers book and pay in the staff and customer apps, built for the web in WebAssembly or as native apps. Customers also browse their business's booking pages, and prospective businesses browse Tetsu's marketing site, both served by the Tetsu server. Apps and partner software call the server's API over HTTPS, and the server sends webhooks to partner software. Apps send card details straight to payment processors' hosted fields. The server, one Rust binary, reads and writes PostgreSQL over SQL with one schema per module, stores documents and media in object storage, charges and refunds through payment processors, and messages, syncs, and imports through other outside systems: email and SMS, marketplaces, accounting tools, video, and previous systems.
+    accDescr: Customers book and pay on their business's booking pages in a browser, hosted or embedded, and prospective businesses browse Tetsu's marketing site, both served by the Tetsu server. Staff run the business in the staff app, and customers may use native apps; their technology is open. Apps and partner software call the server's API over HTTPS, and the server sends webhooks to partner software. Browsers and apps send card details straight to payment processors' hosted fields. The server, one Rust binary, reads and writes PostgreSQL over SQL with one schema per module, stores documents and media in object storage, charges and refunds through payment processors, and messages, syncs, and imports through other outside systems: email and SMS, marketplaces, accounting tools, video, and previous systems.
 
     prospects([Prospective businesses])
     staff([Staff of each business])
     customers([Customers of each business])
     partners([Partner software])
 
-    apps["Staff and customer apps<br/>web (WebAssembly) or native"]
-    server["Tetsu server<br/>Rust binary, serves pages and API"]
+    apps["Staff app and native customer apps<br/>technology open, #14"]
+    server["Tetsu server<br/>Rust binary, serves server-rendered pages and API"]
     db[("PostgreSQL<br/>one schema per module")]
     files[("Object storage<br/>documents and media")]
 
@@ -91,10 +97,11 @@ flowchart TB
     services(["Email, SMS, marketplaces, accounting,<br/>video, previous systems"])
 
     staff -- runs the business in --> apps
-    customers -- books and pays in --> apps
+    customers -- may use --> apps
     prospects -- browses the marketing site, HTTPS --> server
     apps -- calls API, HTTPS --> server
-    customers -- browses booking pages, HTTPS --> server
+    customers -- books and pays on booking pages, hosted or embedded, HTTPS --> server
+    customers -- enters card details in a browser, HTTPS --> processors
     partners -- calls API, HTTPS --> server
     server -- sends webhooks, HTTPS --> partners
     apps -- sends card details, HTTPS --> processors
