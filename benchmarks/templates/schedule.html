@@ -1,0 +1,6 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>{{ studio }} schedule</title></head>
+<body><h1>{{ studio }}</h1>
+<table><thead><tr><th>Class</th><th>Starts</th><th>Coach</th><th>Room</th><th>Spots</th></tr></thead><tbody>
+{% for r in rows %}<tr><td>{{ r.name }}</td><td>{{ r.starts }}</td><td>{{ r.coach }}</td><td>{{ r.room }}</td><td>{% if r.spots == 0 %}Waitlist{% else %}{{ r.spots }}{% endif %}</td></tr>
+{% endfor %}</tbody></table></body></html>

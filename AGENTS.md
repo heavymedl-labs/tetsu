@@ -13,7 +13,9 @@ them as current intent.
 
 The repository holds documentation, ADRs, CI, and project tooling only. Do not
 add Rust crates, `Cargo.toml`, or application code until an issue opens the
-implementation phase.
+implementation phase. The one exception is the benchmark harness in
+[benchmarks/](benchmarks/README.md)
+([ADR-0008](docs/adr/0008-benchmark-harness.md)).
 
 ## Rules
 

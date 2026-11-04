@@ -12,6 +12,8 @@ number, and add a row below. Never renumber.
 | [0004](0004-security.md) | Security | Accepted |
 | [0005](0005-testing-and-performance.md) | Testing and performance | Accepted |
 | [0006](0006-diagrams.md) | Diagrams | Accepted |
+| [0007](0007-server-stack.md) | Server stack | Proposed |
+| [0008](0008-benchmark-harness.md) | Benchmark harness | Proposed |
 
 ## Open decisions
 
