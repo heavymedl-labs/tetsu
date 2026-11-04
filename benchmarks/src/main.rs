@@ -35,7 +35,7 @@ fn usage() -> ! {
   tetsu-bench setup <admin-url>
   tetsu-bench db <variant> <lookup|list|book> <ops> <tasks> <pool>
   tetsu-bench tpl <renders>
-  tetsu-bench http <axum|axum-mw|actix|salvo|hyper> <threads> <port>
+  tetsu-bench http <axum|axum-mw|axum-vec-json|actix|salvo|hyper> <threads> <port>
   tetsu-bench rt <tokio-ct|tokio-mt|monoio|compio> <port>
   tetsu-bench e2e <sqlx|tokio-pg|tokio-pg-pipe> <threads> <port>"
     );

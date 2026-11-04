@@ -23,7 +23,7 @@ only when the harness changes.
 | --- | --- | --- |
 | `db` | SQLx, `tokio-postgres` (sequential and pipelined), Cornucopia (as generated, prepared, prepared and pipelined), Diesel async, on lookup, list, and booking transactions under row-level security | `sqlx` |
 | `tpl` | Askama, Sailfish, Maud, and homegrown string building, rendering a 50-row schedule | `askama` |
-| `http` | Axum, Axum with tracing, timeout, and request ID layers, actix-web, Salvo, and raw hyper | `axum` |
+| `http` | Axum, Axum with tracing, timeout, and request ID layers, Axum with a `to_vec` JSON response, actix-web, Salvo, and raw hyper | `axum` |
 | `rt` | Tokio current-thread and multi-thread, monoio, and compio on one core; Linux only | `tokio-mt` |
 | `e2e` | An Axum page that queries 50 classes and renders Askama, with each driver | `sqlx` |
 

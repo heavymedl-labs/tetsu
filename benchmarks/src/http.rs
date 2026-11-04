@@ -24,6 +24,7 @@ pub fn serve(server: &str, threads: usize, port: u16) {
     match server {
         "axum" => axum(threads, &addr, false),
         "axum-mw" => axum(threads, &addr, true),
+        "axum-vec-json" => axum_vec_json(threads, &addr),
         "actix" => actix(threads, &addr),
         "salvo" => salvo(threads, &addr),
         "hyper" => hyper(threads, &addr),
@@ -64,6 +65,30 @@ fn axum(threads: usize, addr: &str, middleware: bool) {
                 ))
                 .layer(SetRequestIdLayer::new(header, Sequential::default()));
         }
+        let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
+        axum::serve(listener, app).await.unwrap();
+    });
+}
+
+/// Axum with a JSON response built by `serde_json::to_vec` instead of
+/// `axum::Json`, which serializes through a `BytesMut` writer.
+fn axum_vec_json(threads: usize, addr: &str) {
+    use axum::http::header::CONTENT_TYPE;
+    use axum::response::{IntoResponse, Response};
+    use axum::{Router, routing::get};
+
+    struct VecJson<T>(T);
+    impl<T: Serialize> IntoResponse for VecJson<T> {
+        fn into_response(self) -> Response {
+            ([(CONTENT_TYPE, "application/json")], serde_json::to_vec(&self.0).unwrap()).into_response()
+        }
+    }
+
+    let addr = addr.to_string();
+    runtime(threads).block_on(async move {
+        let app = Router::new()
+            .route("/plain", get(|| async { "Hello, World!" }))
+            .route("/json", get(|| async { VecJson(items()) }));
         let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
         axum::serve(listener, app).await.unwrap();
     });

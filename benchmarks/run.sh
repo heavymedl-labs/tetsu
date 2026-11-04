@@ -93,7 +93,7 @@ if has tpl; then
 fi
 
 if has http; then
-  for v in $(shuf -e axum axum-mw actix salvo hyper); do
+  for v in $(shuf -e axum axum-mw axum-vec-json actix salvo hyper); do
     log "http $v"
     run_http() {
       load http plain "$v" http://127.0.0.1:38080/plain 128
