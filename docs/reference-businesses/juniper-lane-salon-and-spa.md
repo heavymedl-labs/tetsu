@@ -1,4 +1,4 @@
-# Fernhollow Salon and Spa
+# Juniper Lane Salon and Spa
 
 A fictional salon and spa, and Tetsu's [reference business](README.md) for
 salons and spas. Avery Okafor owns it.
@@ -58,7 +58,7 @@ salons and spas. Avery Okafor owns it.
 
 | Client | Situation |
 | --- | --- |
-| Lee Park | Also a Tallow Street Strength customer, with the same email address |
+| Lee Park | Also an Anvil Row Strength customer, with the same email address |
 | Grace Liu | Books color with a senior stylist who is leaving the salon |
 | Hana Sato and Jules Moreau | Couples massage; Hana pays for both |
 | Omar Haddad | Monthly Massage member with 3 rolled-over massages, cancelling |
@@ -94,9 +94,9 @@ explain, or losing client notes.
 
 ## Minimum sellable product
 
-What Fernhollow needs before it switches. Going live with it is
-[milestone 3](https://github.com/heavymedl-labs/tetsu/milestones), after Tallow
-Street.
+What Juniper Lane needs before it switches. Going live with it is
+[milestone 3](https://github.com/heavymedl-labs/tetsu/milestones), after Anvil
+Row.
 
 **Needed to go live:**
 

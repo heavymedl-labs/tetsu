@@ -123,7 +123,7 @@ pub fn run(renders: usize) {
             spots: (i % 7) as u32,
         })
         .collect();
-    let studio = "Tallow Street Strength";
+    let studio = "Anvil Row Strength";
     let engines: [(&str, Box<dyn Fn() -> String>); 4] = [
         ("askama", Box::new(|| AskamaPage { studio, rows: &rows }.render().unwrap())),
         ("sailfish", Box::new(|| SailfishPage { studio, rows: &rows }.render_once().unwrap())),

@@ -5,9 +5,9 @@ Two fictional businesses that adopt Tetsu, one for each industry in
 product as a customer would, and give every decision, milestone, and test the
 same concrete cases to check against.
 
-- [Tallow Street Strength](tallow-street-strength.md): a boutique fitness
+- [Anvil Row Strength](anvil-row-strength.md): a boutique fitness
   brand with three locations in two time zones.
-- [Fernhollow Salon and Spa](fernhollow-salon-and-spa.md): a salon and spa
+- [Juniper Lane Salon and Spa](juniper-lane-salon-and-spa.md): a salon and spa
   with one location, appointments, and shared rooms.
 
 ## How we use them

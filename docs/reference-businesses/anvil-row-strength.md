@@ -1,4 +1,4 @@
-# Tallow Street Strength
+# Anvil Row Strength
 
 A fictional boutique fitness brand, and Tetsu's
 [reference business](README.md) for fitness. Rowan Ellis owns it.
@@ -71,7 +71,7 @@ A fictional boutique fitness brand, and Tetsu's
 | Priya Nair | Unlimited member, frozen for November with an injury |
 | Sam Ortiz | Card expired, so this month's renewal failed |
 | Jordan Reyes and Ari Reyes | Jordan pays for 15-year-old Ari and signed Ari's waiver |
-| Lee Park | Also a Fernhollow client, with the same email address |
+| Lee Park | Also a Juniper Lane client, with the same email address |
 | Casey Hart | Founding rate since 2019 |
 | Morgan Blake | Cancelled in October and asked for their data to be deleted |
 
@@ -107,7 +107,7 @@ being unable to take the data out.
 
 ## Minimum sellable product
 
-What Tallow Street needs before it switches. Going live with it is
+What Anvil Row needs before it switches. Going live with it is
 [milestone 2](https://github.com/heavymedl-labs/tetsu/milestones).
 
 **Needed to go live:**
@@ -128,5 +128,5 @@ What Tallow Street needs before it switches. Going live with it is
   Rowan understands.
 
 **Can wait:** stock counts, native apps, self-serve sign-up (we provision
-Tallow Street ourselves), partner API access, payroll integration, marketing
+Anvil Row ourselves), partner API access, payroll integration, marketing
 tools, and analytics beyond the reports above.

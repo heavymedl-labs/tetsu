@@ -16,7 +16,7 @@ baseline where feasible. The evidence is in
 The stack has to:
 
 - keep request handling fast under bursts, such as the 6:00 a.m. check-in rush
-  at [Tallow Street](../reference-businesses/tallow-street-strength.md), and
+  at [Anvil Row](../reference-businesses/anvil-row-strength.md), and
   meet the benchmark gate in [ADR-0005](0005-testing-and-performance.md);
 - let each module own its schema and migrations, and let
   [tenant isolation](https://github.com/heavymedl-labs/tetsu/issues/8) set
