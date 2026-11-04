@@ -93,8 +93,8 @@ def report(rows, runs, title):
             continue
         unit = "ns per render" if metric == "ns_per_render" else "ops/s"
         lines += [f"## {name}", "", f"Baseline: `{base}`.", "",
-                  f"| Case | Option | Speed vs baseline (95% CI) | Mean {unit} (CV) | Median p99 | CPU per op |",
-                  "| --- | --- | --- | --- | --- | --- |"]
+                  f"| Case | Option | Speed vs baseline (95% CI) | Mean {unit} (CV) | Median p99 | CPU per op | Server cores busy |",
+                  "| --- | --- | --- | --- | --- | --- | --- |"]
         suite_rows.sort(key=lambda r: (r["case"], -(r["speed_vs_baseline"] or {}).get("mean", 0)))
         for r in suite_rows:
             s = r["speed_vs_baseline"]
@@ -106,7 +106,9 @@ def report(rows, runs, title):
             p99_s = f"{p99['median'] / 1000:.2f} ms" if p99 else ""
             cpu = m.get("cpu_us_per_op")
             cpu_s = f"{cpu['mean']:.0f} µs" if cpu else ""
-            lines.append(f"| {r['case']} | `{r['variant']}` | {speed} | {main_s} | {p99_s} | {cpu_s} |")
+            busy = m.get("server_cores_busy")
+            busy_s = f"{busy['median']:.2f}" if busy else ""
+            lines.append(f"| {r['case']} | `{r['variant']}` | {speed} | {main_s} | {p99_s} | {cpu_s} | {busy_s} |")
         lines.append("")
     return "\n".join(lines)
 

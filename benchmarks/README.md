@@ -34,6 +34,13 @@ run, then averaged across runs. Shared runners differ from one another, so
 compare speed ratios, not absolute numbers. A wide confidence interval or a CV
 above about 10% means more runs are needed.
 
+CPU per op is the client process's time in the `db` suite and the server's in
+the `http`, `rt`, and `e2e` suites. Server cores busy shows what set the
+throughput in those three. In `http` and `rt`, a value below the cores the
+server was given means the load generator hit its limit first, so compare CPU
+per op instead of speed. In `e2e`, the server also waits on Postgres, so a low
+value does not implicate the load generator.
+
 ## Run locally
 
 Docker is the simplest way, and matches CI:

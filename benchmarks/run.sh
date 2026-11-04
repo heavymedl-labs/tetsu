@@ -37,23 +37,36 @@ wait_port() {
   return 1
 }
 
+# CPU ticks used so far by the running server.
+server_ticks() {
+  local f
+  read -ra f <"/proc/$server_pid/stat"
+  echo $((f[13] + f[14]))
+}
+
 # Loads a URL with oha and prints one normalized record. Extra arguments go to
-# oha, such as --rand-regex-url.
+# oha, such as --rand-regex-url. Server CPU shows whether the server or the load
+# generator set the throughput, and stays comparable when the generator did.
 load() {
   local suite=$1 case=$2 variant=$3 url=$4 conns=$5
   shift 5
   taskset -c "$load_cpus" oha -c "$conns" -z 2s --no-tui "$@" "$url" >/dev/null 2>&1 || true
-  taskset -c "$load_cpus" oha -c "$conns" -z "${SECONDS_PER}s" --no-tui --output-format json "$@" "$url" |
-    jq -c --arg s "$suite" --arg c "$case" --arg v "$variant" '{
+  local before result
+  before=$(server_ticks)
+  result=$(taskset -c "$load_cpus" oha -c "$conns" -z "${SECONDS_PER}s" --no-tui --output-format json "$@" "$url")
+  jq -c --arg s "$suite" --arg c "$case" --arg v "$variant" \
+    --argjson ticks $(($(server_ticks) - before)) --argjson hz "$(getconf CLK_TCK)" --argjson secs "$SECONDS_PER" '{
       suite: $s, case: $c, variant: $v,
       metrics: {
         ops_per_s: .summary.requestsPerSec,
+        cpu_us_per_op: ($ticks / $hz * 1e6 / (.summary.requestsPerSec * $secs)),
+        server_cores_busy: ($ticks / $hz / $secs),
         p50_us: (.latencyPercentiles.p50 * 1e6),
         p99_us: (.latencyPercentiles.p99 * 1e6),
         p999_us: (.latencyPercentiles["p99.9"] * 1e6),
         errors: ([.errorDistribution // {} | to_entries[] | select(.key != "aborted due to deadline") | .value] | add // 0)
       }
-    }' >>"$OUT"
+    }' <<<"$result" >>"$OUT"
 }
 
 # Starts a server pinned to the server cores, runs a function, then stops it.
@@ -64,10 +77,10 @@ with_server() {
   while [[ $1 != -- ]]; do args+=("$1"); shift; done
   shift
   taskset -c "$server_cpus" "$BIN" "${args[@]}" >/dev/null 2>&1 &
-  local pid=$!
+  server_pid=$!
   if wait_port "$port"; then "$@"; else log "server ${args[*]} did not start"; fi
-  kill "$pid" 2>/dev/null || true
-  wait "$pid" 2>/dev/null || true
+  kill "$server_pid" 2>/dev/null || true
+  wait "$server_pid" 2>/dev/null || true
   sleep 1
 }
 
