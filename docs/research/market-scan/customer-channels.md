@@ -50,6 +50,13 @@ decision. Where it disagrees with an ADR, the ADR wins.
 The first seven rows draw on the earlier scan, and we confirmed Mindbody, Mariana Tek, and
 Walla on their own pages. "Not checked" means we did not look, not that the feature is absent.
 
+## Two real studios
+
+[Intent Hot Yoga and Ride Culture](studio-evidence/README.md), both in Bellingham, Washington, run on
+Mariana Tek. Each has its own website with booking embedded in its pages, and its own branded app
+published under the studio's name. That matches the Apple rule below, and neither sends customers
+to a vendor's app. Their screens are nearly identical apart from colors and logos.
+
 ## Constraints that shape the choice
 
 - **Apple limits templated apps.** [Guideline 4.2.6](https://developer.apple.com/app-store/review/guidelines/)
@@ -74,10 +81,12 @@ would leave over losing their data or being unable to take it out.
 A leading option for [#14](https://github.com/heavymedl-labs/tetsu/issues/14), in build order:
 
 1. **A hosted booking site per business,** on a Tetsu subdomain or the business's own domain,
-   working well in a phone browser. Each business links to it from its existing website.
-2. **Direct links, then a simple widget** for a business's own site.
+   working well in a phone browser.
+2. **Direct links and an embed for a business's own site.** Both real studios keep booking on their
+   own pages, so this should follow soon after the hosted site, if embedded sign-in passes testing.
 3. **Integrations for discovery:** Reserve with Google and ClassPass.
-4. **Branded native apps later,** as a paid option.
+4. **Branded native apps later,** as a paid option. Even the two single-location studios have one,
+   though Mariana Tek includes it, so this may arrive sooner than the reference businesses suggest.
 5. **No Tetsu marketplace.** It works against winning on trust, needs consumer demand we cannot
    match, and conflicts with [customer accounts owned by the business](https://github.com/heavymedl-labs/tetsu/issues/9).
 
@@ -113,4 +122,5 @@ wildcards, so subdomains are cheap.
   and [Momence's listing](https://www.softwares.com/software/momence).
 - Reserve with Google: [Mindbody's announcement](https://www.mindbodyonline.com/company/press/mindbody-partners-with-google-to-pilot-new-fitness-booking-integration)
   and [Arketa's help page](https://help.arketa.com/marketing/reserve-with-google).
+- [Studio evidence](studio-evidence/README.md): two real studios, 2026-11-04.
 - [Hosting research](../hosting.md): Render's domain limits.
