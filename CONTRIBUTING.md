@@ -12,12 +12,40 @@ People and coding agents follow the same workflow and the rules in
 2. Branch from `main` with a short name and a type prefix, such as
    `docs/glossary`, `adr/tenant-isolation`, or `ci/coverage`.
 3. Keep the branch and pull request to that one issue.
-4. Run the [checks](AGENTS.md#checks).
+4. Run the [checks](AGENTS.md#checks), and a [docs audit](#docs-audit) if you
+   changed docs or issues.
 5. Open a pull request with the template filled in and `Closes #N`.
 
 While the maintainer is the only contributor, changes go straight to `main`
 instead: run the checks, commit, push, and close the issue by hand. Steps 2, 3,
 and 5 return when a second contributor joins.
+
+## Docs audit
+
+Every change to docs, ADRs, issues, or the project board gets an audit before it
+lands, so what we write stays true to what we decide.
+
+**Scope.** Start with what you changed and whatever links to or repeats it. Widen to
+the whole project when a change alters a decision, a term, or the project's direction.
+
+**Check each of these, and fix what you find:**
+
+- **Accuracy.** Claims match accepted ADRs, the code, and their sources. Facts that age
+  have a date, and evidence says how strong it is.
+- **Duplication.** Each concept has one home, and everything else links to it.
+- **Misleading text.** Nothing stale, nothing that presents an open decision as settled,
+  and nothing fitted to one industry in platform docs.
+- **Merge or remove.** Merge or delete any document or section that no longer earns its
+  place, and retarget links to it. Fewer documents is the better outcome.
+
+**What stays.** Accepted ADRs change only as [ADR-0001](docs/adr/0001-how-we-work.md)
+allows, so a wrong decision gets a superseding ADR. Research pages stay dated records:
+add a note rather than rewriting what was found. When a fix is out of scope, open an issue.
+
+**Record it.** Add an `Audit:` footer to the commit or a line in the pull request, saying
+the scope and what changed, such as `Audit: scoped, merged two glossary entries` or
+`Audit: scoped, no findings`. For issue and board changes, say so in your report of
+the work.
 
 ## Project board
 

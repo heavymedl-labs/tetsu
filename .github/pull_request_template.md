@@ -14,4 +14,5 @@ hot path changed, include benchmark results.
 
 - [ ] Every new framework, library, service, or tool has an ADR.
 - [ ] Docs and the ADR index are updated.
+- [ ] Docs changes have a docs audit (see CONTRIBUTING.md), with its scope stated under Change.
 - [ ] Local checks pass.

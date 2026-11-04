@@ -31,6 +31,8 @@ implementation phase. The one exception is the benchmark harness in
   and wait.
 - Follow the workflow in [CONTRIBUTING.md](CONTRIBUTING.md).
 - Write commit messages in the [Conventional Commits](CONTRIBUTING.md#commits) format.
+- Audit every change to docs, issues, or the project board, as
+  [CONTRIBUTING.md](CONTRIBUTING.md#docs-audit) describes.
 
 ## Checks
 
