@@ -34,7 +34,7 @@ businesses share one Tetsu, and each sees only its own data.
 ```mermaid
 flowchart TB
     accTitle: System context
-    accDescr: Many businesses share Tetsu. Each business's staff run it with Tetsu and its customers book and pay with it. Prospective businesses read Tetsu's marketing site. Partner software calls Tetsu's API and receives its webhooks. Tetsu charges, messages, syncs, streams, and imports through outside systems: payment processors, email and SMS providers, marketplaces, accounting tools, video and streaming, and previous systems.
+    accDescr: Many businesses share Tetsu. Each business's staff run it with Tetsu and its customers book and pay with it. Prospective businesses read about Tetsu. Partner software calls Tetsu's API and receives its webhooks. Tetsu charges, messages, syncs, streams, and imports through outside systems: payment processors, email and SMS providers, marketplaces, accounting tools, video and streaming, and previous systems.
 
     prospects([Prospective businesses])
     staff([Staff of each business])
@@ -48,7 +48,7 @@ flowchart TB
         accounting([Accounting tools]) ~~~ video([Video and streaming]) ~~~ previous([Previous systems])
     end
 
-    prospects -- reads the marketing site of --> tetsu
+    prospects -- reads about --> tetsu
     staff -- runs the business with --> tetsu
     customers -- books and pays with --> tetsu
     partners -- calls the API of --> tetsu
@@ -66,7 +66,7 @@ flowchart TB
 ### Containers
 
 Tetsu's separately running parts are blue and green. The server renders each
-business's booking pages and Tetsu's own marketing site, and serves the API.
+business's booking pages and a simple page about Tetsu, and serves the API.
 PostgreSQL holds records, and object storage holds files such as signed
 documents and media. Card details go from the browser or app
 straight to the processor's hosted fields and never reach Tetsu
@@ -81,7 +81,7 @@ intended choice for the staff app. Every surface goes through the same use cases
 ```mermaid
 flowchart TB
     accTitle: Containers
-    accDescr: Customers book and pay on their business's booking pages in a browser, hosted or embedded, and prospective businesses browse Tetsu's marketing site, both served by the Tetsu server. Staff run the business in the staff app, and customers may use native apps; their technology is open. Apps and partner software call the server's API over HTTPS, and the server sends webhooks to partner software. Browsers and apps send card details straight to payment processors' hosted fields. The server, one Rust binary, reads and writes PostgreSQL over SQL with one schema per module, stores documents and media in object storage, charges and refunds through payment processors, and messages, syncs, and imports through other outside systems: email and SMS, marketplaces, accounting tools, video, and previous systems.
+    accDescr: Customers book and pay on their business's booking pages in a browser, hosted or embedded, and prospective businesses read about Tetsu, both served by the Tetsu server. Staff run the business in the staff app, and customers may use native apps; their technology is open. Apps and partner software call the server's API over HTTPS, and the server sends webhooks to partner software. Browsers and apps send card details straight to payment processors' hosted fields. The server, one Rust binary, reads and writes PostgreSQL over SQL with one schema per module, stores documents and media in object storage, charges and refunds through payment processors, and messages, syncs, and imports through other outside systems: email and SMS, marketplaces, accounting tools, video, and previous systems.
 
     prospects([Prospective businesses])
     staff([Staff of each business])
@@ -98,7 +98,7 @@ flowchart TB
 
     staff -- runs the business in --> apps
     customers -- may use --> apps
-    prospects -- browses the marketing site, HTTPS --> server
+    prospects -- reads about Tetsu, HTTPS --> server
     apps -- calls API, HTTPS --> server
     customers -- books and pays on booking pages, hosted or embedded, HTTPS --> server
     customers -- enters card details in a browser, HTTPS --> processors
