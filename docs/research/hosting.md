@@ -88,7 +88,7 @@ These are compared, not pass or fail.
 
 - Recovery targets, restore testing, alerting, and on-call belong to #27. This
   decision must only keep them possible.
-- Postgres TLS crate choice follows this decision, with its own ADR if M5 needs one.
+- Postgres TLS crate choice follows this decision. It is now [ADR-0013](../adr/0013-postgres-tls.md).
 
 ## Where it stands
 
@@ -146,8 +146,8 @@ Limits of this pick:
 - **Not yet checked.** Whether Neon's free plan allows commercial use (its terms and plans
   page do not say), and how many custom domains Render's free services allow beyond the
   2 on Hobby. A domain is the one likely cost.
-- **Encrypted connections from day one.** Neon needs TLS, so the Postgres TLS crate ADR
-  comes first.
+- **Encrypted connections from day one.** Neon needs TLS, which [ADR-0013](../adr/0013-postgres-tls.md)
+  settles.
 
 ### Free phase cost
 

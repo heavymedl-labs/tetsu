@@ -128,7 +128,8 @@ the only Render-specific code.
 
 **Next.**
 
-- A Postgres TLS crate needs its own ADR before the first deploy, because Neon requires TLS.
+- A Postgres TLS crate needs its own ADR before the first deploy, because Neon requires TLS. This is now
+  [ADR-0013](0013-postgres-tls.md).
 - The first deploy runs the connection and wake tests in the research page, and shows whether
   a free Cloudflare cache can hide the slow wake. Adopting that needs its own check.
 

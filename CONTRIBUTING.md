@@ -25,8 +25,12 @@ and 5 return when a second contributor joins.
 Every change to docs, ADRs, issues, or the project board gets an audit before it
 lands, so what we write stays true to what we decide.
 
-**Scope.** Start with what you changed and whatever links to or repeats it. Widen to
-the whole project when a change alters a decision, a term, or the project's direction.
+**Scope.** Start with what you changed. Then search repo docs, open issues, and issue comments for
+whatever refers to it, by name and by number. Accepting an ADR or closing an issue always counts as a change
+to search for. Widen to the whole project when a change alters a decision, a term, or the project's direction.
+
+Passing checks do not count as an audit. They catch formatting and broken links, not whether something is
+still true.
 
 **Check each of these, and fix what you find:**
 
@@ -42,10 +46,9 @@ the whole project when a change alters a decision, a term, or the project's dire
 allows, so a wrong decision gets a superseding ADR. Research pages stay dated records:
 add a note rather than rewriting what was found. When a fix is out of scope, open an issue.
 
-**Record it.** Add an `Audit:` footer to the commit or a line in the pull request, saying
-the scope and what changed, such as `Audit: scoped, merged two glossary entries` or
-`Audit: scoped, no findings`. For issue and board changes, say so in your report of
-the work.
+**Record it.** Add an `Audit:` footer to the commit or a line in the pull request, saying the scope, what you
+searched, and what changed, such as `Audit: scoped, searched docs and issues for #29, updated two`. Say so if
+you sampled rather than read. For issue and board changes, say the same in your report of the work.
 
 ## Project board
 
