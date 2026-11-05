@@ -41,6 +41,9 @@ option for most of them.
 - [Support access to tenant accounts](https://github.com/heavymedl-labs/tetsu/issues/24)
 - [Money: currencies, rounding, and tax](https://github.com/heavymedl-labs/tetsu/issues/26)
 - [Operations: observability, backups, and recovery](https://github.com/heavymedl-labs/tetsu/issues/27)
+- [Postgres TLS crate](https://github.com/heavymedl-labs/tetsu/issues/29)
+- [Dependency checks, secrets, and a security target](https://github.com/heavymedl-labs/tetsu/issues/31)
+- [Landing page framework and host](https://github.com/heavymedl-labs/tetsu/issues/32)
 
 ## Finding sources
 
