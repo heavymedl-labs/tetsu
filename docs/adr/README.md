@@ -18,6 +18,7 @@ number, and add a row below. Never renumber.
 | [0010](0010-evaluating-technology.md) | Evaluating technology | Accepted |
 | [0011](0011-server-stack-guardrails.md) | Server stack guardrails | Accepted |
 | [0012](0012-first-hosting-and-deploys.md) | First hosting and deploys | Accepted |
+| [0013](0013-postgres-tls.md) | Postgres TLS | Accepted |
 
 ## Open decisions
 
@@ -41,7 +42,6 @@ option for most of them.
 - [Support access to tenant accounts](https://github.com/heavymedl-labs/tetsu/issues/24)
 - [Money: currencies, rounding, and tax](https://github.com/heavymedl-labs/tetsu/issues/26)
 - [Operations: observability, backups, and recovery](https://github.com/heavymedl-labs/tetsu/issues/27)
-- [Postgres TLS crate](https://github.com/heavymedl-labs/tetsu/issues/29)
 - [Dependency checks, secrets, and a security target](https://github.com/heavymedl-labs/tetsu/issues/31)
 - [Landing page framework and host](https://github.com/heavymedl-labs/tetsu/issues/32)
 
