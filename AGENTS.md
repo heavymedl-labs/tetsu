@@ -69,12 +69,11 @@ Use `git-workflow-and-versioning` for commits, but follow
 Run these before you push to `main` or open a pull request:
 
 ```bash
-scripts/check-adrs.sh
-npx markdownlint-cli2@0.24.0 "**/*.md"
+scripts/check.sh
 ```
 
-CI also checks links and lints workflows. Keep the markdownlint-cli2 version
-matched to the one the CI action bundles.
+It needs the Node version in `.nvmrc`. CI runs the same script, and also checks
+links and lints workflows.
 
 ## Writing
 

@@ -9,18 +9,27 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # A separate group per commit on main, because its run is the only scan of its commits.
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: true
 
 jobs:
-  markdown:
-    name: Markdown lint
+  checks:
+    name: Repository checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: DavidAnson/markdownlint-cli2-action@696eb3f2509270d7b882d2aa68347bc676e7af34 # v25.0.0
         with:
-          globs: "**/*.md"
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      # After a force push the old head is on no branch, so fetch it by its SHA.
+      - run: |
+          git fetch --quiet origin "$BASE" || true
+          scripts/check.sh --base "$BASE"
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
 
   links:
     name: Link check
@@ -38,13 +47,6 @@ jobs:
         with:
           args: --no-progress --include-fragments --offline "docs/research/**/*.md"
           fail: true
-
-  adrs:
-    name: ADR structure
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: scripts/check-adrs.sh
 
   workflows:
     name: Workflow lint
