@@ -25,6 +25,7 @@ phase, and nothing is built yet.
 - [ARCHITECTURE.md](ARCHITECTURE.md): the system's shape and invariants
 - [docs/adr](docs/adr/README.md): decisions and the reasoning behind them
 - [docs/GLOSSARY.md](docs/GLOSSARY.md): shared vocabulary
+- [CONSTRAINTS.md](CONSTRAINTS.md): the quality bar
 - [docs/reference-businesses](docs/reference-businesses/README.md): fictional
   businesses we check the product against
 - [docs/research](docs/research/market-scan/README.md): market research that

@@ -19,6 +19,7 @@ number, and add a row below. Never renumber.
 | [0011](0011-server-stack-guardrails.md) | Server stack guardrails | Accepted |
 | [0012](0012-first-hosting-and-deploys.md) | First hosting and deploys | Accepted |
 | [0013](0013-postgres-tls.md) | Postgres TLS | Accepted |
+| [0014](0014-checks-and-duties.md) | Checks and duties | Accepted |
 
 ## Open decisions
 

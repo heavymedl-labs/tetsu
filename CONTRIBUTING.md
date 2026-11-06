@@ -12,13 +12,33 @@ People and coding agents follow the same workflow and the rules in
 2. Branch from `main` with a short name and a type prefix, such as
    `docs/glossary`, `adr/tenant-isolation`, or `ci/coverage`.
 3. Keep the branch and pull request to that one issue.
-4. Run the [checks](AGENTS.md#checks), and a [docs audit](#docs-audit) if you
-   changed docs or issues.
+4. Follow the [duties](AGENTS.md#duties), run the [checks](AGENTS.md#checks), and
+   do a [docs audit](#docs-audit) if you changed docs or issues.
 5. Open a pull request with the template filled in and `Closes #N`.
 
 While the maintainer is the only contributor, changes go straight to `main`
-instead: run the checks, commit, push, and close the issue by hand. Steps 2, 3,
-and 5 return when a second contributor joins.
+instead: follow the duties, run the checks, commit, push, and close the issue by
+hand. Steps 2, 3, and 5 return when a second contributor joins or a real business
+adopts Tetsu ([ADR-0014](docs/adr/0014-checks-and-duties.md)).
+
+## Agent skills
+
+The [duties](AGENTS.md#duties) name skills from
+[addyosmani/agent-skills](https://github.com/addyosmani/agent-skills) (MIT). We refer to them by name
+and never edit them, so any way of installing them works.
+
+If your agent already has them, there is nothing to do. Otherwise, install the whole pack, because
+some skills share files:
+
+```bash
+npx skills add addyosmani/agent-skills
+```
+
+Or clone the repository and follow its README for your agent. If a skill is unavailable, say so
+rather than skipping the step.
+
+We last [reviewed](docs/research/agent-skills.md) the pack at version 0.6.15. Review it again before
+relying on a newer version's changes to these skills.
 
 ## Docs audit
 

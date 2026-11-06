@@ -16,6 +16,10 @@ records one significant decision, its alternatives, and its sources.
 tenants, so a failure in one cell does not reach the others. Whether Tetsu uses
 cells is [undecided](https://github.com/heavymedl-labs/tetsu/issues/8).
 
+**Check.** An automated control that gives the same answer every time, such as a
+test or a lint. Contrast with a duty. See
+[ADR-0014](adr/0014-checks-and-duties.md).
+
 **Composition root.** The `tetsu` binary, which wires modules together. The
 only place that knows every module.
 
@@ -28,6 +32,12 @@ tenancy, identity and access, and audit.
 
 **Domain event.** A record that something happened in a module, published for
 other modules to react to. Past tense, such as `BookingCancelled`.
+
+**Duty.** Judgment an agent or person must carry out because no tool can, such as
+simplifying a change. Listed in [AGENTS.md](../AGENTS.md#duties).
+
+**Fresh review.** A review by an agent that did not write the change, seeing only
+the issue and the diff. See [docs/review.md](review.md).
 
 **Kernel.** The small core that defines the module contract: traits and types,
 with no domain knowledge and no runtime plug-in loading.
