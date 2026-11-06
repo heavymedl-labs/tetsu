@@ -1,0 +1,24 @@
+//! Use cases.
+
+use crate::domain::{Error, NewTenant, Tenant};
+use crate::ports::TenantStore;
+
+/// Creates a tenant, reachable at its slug.
+///
+/// # Errors
+/// Fails if the slug is taken or storage fails.
+pub async fn create_tenant(store: &impl TenantStore, tenant: &NewTenant) -> Result<Tenant, Error> {
+    store.insert(tenant).await
+}
+
+/// Finds the tenant at an address. An unknown address fails, and never falls back to a default tenant.
+///
+/// # Errors
+/// Fails with [`Error::NotFound`] for an unknown address, or if storage fails.
+pub async fn resolve(store: &impl TenantStore, address: &str) -> Result<Tenant, Error> {
+    let address = address.trim().to_ascii_lowercase();
+    store
+        .find_by_address(&address)
+        .await?
+        .ok_or(Error::NotFound)
+}
