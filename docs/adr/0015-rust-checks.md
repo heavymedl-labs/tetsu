@@ -1,6 +1,6 @@
 # 0015. Rust checks
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-06
 
 ## Context

@@ -25,7 +25,7 @@ records the maintainer's approval for the files that commit touches.
 
 A language lands only once its row is filled. "Gap" means no good tool exists, so the fresh review
 covers that rule. The Rust row and its limits are in
-[ADR-0015](docs/adr/0015-rust-checks.md), which is proposed. The SQL row's tools are candidates that have not
+[ADR-0015](docs/adr/0015-rust-checks.md). The SQL row's tools are candidates that have not
 been evaluated, and each needs an ADR under [ADR-0010](docs/adr/0010-evaluating-technology.md).
 
 | Language | Tests catch mistakes | Coverage | New duplication, outside tests | Complexity | Boundaries |

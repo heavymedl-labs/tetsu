@@ -20,7 +20,7 @@ number, and add a row below. Never renumber.
 | [0012](0012-first-hosting-and-deploys.md) | First hosting and deploys | Deploying, or moving to a new host or paid plan | Accepted |
 | [0013](0013-postgres-tls.md) | Postgres TLS | Connecting to Postgres | Accepted |
 | [0014](0014-checks-and-duties.md) | Checks and duties | Changing a check, duty, or the quality bar | Accepted |
-| [0015](0015-rust-checks.md) | Rust checks | Changing a Rust tool or limit | Proposed |
+| [0015](0015-rust-checks.md) | Rust checks | Changing a Rust tool or limit | Accepted |
 
 ## Open decisions
 
