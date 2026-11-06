@@ -27,6 +27,13 @@ for tool in cargo-llvm-cov cargo-mutants .tools/bin/lizard; do
   fi
 done
 
+if [[ -z "${TEST_DATABASE_URL:-}" ]]; then
+  echo "error: set TEST_DATABASE_URL to a Postgres the tests may create databases on, for example:" >&2
+  echo "  docker run -d --name tetsu-test-pg -p 54329:5432 -e POSTGRES_HOST_AUTH_METHOD=trust postgres:18.6" >&2
+  echo "  export TEST_DATABASE_URL=postgres://postgres@localhost:54329/postgres" >&2
+  exit 1
+fi
+
 python3 scripts/floor_guard.py "$@"
 python3 -m unittest discover -b -s scripts/tests -t .
 scripts/check-adrs.sh

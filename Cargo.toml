@@ -10,6 +10,16 @@ edition = "2024"
 rust-version = "1.99"
 publish = false
 
+[workspace.dependencies]
+deadpool-postgres = "0.14"
+rustls = "0.23.46"
+tetsu-kernel = { path = "crates/kernel" }
+tetsu-postgres = { path = "crates/postgres" }
+tokio = { version = "1.54", features = ["macros", "net", "rt-multi-thread", "time"] }
+tokio-postgres = "0.7"
+tokio-postgres-rustls = "0.14"
+webpki-roots = "1"
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 

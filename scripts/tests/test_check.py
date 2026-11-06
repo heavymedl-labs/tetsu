@@ -28,12 +28,15 @@ class CheckScript(unittest.TestCase):
         write(self.root / ".tools" / "bin" / "lizard", f'#!/bin/sh\necho "lizard $*" >> "{self.log}"\n', EXECUTABLE)
         write(self.root / "scripts" / "check-adrs.sh", f'#!/bin/sh\necho adrs >> "{self.log}"\n', EXECUTABLE)
 
+    no_database = False
+
     def stub(self, name, body):
         write(self.bin / name, f"#!/bin/sh\n{body}\n", EXECUTABLE)
 
     def check(self, *args, nvm_dir=None):
         return run([self.root / "scripts" / "check.sh", *args], self.root,
-                   PATH=f"{self.bin}:/usr/bin:/bin", NVM_DIR=str(nvm_dir or self.root / "no-nvm"))
+                   PATH=f"{self.bin}:/usr/bin:/bin", NVM_DIR=str(nvm_dir or self.root / "no-nvm"),
+                   TEST_DATABASE_URL="" if self.no_database else "postgres://test")
 
     def test_runs_every_stage(self):
         result = self.check()
@@ -75,6 +78,13 @@ class CheckScript(unittest.TestCase):
         result = self.check()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Node 26", result.stderr)
+
+    def test_a_missing_test_database_fails_with_a_fix(self):
+        self.no_database = True
+        result = self.check()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("TEST_DATABASE_URL", result.stderr)
+        self.assertIn("docker run", result.stderr)
 
     def test_a_missing_tool_fails_with_a_fix(self):
         (self.root / ".tools" / "bin" / "lizard").unlink()
