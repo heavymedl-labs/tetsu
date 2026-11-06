@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Runs every local check. The pre-push hook and CI both call this.
-# Takes --base <ref>, the commit to compare with. The default is origin/main.
+# Runs every local check. The pre-push hook and CI run all of it, and the pre-commit
+# hook runs only formatters and linters with --fast. Otherwise it takes --base <ref>,
+# the commit to compare with, which defaults to origin/main.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -11,6 +12,7 @@ nvm_script="${NVM_DIR:-$HOME/.nvm}/nvm.sh"
 if ! right_node && [[ -s "$nvm_script" ]]; then
   # nvm's own script does not run under these shell options.
   set +eu
+  # shellcheck source=/dev/null # nvm lives outside the repository.
   . "$nvm_script"
   nvm use "$wanted" >/dev/null
   set -eu
@@ -20,12 +22,46 @@ if ! right_node; then
   exit 1
 fi
 
-for tool in cargo-llvm-cov cargo-mutants .tools/bin/lizard; do
+fast=false
+if [[ "${1:-}" == "--fast" ]]; then
+  fast=true
+  shift
+fi
+
+for tool in cargo-llvm-cov cargo-mutants .tools/bin/lizard .tools/bin/ruff .tools/bin/shellcheck \
+  .tools/bin/shfmt .tools/bin/squawk .tools/bin/sqlfluff; do
   if ! command -v "$tool" >/dev/null; then
     echo "error: $tool is missing. Run scripts/install-tools.sh" >&2
     exit 1
   fi
 done
+
+# Formatters and linters, fast enough to run on every commit (ADR-0017).
+lint() {
+  cargo fmt --all --check
+  cargo clippy --all-targets -- -D warnings
+  .tools/bin/ruff check
+  .tools/bin/ruff format --check
+  local shell_files=(scripts/*.sh benchmarks/run.sh .githooks/*)
+  .tools/bin/shellcheck "${shell_files[@]}"
+  .tools/bin/shfmt -d "${shell_files[@]}"
+  local migrations=()
+  while IFS= read -r file; do migrations+=("$file"); done < <(find crates -path '*/migrations/*.sql' | sort)
+  if ((${#migrations[@]} > 0)); then
+    .tools/bin/squawk "${migrations[@]}"
+  fi
+  local sql=()
+  while IFS= read -r file; do sql+=("$file"); done < <(find crates benchmarks -name '*.sql' 2>/dev/null | sort)
+  if ((${#sql[@]} > 0)); then
+    .tools/bin/sqlfluff lint "${sql[@]}"
+  fi
+  npx --yes markdownlint-cli2@0.24.0 "**/*.md"
+}
+
+lint
+if [[ "$fast" == true ]]; then
+  exit 0
+fi
 
 if [[ -z "${TEST_DATABASE_URL:-}" ]]; then
   echo "error: set TEST_DATABASE_URL to a Postgres the tests may create databases on, for example:" >&2
@@ -38,11 +74,8 @@ python3 scripts/floor_guard.py "$@"
 python3 -m unittest discover -b -s scripts/tests -t .
 scripts/check-adrs.sh
 python3 scripts/check_doc_sizes.py
-npx --yes markdownlint-cli2@0.24.0 "**/*.md"
 
 # Limits are in ADR-0015 and ADR-0016. Cargo skips the benchmark harness, except for formatting.
-cargo fmt --all --check
-cargo clippy --all-targets -- -D warnings
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 cargo llvm-cov --json --summary-only --output-path "$work/coverage.json"

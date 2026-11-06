@@ -1,0 +1,36 @@
+# Python lint and format (ADR-0017). Our scripts run on the system python3.
+target-version = "py39"
+line-length = 110
+
+[lint]
+select = [
+  "E", "W", "F",  # pycodestyle and Pyflakes
+  "I",            # import order
+  "B",            # likely bugs
+  "UP",           # modern syntax
+  "SIM", "C4", "RET", "PERF",
+  "PL",           # Pylint, including complexity limits
+  "C90",          # cyclomatic complexity
+  "S",            # security
+  "PTH",          # pathlib over os.path
+  "N",            # naming
+  "TRY", "ARG",
+  "RUF",
+]
+
+ignore = [
+  "TRY003",  # long messages in built-in exceptions are fine in small scripts
+]
+
+[lint.mccabe]
+# The same limit as Rust (ADR-0015).
+max-complexity = 10
+
+[lint.pylint]
+max-args = 5
+
+[lint.per-file-ignores]
+# Our scripts run git, a trusted tool found on PATH.
+"scripts/**" = ["S603", "S607"]
+# unittest names assert methods in camelCase, and tests compare against literal values.
+"scripts/tests/*" = ["N802", "PLR2004"]

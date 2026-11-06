@@ -78,7 +78,9 @@ Run these before you push to `main` or open a pull request:
 scripts/check.sh
 ```
 
-It needs the Node version in `.nvmrc`, and `scripts/install-tools.sh` run once. CI
+It needs the Node version in `.nvmrc`, uv, `scripts/install-tools.sh` run once, and a
+test Postgres in `TEST_DATABASE_URL`. `scripts/check.sh --fast` runs only formatters and
+linters, as the pre-commit hook does. CI
 runs the same script, and also checks links and lints workflows.
 
 ## Writing

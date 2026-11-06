@@ -74,7 +74,10 @@ with_server() {
   local port=$1
   shift
   local args=()
-  while [[ $1 != -- ]]; do args+=("$1"); shift; done
+  while [[ $1 != -- ]]; do
+    args+=("$1")
+    shift
+  done
   shift
   taskset -c "$server_cpus" "$BIN" "${args[@]}" >/dev/null 2>&1 &
   server_pid=$!

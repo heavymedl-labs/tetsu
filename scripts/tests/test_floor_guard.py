@@ -1,4 +1,5 @@
 """The floor guard must fail each floor violation and pass a clean control."""
+
 import tempfile
 import unittest
 from pathlib import Path
@@ -63,7 +64,7 @@ class CleanControl(GuardCase):
         self.assertEqual(self.guard().returncode, 0)
 
     def test_ordinary_code_passes(self):
-        write(self.repo / "src" / "lib.rs", "fn main() { println!(\"hi\"); }\n")
+        write(self.repo / "src" / "lib.rs", 'fn main() { println!("hi"); }\n')
         self.assertEqual(self.guard().returncode, 0)
 
     def test_docs_may_mention_the_patterns(self):
@@ -87,18 +88,32 @@ class CleanControl(GuardCase):
         path.write_text(path.read_text() + "| E1 | Tests | a.py | One-off | Maintainer | 2027-01-01 |\n")
         self.commit("add exception\n\nFloor-reason: test setup")
         self.git("tag", "-f", "base")
-        path.write_text(path.read_text().replace("| E1 | Tests | a.py | One-off | Maintainer | 2027-01-01 |\n", ""))
+        path.write_text(
+            path.read_text().replace("| E1 | Tests | a.py | One-off | Maintainer | 2027-01-01 |\n", "")
+        )
         self.assertEqual(self.guard().returncode, 0)
 
 
 class Suppressions(GuardCase):
     def test_flags_each_suppression_form(self):
-        for line in ("#[allow(dead_code)]", "#![allow(unused)]", "x = 1  # noqa",
-                     "# shellcheck disable=SC2086", "// eslint-disable-next-line",
-                     "# flake8: noqa", "x = 1  # NOQA", "x = 1  # nosec", "x = 1  # pyright: ignore",
-                     "// @ts-expect-error", "#[cfg_attr(test, allow(dead_code))]",
-                     "    continue-on-error: true", "#[allow(dead_code)] // no reason",
-                     'exclude_re = ["replace foo"]'):
+        for line in (
+            "#[allow(dead_code)]",
+            "#![allow(unused)]",
+            "x = 1  # noqa",
+            "# shellcheck disable=SC2086",
+            "// eslint-disable-next-line",
+            "# flake8: noqa",
+            "x = 1  # NOQA",
+            "x = 1  # nosec",
+            "x = 1  # pyright: ignore",
+            "// @ts-expect-error",
+            "-- squawk-ignore require-concurrent-index-creation",
+            "SELECT 1 -- noqa: LT01",
+            "#[cfg_attr(test, allow(dead_code))]",
+            "    continue-on-error: true",
+            "#[allow(dead_code)] // no reason",
+            'exclude_re = ["replace foo"]',
+        ):
             with self.subTest(line=line):
                 write(self.repo / "src" / "a.rs", line + "\n")
                 self.assertFlags("silenced-checker")
@@ -118,9 +133,16 @@ class Suppressions(GuardCase):
 
 class Stubs(GuardCase):
     def test_flags_each_stub_form(self):
-        for line in ("todo!()", "unimplemented!()", "raise NotImplementedError",
-                     "// TODO finish this", "catch (e) {}", "except Exception: pass",
-                     "Err(_) => {}", "if let Err(_) = x {}"):
+        for line in (
+            "todo!()",
+            "unimplemented!()",
+            "raise NotImplementedError",
+            "// TODO finish this",
+            "catch (e) {}",
+            "except Exception: pass",
+            "Err(_) => {}",
+            "if let Err(_) = x {}",
+        ):
             with self.subTest(line=line):
                 write(self.repo / "src" / "a.rs", line + "\n")
                 self.assertFlags("unfinished-work")
@@ -138,9 +160,17 @@ class Handlers(GuardCase):
 
 class Tests(GuardCase):
     def test_flags_added_skips(self):
-        for line in ("#[ignore]", "it.skip('x')", "@unittest.skip('later')",
-                     "@pytest.mark.skip", "self.skipTest('later')", "@skipIf(True, 'x')",
-                     "@unittest.expectedFailure", "pytest.skip('x')", "it.only('x')"):
+        for line in (
+            "#[ignore]",
+            "it.skip('x')",
+            "@unittest.skip('later')",
+            "@pytest.mark.skip",
+            "self.skipTest('later')",
+            "@skipIf(True, 'x')",
+            "@unittest.expectedFailure",
+            "pytest.skip('x')",
+            "it.only('x')",
+        ):
             with self.subTest(line=line):
                 write(self.repo / "tests" / "test_b.py", line + "\n")
                 self.assertFlags("test-made-easier")
@@ -193,20 +223,36 @@ class Constraints(GuardCase):
         self.assertFlags("rule-removed")
 
     def test_flags_an_exception_with_any_id(self):
-        self.edit("| --- | --- | --- | --- | --- | --- |\n",
-                  "| --- | --- | --- | --- | --- | --- |\n| ex-1 | Tests | a.py | Why | Me | 2027-01-01 |\n")
+        self.edit(
+            "| --- | --- | --- | --- | --- | --- |\n",
+            "| --- | --- | --- | --- | --- | --- |\n| ex-1 | Tests | a.py | Why | Me | 2027-01-01 |\n",
+        )
         self.assertFlags("new-exception")
 
     def test_flags_a_new_exception(self):
-        self.edit("| --- | --- | --- | --- | --- | --- |\n",
-                  "| --- | --- | --- | --- | --- | --- |\n| E1 | Tests | a.py | Why | Me | 2027-01-01 |\n")
+        self.edit(
+            "| --- | --- | --- | --- | --- | --- |\n",
+            "| --- | --- | --- | --- | --- | --- |\n| E1 | Tests | a.py | Why | Me | 2027-01-01 |\n",
+        )
         self.assertFlags("new-exception")
 
 
 class GuardProtectsItself(GuardCase):
     def test_flags_removed_lines_in_the_check_files(self):
-        for path in ("scripts/check.sh", "scripts/floor_guard.py", "scripts/check_coverage.py",
-                     ".githooks/pre-push", ".github/workflows/ci.yml"):
+        for path in (
+            "scripts/check.sh",
+            "scripts/floor_guard.py",
+            "scripts/check_coverage.py",
+            ".githooks/pre-push",
+            ".githooks/pre-commit",
+            ".github/workflows/ci.yml",
+            "clippy.toml",
+            "ruff.toml",
+            ".squawk.toml",
+            ".sqlfluff",
+            ".editorconfig",
+            "Cargo.toml",
+        ):
             with self.subTest(path=path):
                 write(self.repo / path, "one\ntwo\n")
                 self.commit("add " + path)

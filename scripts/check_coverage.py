@@ -6,6 +6,7 @@ usage: scripts/check_coverage.py <cargo metadata json> <cargo llvm-cov summary j
 Each crate under crates/ declares its tier and kind in [package.metadata.tetsu].
 Limits are in ADR-0016. Stable Rust measures lines and regions, not branches (E3).
 """
+
 import json
 import sys
 from pathlib import Path

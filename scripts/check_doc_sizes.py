@@ -3,6 +3,7 @@
 
 Agents load AGENTS.md every session. Tokens are estimated at 4 characters each.
 """
+
 import subprocess
 import sys
 from pathlib import Path

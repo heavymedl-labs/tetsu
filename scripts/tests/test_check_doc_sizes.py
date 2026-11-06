@@ -1,4 +1,5 @@
 """The size check must fail a long AGENTS.md and only warn on other long docs."""
+
 import tempfile
 import unittest
 from pathlib import Path

@@ -6,65 +6,114 @@ usage: scripts/generate-brand.py [output-dir]
 
 PNG exports for uploading are rendered from the SVGs; see docs/brand/README.md.
 """
+
 import sys
-out = sys.argv[1] if len(sys.argv) > 1 else "docs/brand"
-GLYPHS = {"t": [".X.", "XXX", ".X.", ".X.", ".XX"], "e": ["XXX", "X.X", "XXX", "X..", "XXX"],
-          "s": ["XXX", "X..", "XXX", "..X", "XXX"], "u": ["X.X", "X.X", "X.X", "X.X", "XXX"]}
+from pathlib import Path
+from typing import NamedTuple
+
+GLYPHS = {
+    "t": [".X.", "XXX", ".X.", ".X.", ".XX"],
+    "e": ["XXX", "X.X", "XXX", "X..", "XXX"],
+    "s": ["XXX", "X..", "XXX", "..X", "XXX"],
+    "u": ["X.X", "X.X", "X.X", "X.X", "XXX"],
+}
+GLYPH_WIDTH, GLYPH_HEIGHT, GLYPH_PITCH = 3, 5, 4
+WORD_COLUMNS = 19  # five glyphs of 3 columns, with a gap after each but the last
+HOT_ROW, HOT_COLUMN = 1, 2  # the booked slot: the top right of the first letter
+SOCIAL_WIDTH, SOCIAL_HEIGHT = 1280, 640
+GHOST_STROKE = 1.5
+
+
+class Style(NamedTuple):
+    """How to draw a slot: its colors, the ghost outline's opacity, and its corner radius."""
+
+    on: str
+    hot: str
+    ghost: str
+    ghost_opacity: float
+    rx: int
+
+
 THEMES = {"light": ("#3A4250", "#E5622B", "#3A4250"), "dark": ("#D9DEE5", "#F07A45", "#D9DEE5")}
+
 
 def cells(word="tetsu"):
     """Yields (col, row, state) over the word's grid; state is on, hot, or empty."""
-    for col in range(len(word) * 4 - 1):
-        li, lc = divmod(col, 4)
-        for row in range(5):
-            on = lc < 3 and GLYPHS[word[li]][row][lc] == "X"
-            hot = li == 0 and row == 1 and lc == 2
+    for col in range(len(word) * GLYPH_PITCH - 1):
+        letter, column = divmod(col, GLYPH_PITCH)
+        for row in range(GLYPH_HEIGHT):
+            on = column < GLYPH_WIDTH and GLYPHS[word[letter]][row][column] == "X"
+            hot = letter == 0 and row == HOT_ROW and column == HOT_COLUMN
             yield col, row, ("hot" if hot else "on") if on else "empty"
 
-def slot(x, y, size, state, on, hot, ghost, ghost_opacity, rx):
+
+def slot(x, y, size, state, style):
     if state == "empty":
-        w = 1.5
-        return (f'<rect x="{x + w/2:g}" y="{y + w/2:g}" width="{size - w:g}" height="{size - w:g}" rx="{rx}" '
-                f'fill="none" stroke="{ghost}" stroke-opacity="{ghost_opacity}" stroke-width="{w}"/>')
-    return f'<rect x="{x:g}" y="{y:g}" width="{size:g}" height="{size:g}" rx="{rx}" fill="{hot if state == "hot" else on}"/>'
+        w = GHOST_STROKE
+        return (
+            f'<rect x="{x + w / 2:g}" y="{y + w / 2:g}" width="{size - w:g}" height="{size - w:g}" '
+            f'rx="{style.rx}" fill="none" stroke="{style.ghost}" stroke-opacity="{style.ghost_opacity}" '
+            f'stroke-width="{w}"/>'
+        )
+    fill = style.hot if state == "hot" else style.on
+    return f'<rect x="{x:g}" y="{y:g}" width="{size:g}" height="{size:g}" rx="{style.rx}" fill="{fill}"/>'
+
 
 def svg(w, h, body, title):
-    return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}" role="img" '
-            f'aria-labelledby="t"><title id="t">{title}</title>\n{body}\n</svg>\n')
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}" role="img" '
+        f'aria-labelledby="t"><title id="t">{title}</title>\n{body}\n</svg>\n'
+    )
+
 
 def wordmark(theme):
-    on, hot, ghost = THEMES[theme]
+    style = Style(*THEMES[theme], ghost_opacity=0.22, rx=3)
     size, pitch = 24, 30
-    body = "\n".join(slot(c * pitch, r * pitch, size, s, on, hot, ghost, 0.22, 3) for c, r, s in cells())
-    return svg(19 * pitch - 6, 5 * pitch - 6, body, "tetsu")
+    body = "\n".join(slot(c * pitch, r * pitch, size, s, style) for c, r, s in cells())
+    return svg(WORD_COLUMNS * pitch - 6, GLYPH_HEIGHT * pitch - 6, body, "tetsu")
+
 
 def avatar():
     t = [[1, 1, 1], [0, 1, 0], [0, 1, 0]]
+    style = Style("#F4F2EE", "#E5622B", "#F4F2EE", ghost_opacity=0.28, rx=15)
     parts = ['<rect width="500" height="500" fill="#3A4250"/>']
     for r in range(3):
         for c in range(3):
             state = ("hot" if (r, c) == (0, 2) else "on") if t[r][c] else "empty"
-            parts.append(slot(80 + c * 120, 80 + r * 120, 100, state, "#F4F2EE", "#E5622B", "#F4F2EE", 0.28, 15))
+            parts.append(slot(80 + c * 120, 80 + r * 120, 100, state, style))
     return svg(500, 500, "\n".join(parts), "Tetsu")
 
+
 def social():
-    on, hot, ghost = THEMES["dark"]
     size, pitch = 32, 40
-    x0, y0 = (1280 - (19 * pitch - 8)) // 2, (640 - (5 * pitch - 8)) // 2
+    x0 = (SOCIAL_WIDTH - (WORD_COLUMNS * pitch - 8)) // 2
+    y0 = (SOCIAL_HEIGHT - (GLYPH_HEIGHT * pitch - 8)) // 2
     word = {(c, r): s for c, r, s in cells()}
-    parts = ['<rect width="1280" height="640" fill="#16181C"/>']
+    near_style = Style(*THEMES["dark"], ghost_opacity=0.2, rx=4)
+    far_style = near_style._replace(ghost_opacity=0.08)
+    parts = [f'<rect width="{SOCIAL_WIDTH}" height="{SOCIAL_HEIGHT}" fill="#16181C"/>']
     for r in range(-7, 12):
         for c in range(-8, 27):
             x, y = x0 + c * pitch, y0 + r * pitch
-            if x + size < 0 or y + size < 0 or x > 1280 or y > 640:
+            if x + size < 0 or y + size < 0 or x > SOCIAL_WIDTH or y > SOCIAL_HEIGHT:
                 continue
-            state = word.get((c, r), "empty")
-            near = 0 <= c < 19 and 0 <= r < 5
-            parts.append(slot(x, y, size, state, on, hot, ghost, 0.2 if near else 0.08, 4))
-    return svg(1280, 640, "\n".join(parts), "Tetsu")
+            near = 0 <= c < WORD_COLUMNS and 0 <= r < GLYPH_HEIGHT
+            parts.append(slot(x, y, size, word.get((c, r), "empty"), near_style if near else far_style))
+    return svg(SOCIAL_WIDTH, SOCIAL_HEIGHT, "\n".join(parts), "Tetsu")
 
-files = {"tetsu-wordmark-light.svg": wordmark("light"), "tetsu-wordmark-dark.svg": wordmark("dark"),
-         "tetsu-avatar.svg": avatar(), "tetsu-social-preview.svg": social()}
-for name, text in files.items():
-    open(f"{out}/{name}", "w").write(text)
-    print(name, len(text))
+
+def main():
+    out = Path(sys.argv[1] if len(sys.argv) > 1 else "docs/brand")
+    files = {
+        "tetsu-wordmark-light.svg": wordmark("light"),
+        "tetsu-wordmark-dark.svg": wordmark("dark"),
+        "tetsu-avatar.svg": avatar(),
+        "tetsu-social-preview.svg": social(),
+    }
+    for name, text in files.items():
+        (out / name).write_text(text)
+        print(name, len(text))
+
+
+if __name__ == "__main__":
+    main()

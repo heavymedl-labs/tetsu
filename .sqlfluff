@@ -1,0 +1,17 @@
+# SQL lint and format (ADR-0017).
+[sqlfluff]
+dialect = postgres
+templater = raw
+
+[sqlfluff:rules:capitalisation.keywords]
+capitalisation_policy = upper
+
+[sqlfluff:rules:capitalisation.functions]
+extended_capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.types]
+extended_capitalisation_policy = lower
+
+[sqlfluff:rules:references.keywords]
+# Postgres does not reserve "name", and most modules have a name column.
+ignore_words = name

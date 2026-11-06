@@ -1,4 +1,5 @@
 """check-adrs.sh must accept a valid ADR and fail each kind of broken one."""
+
 import shutil
 import tempfile
 import unittest

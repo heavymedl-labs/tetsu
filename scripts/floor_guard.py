@@ -13,6 +13,7 @@ determined person, so the fresh review still applies.
 Adapted from the floor guard in addyosmani/agent-skills (MIT), with Rust and
 Python patterns. It does not scan for secrets; see issue 31.
 """
+
 import argparse
 import os
 import re
@@ -28,16 +29,32 @@ PROTECTED = {
     "scripts/check_coverage.py",
     "scripts/floor_guard.py",
     ".githooks/pre-push",
+    ".githooks/pre-commit",
     ".github/workflows/ci.yml",
+    # Lint and lint-level config: removing a line can switch a rule off.
+    "clippy.toml",
+    "ruff.toml",
+    ".squawk.toml",
+    ".sqlfluff",
+    ".editorconfig",
+    "Cargo.toml",
 }
 CRATE_DECLARATION = re.compile(r"^(tier|kind)\s*=")
-DIFF_FLAGS = ("--no-renames", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", "--unified=0")
+DIFF_FLAGS = (
+    "--no-renames",
+    "--no-color",
+    "--no-ext-diff",
+    "--src-prefix=a/",
+    "--dst-prefix=b/",
+    "--unified=0",
+)
 
 SUPPRESSION = re.compile(
     r"#!?\[(allow|expect)\(|cfg_attr\(.*allow\(|@ts-ignore|@ts-nocheck|@ts-expect-error"
     r"|eslint-disable|biome-ignore|#\s*((flake8|ruff):\s*)?noqa|#\s*nosec|#\s*type:\s*ignore"
     r"|pyright:\s*ignore|#\s*pragma:\s*no cover|pylint:\s*disable|shellcheck disable"
-    r"|istanbul ignore|nosemgrep|gitleaks:allow|Stryker disable|continue-on-error|exclude_re",
+    r"|istanbul ignore|nosemgrep|gitleaks:allow|Stryker disable|continue-on-error|exclude_re"
+    r"|squawk-ignore|--\s*noqa",
     re.IGNORECASE,
 )
 WRITTEN_REASON = re.compile(r"\breason\s*[=:]", re.IGNORECASE)
@@ -60,14 +77,14 @@ EXCEPTION_ROW = re.compile(r"^\|\s*[A-Za-z]+-?\d+\s*\|")
 REASON = re.compile(r"^Floor-reason:[ \t]*(\S.*)$", re.MULTILINE)
 
 
-class CouldNotRun(Exception):
+class CouldNotRunError(Exception):
     pass
 
 
 def git(*args, allowed=(0,)):
     result = subprocess.run(["git", *args], capture_output=True, text=True, errors="replace", check=False)
     if result.returncode not in allowed:
-        raise CouldNotRun(f"git {args[0]} failed: {result.stderr.strip()}")
+        raise CouldNotRunError(f"git {args[0]} failed: {result.stderr.strip()}")
     return result.stdout
 
 
@@ -118,7 +135,9 @@ def scan_line(path, text, previous):
         return
     if NO_VERIFY.search(text) or (SUPPRESSION.search(text) and not WRITTEN_REASON.search(text)):
         yield "silenced-checker", path, text
-    empty_handler = text.strip() == "pass" and previous[0] == path and previous[1].strip().startswith("except")
+    empty_handler = (
+        text.strip() == "pass" and previous[0] == path and previous[1].strip().startswith("except")
+    )
     if STUB.search(text) or empty_handler:
         yield "unfinished-work", path, text
     if SKIP.search(text):
@@ -194,15 +213,17 @@ def main():
         merge_base = git("merge-base", base, "HEAD").strip()
         added, removed, deleted = parse_diff(read_diff(merge_base))
         findings = [
-            *scan_code(added), *scan_tests(removed, deleted),
-            *scan_protected(removed), *scan_constraints(added, removed),
+            *scan_code(added),
+            *scan_tests(removed, deleted),
+            *scan_protected(removed),
+            *scan_constraints(added, removed),
         ]
         if not findings:
             print("floor-guard: clean")
             return 0
         print(f"floor-guard: {len(findings)} finding(s):", file=sys.stderr)
         return 1 if report(findings, merge_base) else 0
-    except CouldNotRun as error:
+    except CouldNotRunError as error:
         print(f"floor-guard: could not run: {error}", file=sys.stderr)
         return 2
 

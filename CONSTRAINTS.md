@@ -25,15 +25,16 @@ records the maintainer's approval for the files that commit touches.
 
 A language lands only once its row is filled. "Gap" means no good tool exists, so the fresh review
 covers that rule. The Rust row and its limits are in
-[ADR-0015](docs/adr/0015-rust-checks.md) and [ADR-0016](docs/adr/0016-crate-layout-and-coverage.md). The SQL row's tools are candidates that have not
-been evaluated, and each needs an ADR under [ADR-0010](docs/adr/0010-evaluating-technology.md).
+[ADR-0015](docs/adr/0015-rust-checks.md) and [ADR-0016](docs/adr/0016-crate-layout-and-coverage.md), and the format and lint
+column is in [ADR-0017](docs/adr/0017-format-and-lint.md). Format and lint run on every commit, and the rest
+on every push.
 
-| Language | Tests catch mistakes | Coverage | New duplication, outside tests | Complexity | Boundaries |
-| --- | --- | --- | --- | --- | --- |
-| Rust | `cargo-mutants` | `cargo-llvm-cov`, E3 | jscpd | Clippy, lizard | [#25](https://github.com/heavymedl-labs/tetsu/issues/25) |
-| SQL | To choose | To choose | To choose | To choose | [#25](https://github.com/heavymedl-labs/tetsu/issues/25) |
-| Bash | `unittest`, from Python | E2 | E2 | E2 | E2 |
-| Python | `unittest` | E2 | E2 | E2 | E2 |
+| Language | Format and lint | Tests catch mistakes | Coverage | New duplication, outside tests | Complexity | Boundaries |
+| --- | --- | --- | --- | --- | --- | --- |
+| Rust | rustfmt, Clippy | `cargo-mutants` | `cargo-llvm-cov`, E3 | jscpd | Clippy, lizard | [#25](https://github.com/heavymedl-labs/tetsu/issues/25) |
+| SQL | SQLFluff, and Squawk on migrations | Module tests against Postgres | E4 | E4 | E4 | [#25](https://github.com/heavymedl-labs/tetsu/issues/25) |
+| Bash | shfmt, ShellCheck | `unittest`, from Python | E2 | E2 | E2 | E2 |
+| Python | Ruff | `unittest` | E2 | E2 | Ruff | E2 |
 
 Docs and workflows have no row, because tests and complexity do not apply. What runs on them today
 is in [AGENTS.md](AGENTS.md#checks), and docs also get the
@@ -48,5 +49,6 @@ Nothing yet. Add a metric here with today's value and its direction once code ex
 | ID | Rule | Path | Reason | Owner | Expires |
 | --- | --- | --- | --- | --- | --- |
 | E1 | Scripts need tests | `scripts/generate-brand.py` | One-off generator, and its output is checked by eye | Maintainer | 2027-02-04 |
-| E2 | Bash and Python checks beyond tests | `scripts/` | Tooling only, with no numeric limit, and too small to justify more tools yet, so the fresh review covers these | Maintainer | 2027-02-04 |
+| E2 | Bash and Python coverage, duplication, and boundaries, and Bash complexity | `scripts/` | Tooling only, with no numeric limit, and too small to justify more tools yet, so the fresh review covers these | Maintainer | 2027-02-04 |
 | E3 | ADR-0005's branch coverage | `crates/` | It needs nightly Rust, so stable measures lines and regions. Settle before the first Tier 1 code | Maintainer | 2027-02-04 |
+| E4 | SQL coverage, duplication, and complexity | `crates/` | No good tool fits: module tests run every query against Postgres, and the fresh review covers the rest | Maintainer | 2027-02-04 |
