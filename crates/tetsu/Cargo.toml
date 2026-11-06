@@ -9,5 +9,9 @@ publish.workspace = true
 [dependencies]
 tetsu-kernel = { path = "../kernel" }
 
+[package.metadata.tetsu]
+kind = "root"
+tier = 2
+
 [lints]
 workspace = true

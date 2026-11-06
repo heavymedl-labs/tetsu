@@ -6,5 +6,9 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[package.metadata.tetsu]
+kind = "platform"
+tier = 2
+
 [lints]
 workspace = true

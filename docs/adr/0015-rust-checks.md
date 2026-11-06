@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-06
+- Coverage limits replaced by [ADR-0016](0016-crate-layout-and-coverage.md)
 
 ## Context
 

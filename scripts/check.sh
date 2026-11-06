@@ -33,10 +33,14 @@ scripts/check-adrs.sh
 python3 scripts/check_doc_sizes.py
 npx --yes markdownlint-cli2@0.24.0 "**/*.md"
 
-# Limits are in ADR-0015. Cargo skips the benchmark harness, except for formatting.
+# Limits are in ADR-0015 and ADR-0016. Cargo skips the benchmark harness, except for formatting.
 cargo fmt --all --check
 cargo clippy --all-targets -- -D warnings
-cargo llvm-cov --fail-under-lines 90 --fail-under-regions 90
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+cargo llvm-cov --json --summary-only --output-path "$work/coverage.json"
+cargo metadata --no-deps --format-version 1 >"$work/metadata.json"
+python3 scripts/check_coverage.py "$work/metadata.json" "$work/coverage.json"
 .tools/bin/lizard -l rust -C 10 -L 50 -a 5 -w crates
 npx --yes jscpd@5.4.2 crates --threshold 0 --ignore "**/tests/**" --reporters console
 
@@ -44,9 +48,7 @@ base="origin/main"
 if [[ "${1:-}" == "--base" ]]; then
   base="$2"
 fi
-rust_diff="$(mktemp)"
-trap 'rm -f "$rust_diff"' EXIT
-git diff "$(git merge-base "$base" HEAD)" -- crates >"$rust_diff"
-if [[ -s "$rust_diff" ]]; then
-  cargo mutants --in-diff "$rust_diff"
+git diff "$(git merge-base "$base" HEAD)" -- crates >"$work/rust.diff"
+if [[ -s "$work/rust.diff" ]]; then
+  cargo mutants --in-diff "$work/rust.diff"
 fi

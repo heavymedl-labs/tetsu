@@ -23,7 +23,14 @@ from pathlib import Path
 # This guard and its tests name the patterns they look for.
 SCAN_EXEMPT = {"scripts/floor_guard.py", "scripts/tests/test_floor_guard.py"}
 # Removing a line from these lowers the bar, so each removal needs a reason.
-PROTECTED = {"scripts/check.sh", "scripts/floor_guard.py", ".githooks/pre-push", ".github/workflows/ci.yml"}
+PROTECTED = {
+    "scripts/check.sh",
+    "scripts/check_coverage.py",
+    "scripts/floor_guard.py",
+    ".githooks/pre-push",
+    ".github/workflows/ci.yml",
+}
+CRATE_DECLARATION = re.compile(r"^(tier|kind)\s*=")
 DIFF_FLAGS = ("--no-renames", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", "--unified=0")
 
 SUPPRESSION = re.compile(
@@ -132,6 +139,8 @@ def scan_protected(removed):
     for path, text in removed:
         if path in PROTECTED:
             yield "guard-weakened", path, text
+        elif path.startswith("crates/") and path.endswith("Cargo.toml") and CRATE_DECLARATION.match(text):
+            yield "tier-changed", path, text
 
 
 def exception_rows():

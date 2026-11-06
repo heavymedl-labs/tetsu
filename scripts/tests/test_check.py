@@ -40,7 +40,8 @@ class CheckScript(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         log = self.log.read_text()
         for stage in ("floor_guard.py", "unittest", "adrs", "check_doc_sizes.py", "markdownlint-cli2",
-                      "cargo fmt --all --check", "cargo clippy", "cargo llvm-cov", "lizard", "jscpd",
+                      "cargo fmt --all --check", "cargo clippy", "cargo llvm-cov --json", "cargo metadata",
+                      "check_coverage.py", "lizard", "jscpd",
                       "cargo mutants"):
             self.assertIn(stage, log)
 

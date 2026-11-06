@@ -21,6 +21,7 @@ number, and add a row below. Never renumber.
 | [0013](0013-postgres-tls.md) | Postgres TLS | Connecting to Postgres | Accepted |
 | [0014](0014-checks-and-duties.md) | Checks and duties | Changing a check, duty, or the quality bar | Accepted |
 | [0015](0015-rust-checks.md) | Rust checks | Changing a Rust tool or limit | Accepted |
+| [0016](0016-crate-layout-and-coverage.md) | Crate layout and coverage by tier | Adding a crate or module, or setting its tier | Accepted |
 
 ## Open decisions
 

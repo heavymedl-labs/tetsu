@@ -205,8 +205,8 @@ class Constraints(GuardCase):
 
 class GuardProtectsItself(GuardCase):
     def test_flags_removed_lines_in_the_check_files(self):
-        for path in ("scripts/check.sh", "scripts/floor_guard.py", ".githooks/pre-push",
-                     ".github/workflows/ci.yml"):
+        for path in ("scripts/check.sh", "scripts/floor_guard.py", "scripts/check_coverage.py",
+                     ".githooks/pre-push", ".github/workflows/ci.yml"):
             with self.subTest(path=path):
                 write(self.repo / path, "one\ntwo\n")
                 self.commit("add " + path)
@@ -214,6 +214,27 @@ class GuardProtectsItself(GuardCase):
                 write(self.repo / path, "one\n")
                 self.assertFlags("guard-weakened")
                 write(self.repo / path, "one\ntwo\n")
+
+
+class CrateTier(GuardCase):
+    def setUp(self):
+        super().setUp()
+        self.manifest = self.repo / "crates" / "a" / "Cargo.toml"
+        write(self.manifest, '[package.metadata.tetsu]\nkind = "platform"\ntier = 1\n')
+        self.commit("add crate")
+        self.git("tag", "-f", "base")
+
+    def test_flags_a_changed_tier(self):
+        self.manifest.write_text(self.manifest.read_text().replace("tier = 1", "tier = 3"))
+        self.assertFlags("tier-changed")
+
+    def test_flags_a_changed_kind(self):
+        self.manifest.write_text(self.manifest.read_text().replace('"platform"', '"root"'))
+        self.assertFlags("tier-changed")
+
+    def test_other_manifest_edits_pass(self):
+        self.manifest.write_text(self.manifest.read_text() + "\n[dependencies]\n")
+        self.assertEqual(self.guard().returncode, 0)
 
 
 class Reasons(GuardCase):
