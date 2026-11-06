@@ -47,6 +47,7 @@ option for most of them.
 - [Operations: observability, backups, and recovery](https://github.com/heavymedl-labs/tetsu/issues/27)
 - [Dependency checks, secrets, and a security target](https://github.com/heavymedl-labs/tetsu/issues/31)
 - [Landing page framework and host](https://github.com/heavymedl-labs/tetsu/issues/32)
+- [Load test tools, latency budgets, and memory measurement](https://github.com/heavymedl-labs/tetsu/issues/37)
 
 ## Finding sources
 
