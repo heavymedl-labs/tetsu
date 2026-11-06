@@ -24,12 +24,38 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+            ~/.cargo/registry
+            .tools
+            target
+          key: tools-${{ hashFiles('scripts/install-tools.sh', 'Cargo.lock', 'rust-toolchain.toml') }}
+      - run: scripts/install-tools.sh
       # After a force push the old head is on no branch, so fetch it by its SHA.
       - run: |
           git fetch --quiet origin "$BASE" || true
           scripts/check.sh --base "$BASE"
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+
+  image:
+    name: Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: docker build -t tetsu:ci .
+      - run: docker run --rm tetsu:ci
+
+  benchmarks:
+    name: Benchmark harness compiles
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: cargo check --locked -p tetsu-bench
 
   links:
     name: Link check

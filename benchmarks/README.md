@@ -1,9 +1,10 @@
 # Benchmarks
 
 Repeatable benchmarks for the server stack in
-[ADR-0007](../docs/adr/0007-server-stack.md). This is the only Rust code allowed
-before the implementation phase ([ADR-0008](../docs/adr/0008-benchmark-harness.md)).
-It is not product code. Findings and their reading are in
+[ADR-0007](../docs/adr/0007-server-stack.md), run as
+[ADR-0008](../docs/adr/0008-benchmark-harness.md) describes. It is a member of the
+workspace, but not product code, and Cargo skips it unless asked with
+`-p tetsu-bench`. Findings and their reading are in
 [Server stack research](../docs/research/server-stack.md).
 
 ## Run in CI
@@ -14,8 +15,8 @@ and which suites. Each run gets a fresh runner and a Postgres 18 service. The
 `benchmark-report` artifact holds `report.md`, `summary.json`, and each run's
 raw records.
 
-The image is tagged with the git tree hash of this directory, so it is rebuilt
-only when the harness changes.
+The image is tagged with a hash of this directory, `crates/`, and the workspace
+files, so it is rebuilt only when those change.
 
 ## Suites
 
@@ -46,7 +47,7 @@ value does not implicate the load generator.
 Docker is the simplest way, and matches CI:
 
 ```bash
-docker build -t tetsu-bench benchmarks
+docker build -f benchmarks/Dockerfile -t tetsu-bench .
 docker run -d --name bench-pg --network host -e POSTGRES_HOST_AUTH_METHOD=trust postgres:18.6
 docker run --rm --network host --security-opt seccomp=unconfined \
   -e ADMIN_URL=postgres://postgres@localhost:5432/postgres \

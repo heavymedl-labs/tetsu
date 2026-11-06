@@ -1,0 +1,8 @@
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-unwrap-in-tests = true
+too-many-lines-threshold = 50
+
+# ADR-0007: our own JSON type, not axum::Json. ADR-0011: Row::try_get, not Row::get, which panics.
+disallowed-types = [{ path = "axum::Json", reason = "use our own JSON type (ADR-0007)", allow-invalid = true }]
+disallowed-methods = [{ path = "tokio_postgres::Row::get", reason = "use Row::try_get (ADR-0011)", allow-invalid = true }]

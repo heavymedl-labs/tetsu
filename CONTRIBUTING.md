@@ -13,9 +13,9 @@ People and coding agents follow the same workflow and the rules in
    `docs/glossary`, `adr/tenant-isolation`, or `ci/coverage`.
 3. Keep the branch and pull request to that one issue.
 4. Follow the [duties](AGENTS.md#duties), run the [checks](AGENTS.md#checks), and
-   do a [docs audit](#docs-audit) if you changed docs or issues. Run
-   `git config core.hooksPath .githooks` once per clone, so the checks run before
-   each push.
+   do a [docs audit](#docs-audit) if you changed docs or issues. Once per
+   clone, run `scripts/install-tools.sh` and `git config core.hooksPath .githooks`,
+   so the checks run before each push.
 5. Open a pull request with the template filled in and `Closes #N`.
 
 While the maintainer is the only contributor, changes go straight to `main`

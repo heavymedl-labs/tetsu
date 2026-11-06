@@ -30,7 +30,7 @@ SUPPRESSION = re.compile(
     r"#!?\[(allow|expect)\(|cfg_attr\(.*allow\(|@ts-ignore|@ts-nocheck|@ts-expect-error"
     r"|eslint-disable|biome-ignore|#\s*((flake8|ruff):\s*)?noqa|#\s*nosec|#\s*type:\s*ignore"
     r"|pyright:\s*ignore|#\s*pragma:\s*no cover|pylint:\s*disable|shellcheck disable"
-    r"|istanbul ignore|nosemgrep|gitleaks:allow|Stryker disable|continue-on-error",
+    r"|istanbul ignore|nosemgrep|gitleaks:allow|Stryker disable|continue-on-error|exclude_re",
     re.IGNORECASE,
 )
 WRITTEN_REASON = re.compile(r"\breason\s*[=:]", re.IGNORECASE)

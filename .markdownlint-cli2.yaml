@@ -6,4 +6,4 @@ config:
     allowed_elements: [h1, br, picture, source, img]
 ignores:
   - "node_modules/**"
-  - "benchmarks/target/**"
+  - "target/**"

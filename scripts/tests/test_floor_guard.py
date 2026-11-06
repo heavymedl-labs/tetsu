@@ -97,7 +97,8 @@ class Suppressions(GuardCase):
                      "# shellcheck disable=SC2086", "// eslint-disable-next-line",
                      "# flake8: noqa", "x = 1  # NOQA", "x = 1  # nosec", "x = 1  # pyright: ignore",
                      "// @ts-expect-error", "#[cfg_attr(test, allow(dead_code))]",
-                     "    continue-on-error: true", "#[allow(dead_code)] // no reason"):
+                     "    continue-on-error: true", "#[allow(dead_code)] // no reason",
+                     'exclude_re = ["replace foo"]'):
             with self.subTest(line=line):
                 write(self.repo / "src" / "a.rs", line + "\n")
                 self.assertFlags("silenced-checker")

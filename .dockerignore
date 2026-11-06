@@ -1,0 +1,6 @@
+.git
+**/target
+**/results
+mutants.out*
+.tools
+docs

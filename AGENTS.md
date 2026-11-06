@@ -19,11 +19,9 @@ one as current intent. The [ADR index](docs/adr/README.md) says when to read eac
 
 ## Current phase
 
-The repository holds documentation, ADRs, CI, and project tooling only. Do not
-add Rust crates, `Cargo.toml`, or application code until an issue opens the
-implementation phase. The one exception is the benchmark harness in
-[benchmarks/](benchmarks/README.md)
-([ADR-0008](docs/adr/0008-benchmark-harness.md)).
+The implementation phase is open. The workspace holds the `tetsu` binary and the
+kernel, and the walking skeleton comes next, starting with
+[#19](https://github.com/heavymedl-labs/tetsu/issues/19).
 
 ## Rules
 
@@ -80,8 +78,8 @@ Run these before you push to `main` or open a pull request:
 scripts/check.sh
 ```
 
-It needs the Node version in `.nvmrc`. CI runs the same script, and also checks
-links and lints workflows.
+It needs the Node version in `.nvmrc`, and `scripts/install-tools.sh` run once. CI
+runs the same script, and also checks links and lints workflows.
 
 ## Writing
 

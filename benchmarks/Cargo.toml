@@ -35,7 +35,3 @@ tower-http = { version = "0.7", features = ["trace", "timeout", "request-id"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 compio = { version = "0.19", features = ["macros", "runtime", "net", "io-uring"] }
 monoio = { version = "0.2", features = ["iouring", "sync"] }
-
-[profile.release]
-codegen-units = 1
-lto = "fat"

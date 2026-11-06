@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs every local check. The pre-push hook and CI both call this.
-# Arguments go to the floor guard, such as --base <ref>.
+# Takes --base <ref>, the commit to compare with. The default is origin/main.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -20,8 +20,33 @@ if ! right_node; then
   exit 1
 fi
 
+for tool in cargo-llvm-cov cargo-mutants .tools/bin/lizard; do
+  if ! command -v "$tool" >/dev/null; then
+    echo "error: $tool is missing. Run scripts/install-tools.sh" >&2
+    exit 1
+  fi
+done
+
 python3 scripts/floor_guard.py "$@"
 python3 -m unittest discover -b -s scripts/tests -t .
 scripts/check-adrs.sh
 python3 scripts/check_doc_sizes.py
 npx --yes markdownlint-cli2@0.24.0 "**/*.md"
+
+# Limits are in ADR-0015. Cargo skips the benchmark harness, except for formatting.
+cargo fmt --all --check
+cargo clippy --all-targets -- -D warnings
+cargo llvm-cov --fail-under-lines 90 --fail-under-regions 90
+.tools/bin/lizard -l rust -C 10 -L 50 -a 5 -w crates
+npx --yes jscpd@5.4.2 crates --threshold 0 --ignore "**/tests/**" --reporters console
+
+base="origin/main"
+if [[ "${1:-}" == "--base" ]]; then
+  base="$2"
+fi
+rust_diff="$(mktemp)"
+trap 'rm -f "$rust_diff"' EXIT
+git diff "$(git merge-base "$base" HEAD)" -- crates >"$rust_diff"
+if [[ -s "$rust_diff" ]]; then
+  cargo mutants --in-diff "$rust_diff"
+fi

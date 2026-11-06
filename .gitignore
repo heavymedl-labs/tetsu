@@ -1,2 +1,4 @@
 /target
 __pycache__/
+/.tools
+/mutants.out*

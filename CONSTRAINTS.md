@@ -24,13 +24,13 @@ records the maintainer's approval for the files that commit touches.
 ## Checks by language
 
 A language lands only once its row is filled. "Gap" means no good tool exists, so the fresh review
-covers that rule. **Only the Bash and Python tests run today.** Tools named for Rust and SQL are
-candidates that have not been evaluated, and each needs an ADR under
-[ADR-0010](docs/adr/0010-evaluating-technology.md).
+covers that rule. The Rust row and its limits are in
+[ADR-0015](docs/adr/0015-rust-checks.md), which is proposed. The SQL row's tools are candidates that have not
+been evaluated, and each needs an ADR under [ADR-0010](docs/adr/0010-evaluating-technology.md).
 
 | Language | Tests catch mistakes | Coverage | New duplication, outside tests | Complexity | Boundaries |
 | --- | --- | --- | --- | --- | --- |
-| Rust | `cargo-mutants` | `cargo-llvm-cov` | jscpd | Clippy, lizard | [#25](https://github.com/heavymedl-labs/tetsu/issues/25) |
+| Rust | `cargo-mutants` | `cargo-llvm-cov`, E3 | jscpd | Clippy, lizard | [#25](https://github.com/heavymedl-labs/tetsu/issues/25) |
 | SQL | To choose | To choose | To choose | To choose | [#25](https://github.com/heavymedl-labs/tetsu/issues/25) |
 | Bash | `unittest`, from Python | E2 | E2 | E2 | E2 |
 | Python | `unittest` | E2 | E2 | E2 | E2 |
@@ -49,3 +49,4 @@ Nothing yet. Add a metric here with today's value and its direction once code ex
 | --- | --- | --- | --- | --- | --- |
 | E1 | Scripts need tests | `scripts/generate-brand.py` | One-off generator, and its output is checked by eye | Maintainer | 2027-02-04 |
 | E2 | Bash and Python checks beyond tests | `scripts/` | Tooling only, with no numeric limit, and too small to justify more tools yet, so the fresh review covers these | Maintainer | 2027-02-04 |
+| E3 | ADR-0005's branch coverage | `crates/` | It needs nightly Rust, so stable measures lines and regions. Settle before the first Tier 1 code | Maintainer | 2027-02-04 |

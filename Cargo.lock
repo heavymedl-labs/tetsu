@@ -771,6 +771,7 @@ dependencies = [
  "chrono",
  "deadpool-postgres",
  "futures",
+ "postgres",
  "postgres-protocol",
  "postgres-types",
  "tokio-postgres",
@@ -2369,6 +2370,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "postgres"
+version = "0.19.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33ad20e0aa0b24f5a394eab4f78c781d248982b22b25cecc7e3aa46a681605bd"
+dependencies = [
+ "bytes",
+ "fallible-iterator",
+ "futures-util",
+ "log",
+ "tokio",
+ "tokio-postgres",
+]
+
+[[package]]
 name = "postgres-derive"
 version = "0.4.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2390,6 +2405,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "fallible-iterator",
+ "getrandom 0.4.3",
  "hmac",
  "md-5",
  "memchr",
@@ -3246,6 +3262,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "tetsu"
+version = "0.1.0"
+dependencies = [
+ "tetsu-kernel",
+]
+
+[[package]]
 name = "tetsu-bench"
 version = "0.1.0"
 dependencies = [
@@ -3276,6 +3299,10 @@ dependencies = [
  "tokio-postgres",
  "tower-http",
 ]
+
+[[package]]
+name = "tetsu-kernel"
+version = "0.1.0"
 
 [[package]]
 name = "thin-cell"

@@ -1,6 +1,6 @@
 # Architecture
 
-A bird's-eye view of Tetsu's design; nothing is built yet. The
+A bird's-eye view of Tetsu's design. Only the kernel and the binary exist so far. The
 [ADRs](docs/adr/README.md) hold the reasoning; this page holds the shape and
 the rules that must stay true.
 

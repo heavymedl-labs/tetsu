@@ -48,12 +48,12 @@ jobs:
         run: |
           [[ "$RUNS" =~ ^([1-9]|10)$ ]] || { echo "runs must be 1 to 10" >&2; exit 1; }
           echo "matrix=$(seq "$RUNS" | jq -cs .)" >>"$GITHUB_OUTPUT"
-      - name: Tag by harness content
+      - name: Tag by the content the image builds from
         id: tag
         env:
           OWNER: ${{ github.repository_owner }}
         run: |
-          tree=$(git rev-parse HEAD:benchmarks)
+          tree=$(git ls-tree HEAD benchmarks crates Cargo.toml Cargo.lock rust-toolchain.toml | git hash-object --stdin)
           echo "image=ghcr.io/${OWNER,,}/tetsu-bench:${tree}" >>"$GITHUB_OUTPUT"
       - name: Build and push unless present
         env:
@@ -65,7 +65,7 @@ jobs:
           if docker manifest inspect "$IMAGE" >/dev/null 2>&1; then
             echo "Reusing $IMAGE"
           else
-            docker build -t "$IMAGE" benchmarks
+            docker build -f benchmarks/Dockerfile -t "$IMAGE" .
             docker push "$IMAGE"
           fi
 

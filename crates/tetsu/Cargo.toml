@@ -1,0 +1,13 @@
+[package]
+name = "tetsu"
+description = "The Tetsu binary, which wires modules together."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+tetsu-kernel = { path = "../kernel" }
+
+[lints]
+workspace = true

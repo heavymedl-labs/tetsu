@@ -20,28 +20,41 @@ class CheckScript(unittest.TestCase):
         shutil.copy(ROOT / "scripts" / "check.sh", self.root / "scripts")
         write(self.root / ".nvmrc", "26\n")
         self.bin = self.root / "bin"
-        self.stub("node", 'echo v26.1.0')
-        self.stub("npx", f'echo lint >> "{self.log}"')
+        self.stub("node", "echo v26.1.0")
+        for tool in ("npx", "cargo", "cargo-llvm-cov", "cargo-mutants"):
+            self.stub(tool, f'echo "{tool} $*" >> "{self.log}"')
         self.stub("python3", f'echo "python $1 $2 $3" >> "{self.log}"')
+        self.stub("git", 'if [ "$1" = merge-base ]; then echo abc; else echo "$@" >> "' + str(self.log) + '"; echo changed; fi')
+        write(self.root / ".tools" / "bin" / "lizard", f'#!/bin/sh\necho "lizard $*" >> "{self.log}"\n', EXECUTABLE)
         write(self.root / "scripts" / "check-adrs.sh", f'#!/bin/sh\necho adrs >> "{self.log}"\n', EXECUTABLE)
 
     def stub(self, name, body):
         write(self.bin / name, f"#!/bin/sh\n{body}\n", EXECUTABLE)
 
-    def check(self, *args):
+    def check(self, *args, nvm_dir=None):
         return run([self.root / "scripts" / "check.sh", *args], self.root,
-                   PATH=f"{self.bin}:/usr/bin:/bin", NVM_DIR=str(self.root / "no-nvm"))
+                   PATH=f"{self.bin}:/usr/bin:/bin", NVM_DIR=str(nvm_dir or self.root / "no-nvm"))
 
     def test_runs_every_stage(self):
         result = self.check()
         self.assertEqual(result.returncode, 0, result.stderr)
         log = self.log.read_text()
-        for stage in ("floor_guard.py", "unittest", "adrs", "check_doc_sizes.py", "lint"):
+        for stage in ("floor_guard.py", "unittest", "adrs", "check_doc_sizes.py", "markdownlint-cli2",
+                      "cargo fmt --all --check", "cargo clippy", "cargo llvm-cov", "lizard", "jscpd",
+                      "cargo mutants"):
             self.assertIn(stage, log)
 
-    def test_passes_arguments_to_the_guard(self):
+    def test_passes_the_base_to_the_guard_and_the_mutation_diff(self):
         self.check("--base", "abc123")
-        self.assertIn("floor_guard.py --base abc123", self.log.read_text())
+        log = self.log.read_text()
+        self.assertIn("floor_guard.py --base abc123", log)
+        self.assertIn("diff abc -- crates", log)
+
+    def test_skips_mutation_testing_when_no_rust_changed(self):
+        self.stub("git", 'if [ "$1" = merge-base ]; then echo abc; fi')
+        result = self.check()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("cargo mutants", self.log.read_text())
 
     def test_stops_on_a_failing_stage(self):
         self.stub("python3", "exit 1")
@@ -52,9 +65,8 @@ class CheckScript(unittest.TestCase):
     def test_switches_node_through_nvm(self):
         self.stub("node", 'if [ -n "$NVM_SWITCHED" ]; then echo v26.1.0; else echo v10.15.3; fi')
         nvm = self.root / "nvm"
-        write(nvm / "nvm.sh", 'nvm() { export NVM_SWITCHED=1; }\n')
-        result = run([self.root / "scripts" / "check.sh"], self.root,
-                     PATH=f"{self.bin}:/usr/bin:/bin", NVM_DIR=str(nvm))
+        write(nvm / "nvm.sh", "nvm() { export NVM_SWITCHED=1; }\n")
+        result = self.check(nvm_dir=nvm)
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_wrong_node_version_fails_with_a_fix(self):
@@ -62,6 +74,30 @@ class CheckScript(unittest.TestCase):
         result = self.check()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Node 26", result.stderr)
+
+    def test_a_missing_tool_fails_with_a_fix(self):
+        (self.root / ".tools" / "bin" / "lizard").unlink()
+        result = self.check()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("scripts/install-tools.sh", result.stderr)
+
+
+class InstallTools(unittest.TestCase):
+    def test_pins_every_tool(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log = root / "log"
+            (root / "scripts").mkdir()
+            shutil.copy(ROOT / "scripts" / "install-tools.sh", root / "scripts")
+            pip = f'#!/bin/sh\necho "pip $*" >> "{log}"\n'
+            write(root / "bin" / "cargo", f'#!/bin/sh\necho "cargo $*" >> "{log}"\n', EXECUTABLE)
+            write(root / "bin" / "python3", f'#!/bin/sh\nmkdir -p .tools/bin\nprintf \'{pip}\' > .tools/bin/pip\nchmod +x .tools/bin/pip\n', EXECUTABLE)
+            result = run([root / "scripts" / "install-tools.sh"], root, PATH=f"{root / 'bin'}:/usr/bin:/bin")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            text = log.read_text()
+            self.assertRegex(text, r"cargo install --locked --version \S+ cargo-llvm-cov")
+            self.assertRegex(text, r"cargo install --locked --version \S+ cargo-mutants")
+            self.assertRegex(text, r"pip install .*lizard==\S+")
 
 
 class PrePushHook(unittest.TestCase):
