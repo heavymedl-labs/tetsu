@@ -62,14 +62,16 @@ still true.
 - **Misleading text.** Nothing stale, nothing that presents an open decision as settled,
   and nothing fitted to one industry in platform docs.
 - **Merge or remove.** Merge or delete any document or section that no longer earns its
-  place, and retarget links to it. Fewer documents is the better outcome.
+  place, and retarget links to it. Fewer documents is the better outcome. Ask what this change
+  removed or merged, and when it only adds, why nothing could go.
 
 **What stays.** Accepted ADRs change only as [ADR-0001](docs/adr/0001-how-we-work.md)
 allows, so a wrong decision gets a superseding ADR. Research pages stay dated records:
-add a note rather than rewriting what was found. When a fix is out of scope, open an issue.
+add a note rather than rewriting what was found, and when shortening one, keep what ADRs and issues
+cite and point to the full version in git history. When a fix is out of scope, open an issue.
 
 **Record it.** Add an `Audit:` footer to the commit or a line in the pull request, saying the scope, what you
-searched, and what changed, such as `Audit: scoped, searched docs and issues for #29, updated two`. Say so if
+searched, what changed, and what was removed, such as `Audit: scoped, searched docs and issues for #29, updated two`. Say so if
 you sampled rather than read. For issue and board changes, say the same in your report of the work.
 
 ## Project board

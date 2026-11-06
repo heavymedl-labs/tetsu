@@ -18,6 +18,7 @@ records the maintainer's approval for the files that commit touches.
 - No skipped or deleted test without a reason in the commit message.
 - No secrets in source.
 - No bypassing checks with `--no-verify`.
+- `AGENTS.md` stays at or under 100 lines, because agents load it every session.
 - This file is not weakened to make a change pass.
 
 ## Checks by language

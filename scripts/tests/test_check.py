@@ -36,7 +36,7 @@ class CheckScript(unittest.TestCase):
         result = self.check()
         self.assertEqual(result.returncode, 0, result.stderr)
         log = self.log.read_text()
-        for stage in ("floor_guard.py", "unittest", "adrs", "lint"):
+        for stage in ("floor_guard.py", "unittest", "adrs", "check_doc_sizes.py", "lint"):
             self.assertIn(stage, log)
 
     def test_passes_arguments_to_the_guard(self):

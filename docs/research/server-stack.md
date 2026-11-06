@@ -3,7 +3,8 @@
 Research for [ADR-0007](../adr/0007-server-stack.md), run 2026-11-03 by Kurt
 Medley with a coding agent. Each layer of the stack was benchmarked against its
 competitors and, where feasible, a homegrown baseline. This is research, not a
-decision. Where it disagrees with an ADR, the ADR wins.
+decision. Where it disagrees with an ADR, the ADR wins. Shortened 2026-11-06. The full version is
+at `git show f46cbef:docs/research/server-stack.md`.
 
 ## Findings
 
@@ -103,25 +104,9 @@ JSON the server did, at 0.97 to 0.99.
 Trace, timeout, and request ID layers on Axum add 3 to 4 µs per request, a median
 of 14.9 µs on plain text and 33.8 µs on JSON.
 
-To find where Axum's cost goes, a local test on a 2-CPU Linux container removed
-one layer at a time, over 8 rounds:
-
-| JSON server | Extra CPU vs hyper | Allocations per request |
-| --- | --- | --- |
-| hyper with Axum's boxed body | +0.15 µs | 9 (hyper: 8) |
-| hyper serving an Axum `Router` | +0.80 µs | 19 |
-| Axum with `to_vec` and `TCP_NODELAY` | +0.93 µs | 18 |
-| Axum with `to_vec` | +0.95 µs | not counted |
-
-The router and handler layers add about nine allocations per request, on plain
-text as well as JSON. `TCP_NODELAY` and the boxed body cost nothing measurable.
-Allocation counts were not repeated in CI, so CI shows the overhead but not its
-cause.
-
-Axum's extra CPU over hyper is about 1 µs on plain text and 3 µs on JSON in CI.
-About 2 µs of that is unexplained. It is too small to affect the choice.
-`axum::Json` is a separate cost: it makes about as many allocations as `to_vec`
-but serializes through a `BytesMut` writer.
+Axum's extra CPU over hyper is about 1 µs on plain text and 3 µs on JSON. A local test traced
+about nine extra allocations per request to the router and handler layers. That is too small to
+affect the choice.
 
 Maintenance over the last 52 weeks:
 
@@ -324,21 +309,11 @@ All licenses are permissive. The driver and the pool lean most on one person, an
 tower has the least recent activity, though it is widely used.
 
 Every RustSec advisory for these crates is patched in the versions our benchmark
-lockfile uses:
-
-| Advisory | Crate | Severity | Issue | Patched in | Locked |
-| --- | --- | --- | --- | --- | --- |
-| RUSTSEC-2026-0179 | `postgres-protocol` | High | Unbounded SCRAM iterations from a malicious server | 0.6.12 | 0.6.12 |
-| RUSTSEC-2026-0180 | `postgres-protocol` | Medium | Panic on a malformed `hstore` value | 0.6.12 | 0.6.12 |
-| RUSTSEC-2026-0178 | `tokio-postgres` | Medium | Panic on a `DataRow` with too few fields | 0.7.18 | 0.7.18 |
-| RUSTSEC-2026-0384 | `tokio` | None listed | Race in `time::Interval` on 1.54.0 | 1.54.1 | 1.54.1 |
-| RUSTSEC-2026-0386 | `tokio` | Informational | `AsyncFd::new` unsoundness | 1.53.3 | 1.54.1 |
-
-Older advisories exist for tokio, hyper, h2, http, axum-core, and tower-http, all
-patched well below our versions. One exception sits outside the chosen stack: the
-lockfile's `h2` 0.3.27 comes through actix-web, and RUSTSEC-2026-0258 is patched in
-0.4.16. Axum's HTTP/2 support would need `h2` 0.4, so the skeleton should check
-that version.
+lockfile uses,
+including the high-severity RUSTSEC-2026-0179 in `postgres-protocol`, patched in 0.6.12. Older
+advisories are patched well below our versions. One exception sits outside the chosen stack: the
+lockfile's `h2` 0.3.27 comes through actix-web, and RUSTSEC-2026-0258 is patched in 0.4.16. Axum's
+HTTP/2 support would need `h2` 0.4, so the skeleton should check that version.
 
 ### Options not evaluated earlier
 
@@ -373,26 +348,17 @@ the `tetsu` binary cannot embed them.
 
 goose is the strongest alternative to our runner. Atlas's community build leaves
 out row-level security and migration linting, and the default binary is proprietary
-with a paid tier, so it is out. We keep our runner for now and decide with
-[#18](https://github.com/heavymedl-labs/tetsu/issues/18), which sets when migrations
-run. Choosing a tool there would need a new ADR.
+with a paid tier, so it is out. [ADR-0012](../adr/0012-first-hosting-and-deploys.md) keeps our runner.
 
 ### Open items
 
-- **Postgres TLS.** ADRs 0003 to 0009 do not mention it, and `tokio-postgres`
-  needs a separate TLS crate, which needs its own ADR. Raised on
-  [#18](https://github.com/heavymedl-labs/tetsu/issues/18).
+Later decisions settled these for the free phase: Postgres TLS in
+[ADR-0013](../adr/0013-postgres-tls.md), and when migrations run and connection poolers in
+[ADR-0012](../adr/0012-first-hosting-and-deploys.md).
+
 - **Axum server timeouts.** Axum's unreleased changelog adds a default header read
   timeout, which suggests 0.8.9 applies none. We have not tested this.
-- **Advisory checks in CI.** Nothing checks advisories automatically yet. A tool
-  for it needs its own ADR once code exists.
-- **When migrations run.** Practitioner guides favor a pre-deploy job over running
-  at startup. A `tetsu migrate` command would fit that and keep migrations in the
-  binary. Raised on #18.
-- **Connection poolers.** PgBouncer's `max_prepared_statements` tracks
-  protocol-level prepared statements in transaction mode, which should cover our
-  cached statements, but we have not tested it. The runner's session-level
-  advisory lock needs a direct connection. Raised on #18.
+- **Advisory checks in CI.** [#31](https://github.com/heavymedl-labs/tetsu/issues/31) decides this.
 - **The query checking revisit.** It should weigh SQLx as well as Cornucopia and
   rerun the driver comparison with real network latency. Raised on
   [#28](https://github.com/heavymedl-labs/tetsu/issues/28).

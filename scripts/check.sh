@@ -23,4 +23,5 @@ fi
 python3 scripts/floor_guard.py "$@"
 python3 -m unittest discover -b -s scripts/tests -t .
 scripts/check-adrs.sh
+python3 scripts/check_doc_sizes.py
 npx --yes markdownlint-cli2@0.24.0 "**/*.md"

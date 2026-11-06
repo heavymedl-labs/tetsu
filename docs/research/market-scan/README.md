@@ -18,13 +18,13 @@ Seven studio-software platforms, scanned for our first vertical. The market is c
 
 Ordered by relevance: our benchmark first, then the boutique challengers, then the broad incumbents.
 
-- [Mariana Tek](boutique-fitness/mariana-tek.md): the premium boutique specialist and our benchmark; quote-only and Stripe-only.
-- [Momence](boutique-fitness/momence.md): the modern challenger with a free tier and self-serve API, now owned by Xplor.
-- [Arketa](boutique-fitness/arketa.md): the venture-backed all-in-one reaching into payroll and accounting; wins on support.
-- [Walla](boutique-fitness/walla.md): the premium, focused boutique platform selling retention insight and polish.
-- [Mindbody](boutique-fitness/mindbody.md): the broadest platform and largest two-sided network, now moving down-market at $79.
-- [ABC Glofox](boutique-fitness/abc-glofox.md): the franchise and multi-country specialist inside ABC Fitness, with the best-engineered API.
-- [WellnessLiving](boutique-fitness/wellnessliving.md): the founder-led generalist across many verticals; published prices, locked-in processor.
+- [Mariana Tek](boutique-fitness/players.md#mariana-tek): the premium boutique specialist and our benchmark; quote-only and Stripe-only.
+- [Momence](boutique-fitness/players.md#momence): the modern challenger with a free tier and self-serve API, now owned by Xplor.
+- [Arketa](boutique-fitness/players.md#arketa): the venture-backed all-in-one reaching into payroll and accounting; wins on support.
+- [Walla](boutique-fitness/players.md#walla): the premium, focused boutique platform selling retention insight and polish.
+- [Mindbody](boutique-fitness/players.md#mindbody): the broadest platform and largest two-sided network, now moving down-market at $79.
+- [ABC Glofox](boutique-fitness/players.md#abc-glofox): the franchise and multi-country specialist inside ABC Fitness, with the best-engineered API.
+- [WellnessLiving](boutique-fitness/players.md#wellnessliving): the founder-led generalist across many verticals; published prices, locked-in processor.
 
 ### Findings
 
@@ -39,7 +39,7 @@ Ordered by relevance: our benchmark first, then the boutique challengers, then t
 - **Win on trust:** published flat pricing, a choice of payment processor, and customer data owned by the studio.
 - **Match the table stakes, resist the sprawl:** build the roughly 20 capabilities every player has, and integrate payroll, accounting and video rather than building them.
 
-Switching, the API and processor choice are covered in [Platform implications](platform-implications.md), which lists proposed platform changes from every vertical. Tables are in [Compare](boutique-fitness/compare.md) and each player's detail under [Boutique fitness](#platforms).
+Switching, the API and processor choice are covered in [Platform implications](platform-implications.md), which lists proposed platform changes from every vertical. Tables are in [Compare](boutique-fitness/compare.md), and each player's detail is in [Players](boutique-fitness/players.md).
 
 ## Method
 
@@ -47,9 +47,9 @@ Switching, the API and processor choice are covered in [Platform implications](p
 - **"Not found":** the research didn't confirm the feature. It doesn't mean the product lacks it.
 - **Reported figures:** spend, contract terms and fees that come from reviewers are marked as reported. Treat them as signals, not facts.
 
-### Reading the feature maps
+### Reading the feature matrix
 
-Every competitor profile has a feature map. Each row has a **Tag** (how we'd build it) and a **Platform capability** (where it would live). Capabilities and their patterns are listed in [Platform implications](platform-implications.md); role terms are in the [glossary](../../GLOSSARY.md).
+Each row in [Compare](boutique-fitness/compare.md) has a **Tag** for how we'd build it. Capabilities and their patterns are listed in [Platform implications](platform-implications.md); role terms are in the [glossary](../../GLOSSARY.md).
 
 | Tag | Meaning |
 | --- | --- |
@@ -59,10 +59,8 @@ Every competitor profile has a feature map. Each row has a **Tag** (how we'd bui
 | Integration | A third-party service reached through a driven port |
 | (new) | Not in our plan yet |
 
-A row whose capability is **None** has no platform home: it is vertical-only or outside our scope.
-
 ### Boutique fitness caveats
 
-- **Uneven depth:** Mindbody's and Walla's help centers aren't public, so those maps lean on feature pages, blog posts and reviews. Walla's is the thinnest.
+- **Uneven depth:** Mindbody's and Walla's help centers aren't public, so their rows lean on feature pages, blog posts and reviews. Walla's is the thinnest.
 - **Competitor-written sources:** Vibefam, Arketa, Pabau and Supergood. They are flagged where used.
 - **Not yet done:** interviews with studio owners. They would strengthen these findings but are optional; v1 scoping does not wait for them.

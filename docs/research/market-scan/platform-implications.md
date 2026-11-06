@@ -1,6 +1,6 @@
 # Platform implications
 
-What the research means for Tetsu, our platform, across every vertical scanned: proposed changes to the plan, then the platform capabilities the feature maps point to, with each one's role and pattern. Pattern catalogs for ADR sources are in the [ADR index](../../adr/README.md#finding-sources).
+What the research means for Tetsu, our platform, across every vertical scanned: proposed changes to the plan, then the platform capabilities the feature matrix points to, with each one's role and pattern. Pattern catalogs for ADR sources are in the [ADR index](../../adr/README.md#finding-sources).
 
 ## Proposed changes from boutique fitness
 

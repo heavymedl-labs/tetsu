@@ -1,6 +1,6 @@
 # Compare
 
-The seven boutique fitness players side by side: business model and API first, then 58 capabilities. Tags are explained in the [Market Scan method](../README.md#reading-the-feature-maps).
+The seven boutique fitness players side by side: business model and API first, then 58 capabilities. Tags are explained in the [Market Scan method](../README.md#reading-the-feature-matrix).
 
 ## Business model and platform
 
@@ -19,7 +19,7 @@ Four of the seven belong to three private-equity-backed owners; WellnessLiving, 
 
 ## Feature matrix
 
-58 capabilities harmonized from the seven feature maps (processor and API details are in the table above). About 20 appear at all seven players, which makes them v1 table stakes.
+58 capabilities harmonized from each player's features (processor and API details are in the table above). About 20 appear at all seven players, which makes them v1 table stakes.
 
 | Area | Capability | Our tag | Mindbody | Mariana Tek | ABC Glofox | WellnessLiving | Momence | Arketa | Walla |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |

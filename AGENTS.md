@@ -4,8 +4,10 @@ Instructions for coding agents working in Tetsu. Humans follow them too.
 
 ## Start here
 
-Read [README.md](README.md), then [ARCHITECTURE.md](ARCHITECTURE.md). Its
-invariants are hard rules. Use the terms in [docs/GLOSSARY.md](docs/GLOSSARY.md)
+Read [README.md](README.md), then the
+[invariants](ARCHITECTURE.md#invariants), which are hard rules. Read the rest of
+[ARCHITECTURE.md](ARCHITECTURE.md) when your change touches it. Use the terms in
+[docs/GLOSSARY.md](docs/GLOSSARY.md)
 exactly. Follow ADRs in [docs/adr](docs/adr/README.md); until accepted, treat
 them as current intent.
 
@@ -77,7 +79,9 @@ links and lints workflows.
 
 ## Writing
 
-Keep docs short and plain. Lead with the point, prefer specific nouns and
-active verbs, and cut sentences that do no work. Do not use em or en dashes as
-punctuation. Each concept has one home; link to it instead of repeating it.
-New terms go in the glossary.
+Every line costs tokens each time it is read, so merge or remove before adding.
+Keep docs short and plain, with normal grammar so people can read them. Lead with
+the point, prefer short words, specific nouns, and active verbs, and keep to one
+idea per sentence. Cut filler, hedging, and sentences that do no work. Do not use
+em or en dashes as punctuation. Each concept has one home; link to it instead of
+repeating it. New terms go in the glossary.

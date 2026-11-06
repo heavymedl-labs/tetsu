@@ -2,7 +2,8 @@
 
 Research for [#18](https://github.com/heavymedl-labs/tetsu/issues/18), following
 [ADR-0010](../adr/0010-evaluating-technology.md). This is research, not a decision.
-Where it disagrees with an ADR, the ADR wins.
+Where it disagrees with an ADR, the ADR wins. Shortened 2026-11-06. The full version is at
+`git show f46cbef:docs/research/hosting.md`.
 
 ## Criteria
 
@@ -151,24 +152,13 @@ Limits of this pick:
 
 ### Free phase cost
 
-Rates read from Google's and Neon's pages on 2026-11-04. The totals are our arithmetic.
+Rates read on 2026-11-04. The totals are our arithmetic.
 
 **The pick costs nothing, and with no card on Render it cannot start billing.** Neon's free
-plan suspends the database at its limit. Cloud Run, the fallback, is different: normal use
-is free, but setting maximum instances to 1 limits CPU charges and not request or data
-charges, so sustained traffic on a public endpoint costs money.
-
-| Sustained traffic, all month, one 1 vCPU instance | Requests | CPU and memory | Outbound data |
-| --- | --- | --- | --- |
-| 10 requests per second | About $10 | Up to $61 | 175 GB, rate not confirmed |
-| 100 requests per second | About $104 | Up to $61 | 1.75 TB, rate not confirmed |
-
-Budgets only send alerts. Google's documented way to enforce a limit is a function that
-removes billing from the project, which arrives after a delay, shuts down everything in
-the project, and may delete resources. That fits us better than most, because the app is
-stateless and its data lives in Neon and R2. So: **a dedicated project, a budget of a few
-dollars, and that function** if we ever use it. Spending can still pass the budget during
-the delay.
+plan suspends the database at its limit. Cloud Run, the fallback, has no spending limit, and
+sustained traffic costs money: about $70 a month at 10 requests per second, before outbound
+data. If we ever use it, use a dedicated project, a budget of a few dollars, and Google's
+function that removes billing.
 
 | Past the free tier | Monthly cost |
 | --- | --- |
@@ -177,9 +167,8 @@ the delay.
 | Render Starter, 512 MB, always on | $7 |
 | Cloud Run, 1 vCPU and 512 MB always on, instance billing | About $45 |
 
-Neon offers an SLA only on Scale, at $0.222 per CU-hour by a third-party review, or about
-$162 a month for 1 CU. Staying on Neon past the free phase is therefore not clearly cheaper
-than the finalists once we need an SLA.
+Neon offers an SLA only on Scale, about $162 a month for 1 CU by a third-party review, so
+staying on Neon is not clearly cheaper than the finalists once we need one.
 
 Neon's 100 CU-hours cover about 400 hours at 0.25 CU, or 55% of a month. An uptime monitor
 that wakes the database more often than every 5 minutes would use them up, and the
@@ -188,38 +177,25 @@ needs to allow for this.
 
 ### Free phase usage and health
 
-This table was written while Cloud Run was the pick. Render's own record is under
-[Weighed criteria](#weighed-criteria). The evidence here is
-weak to moderate. We found no first-hand report of Axum or
-`tokio-postgres` on Cloud Run with Neon, and no reliable adoption figure for any of the
-three products.
-
-| | Cloud Run | Neon | R2 |
-| --- | --- | --- | --- |
-| **Usage** | Google Cloud 24.5% in the 2026 Stack Overflow survey; Cloud Run itself is not measured | Not found in the survey results we read | Cloudflare 24.6%; R2 itself is not measured |
-| **Owner** | Google | Databricks, bought in 2025 for about $1B | Cloudflare |
-| **Recent incidents** | Global control failure, June 2025. Multi-service failure in `us-west1`, 2 hours 22 minutes, 20 August 2026 | Two outages totaling 5.5 hours in `us-east-1`, May 2025. Slow compute starts in Ohio, 2 November 2026, per a tracker | About an hour, 6 February 2025 (a mistaken abuse action). Elevated errors, 21 March 2025 |
-| **Reported problems** | CPU stops between requests, which stalls background work and pool timers. Idle connections are lost | Cold starts, and connections ended after idle | No versioning or object lock |
-| **Direction** | Stable | Free plan and storage prices improved since the sale, by secondary sources. New Azure projects have closed | Stable |
-
-The survey counts self-reported developer use, not production workloads or market share.
-Render, Fly.io, Supabase, and Neon did not appear in the survey data we read. For
-comparison, AWS had 41.8%, Firebase 11.1%, Vercel 10.7%, and DigitalOcean 9.6%.
+The evidence is weak to moderate, and it was gathered while Cloud Run was the pick. Render's own
+record is under [Weighed criteria](#weighed-criteria). We found no first-hand report of Axum or
+`tokio-postgres` on Cloud Run with Neon, and no reliable adoption figure. Neon has been owned by Databricks
+since 2025. It had two outages totaling 5.5 hours in May 2025, and slow compute starts in Ohio on
+2 November 2026, per a tracker. R2 had about an hour down on 6 February 2025, and has no
+versioning or object lock.
 
 Three of these affect our design:
 
-- **Background work.** A free Render service stops after 15 idle minutes, and on Cloud
-  Run's free billing mode CPU stops after each response. Either way a loop that delivers
-  outbox events can stall, and the walking skeleton has to prove domain events. So
-  [#11](https://github.com/heavymedl-labs/tetsu/issues/11) must allow for this, for example
-  by delivering when traffic wakes the service, until a paid instance runs all the time.
+- **Background work.** A free Render service stops after 15 idle minutes, so a loop that delivers
+  outbox events can stall, and the walking skeleton has to prove domain events.
+  [#11](https://github.com/heavymedl-labs/tetsu/issues/11) must allow for this, for example by
+  delivering when traffic wakes the service, until a paid instance runs all the time.
 - **Connecting on a cold start.** A Neon forum thread reports `tokio-postgres` and SQLx
   hanging indefinitely on cold starts, with a connect timeout not helping. We do not know
   its age or outcome. Since ADR-0011 already found that `connect_timeout` does not cover a
   stalled server, the pool's `create` timeout has to bound this. The hosted tests cover it.
-- **Files later.** R2 has no versioning or object lock, and #27 lists versioning as an
-  option for protecting files. That is fine now, but counts against keeping R2 for signed
-  waivers. We also did not confirm presigned URLs on R2's S3 API page.
+- **Files later.** #27 lists versioning as an option for protecting files, which counts against
+  keeping R2 for signed waivers. We also did not confirm presigned URLs on R2's S3 API page.
 
 ### Agent tooling
 
@@ -318,16 +294,6 @@ Our estimates at list price, per month. Nothing here has been billed.
 
 Both stay under the $150 limit, which applies through milestone 1.
 
-- **Render, milestone 1:** Pro workspace $25, two Starter instances $14, Basic-1gb
-  Postgres $19 plus 10 GB of storage $3, staging $13. Files fit R2's free tier.
-- **Render, milestone 3:** Pro workspace $25, two Standard instances $50, Pro-4gb
-  Postgres and its standby $110 plus storage $12, staging $13, R2 under $1.
-- **AWS, milestone 1:** Two 0.25 vCPU Fargate tasks $14, load balancer $16,
-  `db.t4g.small` plus storage $26, staging $21, public IPv4 addresses about $18. Logs
-  and small S3 use are extra.
-- **AWS, milestone 3:** Two 0.5 vCPU tasks $29, load balancer about $20,
-  `db.t4g.medium` Multi-AZ plus storage $99, staging $21, IPv4 $18, S3 about $1.
-
 AWS's lower figure at milestone 3 comes with less memory per task and a burstable
 database, so the two are not exact equivalents.
 
@@ -353,13 +319,11 @@ the figures show that both have real incidents, not that either is more reliable
 
 ## Community practice
 
-The evidence is weak. AWS is the most used cloud in the 2026 Stack Overflow survey, at
-41.8%, and the Render figure was not in the data we read. Most comparisons found were written by vendors selling an
-alternative, and we found no independent data on managed Postgres reliability on these
-platforms. Common advice is a platform like Render before revenue, then ECS with RDS
-as a business grows. That fits starting on Render and keeping the option to move.
-Railway's forum shows the cost of unmanaged databases: two 2026 threads report data
-loss with no backups enabled and no recovery path.
+The evidence is weak: most comparisons were written by vendors selling an alternative, and we
+found no independent data on managed Postgres reliability. Common advice is a platform like
+Render before revenue, then ECS with RDS as a business grows, which fits starting on Render and
+keeping the option to move. Two 2026 Railway forum threads report data loss with no backups
+enabled and no recovery path.
 
 ## Failure tests
 
@@ -406,7 +370,7 @@ creates then. Expect under $20 if the resources are deleted afterward.
 
 ## Sources
 
-Read 2026-11-04.
+Read 2026-11-04. Sources for most options we ruled out are in the full version.
 
 - Render docs: [deploys](https://render.com/docs/deploys), [prebuilt images](https://render.com/docs/deploying-an-image),
   [rollbacks](https://render.com/docs/rollbacks), [connecting to Postgres](https://render.com/docs/postgresql-creating-connecting),
@@ -414,62 +378,29 @@ Read 2026-11-04.
   [high availability](https://render.com/docs/postgresql-high-availability),
   [backups](https://render.com/docs/postgresql-backups), [regions](https://render.com/docs/regions),
   [custom domains](https://render.com/docs/custom-domains), [pricing](https://render.com/pricing),
-  and the [ISO 27001 and document center post](https://render.com/blog/render-iso-27001-and-document-center).
+  and [free services](https://render.com/docs/free).
+- Neon docs: [pricing](https://neon.com/pricing), [plans](https://neon.com/docs/introduction/plans),
+  [regions](https://neon.com/docs/introduction/regions), [versions](https://neon.com/docs/postgresql/postgres-version-policy),
+  [pooling](https://neon.com/docs/connect/connection-pooling), and [connection latency](https://neon.com/docs/connect/connection-latency).
 - AWS: [ECS Express Mode](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/express-service-overview.html),
   [RDS Multi-AZ](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Concepts.MultiAZSingleStandby.html),
   [RDS PostgreSQL versions](https://docs.aws.amazon.com/AmazonRDS/latest/PostgreSQLReleaseNotes/postgresql-versions.html),
   [App Runner availability](https://docs.aws.amazon.com/apprunner/latest/dg/apprunner-availability-change.html),
   and the AWS price list API for Ohio. The IPv4 rate is from memory, not the API.
-- GitHub: [OIDC in AWS](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws).
-- Fly.io: [Managed Postgres docs](https://docs.fly.io/mpg/overview), [product page](https://fly.io/mpg.md),
-  and [client configuration](https://fly.io/docs/mpg/client-configuration/).
-- DigitalOcean: [PostgreSQL pricing](https://docs.digitalocean.com/products/databases/postgresql/details/pricing/)
-  and [App Platform pricing](https://docs.digitalocean.com/products/app-platform/details/pricing/).
-- Railway: [backups guide](https://docs.railway.com/guides/postgres-backups-restores) and
-  forum threads on [data loss](https://station.railway.com/questions/production-postgre-sql-data-loss-need-re-f0684652)
-  and [restoring](https://station.railway.com/questions/data-loss-on-production-postgres-need-p-93d6e23e).
-- Google Cloud: [Cloud SQL release notes](https://docs.cloud.google.com/sql/docs/postgres/release-notes),
-  [Cloud Run rollouts](https://docs.cloud.google.com/run/docs/rollouts-rollbacks-traffic-migration),
-  and [third-party Cloud SQL prices](https://www.bytebase.com/dbcost/cloudsql-pricing/).
-- Cloudflare: [R2 pricing](https://developers.cloudflare.com/r2/pricing/).
-- Free tiers: [Google Cloud](https://docs.cloud.google.com/free/docs/free-cloud-features),
-  [Cloud Run deploy sources](https://docs.cloud.google.com/run/docs/deploying), [Neon pricing](https://neon.com/pricing),
-  [Neon versions](https://neon.com/docs/postgresql/postgres-version-policy), [Neon pooling](https://neon.com/docs/connect/connection-pooling),
-  [Render free](https://render.com/docs/free), [Supabase pricing](https://supabase.com/pricing),
-  [Supabase connections](https://supabase.com/docs/guides/database/connecting-to-postgres),
-  [Supabase on Postgres 18](https://github.com/orgs/supabase/discussions/42681), [Supabase Compute](https://supabase.com/blog/supabase-compute-private-alpha),
-  [Firebase pricing](https://firebase.google.com/pricing), [Firebase SQL Connect](https://firebase.google.com/docs/data-connect),
-  [Vercel Hobby](https://vercel.com/docs/plans/hobby), [Vercel containers](https://vercel.com/docs/functions/runtimes/container),
-  [Koyeb pricing](https://www.koyeb.com/pricing), [Oracle Always Free](https://docs.oracle.com/en-us/iaas/Content/FreeTier/resourceref.htm),
-  and [AWS Free Tier](https://aws.amazon.com/free/).
-- Load testing rules: [Vercel](https://vercel.com/kb/guide/what-s-vercel-s-policy-regarding-load-testing-deployments),
-  [Supabase](https://supabase.com/docs/guides/deployment/going-into-prod), and [AWS](https://aws.amazon.com/ec2/testing/).
-- Agent tooling: [Render MCP server](https://render.com/docs/mcp-server), [Render CLI](https://render.com/docs/cli),
-  [Render for coding agents](https://render.com/docs/llm-support), [Render scoped API keys](https://render.com/docs/scoped-api-keys),
-  [Neon MCP server](https://neon.com/docs/ai/neon-mcp-server), [Neon CLI](https://neon.com/docs/reference/neon-cli),
-  and [Neon API keys](https://neon.com/docs/manage/api-keys).
-- Cloudflare: [Containers pricing](https://developers.cloudflare.com/containers/pricing/),
-  [Containers overview](https://developers.cloudflare.com/containers/), [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/),
-  [Rust on Workers](https://developers.cloudflare.com/workers/languages/rust/), [cache rules](https://developers.cloudflare.com/cache/how-to/cache-rules/),
-  a [report on caching HTML on the free plan](https://dev.to/doodoolove/why-cloudflares-free-plan-cache-rules-dont-cache-your-html-and-the-page-rules-fix-that-does-24d4),
-  and two guides to enabling R2 that disagree on a payment method:
-  [no card](https://dev.to/leonwong282/the-complete-beginners-guide-to-cloudflare-r2-image-hosting-2025-2g4k)
-  and [card needed](https://eastondev.com/blog/en/posts/dev/20251130-r2-picgo-setup/).
-- Free phase cost and limits: [Cloud Run pricing](https://cloud.google.com/run/pricing),
+- Google Cloud: [Cloud Run pricing](https://cloud.google.com/run/pricing),
   [disabling billing with budgets](https://docs.cloud.google.com/billing/docs/how-to/disable-billing-with-notifications),
-  [Neon plans](https://neon.com/docs/introduction/plans), [Neon regions](https://neon.com/docs/introduction/regions),
-  [Neon connection latency](https://neon.com/docs/connect/connection-latency), and
-  [R2's S3 API](https://developers.cloudflare.com/r2/api/s3/api/).
-- Usage: [Stack Overflow Developer Survey 2026, cloud platforms](https://survey.stackoverflow.co/2026/technology/data/cloud-plat).
+  [free features](https://docs.cloud.google.com/free/docs/free-cloud-features),
+  and [third-party Cloud SQL prices](https://www.bytebase.com/dbcost/cloudsql-pricing/).
 - Incidents: [Neon, May 2025](https://www.ilert.com/postmortems/neon-outage-may-2025),
   [R2, February 2025](https://blog.cloudflare.com/cloudflare-incident-on-february-6-2025/),
-  [R2, March 2025](https://blog.cloudflare.com/cloudflare-incident-march-21-2025/),
-  [Google, June 2025](https://status.cloud.google.com/incidents/ow5i3PPK96RduMcb1SsW),
   [AWS, October 2025](https://www.infoq.com/news/2025/11/aws-dynamodb-outage-postmortem), and
   the [Neon tracker](https://statusgator.com/services/neon).
-- Practitioner reports, single sources: [Neon review with cold start measurements](https://pickuma.com/for-dev/neon-serverless-postgres-review/),
-  [Neon forum thread on Rust cold starts](https://community.neon.tech/t/non-deterministic-connection-hangup-with-rust-libraries-tokio-postgres-and-sqlx-when-connecting-with-neon-on-cold-start/940),
-  [Cloud Run CPU throttling](https://medium.com/@buckwheat469/how-cloud-runs-default-cpu-throttling-turned-an-18-second-response-into-an-8-minute-timeout-63c3abc74df1),
-  and a [Cloud Run cold start incident](https://www.72technologies.com/blog/gcp-cloud-run-cold-start-incident).
 - Weaker sources: [Render's funding announcement](https://siliconangle.com/?p=731299) and
   the [Pingoru incident tracker](https://pingoru.io/providers/render/outage-history).
+- GitHub: [OIDC in AWS](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws).
+- Cloudflare: [R2 pricing](https://developers.cloudflare.com/r2/pricing/) and [R2's S3 API](https://developers.cloudflare.com/r2/api/s3/api/).
+- Agent tooling: [Render MCP server](https://render.com/docs/mcp-server), [Render CLI](https://render.com/docs/cli),
+  [Render scoped API keys](https://render.com/docs/scoped-api-keys), [Neon MCP server](https://neon.com/docs/ai/neon-mcp-server),
+  [Neon CLI](https://neon.com/docs/reference/neon-cli), and [Neon API keys](https://neon.com/docs/manage/api-keys).
+- Single reports: [Neon cold start measurements](https://pickuma.com/for-dev/neon-serverless-postgres-review/),
+  and the [Neon forum thread on Rust cold starts](https://community.neon.tech/t/non-deterministic-connection-hangup-with-rust-libraries-tokio-postgres-and-sqlx-when-connecting-with-neon-on-cold-start/940).
