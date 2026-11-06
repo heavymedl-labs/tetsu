@@ -4,22 +4,22 @@ Each ADR records one decision with its context, alternatives, consequences,
 and sources. To add one, copy [template.md](template.md), take the next
 number, and add a row below. Never renumber.
 
-| ADR | Title | Status |
-| --- | --- | --- |
-| [0001](0001-how-we-work.md) | How we work | Accepted |
-| [0002](0002-platform-and-verticals.md) | Platform and verticals | Accepted |
-| [0003](0003-architecture.md) | Architecture | Accepted |
-| [0004](0004-security.md) | Security | Accepted |
-| [0005](0005-testing-and-performance.md) | Testing and performance | Accepted |
-| [0006](0006-diagrams.md) | Diagrams | Accepted |
-| [0007](0007-server-stack.md) | Server stack | Accepted |
-| [0008](0008-benchmark-harness.md) | Benchmark harness | Accepted |
-| [0009](0009-defer-generated-queries.md) | Defer generated queries | Accepted |
-| [0010](0010-evaluating-technology.md) | Evaluating technology | Accepted |
-| [0011](0011-server-stack-guardrails.md) | Server stack guardrails | Accepted |
-| [0012](0012-first-hosting-and-deploys.md) | First hosting and deploys | Accepted |
-| [0013](0013-postgres-tls.md) | Postgres TLS | Accepted |
-| [0014](0014-checks-and-duties.md) | Checks and duties | Accepted |
+| ADR | Title | Read when | Status |
+| --- | --- | --- | --- |
+| [0001](0001-how-we-work.md) | How we work | Changing how we record decisions or agent rules | Accepted |
+| [0002](0002-platform-and-verticals.md) | Platform and verticals | Deciding what is platform and what is vertical | Accepted |
+| [0003](0003-architecture.md) | Architecture | Structuring modules, ports, or deployment | Accepted |
+| [0004](0004-security.md) | Security | Touching identity, tenant data, payments, or secrets | Accepted |
+| [0005](0005-testing-and-performance.md) | Testing and performance | Setting tests, rigor tiers, or benchmarks | Accepted |
+| [0006](0006-diagrams.md) | Diagrams | Drawing diagrams | Accepted |
+| [0007](0007-server-stack.md) | Server stack | Choosing or using server libraries: HTTP, Postgres, templates, migrations | Accepted |
+| [0008](0008-benchmark-harness.md) | Benchmark harness | Running benchmarks | Accepted |
+| [0009](0009-defer-generated-queries.md) | Defer generated queries | Writing database queries | Accepted |
+| [0010](0010-evaluating-technology.md) | Evaluating technology | Adopting a framework, library, service, or tool | Accepted |
+| [0011](0011-server-stack-guardrails.md) | Server stack guardrails | Setting timeouts, statement caching, or migration locks | Accepted |
+| [0012](0012-first-hosting-and-deploys.md) | First hosting and deploys | Deploying, or moving to a new host or paid plan | Accepted |
+| [0013](0013-postgres-tls.md) | Postgres TLS | Connecting to Postgres | Accepted |
+| [0014](0014-checks-and-duties.md) | Checks and duties | Changing a check, duty, or the quality bar | Accepted |
 
 ## Open decisions
 

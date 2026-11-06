@@ -4,12 +4,18 @@ Instructions for coding agents working in Tetsu. Humans follow them too.
 
 ## Start here
 
-Read [README.md](README.md), then the
-[invariants](ARCHITECTURE.md#invariants), which are hard rules. Read the rest of
-[ARCHITECTURE.md](ARCHITECTURE.md) when your change touches it. Use the terms in
-[docs/GLOSSARY.md](docs/GLOSSARY.md)
-exactly. Follow ADRs in [docs/adr](docs/adr/README.md); until accepted, treat
-them as current intent.
+Read [docs/invariants.md](docs/invariants.md), which are hard rules, then only what
+your task needs. Use glossary terms exactly, and look one up in
+[docs/GLOSSARY.md](docs/GLOSSARY.md) when unsure. Follow ADRs, and treat a proposed
+one as current intent. The [ADR index](docs/adr/README.md) says when to read each.
+
+| Task | Also read |
+| --- | --- |
+| Code or scripts | [CONSTRAINTS.md](CONSTRAINTS.md) |
+| Planning a feature or module | [ARCHITECTURE.md](ARCHITECTURE.md), and the ADRs the index names |
+| Adopting a tool | [ADR-0010](docs/adr/0010-evaluating-technology.md) |
+| Docs, ADRs, or issues | [Docs audit](CONTRIBUTING.md#docs-audit) |
+| Committing | [Commits](CONTRIBUTING.md#commits) |
 
 ## Current phase
 

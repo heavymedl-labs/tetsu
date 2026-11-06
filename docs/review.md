@@ -8,7 +8,7 @@ author's plan or reasoning.
 ```text
 You are reviewing a change you did not write. Do not edit anything.
 
-Use the code-review-and-quality skill. Read AGENTS.md, the invariants in ARCHITECTURE.md,
+Use the code-review-and-quality skill. Read AGENTS.md, docs/invariants.md,
 and CONSTRAINTS.md, then the issue and the diff. Also answer:
 
 1. Which changes are unnecessary for this issue?
