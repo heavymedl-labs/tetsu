@@ -12,11 +12,22 @@ struct Item {
 }
 
 fn items() -> Vec<Item> {
-    (0..50).map(|i| Item { id: i, name: "Strength & Conditioning", coach: "Lee Park", spots: (i % 7) as u32 }).collect()
+    (0..50)
+        .map(|i| Item {
+            id: i,
+            name: "Strength & Conditioning",
+            coach: "Lee Park",
+            spots: (i % 7) as u32,
+        })
+        .collect()
 }
 
 fn runtime(threads: usize) -> tokio::runtime::Runtime {
-    tokio::runtime::Builder::new_multi_thread().worker_threads(threads).enable_all().build().unwrap()
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(threads)
+        .enable_all()
+        .build()
+        .unwrap()
 }
 
 pub fn serve(server: &str, threads: usize, port: u16) {
@@ -38,7 +49,9 @@ fn axum(threads: usize, addr: &str, middleware: bool) {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::Duration;
-    use tower_http::request_id::{MakeRequestId, PropagateRequestIdLayer, RequestId, SetRequestIdLayer};
+    use tower_http::request_id::{
+        MakeRequestId, PropagateRequestIdLayer, RequestId, SetRequestIdLayer,
+    };
 
     #[derive(Clone, Default)]
     struct Sequential(Arc<AtomicU64>);
@@ -80,7 +93,11 @@ fn axum_vec_json(threads: usize, addr: &str) {
     struct VecJson<T>(T);
     impl<T: Serialize> IntoResponse for VecJson<T> {
         fn into_response(self) -> Response {
-            ([(CONTENT_TYPE, "application/json")], serde_json::to_vec(&self.0).unwrap()).into_response()
+            (
+                [(CONTENT_TYPE, "application/json")],
+                serde_json::to_vec(&self.0).unwrap(),
+            )
+                .into_response()
         }
     }
 
@@ -100,8 +117,18 @@ fn actix(threads: usize, addr: &str) {
     actix_web::rt::System::new().block_on(async move {
         HttpServer::new(|| {
             App::new()
-                .route("/plain", web::get().to(|| async { HttpResponse::Ok().content_type("text/plain").body("Hello, World!") }))
-                .route("/json", web::get().to(|| async { HttpResponse::Ok().json(items()) }))
+                .route(
+                    "/plain",
+                    web::get().to(|| async {
+                        HttpResponse::Ok()
+                            .content_type("text/plain")
+                            .body("Hello, World!")
+                    }),
+                )
+                .route(
+                    "/json",
+                    web::get().to(|| async { HttpResponse::Ok().json(items()) }),
+                )
         })
         .workers(threads)
         .bind(addr)
@@ -124,7 +151,9 @@ fn salvo(threads: usize, addr: &str) {
     }
     let addr = addr.to_string();
     runtime(threads).block_on(async move {
-        let router = Router::new().push(Router::with_path("plain").get(plain)).push(Router::with_path("json").get(json));
+        let router = Router::new()
+            .push(Router::with_path("plain").get(plain))
+            .push(Router::with_path("json").get(json));
         let acceptor = TcpListener::new(addr).bind().await;
         Server::new(acceptor).serve(router).await;
     });
@@ -136,13 +165,19 @@ fn hyper(threads: usize, addr: &str) {
     use hyper::{Request, Response, body::Incoming, server::conn::http1, service::service_fn};
     use hyper_util::rt::TokioIo;
 
-    async fn handle(req: Request<Incoming>) -> Result<Response<Full<Bytes>>, std::convert::Infallible> {
+    async fn handle(
+        req: Request<Incoming>,
+    ) -> Result<Response<Full<Bytes>>, std::convert::Infallible> {
         let r = Response::builder();
         Ok(match req.uri().path() {
-            "/plain" => r.header("content-type", "text/plain").body(Full::new(Bytes::from_static(b"Hello, World!"))),
+            "/plain" => r
+                .header("content-type", "text/plain")
+                .body(Full::new(Bytes::from_static(b"Hello, World!"))),
             "/json" => r
                 .header("content-type", "application/json")
-                .body(Full::new(Bytes::from(serde_json::to_vec(&items()).unwrap()))),
+                .body(Full::new(Bytes::from(
+                    serde_json::to_vec(&items()).unwrap(),
+                ))),
             _ => r.status(404).body(Full::new(Bytes::new())),
         }
         .unwrap())
@@ -155,7 +190,9 @@ fn hyper(threads: usize, addr: &str) {
             let (stream, _) = listener.accept().await.unwrap();
             let _ = stream.set_nodelay(true);
             tokio::spawn(async move {
-                let _ = http1::Builder::new().serve_connection(TokioIo::new(stream), service_fn(handle)).await;
+                let _ = http1::Builder::new()
+                    .serve_connection(TokioIo::new(stream), service_fn(handle))
+                    .await;
             });
         }
     });

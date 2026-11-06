@@ -81,7 +81,12 @@ fn homegrown(studio: &str, rows: &[Row]) -> String {
     escape(&mut o, studio);
     o.push_str("</h1>\n<table><thead><tr><th>Class</th><th>Starts</th><th>Coach</th><th>Room</th><th>Spots</th></tr></thead><tbody>\n");
     for r in rows {
-        for (open, v) in [("<tr><td>", &r.name), ("</td><td>", &r.starts), ("</td><td>", &r.coach), ("</td><td>", &r.room)] {
+        for (open, v) in [
+            ("<tr><td>", &r.name),
+            ("</td><td>", &r.starts),
+            ("</td><td>", &r.coach),
+            ("</td><td>", &r.room),
+        ] {
             o.push_str(open);
             escape(&mut o, v);
         }
@@ -125,8 +130,28 @@ pub fn run(renders: usize) {
         .collect();
     let studio = "Anvil Row Strength";
     let engines: [(&str, Box<dyn Fn() -> String>); 4] = [
-        ("askama", Box::new(|| AskamaPage { studio, rows: &rows }.render().unwrap())),
-        ("sailfish", Box::new(|| SailfishPage { studio, rows: &rows }.render_once().unwrap())),
+        (
+            "askama",
+            Box::new(|| {
+                AskamaPage {
+                    studio,
+                    rows: &rows,
+                }
+                .render()
+                .unwrap()
+            }),
+        ),
+        (
+            "sailfish",
+            Box::new(|| {
+                SailfishPage {
+                    studio,
+                    rows: &rows,
+                }
+                .render_once()
+                .unwrap()
+            }),
+        ),
         ("maud", Box::new(|| maud_page(studio, &rows))),
         ("homegrown", Box::new(|| homegrown(studio, &rows))),
     ];

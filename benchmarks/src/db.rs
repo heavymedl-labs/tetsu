@@ -16,7 +16,8 @@ const SET: &str = "SELECT set_config('app.tenant_id', $1, true)";
 const LOOKUP: &str = "SELECT id, tenant_id, name, starts_at, capacity, booked, coach, room FROM class_session WHERE id = $1";
 const LIST: &str = "SELECT id, tenant_id, name, starts_at, capacity, booked, coach, room FROM class_session WHERE starts_at > $1 ORDER BY starts_at LIMIT 50";
 const BOOK_UPDATE: &str = "UPDATE class_session SET booked = booked + 1 WHERE id = $1";
-const BOOK_INSERT: &str = "INSERT INTO booking (tenant_id, session_id, customer_id) VALUES ($1, $2, $3)";
+const BOOK_INSERT: &str =
+    "INSERT INTO booking (tenant_id, session_id, customer_id) VALUES ($1, $2, $3)";
 
 #[derive(Debug, sqlx::FromRow, diesel::Queryable)]
 #[allow(dead_code)]
@@ -74,17 +75,27 @@ fn since() -> DateTime<Utc> {
 /// Creates the `app` role, the `tetsu` database, and the seeded schema.
 pub fn setup(admin_url: &str) {
     tokio::runtime::Runtime::new().unwrap().block_on(async {
-        let (c, conn) = tokio_postgres::connect(admin_url, tokio_postgres::NoTls).await.unwrap();
-        tokio::spawn(conn);
-        c.batch_execute("DROP DATABASE IF EXISTS tetsu").await.unwrap();
-        c.batch_execute("DO $$ BEGIN CREATE ROLE app LOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$")
+        let (c, conn) = tokio_postgres::connect(admin_url, tokio_postgres::NoTls)
             .await
             .unwrap();
+        tokio::spawn(conn);
+        c.batch_execute("DROP DATABASE IF EXISTS tetsu")
+            .await
+            .unwrap();
+        c.batch_execute(
+            "DO $$ BEGIN CREATE ROLE app LOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$",
+        )
+        .await
+        .unwrap();
         c.batch_execute("CREATE DATABASE tetsu").await.unwrap();
         let url = format!("{}/tetsu", admin_url.rsplit_once('/').unwrap().0);
-        let (c, conn) = tokio_postgres::connect(&url, tokio_postgres::NoTls).await.unwrap();
+        let (c, conn) = tokio_postgres::connect(&url, tokio_postgres::NoTls)
+            .await
+            .unwrap();
         tokio::spawn(conn);
-        c.batch_execute(include_str!("../sql/schema.sql")).await.unwrap();
+        c.batch_execute(include_str!("../sql/schema.sql"))
+            .await
+            .unwrap();
         eprintln!("setup: seeded tetsu database");
     });
 }
@@ -102,7 +113,10 @@ where
             let (f, left) = (f.clone(), left.clone());
             tokio::spawn(async move {
                 let mut lat = Vec::new();
-                while left.try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
+                while left
+                    .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1))
+                    .is_ok()
+                {
                     let t = Instant::now();
                     f().await;
                     lat.push(t.elapsed());
@@ -122,7 +136,11 @@ fn deadpool(pool_size: usize) -> deadpool_postgres::Pool {
     let mut cfg = deadpool_postgres::Config::new();
     cfg.url = Some(app_url());
     cfg.pool = Some(deadpool_postgres::PoolConfig::new(pool_size));
-    cfg.create_pool(Some(deadpool_postgres::Runtime::Tokio1), tokio_postgres::NoTls).unwrap()
+    cfg.create_pool(
+        Some(deadpool_postgres::Runtime::Tokio1),
+        tokio_postgres::NoTls,
+    )
+    .unwrap()
 }
 
 async fn warm(pool: &deadpool_postgres::Pool, n: usize) {
@@ -154,7 +172,10 @@ pub fn run(variant: &str, work: &str, ops: usize, tasks: usize, pool_size: usize
                 let pool = deadpool(pool_size);
                 warm(&pool, pool_size).await;
                 cpu0 = cpu_us();
-                drive(ops, tasks, move || tokio_pg_op(pool.clone(), w.clone(), pipe)).await
+                drive(ops, tasks, move || {
+                    tokio_pg_op(pool.clone(), w.clone(), pipe)
+                })
+                .await
             }
             "cornucopia" | "cornucopia-prepared" | "cornucopia-prepared-pipe" => {
                 let prepared = variant.contains("prepared");
@@ -162,7 +183,10 @@ pub fn run(variant: &str, work: &str, ops: usize, tasks: usize, pool_size: usize
                 let pool = deadpool(pool_size);
                 warm(&pool, pool_size).await;
                 cpu0 = cpu_us();
-                drive(ops, tasks, move || cornucopia_op(pool.clone(), w.clone(), prepared, pipe)).await
+                drive(ops, tasks, move || {
+                    cornucopia_op(pool.clone(), w.clone(), prepared, pipe)
+                })
+                .await
             }
             "diesel" => {
                 use diesel_async::AsyncPgConnection;
@@ -185,7 +209,10 @@ pub fn run(variant: &str, work: &str, ops: usize, tasks: usize, pool_size: usize
     lat.sort();
     let p = |q: f64| lat[((lat.len() as f64 * q) as usize).min(lat.len() - 1)].as_secs_f64() * 1e6;
     let mut m = serde_json::Map::new();
-    m.insert("ops_per_s".into(), json!(lat.len() as f64 / wall.as_secs_f64()));
+    m.insert(
+        "ops_per_s".into(),
+        json!(lat.len() as f64 / wall.as_secs_f64()),
+    );
     m.insert("p50_us".into(), json!(p(0.50)));
     m.insert("p99_us".into(), json!(p(0.99)));
     m.insert("p999_us".into(), json!(p(0.999)));
@@ -196,19 +223,41 @@ pub fn run(variant: &str, work: &str, ops: usize, tasks: usize, pool_size: usize
 async fn sqlx_op(pool: sqlx::PgPool, work: String) {
     let (t, id) = pick();
     let mut tx = pool.begin().await.unwrap();
-    sqlx::query(SET).bind(t.to_string()).execute(&mut *tx).await.unwrap();
+    sqlx::query(SET)
+        .bind(t.to_string())
+        .execute(&mut *tx)
+        .await
+        .unwrap();
     match work.as_str() {
         "lookup" => {
-            let s: Session = sqlx::query_as(LOOKUP).bind(id).fetch_one(&mut *tx).await.unwrap();
+            let s: Session = sqlx::query_as(LOOKUP)
+                .bind(id)
+                .fetch_one(&mut *tx)
+                .await
+                .unwrap();
             assert_eq!(s.tenant_id, t);
         }
         "list" => {
-            let v: Vec<Session> = sqlx::query_as(LIST).bind(since()).fetch_all(&mut *tx).await.unwrap();
+            let v: Vec<Session> = sqlx::query_as(LIST)
+                .bind(since())
+                .fetch_all(&mut *tx)
+                .await
+                .unwrap();
             assert!(!v.is_empty());
         }
         _ => {
-            sqlx::query(BOOK_UPDATE).bind(id).execute(&mut *tx).await.unwrap();
-            sqlx::query(BOOK_INSERT).bind(t).bind(id).bind(42i64).execute(&mut *tx).await.unwrap();
+            sqlx::query(BOOK_UPDATE)
+                .bind(id)
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+            sqlx::query(BOOK_INSERT)
+                .bind(t)
+                .bind(id)
+                .bind(42i64)
+                .execute(&mut *tx)
+                .await
+                .unwrap();
         }
     }
     tx.commit().await.unwrap();
@@ -328,14 +377,20 @@ async fn cornucopia_op(pool: deadpool_postgres::Pool, work: String, prepared: bo
     tx.commit().await.unwrap();
 }
 
-async fn diesel_op(pool: diesel_async::pooled_connection::deadpool::Pool<diesel_async::AsyncPgConnection>, work: String) {
+async fn diesel_op(
+    pool: diesel_async::pooled_connection::deadpool::Pool<diesel_async::AsyncPgConnection>,
+    work: String,
+) {
     use diesel::prelude::*;
     use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
     let (t, id) = pick();
     let mut pooled = pool.get().await.unwrap();
     let c: &mut AsyncPgConnection = &mut pooled;
     c.transaction::<_, diesel::result::Error, _>(async move |c: &mut AsyncPgConnection| {
-        diesel::sql_query(SET).bind::<diesel::sql_types::Text, _>(t.to_string()).execute(c).await?;
+        diesel::sql_query(SET)
+            .bind::<diesel::sql_types::Text, _>(t.to_string())
+            .execute(c)
+            .await?;
         match work.as_str() {
             "lookup" => {
                 let s: Session = class_session::table.find(id).first(c).await?;
@@ -356,7 +411,11 @@ async fn diesel_op(pool: diesel_async::pooled_connection::deadpool::Pool<diesel_
                     .execute(c)
                     .await?;
                 diesel::insert_into(booking::table)
-                    .values((booking::tenant_id.eq(t), booking::session_id.eq(id), booking::customer_id.eq(42i64)))
+                    .values((
+                        booking::tenant_id.eq(t),
+                        booking::session_id.eq(id),
+                        booking::customer_id.eq(42i64),
+                    ))
                     .execute(c)
                     .await?;
             }

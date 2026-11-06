@@ -51,8 +51,16 @@ async fn schedule(State(db): State<Arc<Db>>, Query(q): Query<Params>) -> Html<St
     let rows = match &*db {
         Db::Sqlx(pool) => {
             let mut tx = pool.begin().await.unwrap();
-            sqlx::query(SET).bind(&tenant).execute(&mut *tx).await.unwrap();
-            let rows: Vec<Row> = sqlx::query_as(LIST).bind(since).fetch_all(&mut *tx).await.unwrap();
+            sqlx::query(SET)
+                .bind(&tenant)
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+            let rows: Vec<Row> = sqlx::query_as(LIST)
+                .bind(since)
+                .fetch_all(&mut *tx)
+                .await
+                .unwrap();
             tx.commit().await.unwrap();
             rows
         }
@@ -89,27 +97,41 @@ async fn schedule(State(db): State<Arc<Db>>, Query(q): Query<Params>) -> Html<St
 
 pub fn serve(variant: &str, threads: usize, port: u16) {
     let variant = variant.to_string();
-    tokio::runtime::Builder::new_multi_thread().worker_threads(threads).enable_all().build().unwrap().block_on(async move {
-        let db = match variant.as_str() {
-            "sqlx" => Db::Sqlx(
-                sqlx::postgres::PgPoolOptions::new()
-                    .max_connections(16)
-                    .min_connections(16)
-                    .connect(&app_url())
-                    .await
-                    .unwrap(),
-            ),
-            "tokio-pg" | "tokio-pg-pipe" => {
-                let mut cfg = deadpool_postgres::Config::new();
-                cfg.url = Some(app_url());
-                cfg.pool = Some(deadpool_postgres::PoolConfig::new(16));
-                let pool = cfg.create_pool(Some(deadpool_postgres::Runtime::Tokio1), tokio_postgres::NoTls).unwrap();
-                Db::TokioPg(pool, variant.ends_with("pipe"))
-            }
-            other => panic!("unknown e2e variant {other}"),
-        };
-        let app = Router::new().route("/schedule", get(schedule)).with_state(Arc::new(db));
-        let listener = tokio::net::TcpListener::bind(format!("[::]:{port}")).await.unwrap();
-        axum::serve(listener, app).await.unwrap();
-    });
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(threads)
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async move {
+            let db = match variant.as_str() {
+                "sqlx" => Db::Sqlx(
+                    sqlx::postgres::PgPoolOptions::new()
+                        .max_connections(16)
+                        .min_connections(16)
+                        .connect(&app_url())
+                        .await
+                        .unwrap(),
+                ),
+                "tokio-pg" | "tokio-pg-pipe" => {
+                    let mut cfg = deadpool_postgres::Config::new();
+                    cfg.url = Some(app_url());
+                    cfg.pool = Some(deadpool_postgres::PoolConfig::new(16));
+                    let pool = cfg
+                        .create_pool(
+                            Some(deadpool_postgres::Runtime::Tokio1),
+                            tokio_postgres::NoTls,
+                        )
+                        .unwrap();
+                    Db::TokioPg(pool, variant.ends_with("pipe"))
+                }
+                other => panic!("unknown e2e variant {other}"),
+            };
+            let app = Router::new()
+                .route("/schedule", get(schedule))
+                .with_state(Arc::new(db));
+            let listener = tokio::net::TcpListener::bind(format!("[::]:{port}"))
+                .await
+                .unwrap();
+            axum::serve(listener, app).await.unwrap();
+        });
 }

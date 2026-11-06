@@ -18,7 +18,10 @@ pub fn app_url() -> String {
 
 /// Prints one result record.
 pub fn emit(suite: &str, case: &str, variant: &str, metrics: Map<String, Value>) {
-    println!("{}", json!({ "suite": suite, "case": case, "variant": variant, "metrics": metrics }));
+    println!(
+        "{}",
+        json!({ "suite": suite, "case": case, "variant": variant, "metrics": metrics })
+    );
 }
 
 /// Client CPU time used by this process so far, in microseconds.
