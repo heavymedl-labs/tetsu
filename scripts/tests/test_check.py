@@ -28,6 +28,9 @@ class CheckScript(unittest.TestCase):
         self.stub("node", "echo v26.1.0")
         for tool in ("npx", "cargo", "cargo-llvm-cov", "cargo-mutants"):
             self.stub(tool, f'echo "{tool} $*" >> "{self.log}"')
+        # Cargo also logs its build folder, which the nightly pass keeps apart.
+        self.stub("cargo", f'echo "cargo $* dir=${{CARGO_TARGET_DIR-}}" >> "{self.log}"')
+        self.stub("rustup", 'echo "llvm-tools-x86_64-unknown-linux-gnu"')
         self.stub("python3", f'echo "python $1 $2 $3" >> "{self.log}"')
         self.stub(
             "git",
@@ -75,6 +78,7 @@ class CheckScript(unittest.TestCase):
             "cargo metadata",
             "check_coverage.py",
             "cargo +nightly-2026-11-01 llvm-cov --branch",
+            "dir=target/nightly",
             "check_coverage.py --branches",
             "lizard",
             "jscpd",
@@ -308,6 +312,25 @@ class CheckScript(unittest.TestCase):
         self.assertIn("TEST_DATABASE_URL", result.stderr)
         self.assertIn("docker run", result.stderr)
 
+    def test_a_missing_nightly_fails_before_the_slow_stages(self):
+        self.stub("rustup", "exit 1")
+        result = self.check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("nightly-2026-11-01 with llvm-tools-preview is missing", result.stderr)
+        self.assertIn("scripts/install-tools.sh", result.stderr)
+        self.assertNotIn("cargo llvm-cov", self.log.read_text())
+
+    def test_a_nightly_without_its_coverage_tools_fails_too(self):
+        self.stub("rustup", 'echo "rust-std-x86_64-unknown-linux-gnu"')
+        result = self.check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("with llvm-tools-preview is missing", result.stderr)
+
+    def test_fast_mode_does_not_need_the_nightly(self):
+        self.stub("rustup", "exit 1")
+        result = self.check("--fast")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_a_missing_tool_fails_with_a_fix(self):
         (self.root / ".tools" / "bin" / "lizard").unlink()
         result = self.check()
@@ -353,7 +376,9 @@ class InstallTools(unittest.TestCase):
             write(root / "bin" / "rustup", f"#!/bin/sh\n{no_default}\n", EXECUTABLE)
             result = run([root / "scripts" / "install-tools.sh"], root, PATH=f"{root / 'bin'}:/usr/bin:/bin")
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("rustup default none", log.read_text())
+            text = log.read_text()
+            # Unset after the install, which is what set it.
+            self.assertLess(text.index("rustup toolchain install"), text.index("rustup default none"))
 
 
 class PrePushHook(unittest.TestCase):

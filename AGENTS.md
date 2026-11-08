@@ -79,11 +79,12 @@ Run these before you push to `main` or open a pull request:
 scripts/check.sh
 ```
 
-It needs the Node version in `.nvmrc`, uv, `scripts/install-tools.sh` run once, and a
-test Postgres used by one run at a time, since each run drops every test database when it
-ends. It uses the address in `.cargo/config.toml` unless `TEST_DATABASE_URL` names another. `scripts/check.sh --fast` runs only formatters and
-linters, as the pre-commit hook does. CI
-runs the same script, and also checks links and lints workflows.
+It needs the Node version in `.nvmrc`, uv, rustup, `scripts/install-tools.sh` run once
+and again when it says so, and a test Postgres used by one run at a time, since each run
+drops every test database when it ends. It uses the address in `.cargo/config.toml`
+unless `TEST_DATABASE_URL` names another. `scripts/check.sh --fast` runs only formatters
+and linters, as the pre-commit hook does. CI runs the same script, and also checks links
+and lints workflows.
 
 ## Writing
 

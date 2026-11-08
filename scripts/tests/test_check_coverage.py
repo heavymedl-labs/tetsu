@@ -33,8 +33,13 @@ def covered_file(name, percent, branches=None):
 
 
 class CheckCoverage(unittest.TestCase):
-    def check(self, packages, files, *flags):
+    def check(self, packages, files, *flags, exceptions=()):
         with tempfile.TemporaryDirectory() as tmp:
+            rows = "".join(f"{row}\n" for row in exceptions)
+            (Path(tmp) / "CONSTRAINTS.md").write_text(
+                "# Constraints\n\n## Exceptions\n\n| ID | Rule | Path | Reason | Owner | Expires |\n"
+                "| --- | --- | --- | --- | --- | --- |\n" + rows
+            )
             metadata = Path(tmp) / "metadata.json"
             report = Path(tmp) / "report.json"
             metadata.write_text(json.dumps({"packages": packages}))
@@ -52,6 +57,32 @@ class CheckCoverage(unittest.TestCase):
         files = [covered_file("a", 100, branches=99)]
         self.assertEqual(self.check([package("a", tier=1)], files, "--branches").returncode, 1)
         self.assertEqual(self.check([package("a", tier=2)], files, "--branches").returncode, 0)
+
+    def test_an_exception_lowers_one_crate_branch_limit(self):
+        row = "| E9 | Branch limit 80% | `crates/a` | Unreachable | Maintainer | 2099-01-01 |"
+        files = [covered_file("a", 100, branches=85), covered_file("b", 100, branches=85)]
+        packages = [package("a"), package("b")]
+        result = self.check(packages, files, "--branches", exceptions=[row])
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn("a: ", result.stderr)
+        self.assertIn("b: 85.0% of branches", result.stderr)
+
+    def test_an_exception_never_raises_a_limit_or_touches_lines(self):
+        row = "| E9 | Branch limit 95% | `crates/a` | Odd | Maintainer | 2099-01-01 |"
+        files = [covered_file("a", 92, branches=92)]
+        self.assertEqual(self.check([package("a")], files, "--branches", exceptions=[row]).returncode, 0)
+        low = "| E9 | Branch limit 80% | `crates/a` | Unreachable | Maintainer | 2099-01-01 |"
+        lines = self.check([package("a")], [covered_file("a", 85, branches=100)], exceptions=[low])
+        self.assertEqual(lines.returncode, 1)
+
+    def test_an_expired_exception_no_longer_applies(self):
+        row = "| E9 | Branch limit 80% | `crates/a` | Unreachable | Maintainer | 2000-01-01 |"
+        result = self.check(
+            [package("a")], [covered_file("a", 100, branches=85)], "--branches", exceptions=[row]
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("E9 expired on 2000-01-01", result.stderr)
+        self.assertIn("a: 85.0% of branches, under the tier 2 limit of 90%", result.stderr)
 
     def test_a_branch_report_with_no_branches_at_all_fails(self):
         files = [covered_file("a", 100, branches=0)]

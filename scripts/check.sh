@@ -63,6 +63,15 @@ if [[ "$fast" == true ]]; then
   exit 0
 fi
 
+# Checked before the slow stages, so a clone set up before the nightly was pinned, or since its date moved, learns
+# at once. Otherwise rustup could also install it alone, without the coverage tools.
+nightly="$(<.nightly-toolchain)"
+components="$(rustup component list --toolchain "$nightly" --installed 2>/dev/null || true)"
+if [[ $'\n'"$components" != *$'\n'llvm-tools* ]]; then
+  echo "error: $nightly with llvm-tools-preview is missing. Run scripts/install-tools.sh" >&2
+  exit 1
+fi
+
 # Unset or empty, the tests use the default in .cargo/config.toml, which Cargo applies only to a variable that is
 # not set at all. An explicit address is used as given.
 if [[ -z "${TEST_DATABASE_URL:-}" ]]; then
@@ -104,7 +113,7 @@ cargo metadata --no-deps --format-version 1 >"$work/metadata.json"
 python3 scripts/check_coverage.py "$work/metadata.json" "$work/coverage.json"
 # Branches need a nightly compiler (ADR-0020), pinned in .nightly-toolchain, in a build folder of its own. The
 # stable run above stays the one that tests the code we ship.
-CARGO_TARGET_DIR=target/nightly cargo +"$(<.nightly-toolchain)" llvm-cov --branch --json --summary-only \
+CARGO_TARGET_DIR=target/nightly cargo +"$nightly" llvm-cov --branch --json --summary-only \
   --output-path "$work/branches.json"
 python3 scripts/check_coverage.py --branches "$work/metadata.json" "$work/branches.json"
 .tools/bin/lizard -l rust -C 10 -L 50 -a 5 -w crates

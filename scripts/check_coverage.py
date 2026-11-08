@@ -5,12 +5,17 @@ usage: scripts/check_coverage.py [--branches] <cargo metadata json> <cargo llvm-
 
 Each crate under crates/ declares its tier and kind in [package.metadata.tetsu].
 Limits are in ADR-0016. Stable Rust measures lines and regions; --branches checks a nightly run's branches
-instead (ADR-0020).
+instead (ADR-0020). A CONSTRAINTS.md exception with the rule "Branch limit N%" and the path `crates/<name>`
+lowers that crate's branch limit until it expires.
 """
 
+import datetime
 import json
+import re
 import sys
 from pathlib import Path
+
+from floor_guard import exception_rows
 
 LIMITS = {1: 100, 2: 90, 3: 90}
 KINDS = {"platform", "vertical", "root"}
@@ -42,8 +47,29 @@ def totals(directory, files, measures):
     return found
 
 
-def coverage_errors(name, tier, found):
-    limit = LIMITS[tier]
+BRANCH_EXCEPTION = re.compile(
+    r"^\|\s*(?P<id>[^|]+?)\s*\|\s*Branch limit (?P<limit>\d+)%\s*\|\s*`crates/(?P<crate>[^`/]+)`\s*\|"
+    r"[^|]*\|[^|]*\|\s*(?P<expires>\d{4}-\d{2}-\d{2})\s*\|"
+)
+
+
+def branch_exceptions(today):
+    """Lowered branch limits by crate directory name, and an error for each exception past its date. The floor
+    guard reads the same rows, so every row that lowers a limit is one it flags for the maintainer."""
+    limits, errors = {}, []
+    for line in sorted(exception_rows()):
+        match = BRANCH_EXCEPTION.match(line)
+        if not match:
+            continue
+        if datetime.date.fromisoformat(match["expires"]) < today:
+            errors.append(f"exception {match['id']} expired on {match['expires']}; renew or remove it")
+        else:
+            limits[match["crate"]] = int(match["limit"])
+    return limits, errors
+
+
+def coverage_errors(name, tier, found, lowered=None):
+    limit = min(LIMITS[tier], lowered) if lowered is not None else LIMITS[tier]
     for measure, (covered, count) in found.items():
         percent = 100 * covered / count if count else 100
         if percent < limit:
@@ -76,10 +102,13 @@ def main():
     packages = list(crates(metadata))
     errors = list(path_errors(files, [directory for _, directory, _ in packages]))
     errors.extend(empty_errors(files, measures) if files else [])
+    lowered, expired = branch_exceptions(datetime.date.today()) if measures is BRANCHES else ({}, [])
+    errors.extend(expired)
     for name, directory, declared in packages:
         problems = list(declaration_errors(name, declared))
         if not problems:
-            problems = list(coverage_errors(name, declared["tier"], totals(directory, files, measures)))
+            found = totals(directory, files, measures)
+            problems = list(coverage_errors(name, declared["tier"], found, lowered.get(directory.name)))
         errors.extend(problems)
     for error in errors:
         print(f"error: {error}", file=sys.stderr)
