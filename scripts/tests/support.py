@@ -14,14 +14,14 @@ def clean_env(**extra):
     return env
 
 
-def run(args, cwd, **extra_env):
+def run(args, cwd, check=False, **extra_env):
     return subprocess.run(
         [str(a) for a in args],
         cwd=cwd,
         env=clean_env(**extra_env),
         capture_output=True,
         text=True,
-        check=False,
+        check=check,
     )
 
 

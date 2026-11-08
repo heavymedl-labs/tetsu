@@ -88,9 +88,15 @@ base="origin/main"
 if [[ "${1:-}" == "--base" ]]; then
   base="$2"
 fi
-# cargo-mutants reads only plain diffs with a/ and b/ paths, so override every setting that changes them.
-git diff --no-ext-diff --no-textconv --no-color --src-prefix=a/ --dst-prefix=b/ \
-  "$(git merge-base "$base" HEAD)" -- crates >"$work/rust.diff"
+# cargo-mutants reads only plain text diffs with a/ and b/ paths and every changed line, so override each
+# setting that changes them. It mutates the files on disk, so the diff compares them with the base.
+plain=(--text --no-ext-diff --no-textconv --no-color --no-renames --src-prefix=a/ --dst-prefix=b/)
+merge="$(git merge-base "$base" HEAD)"
+git diff "${plain[@]}" "$merge" -- crates >"$work/rust.diff"
 if [[ -s "$work/rust.diff" ]]; then
   cargo mutants --in-diff "$work/rust.diff"
+elif ! git diff --quiet "${plain[@]}" "$merge" HEAD -- crates; then
+  echo "error: commits since $base change crates/, but the files on disk undo that, so there is nothing to" >&2
+  echo "mutate. Commit or restore those files first." >&2
+  exit 1
 fi
