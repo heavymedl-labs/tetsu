@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-06
+- Branch coverage exception superseded by [ADR-0020](0020-branch-coverage.md)
 
 ## Context
 

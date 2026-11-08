@@ -25,7 +25,7 @@ number, and add a row below. Never renumber.
 | [0017](0017-format-and-lint.md) | Format and lint | Adding a formatter, linter, or language, or changing a hook | Accepted |
 | [0018](0018-demo-businesses-as-data.md) | Demo businesses as data | Adding a demo, seeding, or changing the seed file format | Accepted |
 | [0019](0019-seed-format-versions.md) | Seed format versions | Changing the seed file format | Accepted |
-| [0020](0020-branch-coverage.md) | Branch coverage | Setting coverage limits, or moving a crate to Tier 1 | Proposed |
+| [0020](0020-branch-coverage.md) | Branch coverage | Setting coverage limits, or moving a crate to Tier 1 | Accepted |
 | [0021](0021-module-public-surface.md) | Module public surface | Deciding what a module exports | Proposed |
 | [0022](0022-benchmark-image-tag.md) | Benchmark image tag | Changing how the benchmark image is built or tagged | Proposed |
 
@@ -54,7 +54,6 @@ option for most of them.
 - [Dependency checks, secrets, and a security target](https://github.com/heavymedl-labs/tetsu/issues/31)
 - [Landing page framework and host](https://github.com/heavymedl-labs/tetsu/issues/32)
 - [Load test tools, latency budgets, and memory measurement](https://github.com/heavymedl-labs/tetsu/issues/37)
-- [Branch coverage for Tier 1 code](https://github.com/heavymedl-labs/tetsu/issues/51)
 - [What a module's public surface may include](https://github.com/heavymedl-labs/tetsu/issues/52)
 
 ## Finding sources

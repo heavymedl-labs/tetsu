@@ -1,6 +1,6 @@
 # 0020. Branch coverage
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-08
 
 ## Context
@@ -36,8 +36,8 @@ takes the other branch. Mutation testing catches some of these, not all.
 - **If branch coverage leaves nightly,** the check falls back to regions plus mutation testing, the first
   alternative below, through a superseding ADR. The pinned date means a removal cannot break the check until
   the date moves.
-- **On acceptance,** E3 leaves CONSTRAINTS.md, and the E3 lines in ADR-0015 and ADR-0016 are marked superseded
-  by this ADR.
+- **E3 leaves CONSTRAINTS.md** when the branch check runs, and the E3 lines in ADR-0015 and ADR-0016 are
+  marked superseded by this ADR.
 
 ## Alternatives considered
 
