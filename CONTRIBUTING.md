@@ -84,11 +84,12 @@ sets its status to Todo, and to Done when it closes. Keep the rest true:
 - Every issue needs a milestone, a tier, and a priority. `scripts/file_issue.py`
   files one with all three in one step; set them by hand on an issue filed any
   other way, such as from a form or as a sub-issue.
-- The **Roadmap** view groups work by status and sorts it by priority, so set
-  priority rather than moving items by hand.
-- **The next task** is the first item in the Todo group with priority Now that
-  nothing blocks. Keep Now to the few items actually next, and move the rest to
-  Next.
+- The **Roadmap** view groups work by status and sorts it by priority. Within a
+  priority, items keep their board position, so the Todo group reads top to
+  bottom in the order the work happens: each blocker above what it blocks, and a
+  parent issue below its sub-issues. Place a new item where it belongs.
+- **The next task** is the first item in the Todo group that nothing blocks.
+  Keep Now to the few items actually next, and move the rest to Next.
 - When an issue waits on another, including a decision an `adr` issue makes,
   link it with GitHub's "blocked by" relationship, so the wait shows on both
   issues and clears when the blocker closes.
