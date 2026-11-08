@@ -83,8 +83,10 @@ It needs the Node version in `.nvmrc`, uv, rustup, `scripts/install-tools.sh` ru
 and again when it says so, and a test Postgres used by one run at a time, since each run
 drops every test database when it ends. It uses the address in `.cargo/config.toml`
 unless `TEST_DATABASE_URL` names another. `scripts/check.sh --fast` runs only formatters
-and linters, as the pre-commit hook does. CI runs the same script, and also checks links
-and lints workflows.
+and linters, as the pre-commit hook does. CI runs the same script on demand and on pull
+requests, and also builds the image, checks links, and lints workflows
+([ADR-0023](docs/adr/0023-ci-on-demand.md)). Start a run with `gh workflow run CI` after
+a batch of pushes, and before ending a session that pushed code.
 
 ## Writing
 

@@ -1,16 +1,18 @@
 name: CI
 
+# On demand and on pull requests, not on every push: the pre-push hook runs the same checks first, and a manual
+# run checks the whole batch since the last successful one (ADR-0023).
 on:
   pull_request:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
+  # To find the commit the last successful run checked.
+  actions: read
 
 concurrency:
-  # A separate group per commit on main, because its run is the only scan of its commits.
-  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -58,33 +60,35 @@ jobs:
             -c "SELECT pg_reload_conf()"
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - run: scripts/install-tools.sh
+      # A pull request checks against its base. A manual run checks every change since the commit the last
+      # successful run checked, or since the parent commit when there is none.
+      - id: base
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          base="$PR_BASE"
+          if [[ -z "$base" ]]; then
+            base="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --status success \
+              --limit 1 --json headSha --jq '.[0].headSha // empty')"
+          fi
+          echo "sha=${base:-$(git rev-parse HEAD^)}" >>"$GITHUB_OUTPUT"
       # After a force push the old head is on no branch, so fetch it by its SHA.
       - run: |
           git fetch --quiet origin "$BASE" || true
           scripts/check.sh --base "$BASE"
         env:
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE: ${{ steps.base.outputs.sha }}
 
-  image:
-    name: Image
+  # One job, since GitHub bills each job rounded up to a minute and these are short (ADR-0023).
+  rest:
+    name: Image, harness, links, and workflows
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: docker build -t tetsu:ci .
       - run: docker run --rm tetsu:ci
-
-  benchmarks:
-    name: Benchmark harness compiles
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: cargo check --locked -p tetsu-bench
-
-  links:
-    name: Link check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: All links outside research
         uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
@@ -96,10 +100,4 @@ jobs:
         with:
           args: --no-progress --include-fragments --offline "docs/research/**/*.md"
           fail: true
-
-  workflows:
-    name: Workflow lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color
