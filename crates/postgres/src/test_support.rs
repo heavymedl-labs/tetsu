@@ -171,7 +171,7 @@ async fn create(options: &str) -> Result<TestDatabase, Error> {
 }
 
 /// The admin URL with its database swapped for `name`. Only a `postgres://` URL that names a database works,
-/// and a query after it is kept, slashes and all.
+/// and a query after it is kept, slashes and all, unless it overrides the test database.
 fn database_url(admin_url: &str, name: &str) -> Result<String, Error> {
     let unusable = "TEST_DATABASE_URL must be a postgres:// URL that names a database";
     let (address, query) = admin_url
@@ -181,10 +181,15 @@ fn database_url(admin_url: &str, name: &str) -> Result<String, Error> {
     if !base.contains("://") || database.is_empty() {
         return Err(unusable.into());
     }
-    Ok(match query {
+    let url = match query {
         Some(query) => format!("{base}/{name}?{query}"),
         None => format!("{base}/{name}"),
-    })
+    };
+    let config: tokio_postgres::Config = url.parse().map_err(|_| unusable)?;
+    if config.get_dbname() != Some(name) {
+        return Err("TEST_DATABASE_URL must not override the test database in its query".into());
+    }
+    Ok(url)
 }
 
 fn admin_url() -> Result<String, Error> {
@@ -259,8 +264,23 @@ mod tests {
             "postgres",
             "postgres://h:5432",
             "postgres://h:5432?application_name=a/b",
+            "postgres://h/postgres?unknown=value",
         ] {
             assert!(database_url(admin, "t_1_2_3").is_err(), "{admin}");
+        }
+    }
+
+    #[test]
+    fn query_parameters_cannot_override_the_test_database() {
+        for query in [
+            "dbname=postgres",
+            "db%6eame=postgres",
+            "application_name=test&dbname=postgres",
+            "dbname=postgres&application_name=test",
+            "dbname=",
+        ] {
+            let url = format!("postgres://localhost/postgres?{query}");
+            assert!(database_url(&url, "t_1_2_3").is_err(), "{query}");
         }
     }
 

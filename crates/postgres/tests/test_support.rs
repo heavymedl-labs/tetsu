@@ -49,7 +49,12 @@ use support::{admin, exists, swept};
 async fn a_database_is_dropped_when_the_test_is_done_with_it() {
     let database = fresh_database().await.expect("a test database");
     let name = database.name().to_string();
-    connect(&database).await.expect("is usable");
+    let client = connect(&database).await.expect("is usable");
+    let row = client
+        .query_one("SELECT current_database() AS name", &[])
+        .await
+        .expect("queries the connected database");
+    assert_eq!(row.try_get::<_, String>("name").expect("a name"), name);
     assert!(exists(&name).await);
     drop(database);
     assert!(!exists(&name).await);
