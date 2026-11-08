@@ -171,6 +171,8 @@ class Stubs(GuardCase):
             "except Exception: pass",
             "Err(_) => {}",
             "if let Err(_) = x {}",
+            "Err(_) => (),",
+            "Err(_error) => ()",
         ):
             with self.subTest(line=line):
                 write(self.repo / "src" / "a.rs", line + "\n")
@@ -199,6 +201,11 @@ class Tests(GuardCase):
             "@unittest.expectedFailure",
             "pytest.skip('x')",
             "it.only('x')",
+            "#[cfg_attr(not(ci), ignore)]",
+            '#[cfg_attr(windows, ignore = "flaky")]',
+            "#[cfg(any())]",
+            "#![cfg(any())]",
+            "#[cfg(any( ))]",
         ):
             with self.subTest(line=line):
                 write(self.repo / "tests" / "test_b.py", line + "\n")
@@ -308,6 +315,14 @@ class LintConfig(GuardCase):
             ".markdownlint-cli2.jsonc",
             "crates/a/.sqlfluff",
             "crates/a/.cargo/mutants.toml",
+            ".cargo/config.toml",
+            "crates/a/.cargo/config",
+            ".shellcheckrc",
+            ".jscpd.json",
+            "whitelizard.txt",
+            ".sqlfluffignore",
+            "setup.cfg",
+            "tox.ini",
         ):
             with self.subTest(path=path):
                 write(self.repo / path, "x = 1\n")
@@ -363,6 +378,32 @@ class CrateTier(GuardCase):
                 self.manifest.write_text(self.manifest.read_text().replace(dropped, ""))
                 self.assertFlags("lints-dropped")
                 self.git("checkout", "--", ".")
+
+    def test_flags_dropped_dotted_workspace_lints(self):
+        self.manifest.write_text(self.manifest.read_text() + "lints.workspace = true\n")
+        self.commit("add lints")
+        self.git("tag", "-f", "base")
+        self.manifest.write_text(self.manifest.read_text().replace("lints.workspace = true\n", ""))
+        self.assertFlags("lints-dropped")
+
+    def test_flags_a_new_crate_without_workspace_lints(self):
+        write(
+            self.repo / "crates" / "b" / "Cargo.toml",
+            '[package.metadata.tetsu]\nkind = "platform"\ntier = 2\n',
+        )
+        self.assertFlags("lints-dropped")
+
+    def test_a_new_crate_with_workspace_lints_passes(self):
+        for lints in (
+            "[lints]\nworkspace = true\n",
+            "lints.workspace = true\n",
+            "[lints]\nworkspace=true\n",
+            "[lints]\n# shared with the workspace\n\nworkspace = true\n",
+            "lints = { workspace = true }\n",
+        ):
+            with self.subTest(lints=lints):
+                write(self.repo / "crates" / "b" / "Cargo.toml", '[package]\nname = "b"\n\n' + lints)
+                self.assertEqual(self.guard().returncode, 0)
 
     def test_other_manifest_edits_pass(self):
         self.manifest.write_text(self.manifest.read_text() + "\n[dependencies]\n")

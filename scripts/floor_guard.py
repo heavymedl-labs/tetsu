@@ -50,10 +50,17 @@ ALLOW_LEVEL = re.compile(r"""["']allow["']""")
 # A tool reads the nearest of these first, so a new one anywhere can override the config in LINT_CONFIG.
 NEW_CONFIG = re.compile(
     r"(^|/)(\.?clippy\.toml|\.?ruff\.toml|pyproject\.toml|\.?rustfmt\.toml|\.markdownlint[^/]*|\.sqlfluff"
-    r"|\.squawk\.toml|\.editorconfig|\.cargo/mutants\.toml)$"
+    r"|\.sqlfluffignore|\.squawk\.toml|\.editorconfig|\.cargo/(mutants\.toml|config(\.toml)?)|\.shellcheckrc"
+    r"|\.jscpd[^/]*|whitelizard\.txt|setup\.cfg|tox\.ini)$"
 )
 CRATE_DECLARATION = re.compile(r"^(tier|kind)\s*=")
-CRATE_LINTS = re.compile(r"^\[lints\]|^workspace\s*=\s*true")
+CRATE_MANIFEST = re.compile(r"^crates/[^/]+/Cargo\.toml$")
+CRATE_LINTS = re.compile(r"^\[lints\]|^(lints\.)?workspace\s*=\s*true")
+WORKSPACE_LINTS = re.compile(
+    r"^\[lints\]\s*\n(\s*(#.*)?\n)*\s*workspace\s*=\s*true|^lints\.workspace\s*=\s*true"
+    r"|^lints\s*=\s*\{\s*workspace\s*=\s*true",
+    re.MULTILINE,
+)
 DIFF_FLAGS = (
     "--no-renames",
     "--no-color",
@@ -78,10 +85,10 @@ MARKDOWN_SUPPRESSION = re.compile(r"markdownlint-(disable|configure)")
 STUB = re.compile(
     r"\btodo!\(|\bunimplemented!\(|raise NotImplementedError|\bTODO\b|\bFIXME\b"
     r"|catch\s*(\([^)]*\))?\s*\{\s*\}|except\b.*:\s*pass\b"
-    r"|Err\(_\w*\)\s*(=>\s*\{\s*\}|=\s*\S+\s*\{\s*\})"
+    r"|Err\(_\w*\)\s*(=>\s*(\{\s*\}|\(\))|=\s*\S+\s*\{\s*\})"
 )
 SKIP = re.compile(
-    r"#\[ignore|\b(it|test|describe)\.(skip|todo|only)\b|\bxit\(|\bxdescribe\("
+    r"#\[ignore|cfg_attr\(.*\bignore\b|#!?\[cfg\(any\(\s*\)\)\]|\b(it|test|describe)\.(skip|todo|only)\b|\bxit\(|\bxdescribe\("
     r"|unittest\.skip|skipTest\(|@skip\w*\(|expectedFailure"
     r"|pytest\.mark\.(skip|xfail)|pytest\.skip\(|t\.Skip\("
 )
@@ -176,7 +183,7 @@ def scan_tests(removed, deleted):
 
 def scan_protected(added, removed, created):
     for path, text in removed:
-        crate_manifest = path.startswith("crates/") and path.endswith("Cargo.toml")
+        crate_manifest = CRATE_MANIFEST.match(path)
         if path in PROTECTED:
             yield "guard-weakened", path, text
         elif crate_manifest and CRATE_DECLARATION.match(text):
@@ -190,6 +197,8 @@ def scan_protected(added, removed, created):
     for path in created:
         if path not in PROTECTED and NEW_CONFIG.search(path):
             yield "config-added", path, "new config file"
+        if CRATE_MANIFEST.match(path) and not WORKSPACE_LINTS.search(Path(path).read_text(errors="replace")):
+            yield "lints-dropped", path, "new crate without the workspace lints"
 
 
 def exception_rows():
