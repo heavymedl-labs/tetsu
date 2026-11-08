@@ -223,15 +223,28 @@ async fn a_failure_after_the_tenant_row_leaves_nothing_behind() {
     );
 }
 
+/// A stale statement is cached on every connection that ran the query, so the first failure clears them all.
 #[tokio::test]
-async fn a_stale_cached_query_is_temporary_and_clears_the_cache() {
-    let (store, settings) = store_and_settings().await;
+async fn a_stale_cached_query_is_temporary_and_clears_every_connection() {
+    let settings = fresh_database().await.expect("a test database");
+    migrate(&settings, &[&Tenancy]).await.expect("migrates");
+    let pool = pool(&settings).expect("pool");
+    let store = postgres_store(pool.clone());
     create_tenant(&store, &tenant("sample-studio", &[]))
         .await
         .expect("creates");
-    resolve(&store, "/sample-studio")
-        .await
-        .expect("caches the query");
+    let find = include_str!("../sql/find_tenant_by_address.sql");
+    let (first, second) = (
+        pool.get().await.expect("a connection"),
+        pool.get().await.expect("another"),
+    );
+    for connection in [&first, &second] {
+        connection
+            .prepare_cached(find)
+            .await
+            .expect("caches the query");
+    }
+    drop((first, second));
     let client = tetsu_postgres::connect(&settings).await.expect("connects");
     client
         .batch_execute("ALTER TABLE tenancy.tenants ALTER COLUMN name TYPE varchar(200)")
@@ -241,10 +254,43 @@ async fn a_stale_cached_query_is_temporary_and_clears_the_cache() {
         resolve(&store, "/sample-studio").await,
         Err(Error::Unavailable(_))
     ));
+    let (first, second) = (
+        pool.get().await.expect("a connection"),
+        pool.get().await.expect("another"),
+    );
+    assert_eq!(
+        (first.statement_cache.size(), second.statement_cache.size()),
+        (0, 0),
+        "every connection's cache is cleared"
+    );
+    drop((first, second));
     assert!(
         resolve(&store, "/sample-studio").await.is_ok(),
         "the next request succeeds"
     );
+}
+
+/// The insert returns the tenant's id, so changing that column's type makes its cached statement stale.
+#[tokio::test]
+async fn a_stale_cached_insert_is_temporary_and_clears_the_cache() {
+    let settings = fresh_database().await.expect("a test database");
+    migrate(&settings, &[&Tenancy]).await.expect("migrates");
+    let pool = pool(&settings).expect("pool");
+    let store = postgres_store(pool.clone());
+    create_tenant(&store, &tenant("sample-studio", &[]))
+        .await
+        .expect("caches the insert");
+    let client = tetsu_postgres::connect(&settings).await.expect("connects");
+    client
+        .batch_execute("ALTER TABLE tenancy.tenants ALTER COLUMN id TYPE int")
+        .await
+        .expect("alters");
+    assert!(matches!(
+        create_tenant(&store, &tenant("another-studio", &[])).await,
+        Err(Error::Unavailable(_))
+    ));
+    let connection = pool.get().await.expect("a connection");
+    assert_eq!(connection.statement_cache.size(), 0, "the cache is cleared");
 }
 
 #[tokio::test]

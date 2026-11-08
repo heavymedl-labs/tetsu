@@ -40,7 +40,7 @@ fn plain(what: &str, raw: &str) -> Result<(), Error> {
         )));
     }
     let trimmed = raw.trim();
-    let shows = |c: char| !c.is_whitespace() && !joiner(c) && c != '\u{2800}';
+    let shows = |c: char| !c.is_whitespace() && !joiner(c) && !format(c) && c != '\u{2800}';
     if !trimmed.is_empty() && !trimmed.chars().any(shows) {
         return Err(Error::Invalid(format!(
             "{what} {raw:?} must hold a visible character"
@@ -73,6 +73,24 @@ fn hidden(c: char) -> bool {
             | '\u{E0000}'..='\u{E0FFF}'
     );
     (ignorable && !joiner(c)) || matches!(c, '\u{2028}' | '\u{2029}')
+}
+
+/// Format characters that are not default ignorable yet show nothing alone: number signs that mark the digits
+/// after them, the Syriac abbreviation mark, interlinear annotation marks, and Egyptian hieroglyph controls.
+/// Text may hold them, beside something visible.
+fn format(c: char) -> bool {
+    matches!(
+        c,
+        '\u{0600}'..='\u{0605}'
+            | '\u{06DD}'
+            | '\u{070F}'
+            | '\u{0890}'..='\u{0891}'
+            | '\u{08E2}'
+            | '\u{110BD}'
+            | '\u{110CD}'
+            | '\u{FFF9}'..='\u{FFFB}'
+            | '\u{13430}'..='\u{1343F}'
+    )
 }
 
 /// Zero-width joiners and variation selectors, Mongolian ones included, which shape the characters beside them.
@@ -427,23 +445,53 @@ mod tests {
             "\u{2800}",
             "\u{2800}\u{2800}",
         ] {
-            assert!(
-                matches!(
-                    NewTenant::new(slug.clone(), bad, theme(), vec![]),
-                    Err(Error::Invalid(_))
-                ),
-                "{bad:?}"
-            );
-            assert!(
-                matches!(Location::new(bad, "UTC"), Err(Error::Invalid(_))),
-                "{bad:?}"
-            );
-            assert!(
-                matches!(Location::new("Main", bad), Err(Error::Invalid(_))),
-                "{bad:?}"
-            );
+            refused_everywhere(bad);
         }
         assert!(NewTenant::new(slug, "Café Ünïcode", theme(), vec![]).is_ok());
+    }
+
+    /// A tenant name, a location name, and a time zone all refuse it.
+    fn refused_everywhere(bad: &str) {
+        let slug = Slug::parse("a").unwrap();
+        assert!(
+            matches!(
+                NewTenant::new(slug, bad, theme(), vec![]),
+                Err(Error::Invalid(_))
+            ),
+            "{bad:?}"
+        );
+        assert!(
+            matches!(Location::new(bad, "UTC"), Err(Error::Invalid(_))),
+            "{bad:?}"
+        );
+        assert!(
+            matches!(Location::new("Main", bad), Err(Error::Invalid(_))),
+            "{bad:?}"
+        );
+    }
+
+    #[test]
+    fn format_characters_alone_show_nothing() {
+        for bad in [
+            "\u{FFF9}",
+            "\u{FFF9}\u{FFFA}\u{FFFB}",
+            "\u{13430}",
+            "\u{13437}\u{13438}",
+            "\u{1343F}",
+            "\u{600}",
+            "\u{605}",
+            "\u{6DD}",
+            "\u{70F}",
+            "\u{890}\u{891}",
+            "\u{8E2}",
+            "\u{110BD}",
+            "\u{110CD}",
+        ] {
+            refused_everywhere(bad);
+        }
+        // A number sign before digits still shows the digits.
+        let slug = Slug::parse("a").unwrap();
+        assert!(NewTenant::new(slug, "\u{600}12", theme(), vec![]).is_ok());
     }
 
     #[test]
