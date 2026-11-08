@@ -11,8 +11,10 @@ use tokio_postgres_rustls::MakeRustlsConnect;
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
 const POOL_SIZE: usize = 8;
+/// How long a request waits for a free pooled connection before failing fast (ADR-0011).
 const POOL_WAIT: Duration = Duration::from_secs(2);
-const POOL_CREATE: Duration = Duration::from_secs(5);
+/// How long opening a connection may take, which also covers a server that accepts and then stalls.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const STATEMENT_TIMEOUT: &str = "-c statement_timeout=5000";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,6 +28,8 @@ pub enum Tls {
 pub struct Settings {
     url: String,
     tls: Tls,
+    connect_timeout: Duration,
+    pool_wait: Duration,
 }
 
 impl std::fmt::Debug for Settings {
@@ -54,7 +58,17 @@ impl Settings {
         Self {
             url: url.to_string(),
             tls,
+            connect_timeout: CONNECT_TIMEOUT,
+            pool_wait: POOL_WAIT,
         }
+    }
+
+    /// Replaces the connect timeout and the pool wait, so tests that wait them out need not take seconds.
+    #[must_use]
+    pub fn with_timeouts(mut self, connect: Duration, pool_wait: Duration) -> Self {
+        self.connect_timeout = connect;
+        self.pool_wait = pool_wait;
+        self
     }
 
     #[must_use]
@@ -167,8 +181,8 @@ pub fn pool(settings: &Settings) -> Result<Pool, Error> {
     let pool = Pool::builder(manager)
         .max_size(POOL_SIZE)
         .runtime(Runtime::Tokio1)
-        .wait_timeout(Some(POOL_WAIT))
-        .create_timeout(Some(POOL_CREATE))
+        .wait_timeout(Some(settings.pool_wait))
+        .create_timeout(Some(settings.connect_timeout))
         .build()?;
     Ok(pool)
 }
@@ -180,17 +194,17 @@ pub fn pool(settings: &Settings) -> Result<Pool, Error> {
 pub async fn connect(settings: &Settings) -> Result<Client, Error> {
     let config = settings.config()?;
     match settings.tls {
-        Tls::Required => connect_with(&config, rustls_connector()).await,
-        Tls::Disabled => connect_with(&config, NoTls).await,
+        Tls::Required => connect_with(&config, rustls_connector(), settings.connect_timeout).await,
+        Tls::Disabled => connect_with(&config, NoTls, settings.connect_timeout).await,
     }
 }
 
-async fn connect_with<T>(config: &Config, tls: T) -> Result<Client, Error>
+async fn connect_with<T>(config: &Config, tls: T, timeout: Duration) -> Result<Client, Error>
 where
     T: MakeTlsConnect<Socket>,
     T::Stream: Send + 'static,
 {
-    let (client, connection) = tokio::time::timeout(POOL_CREATE, config.connect(tls))
+    let (client, connection) = tokio::time::timeout(timeout, config.connect(tls))
         .await
         .map_err(|_| "Postgres did not answer in time")??;
     tokio::spawn(connection);
@@ -200,6 +214,18 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn production_timeouts_are_five_seconds_to_connect_and_two_to_wait() {
+        let settings = Settings::new("postgres://h/db");
+        assert_eq!(settings.connect_timeout, Duration::from_secs(5));
+        assert_eq!(settings.pool_wait, Duration::from_secs(2));
+        let short = settings.with_timeouts(Duration::from_millis(1), Duration::from_millis(2));
+        assert_eq!(
+            (short.connect_timeout, short.pool_wait),
+            (Duration::from_millis(1), Duration::from_millis(2))
+        );
+    }
 
     #[test]
     fn percent_escapes_decode_and_anything_else_stays() {

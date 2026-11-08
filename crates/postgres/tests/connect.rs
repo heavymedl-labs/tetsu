@@ -5,6 +5,10 @@ use std::time::{Duration, Instant};
 use tetsu_postgres::test_support::fresh_database;
 use tetsu_postgres::{Settings, Tls, pool};
 
+/// Real timeouts are seconds long, so tests that wait them out use these instead. The defaults are pinned in
+/// a unit test beside the code.
+const SHORT: Duration = Duration::from_millis(300);
+
 #[tokio::test]
 async fn tls_is_the_default_and_refuses_a_server_without_it() {
     let plain = fresh_database().await.expect("a test database");
@@ -76,14 +80,15 @@ async fn the_direct_connection_has_no_statement_timeout_for_migrations() {
 #[tokio::test]
 async fn a_full_pool_fails_fast() {
     let settings = fresh_database().await.expect("a test database");
-    let pool = pool(&settings).expect("pool");
+    let short = (*settings).clone().with_timeouts(SHORT, SHORT);
+    let pool = pool(&short).expect("pool");
     let mut held = Vec::new();
     for _ in 0..pool.status().max_size {
         held.push(pool.get().await.expect("connects"));
     }
     let started = Instant::now();
     assert!(pool.get().await.is_err());
-    assert!(started.elapsed() < Duration::from_secs(3));
+    assert!(started.elapsed() < Duration::from_secs(2));
 }
 
 #[tokio::test]
@@ -93,10 +98,11 @@ async fn a_server_that_never_answers_times_out() {
         .expect("binds");
     let port = listener.local_addr().expect("address").port();
     let settings =
-        Settings::from_values(&format!("postgres://x@127.0.0.1:{port}/x"), Some("disable"));
+        Settings::from_values(&format!("postgres://x@127.0.0.1:{port}/x"), Some("disable"))
+            .with_timeouts(SHORT, SHORT);
     let started = Instant::now();
     assert!(pool(&settings).expect("pool").get().await.is_err());
-    assert!(started.elapsed() < Duration::from_secs(6));
+    assert!(started.elapsed() < Duration::from_secs(2));
     drop(listener);
 }
 
@@ -107,10 +113,11 @@ async fn a_direct_connection_to_a_silent_server_times_out() {
         .expect("binds");
     let port = listener.local_addr().expect("address").port();
     let settings =
-        Settings::from_values(&format!("postgres://x@127.0.0.1:{port}/x"), Some("disable"));
+        Settings::from_values(&format!("postgres://x@127.0.0.1:{port}/x"), Some("disable"))
+            .with_timeouts(SHORT, SHORT);
     let started = Instant::now();
     assert!(tetsu_postgres::connect(&settings).await.is_err());
-    assert!(started.elapsed() < Duration::from_secs(8));
+    assert!(started.elapsed() < Duration::from_secs(2));
     drop(listener);
 }
 

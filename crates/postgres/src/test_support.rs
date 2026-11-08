@@ -11,8 +11,8 @@ use crate::connection::{Error, Settings, connect};
 static NEXT: AtomicU32 = AtomicU32::new(0);
 /// Held while sweeping, so test binaries running at once do not each repeat the same drops.
 pub const SWEEP_LOCK: i64 = 7_243_002;
-/// Older than any test run, so a database this old belongs to a run that is gone.
-const STALE: Duration = Duration::from_hours(1);
+/// Far longer than any one test holds its database, which is seconds, so one this old belongs to a run that is gone.
+const STALE: Duration = Duration::from_mins(10);
 
 /// A database for one test. It derefs to its [`Settings`], and is dropped with it.
 pub struct TestDatabase {
@@ -71,10 +71,12 @@ pub async fn fresh_database() -> Result<TestDatabase, Error> {
 /// # Errors
 /// As [`fresh_database`], or if the encoding is unknown.
 pub async fn fresh_database_encoded(encoding: &str) -> Result<TestDatabase, Error> {
-    if !encoding
-        .bytes()
-        .all(|b| b.is_ascii_alphanumeric() || b == b'_')
-    {
+    // Written without a character literal, which lizard misreads here and then counts the rest of the file as
+    // part of this function.
+    let plain_name = encoding
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || "_".contains(c));
+    if !plain_name {
         return Err(format!("encoding {encoding:?} must be a plain name").into());
     }
     create(&format!(
@@ -83,13 +85,26 @@ pub async fn fresh_database_encoded(encoding: &str) -> Result<TestDatabase, Erro
     .await
 }
 
-/// Drops every test database older than an hour, which no running test can still be using. If another sweep
+/// Drops every test database over ten minutes old, which no running test can still be using. If another sweep
 /// is already running, this one leaves the work to it. A database that will not drop is reported and skipped,
 /// so it never blocks the tests that follow.
 ///
 /// # Errors
 /// Fails if `TEST_DATABASE_URL` is unset or Postgres cannot be reached.
 pub async fn sweep_stale_databases() -> Result<(), Error> {
+    sweep(STALE).await
+}
+
+/// Drops every test database, however new. Only for when no tests are running, such as at the end of
+/// `scripts/check.sh`, since it takes databases from under any test still using them.
+///
+/// # Errors
+/// Fails if `TEST_DATABASE_URL` is unset or Postgres cannot be reached.
+pub async fn drop_all_test_databases() -> Result<(), Error> {
+    sweep(Duration::ZERO).await
+}
+
+async fn sweep(older_than: Duration) -> Result<(), Error> {
     let admin = connect(&Settings::from_values(&admin_url()?, Some("disable"))).await?;
     let taken: bool = admin
         .query_one("SELECT pg_try_advisory_lock($1) AS taken", &[&SWEEP_LOCK])
@@ -99,15 +114,14 @@ pub async fn sweep_stale_databases() -> Result<(), Error> {
         return Ok(());
     }
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
-    // Every name is checked in Rust, since only a test database's name parses as a creation time.
-    for row in admin.query("SELECT datname FROM pg_database", &[]).await? {
-        // A name that is not UTF-8, such as one made in a LATIN1 database, is never one of ours, so skip it.
-        let Ok(name) = row.try_get::<_, String>("datname") else {
-            continue;
-        };
-        if stale(&name, now)
-            && let Err(error) = admin.batch_execute(&drop_statement(&name)).await
-        {
+    let rows = admin.query("SELECT datname FROM pg_database", &[]).await?;
+    // Every name is checked in Rust, since only a test database's name parses as a creation time. A name that
+    // is not UTF-8, such as one made in a LATIN1 database, is never one of ours, so it is skipped.
+    let names = rows
+        .iter()
+        .filter_map(|row| row.try_get::<_, String>("datname").ok());
+    for name in names.filter(|name| stale(name, now, older_than)) {
+        if let Err(error) = admin.batch_execute(&drop_statement(&name)).await {
             eprintln!("warning: stale test database {name} was not dropped: {error}");
         }
     }
@@ -115,9 +129,9 @@ pub async fn sweep_stale_databases() -> Result<(), Error> {
     Ok(())
 }
 
-/// Whether a name is exactly `t_<seconds>_<process>_<counter>`, as [`create`] makes them, and was created more
-/// than an hour before `now`. Any other name, such as `t_2024_backup`, is never a test database.
-fn stale(name: &str, now: u64) -> bool {
+/// Whether a name is exactly `t_<seconds>_<process>_<counter>`, as [`create`] makes them, and was created at
+/// least `older_than` before `now`. Any other name, such as `t_2024_backup`, is never a test database.
+fn stale(name: &str, now: u64, older_than: Duration) -> bool {
     let parts: Vec<&str> = name
         .strip_prefix("t_")
         .unwrap_or_default()
@@ -130,7 +144,7 @@ fn stale(name: &str, now: u64) -> bool {
     let created = parts
         .first()
         .and_then(|seconds| seconds.parse::<u64>().ok());
-    well_formed && created.is_some_and(|at| now.saturating_sub(at) > STALE.as_secs())
+    well_formed && created.is_some_and(|at| at <= now && now - at >= older_than.as_secs())
 }
 
 async fn create(options: &str) -> Result<TestDatabase, Error> {
@@ -197,12 +211,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_test_database_is_stale_only_after_an_hour() {
+    fn a_test_database_is_stale_after_ten_minutes_and_all_go_at_the_end() {
         let now = 1_800_000_000;
-        assert!(!stale(&format!("t_{now}_1_0"), now));
-        assert!(!stale(&format!("t_{}_1_0", now - 3600), now));
-        assert!(stale(&format!("t_{}_1_0", now - 3601), now));
-        assert!(!stale(&format!("t_{}_1_0", now + 60), now));
+        assert!(!stale(&format!("t_{now}_1_0"), now, STALE));
+        assert!(!stale(&format!("t_{}_1_0", now - 599), now, STALE));
+        assert!(stale(&format!("t_{}_1_0", now - 600), now, STALE));
+        assert!(!stale(&format!("t_{}_1_0", now + 60), now, STALE));
+        assert!(stale(&format!("t_{now}_1_0"), now, Duration::ZERO));
+        assert!(!stale(&format!("t_{}_1_0", now + 60), now, Duration::ZERO));
     }
 
     #[test]
@@ -224,7 +240,7 @@ mod tests {
             "t_1_2_",
             "t_7_x y",
         ] {
-            assert!(!stale(name, u64::MAX), "{name}");
+            assert!(!stale(name, u64::MAX, Duration::ZERO), "{name}");
         }
     }
 
