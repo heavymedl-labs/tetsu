@@ -281,6 +281,52 @@ async fn a_login_refused_by_the_server_is_not_worth_retrying() {
     ));
 }
 
+/// Too many connections reaches the store through the pool, as a login refusal Postgres sends with code 53300.
+/// Superusers skip a database's connection limit, so a role with none to spare stands in.
+#[tokio::test]
+async fn a_server_out_of_connections_is_temporary_through_the_pool() {
+    let (_store, settings) = store_and_settings().await;
+    let role = format!("t_full_{}", std::process::id());
+    let admin = tetsu_postgres::connect(&settings).await.expect("connects");
+    admin
+        .batch_execute(&format!("CREATE ROLE {role} LOGIN CONNECTION LIMIT 0"))
+        .await
+        .expect("creates the role");
+    let url = settings.url().replacen("postgres@", &format!("{role}@"), 1);
+    let full = postgres_store(
+        pool(&tetsu_postgres::Settings::from_values(
+            &url,
+            Some("disable"),
+        ))
+        .expect("pool"),
+    );
+    let result = resolve(&full, "/sample-studio").await;
+    admin
+        .batch_execute(&format!("DROP ROLE {role}"))
+        .await
+        .expect("drops the role");
+    assert!(matches!(result, Err(Error::Unavailable(_))), "{result:?}");
+}
+
+#[tokio::test]
+async fn an_address_padded_with_other_whitespace_is_not_found() {
+    let (store, _database) = store_and_settings().await;
+    create_tenant(&store, &tenant("sample-studio", &[]))
+        .await
+        .expect("creates");
+    for address in [
+        "/sample-studio\u{2028}",
+        "\u{3000}/sample-studio",
+        "/sample-studio\u{a0}",
+    ] {
+        assert_eq!(
+            resolve(&store, address).await,
+            Err(Error::NotFound),
+            "{address:?}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn an_address_with_a_control_character_is_not_found() {
     let (store, _database) = store_and_settings().await;

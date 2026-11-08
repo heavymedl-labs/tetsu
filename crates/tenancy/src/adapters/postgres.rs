@@ -43,7 +43,7 @@ fn database(error: &tokio_postgres::Error) -> Error {
         Error::SlugTaken
     } else if is_stale(error) {
         Error::Unavailable(format!("{STALE}{message}"))
-    } else if error.is_closed() || is_io(error) {
+    } else if error.is_closed() || is_io(error) || is_server_unavailable(error) {
         Error::Unavailable(message)
     } else {
         Error::Storage(message)
@@ -75,6 +75,20 @@ fn message(error: &tokio_postgres::Error) -> String {
             .map(ToString::to_string)
             .collect();
     causes.join(": ")
+}
+
+/// The server ending the session for a restart, crash, or failover, still starting up, or out of connections.
+/// A query running at that moment gets one of these, not a closed connection.
+fn is_server_unavailable(error: &tokio_postgres::Error) -> bool {
+    error.code().is_some_and(|code| {
+        [
+            SqlState::ADMIN_SHUTDOWN,
+            SqlState::CRASH_SHUTDOWN,
+            SqlState::CANNOT_CONNECT_NOW,
+            SqlState::TOO_MANY_CONNECTIONS,
+        ]
+        .contains(code)
+    })
 }
 
 fn is_stale(error: &tokio_postgres::Error) -> bool {
@@ -239,9 +253,13 @@ fn text(row: &Row, column: &str) -> Result<String, Error> {
 mod tests {
     use super::*;
 
-    /// The pool replaces a dead connection, so this case is a race in practice: test the sorting directly.
-    #[tokio::test]
-    async fn a_connection_the_server_closed_is_temporary() {
+    /// A connection, a second one to end it with, and the first one's server process id.
+    async fn client_and_its_killer() -> (
+        tetsu_postgres::test_support::TestDatabase,
+        tokio_postgres::Client,
+        tokio_postgres::Client,
+        i32,
+    ) {
         let settings = tetsu_postgres::test_support::fresh_database()
             .await
             .expect("a test database");
@@ -251,7 +269,14 @@ mod tests {
             .query_one("SELECT pg_backend_pid() AS pid", &[])
             .await
             .expect("finds its pid");
-        let pid: i32 = row.try_get("pid").expect("maps");
+        let pid = row.try_get("pid").expect("maps");
+        (settings, client, admin, pid)
+    }
+
+    /// The pool replaces a dead connection, so this case is a race in practice: test the sorting directly.
+    #[tokio::test]
+    async fn a_connection_the_server_closed_is_temporary() {
+        let (_database, client, admin, pid) = client_and_its_killer().await;
         admin
             .execute("SELECT pg_terminate_backend($1)", &[&pid])
             .await
@@ -261,6 +286,26 @@ mod tests {
             .query_one("SELECT 1", &[])
             .await
             .expect_err("the connection is closed");
+        assert!(matches!(database(&error), Error::Unavailable(_)), "{error}");
+    }
+
+    /// A restart or failover ends sessions with a FATAL error that reaches a query still running, not a closed
+    /// connection, so it must be sorted as temporary too.
+    #[tokio::test]
+    async fn a_query_the_server_cuts_off_is_temporary() {
+        let (_database, client, admin, pid) = client_and_its_killer().await;
+        let running =
+            tokio::spawn(async move { client.query_one("SELECT pg_sleep(10)", &[]).await });
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        admin
+            .execute("SELECT pg_terminate_backend($1)", &[&pid])
+            .await
+            .expect("ends the session");
+        let error = running
+            .await
+            .expect("the query task ends")
+            .expect_err("the query is cut off");
+        assert_eq!(error.code(), Some(&SqlState::ADMIN_SHUTDOWN), "{error}");
         assert!(matches!(database(&error), Error::Unavailable(_)), "{error}");
     }
 

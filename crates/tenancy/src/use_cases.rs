@@ -20,7 +20,10 @@ pub async fn resolve(store: &impl TenantStore, address: &str) -> Result<Tenant, 
     if address.chars().any(char::is_control) {
         return Err(Error::NotFound);
     }
-    let address = address.trim().to_ascii_lowercase();
+    // Only ASCII whitespace, which no address holds: other whitespace, such as U+2028, makes it unknown.
+    let address = address
+        .trim_matches(|c: char| c.is_ascii_whitespace())
+        .to_ascii_lowercase();
     store
         .find_by_address(&address)
         .await?
