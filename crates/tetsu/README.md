@@ -26,6 +26,10 @@ Exit codes are 0 for success, 1 for a failure, and 2 for a command or arguments 
 | `DATABASE_URL` | `migrate`, `seed` | The Postgres to use, which must store text as UTF8. Required, and may not set `sslmode` |
 | `DATABASE_TLS` | `migrate`, `seed` | `require` (the default) or `disable`, for local tests only ([ADR-0013](../../docs/adr/0013-postgres-tls.md)) |
 
+TLS trusts only public certificate authorities until a custom authority file arrives with the first deploy
+([#19](https://github.com/heavymedl-labs/tetsu/issues/19)), so a Postgres with a privately signed certificate
+cannot be reached over TLS yet.
+
 Errors never print the database URL or its password, and a URL with an unencoded `@` in its password is refused,
 so write it as `%40`. Messages from Postgres may name the user or the database.
 
