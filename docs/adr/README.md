@@ -55,6 +55,7 @@ option for most of them.
 - [Dependency checks, secrets, and a security target](https://github.com/heavymedl-labs/tetsu/issues/31)
 - [Landing page framework and host](https://github.com/heavymedl-labs/tetsu/issues/32)
 - [Load test tools, latency budgets, and memory measurement](https://github.com/heavymedl-labs/tetsu/issues/37)
+- [The benchmark image tag rule, proposed as ADR-0022](https://github.com/heavymedl-labs/tetsu/issues/75)
 
 ## Finding sources
 
