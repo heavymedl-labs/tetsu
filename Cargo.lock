@@ -3417,6 +3417,9 @@ name = "tetsu"
 version = "0.1.0"
 dependencies = [
  "tetsu-kernel",
+ "tetsu-postgres",
+ "tetsu-tenancy",
+ "tokio",
 ]
 
 [[package]]
