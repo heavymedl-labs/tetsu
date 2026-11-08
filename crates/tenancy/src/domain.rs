@@ -27,6 +27,16 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+/// Refuses control characters, such as a NUL that Postgres cannot store or a line break in a name.
+fn plain(what: &str, value: &str) -> Result<(), Error> {
+    if value.chars().any(char::is_control) {
+        return Err(Error::Invalid(format!(
+            "{what} {value:?} must not hold control characters"
+        )));
+    }
+    Ok(())
+}
+
 /// Assigned by storage, never by a caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TenantId(i64);
@@ -110,7 +120,7 @@ pub struct Location {
 
 impl Location {
     /// # Errors
-    /// Fails on an empty name or time zone.
+    /// Fails on an empty name or time zone, or control characters in either.
     pub fn new(name: &str, time_zone: &str) -> Result<Self, Error> {
         let (name, time_zone) = (name.trim(), time_zone.trim());
         if name.is_empty() || time_zone.is_empty() {
@@ -118,6 +128,8 @@ impl Location {
                 "a location needs a name and a time zone".into(),
             ));
         }
+        plain("location name", name)?;
+        plain("time zone", time_zone)?;
         Ok(Self {
             name: name.to_string(),
             time_zone: time_zone.to_string(),
@@ -146,7 +158,7 @@ pub struct NewTenant {
 
 impl NewTenant {
     /// # Errors
-    /// Fails on an empty or overlong name.
+    /// Fails on an empty or overlong name, or control characters in it.
     pub fn new(
         slug: Slug,
         name: &str,
@@ -159,6 +171,7 @@ impl NewTenant {
                 "a name must be 1 to {MAX_NAME} characters"
             )));
         }
+        plain("name", name)?;
         Ok(Self {
             slug,
             name: name.to_string(),
@@ -315,6 +328,29 @@ mod tests {
             (location.name(), location.time_zone()),
             ("Denver", "America/Denver")
         );
+    }
+
+    #[test]
+    fn text_refuses_control_characters_storage_could_not_keep() {
+        let slug = Slug::parse("a").unwrap();
+        for bad in ["Bad\u{0}Name", "Two\nLines", "Tab\there"] {
+            assert!(
+                matches!(
+                    NewTenant::new(slug.clone(), bad, theme(), vec![]),
+                    Err(Error::Invalid(_))
+                ),
+                "{bad:?}"
+            );
+            assert!(
+                matches!(Location::new(bad, "UTC"), Err(Error::Invalid(_))),
+                "{bad:?}"
+            );
+            assert!(
+                matches!(Location::new("Main", bad), Err(Error::Invalid(_))),
+                "{bad:?}"
+            );
+        }
+        assert!(NewTenant::new(slug, "Café Ünïcode", theme(), vec![]).is_ok());
     }
 
     #[test]
