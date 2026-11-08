@@ -1,0 +1,18 @@
+# A neutral tenant for Tetsu's own tests. Demo businesses live in tetsu-demos (ADR-0018).
+format = 1
+
+[tenant]
+slug = "sample-studio"
+name = "Sample Studio"
+
+[tenant.theme]
+primary = "#3A4250"
+accent = "#E5622B"
+
+[[tenant.locations]]
+name = "Main Street"
+time_zone = "America/Denver"
+
+[[tenant.locations]]
+name = "Riverside"
+time_zone = "America/Phoenix"

@@ -13,12 +13,15 @@ publish = false
 [workspace.dependencies]
 deadpool-postgres = "0.14"
 rustls = "0.23.46"
+# Seed files only; derives stay on file types in crates/tetsu (ADR-0018).
+serde = { version = "1.0.229", features = ["derive"] }
 tetsu-kernel = { path = "crates/kernel" }
 tetsu-postgres = { path = "crates/postgres" }
 tetsu-tenancy = { path = "crates/tenancy" }
 tokio = { version = "1.54", features = ["macros", "net", "rt-multi-thread", "time"] }
 tokio-postgres = "0.7"
 tokio-postgres-rustls = "0.14"
+toml = { version = "1.2.1", default-features = false, features = ["parse", "serde", "std"] }
 webpki-roots = "1"
 
 [workspace.lints.rust]
