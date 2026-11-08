@@ -64,8 +64,10 @@ if [[ "$fast" == true ]]; then
 fi
 
 if [[ -z "${TEST_DATABASE_URL:-}" ]]; then
+  # No password, so the port is for this machine only. The data is throwaway, so it stays in memory.
   echo "error: set TEST_DATABASE_URL to a Postgres the tests may create databases on, for example:" >&2
-  echo "  docker run -d --name tetsu-test-pg -p 54329:5432 -e POSTGRES_HOST_AUTH_METHOD=trust postgres:18.6 \\" >&2
+  echo "  docker run -d --name tetsu-test-pg --restart unless-stopped -p 127.0.0.1:54329:5432 \\" >&2
+  echo "    -e POSTGRES_HOST_AUTH_METHOD=trust --tmpfs /var/lib/postgresql postgres:18.6 \\" >&2
   echo "    -c fsync=off -c synchronous_commit=off -c full_page_writes=off" >&2
   echo "  export TEST_DATABASE_URL=postgres://postgres@localhost:54329/postgres" >&2
   exit 1

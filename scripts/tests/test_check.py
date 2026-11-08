@@ -217,6 +217,9 @@ class CheckScript(unittest.TestCase):
         result = self.check()
         for setting in ("fsync=off", "synchronous_commit=off", "full_page_writes=off"):
             self.assertIn(setting, result.stderr)
+        # No password, so only this machine may connect; and nothing worth keeping, so nothing goes to disk.
+        self.assertIn("-p 127.0.0.1:54329:5432", result.stderr)
+        self.assertIn("--tmpfs /var/lib/postgresql", result.stderr)
 
     def test_stops_on_a_failing_stage(self):
         self.stub("cargo", "exit 1")
