@@ -1,6 +1,6 @@
 # 0019. Seed format versions
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-07
 - Supersedes the versioning rule in [ADR-0018](0018-demo-businesses-as-data.md)
 

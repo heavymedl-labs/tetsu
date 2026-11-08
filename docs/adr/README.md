@@ -24,7 +24,7 @@ number, and add a row below. Never renumber.
 | [0016](0016-crate-layout-and-coverage.md) | Crate layout and coverage by tier | Adding a crate or module, or setting its tier | Accepted |
 | [0017](0017-format-and-lint.md) | Format and lint | Adding a formatter, linter, or language, or changing a hook | Accepted |
 | [0018](0018-demo-businesses-as-data.md) | Demo businesses as data | Adding a demo, seeding, or changing the seed file format | Accepted |
-| [0019](0019-seed-format-versions.md) | Seed format versions | Changing the seed file format | Proposed |
+| [0019](0019-seed-format-versions.md) | Seed format versions | Changing the seed file format | Accepted |
 | [0020](0020-branch-coverage.md) | Branch coverage | Setting coverage limits, or moving a crate to Tier 1 | Proposed |
 | [0021](0021-module-public-surface.md) | Module public surface | Deciding what a module exports | Proposed |
 | [0022](0022-benchmark-image-tag.md) | Benchmark image tag | Changing how the benchmark image is built or tagged | Proposed |
