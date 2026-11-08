@@ -12,7 +12,8 @@ names no business.
 | `tetsu seed <file or folder>` | Creates the tenants in seed files, and skips any whose slug exists |
 | `tetsu seed --check <file or folder>` | Checks seed files without a database |
 
-A folder means its regular `.toml` files at the top level, in name order, leaving out hidden files. Seeding
+A folder means its `.toml` files at the top level, in name order, leaving out hidden files. One that is not a
+regular file fails the run. Seeding
 checks every file before it writes anything, and writes only through public use cases. A database failure partway leaves earlier tenants in place,
 and a rerun skips them.
 

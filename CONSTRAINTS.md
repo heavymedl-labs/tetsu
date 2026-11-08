@@ -42,7 +42,9 @@ is in [AGENTS.md](AGENTS.md#checks), and docs also get the
 
 ## Measured, not yet enforced
 
-Nothing yet. Add a metric here with today's value and its direction once code exists.
+| Metric | Today (2026-11-08) | Direction |
+| --- | --- | --- |
+| Region coverage per crate, which ADR-0005 says never goes down but ADR-0016's fixed limits let fall to the limit | kernel 100%, postgres 94.4%, tenancy 93.0%, tetsu 96.6% | Up |
 
 ## Exceptions
 
