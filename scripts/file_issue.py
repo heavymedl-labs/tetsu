@@ -12,14 +12,18 @@ when closed.
 
 import argparse
 import json
+import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 OWNER = "heavymedl-labs"
 REPOSITORY = f"{OWNER}/tetsu"
 PROJECT = "1"
 TIERS = {"1": "1", "2": "2", "3": "3", "none": "None"}
+# How many times to look for an item auto-add made before giving up.
+LOOKS = 5
 PRIORITIES = {"now": "Now", "next": "Next", "later": "Later", "anytime": "Anytime"}
 
 
@@ -51,13 +55,16 @@ def board_item(url):
     except FileIssueError as error:
         if "already exists" not in str(error):
             raise
-    items = json.loads(
-        gh("project", "item-list", PROJECT, "--owner", OWNER, "--limit", "1000", "--format", "json")
-    )
-    match = next((i["id"] for i in items["items"] if (i.get("content") or {}).get("url") == url), None)
-    if match is None:
-        raise FileIssueError("the board says the issue is on it, but its item was not found")
-    return match
+    # GitHub can take a few seconds to list an item auto-add just made, so look again before giving up.
+    for attempt in range(LOOKS):
+        if attempt:
+            time.sleep(float(os.environ.get("FILE_ISSUE_RETRY_SECONDS", "2")))
+        listed = gh("project", "item-list", PROJECT, "--owner", OWNER, "--limit", "1000", "--format", "json")
+        items = json.loads(listed)["items"]
+        match = next((i["id"] for i in items if (i.get("content") or {}).get("url") == url), None)
+        if match is not None:
+            return match
+    raise FileIssueError("the board says the issue is on it, but its item was not found")
 
 
 def option_ids(fields, wanted):

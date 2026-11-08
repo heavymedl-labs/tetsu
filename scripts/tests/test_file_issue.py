@@ -3,6 +3,7 @@
 import json
 import stat
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -47,7 +48,11 @@ elif args[:2] == ["project", "item-list"]:
         {{"id": "REDACTED", "content": None}},
         {{"id": "AUTO", "content": {{"url": "https://github.com/o/r/issues/7"}}}},
     ]
-    if os.environ.get("GH_ALREADY") == "missing":
+    # GH_LAG hides the item from the first few lists, as GitHub does for a few seconds after auto-add.
+    lists = os.path.join(os.path.dirname(os.environ["GH_LOG"]), "lists")
+    seen = len(open(lists).read()) if os.path.exists(lists) else 0
+    open(lists, "a").write("x")
+    if os.environ.get("GH_ALREADY") == "missing" or seen < int(os.environ.get("GH_LAG") or 0):
         items = items[:1]
     print(json.dumps({{"items": items}}))
 elif args[:2] == ["project", "view"]:
@@ -69,7 +74,7 @@ class FileIssue(unittest.TestCase):
         self.body = self.dir / "body.md"
         self.body.write_text("### Goal\n\nSomething.\n")
 
-    def file(self, *args, fail="", already=""):
+    def file(self, *args, fail="", already="", lag=0, wait="0"):
         return run(
             ["python3", SCRIPT, *args],
             self.dir,
@@ -77,6 +82,8 @@ class FileIssue(unittest.TestCase):
             GH_LOG=str(self.log),
             GH_FAIL=fail,
             GH_ALREADY=already,
+            GH_LAG=str(lag),
+            FILE_ISSUE_RETRY_SECONDS=wait,
         )
 
     def calls(self):
@@ -144,11 +151,27 @@ class FileIssue(unittest.TestCase):
         for edit in edits:
             self.assertEqual(edit[edit.index("--id") + 1], "AUTO")
 
+    def test_an_auto_added_item_listed_late_still_gets_its_fields(self):
+        result = self.file("task", "T", self.body, "--tier", "2", "--priority", "now", already="1", lag=2)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(sum(c[:2] == ["project", "item-list"] for c in self.calls()), 3)
+        edits = [c for c in self.calls() if c[:2] == ["project", "item-edit"]]
+        self.assertEqual({e[e.index("--id") + 1] for e in edits}, {"AUTO"})
+
+    def test_it_waits_between_looks(self):
+        started = time.monotonic()
+        result = self.file(
+            "task", "T", self.body, "--tier", "2", "--priority", "now", already="1", lag=2, wait="0.3"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertGreaterEqual(time.monotonic() - started, 0.6, "two waits before the third look")
+
     def test_an_auto_added_item_that_cannot_be_found_names_the_filed_issue(self):
         result = self.file("task", "T", self.body, "--tier", "2", "--priority", "now", already="missing")
         self.assertEqual(result.returncode, 1)
         self.assertIn("filed https://github.com/o/r/issues/7", result.stderr)
         self.assertIn("its item was not found", result.stderr)
+        self.assertEqual(sum(c[:2] == ["project", "item-list"] for c in self.calls()), 5, "looked five times")
         self.assertFalse(any(c[:2] == ["project", "item-edit"] for c in self.calls()))
 
     def test_a_board_that_refuses_an_edit_names_the_filed_issue(self):
