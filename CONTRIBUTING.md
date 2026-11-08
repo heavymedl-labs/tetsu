@@ -86,6 +86,14 @@ sets its status to Todo, and to Done when it closes. Keep the rest true:
   other way, such as from a form or as a sub-issue.
 - The **Roadmap** view groups work by status and sorts it by priority, so set
   priority rather than moving items by hand.
+- **The next task** is the first item in the Todo group with priority Now that
+  nothing blocks. Keep Now to the few items actually next, and move the rest to
+  Next.
+- When an issue waits on another, including a decision an `adr` issue makes,
+  link it with GitHub's "blocked by" relationship, so the wait shows on both
+  issues and clears when the blocker closes.
+- File what a review finds as an issue with its own priority. Work on it at once
+  only when it blocks the current task or is a bug.
 - Post a status update (On track, At risk, or Off track) when a milestone's
   scope or risk changes, and at the end of a working session that pushed code
   or closed issues. Say what finished, what is next, any risk, and whether the CI run
