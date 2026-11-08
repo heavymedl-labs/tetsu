@@ -23,7 +23,7 @@ number, and add a row below. Never renumber.
 | [0015](0015-rust-checks.md) | Rust checks | Changing a Rust tool or limit | Accepted |
 | [0016](0016-crate-layout-and-coverage.md) | Crate layout and coverage by tier | Adding a crate or module, or setting its tier | Accepted |
 | [0017](0017-format-and-lint.md) | Format and lint | Adding a formatter, linter, or language, or changing a hook | Accepted |
-| [0018](0018-demo-businesses-as-data.md) | Demo businesses as data | Adding a demo, seeding, or changing the seed file format | Proposed |
+| [0018](0018-demo-businesses-as-data.md) | Demo businesses as data | Adding a demo, seeding, or changing the seed file format | Accepted |
 
 ## Open decisions
 
@@ -50,7 +50,6 @@ option for most of them.
 - [Dependency checks, secrets, and a security target](https://github.com/heavymedl-labs/tetsu/issues/31)
 - [Landing page framework and host](https://github.com/heavymedl-labs/tetsu/issues/32)
 - [Load test tools, latency budgets, and memory measurement](https://github.com/heavymedl-labs/tetsu/issues/37)
-- [Where demo businesses live](https://github.com/heavymedl-labs/tetsu/issues/39)
 
 ## Finding sources
 

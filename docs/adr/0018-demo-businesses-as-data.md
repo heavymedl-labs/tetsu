@@ -1,6 +1,6 @@
 # 0018. Demo businesses as data
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-07
 
 ## Context
