@@ -51,6 +51,29 @@ beyond each installing on our 1.99.1.
 asks for them. Stable measures lines and regions. Regions are finer than lines, but they are not branches,
 and we did not measure how far they differ.
 
+## Branch coverage on nightly, 2026-11-08
+
+Tried for [#51](https://github.com/heavymedl-labs/tetsu/issues/51) on the 2,489 lines in `crates/*/src` then, with
+`cargo +nightly-2026-11-01 llvm-cov --branch` (rustc 1.101.0-nightly, f9ceb4a4d) beside our pinned 1.99.1.
+
+Regions here are nightly's; stable measured each crate slightly higher the same day.
+
+| Crate | Regions | Branches |
+| --- | --- | --- |
+| kernel | 100% | none |
+| postgres | 93.0% | 94.2% (81 of 86) |
+| tenancy | 92.8% | 93.5% (58 of 62) |
+| tetsu | 95.3% | 100% (38 of 38) |
+
+- It ran in seconds once built, in its own target folder, and changed nothing for the stable build.
+- One test failed on nightly only: `char::escape_debug` there escapes a lone combining mark that 1.99.1 prints,
+  so the coverage run tests a newer standard library than the one we ship. Whether that change reaches stable
+  was not checked.
+- Branches are counted for each generic instantiation, so one `if` in a generic function can show as several
+  branches, some never reachable for a given type. The text report needs reading with that in mind.
+- Installing a toolchain with no rustup default set makes it the default, so the install needs care on a
+  contributor's machine.
+
 ## Weakest evidence
 
 All of this ran on about 30 lines of code, so nothing here shows how these tools behave at size. Mutation
