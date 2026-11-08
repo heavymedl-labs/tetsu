@@ -18,8 +18,9 @@ same concrete cases to check against.
   going live with its minimum sellable product, defined on its page. Every
   milestone ends with a walkthrough of both businesses, as owner, staff, and
   customer. Friction found there becomes issues.
-- **Tests.** When implementation opens, the tables on these pages become data
-  files, and a seed loader creates both businesses through public use cases.
+- **Tests.** The tables on these pages become data files in the `tetsu-demos`
+  repository, and `tetsu seed` creates both businesses through public use cases
+  ([ADR-0018](../adr/0018-demo-businesses-as-data.md)).
   Scenario tests, cross-tenant isolation tests, benchmarks, and demo tenants
   all start from them.
 

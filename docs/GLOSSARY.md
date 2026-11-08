@@ -30,6 +30,10 @@ confused with adapters, which sit at the edge of every module.
 **Control plane.** The platform modules that run Tetsu itself, such as
 tenancy, identity and access, and audit.
 
+**Demo business.** A fictional tenant, kept as a data file in the `tetsu-demos`
+repository and shown only in the demo environment, which never holds a real
+business. See [ADR-0018](adr/0018-demo-businesses-as-data.md).
+
 **Domain event.** A record that something happened in a module, published for
 other modules to react to. Past tense, such as `BookingCancelled`.
 
