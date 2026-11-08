@@ -27,7 +27,7 @@ and workflow lint.
 - **A run checks a batch.** It runs mutation testing against the last commit a successful CI run checked, so the
   run covers every change since, however many pushes that was.
 - **A run uses two jobs, not five:** the checks in one, and the image, benchmark harness compile, link check, and
-  workflow lint in the other.
+  workflow lint in the other, which saves the minutes each short job is rounded up to.
 - **A session that pushed code ends with a CI run,** and its status update, which CONTRIBUTING.md already asks
   for, says whether that run passed.
 - **A CI run passes on the exact commit before it deploys,** once deploys exist
@@ -49,7 +49,8 @@ and workflow lint.
 
 ## Consequences
 
-- Pushes cost no minutes. A batch run costs about 6, so ten a month use about 60 of the 2,000.
+- Pushes cost no minutes. The first batch runs, on 2026-11-08, billed about 9 minutes each, so ten a month use
+  about 90 of the 2,000.
 - A problem only a clean machine shows, such as a tool cached locally or an untracked file the tests read, is
   found at the next run rather than at the push. The run then fails, and is fixed before other work, as
   ADR-0014 says of a red `main`.
