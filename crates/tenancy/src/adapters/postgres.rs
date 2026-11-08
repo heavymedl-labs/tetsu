@@ -26,7 +26,42 @@ const STALE: &str = "stale cached statement: ";
 /// The Postgres function that raises it, which unlike the message does not change with the server's language.
 const STALE_ROUTINE: &str = "RevalidateCachedQuery";
 
-/// Tenancy over Postgres, for the composition root. It returns the use cases, never the store itself.
+/// Tenancy over Postgres, for the composition root. It returns the use cases, never the store itself
+/// (ADR-0021).
+///
+/// The use cases are there:
+///
+/// ```no_run
+/// # async fn reach(pool: tetsu_postgres::Pool) {
+/// let _ = tetsu_tenancy::postgres_store(pool).resolve("/x").await;
+/// # }
+/// ```
+///
+/// The handle is not a store, whatever the port's methods are called:
+///
+/// ```compile_fail,E0277
+/// # fn bypass(pool: tetsu_postgres::Pool) {
+/// fn store(_: &impl tetsu_tenancy::TenantStore) {}
+/// store(&tetsu_tenancy::postgres_store(pool));
+/// # }
+/// ```
+///
+/// It derefs to nothing, so no store's methods are reached through it:
+///
+/// ```compile_fail,E0277
+/// # fn bypass(pool: tetsu_postgres::Pool) {
+/// fn derefs(_: &impl std::ops::Deref) {}
+/// derefs(&tetsu_tenancy::postgres_store(pool));
+/// # }
+/// ```
+///
+/// And the store inside it is private:
+///
+/// ```compile_fail,E0616
+/// # fn bypass(pool: tetsu_postgres::Pool) {
+/// let _ = &tetsu_tenancy::postgres_store(pool).store;
+/// # }
+/// ```
 #[must_use]
 pub fn postgres_store(pool: Pool) -> Tenants<impl TenantStore> {
     Tenants::new(PostgresTenants { pool })

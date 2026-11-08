@@ -318,6 +318,10 @@ class CheckScript(unittest.TestCase):
         log = self.log.read_text()
         self.assertRegex(log, r"(?m)^cargo \+nightly-2026-11-01 llvm-cov --branch .* dir=target/nightly$")
         self.assertRegex(log, r"(?m)^cargo llvm-cov --json .* dir=$")
+        # Doc tests run on both: stable proves the examples on the toolchain we ship, and only nightly's
+        # rustdoc checks the error code a compile_fail test names.
+        self.assertRegex(log, r"(?m)^cargo test --doc dir=$")
+        self.assertRegex(log, r"(?m)^cargo \+nightly-2026-11-01 test --doc dir=target/nightly$")
 
     def test_a_missing_nightly_fails_before_the_slow_stages(self):
         self.stub("rustup", "exit 1")

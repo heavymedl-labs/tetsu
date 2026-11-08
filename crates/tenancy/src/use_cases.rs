@@ -4,33 +4,10 @@ use crate::domain::{Error, NewTenant, Tenant};
 use crate::ports::TenantStore;
 
 /// Tenancy's use cases over a store. It offers nothing that reaches the store, so a caller outside Tenancy can
-/// never skip a use case, such as `resolve`'s checks, by calling the port.
-///
-/// The use cases are there:
-///
-/// ```no_run
-/// # async fn reach(pool: tetsu_postgres::Pool) {
-/// let _ = tetsu_tenancy::postgres_store(pool).resolve("/x").await;
-/// # }
-/// ```
-///
-/// The port is not, even with it imported:
-///
-/// ```compile_fail,E0599
-/// # async fn bypass(pool: tetsu_postgres::Pool) {
-/// use tetsu_tenancy::TenantStore;
-/// let _ = tetsu_tenancy::postgres_store(pool).find_by_address("/x").await;
-/// # }
-/// ```
-///
-/// Nor is the store inside it. A method that returned the store would break this too, and only review can catch
-/// one, since it has no name to test for.
-///
-/// ```compile_fail,E0616
-/// # fn bypass(pool: tetsu_postgres::Pool) {
-/// let _ = &tetsu_tenancy::postgres_store(pool).store;
-/// # }
-/// ```
+/// never skip a use case, such as `resolve`'s checks, through it. Tenancy's tables stay reachable through the
+/// database pool, which the rule that a module touches only its own schema governs (#8). The doc tests on
+/// `postgres_store` rule out a store impl, a deref, and a public field. Review catches any other route to the
+/// store, such as a method or a conversion trait that hands it out.
 pub struct Tenants<S> {
     store: S,
 }
