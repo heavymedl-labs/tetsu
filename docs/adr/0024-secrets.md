@@ -1,6 +1,6 @@
 # 0024. Secrets
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-08
 
 ## Context
@@ -33,8 +33,8 @@ stable. The [research](../research/security-checks.md#secret-scanners) has the e
 - **Secrets rotate** when someone with access leaves, when a provider reports exposure, and otherwise
   yearly. Each store lists its secrets by name in [#77](https://github.com/heavymedl-labs/tetsu/issues/77)'s
   deploy docs, never by value.
-- **On acceptance,** CONSTRAINTS.md's note that only the fresh review covers secrets is updated to name
-  this scan.
+- **When the scan lands** ([#81](https://github.com/heavymedl-labs/tetsu/issues/81)), CONSTRAINTS.md's
+  note that only the fresh review covers secrets is updated to name it.
 
 ## Alternatives considered
 

@@ -1,6 +1,6 @@
 # 0026. Security target
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-08
 
 ## Context
@@ -42,7 +42,8 @@ sign-in ([#20](https://github.com/heavymedl-labs/tetsu/issues/20)) is the one re
 ## Consequences
 
 - Sign-in and tenant isolation take longer, since each needs its Level 2 requirements met and named.
-- Milestone 2 gains a review before go live, which needs an issue on the board when milestone 1 closes.
+- Milestone 2 gains a review before go live, tracked in
+  [#83](https://github.com/heavymedl-labs/tetsu/issues/83).
 - A requirement may turn out not to fit, such as one for a feature Tetsu does not have. The review records
   it as not applicable rather than skipping it.
 

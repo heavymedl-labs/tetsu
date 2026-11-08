@@ -1,6 +1,6 @@
 # 0025. Dependency checks
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-08
 
 ## Context
@@ -29,7 +29,9 @@ harness's dependencies ([research](../research/security-checks.md#dependency-che
   check needs no special case.
 - **Dependabot alerts and security updates are turned on for Cargo,** so an advisory published between
   pushes still raises an alert. Routine version updates stay off, since each pull request runs CI.
-- **This lands after #80 clears the harness's advisories,** so the check starts green.
+- **This lands in [#82](https://github.com/heavymedl-labs/tetsu/issues/82), after
+  [#80](https://github.com/heavymedl-labs/tetsu/issues/80) clears the harness's advisories,** so the check
+  starts green.
 
 ## Alternatives considered
 

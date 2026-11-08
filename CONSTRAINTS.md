@@ -10,7 +10,7 @@ Only the maintainer approves loosening anything here.
 
 These apply to every change. [scripts/floor_guard.py](scripts/floor_guard.py) catches the common
 forms, and the [fresh review](docs/review.md) covers the rest, including secrets until
-[#31](https://github.com/heavymedl-labs/tetsu/issues/31). A `Floor-reason:` trailer on a commit
+the scan in [#81](https://github.com/heavymedl-labs/tetsu/issues/81) lands. A `Floor-reason:` trailer on a commit
 records the maintainer's approval for the files that commit touches.
 
 - No new suppression comment without a written reason beside it, such as `#[allow]` or `# noqa`.

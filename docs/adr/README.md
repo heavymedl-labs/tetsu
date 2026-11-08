@@ -29,9 +29,9 @@ number, and add a row below. Never renumber.
 | [0021](0021-module-public-surface.md) | Module public surface | Deciding what a module exports | Accepted |
 | [0022](0022-benchmark-image-tag.md) | Benchmark image tag | Changing how the benchmark image is built or tagged | Proposed |
 | [0023](0023-ci-on-demand.md) | CI on demand | Changing when CI runs, or what it runs | Accepted |
-| [0024](0024-secrets.md) | Secrets | Adding, storing, or rotating a secret, or changing the secret scan | Proposed |
-| [0025](0025-dependency-checks.md) | Dependency checks | Adding a dependency, or handling an advisory or license | Proposed |
-| [0026](0026-security-target.md) | Security target | Building identity, tenant data, or payments, or planning a security review | Proposed |
+| [0024](0024-secrets.md) | Secrets | Adding, storing, or rotating a secret, or changing the secret scan | Accepted |
+| [0025](0025-dependency-checks.md) | Dependency checks | Adding a dependency, or handling an advisory or license | Accepted |
+| [0026](0026-security-target.md) | Security target | Building identity, tenant data, or payments, or planning a security review | Accepted |
 
 ## Open decisions
 
@@ -55,7 +55,6 @@ option for most of them.
 - [Support access to tenant accounts](https://github.com/heavymedl-labs/tetsu/issues/24)
 - [Money: currencies, rounding, and tax](https://github.com/heavymedl-labs/tetsu/issues/26)
 - [Operations: observability, backups, and recovery](https://github.com/heavymedl-labs/tetsu/issues/27)
-- [Dependency checks, secrets, and a security target, proposed as ADR-0024 to ADR-0026](https://github.com/heavymedl-labs/tetsu/issues/31)
 - [Landing page framework and host](https://github.com/heavymedl-labs/tetsu/issues/32)
 - [Load test tools, latency budgets, and memory measurement](https://github.com/heavymedl-labs/tetsu/issues/37)
 - [The benchmark image tag rule, proposed as ADR-0022](https://github.com/heavymedl-labs/tetsu/issues/75)
