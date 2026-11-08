@@ -23,23 +23,37 @@ from pathlib import Path
 
 # This guard and its tests name the patterns they look for.
 SCAN_EXEMPT = {"scripts/floor_guard.py", "scripts/tests/test_floor_guard.py"}
-# Removing a line from these lowers the bar, so each removal needs a reason.
-PROTECTED = {
-    "scripts/check.sh",
-    "scripts/check_coverage.py",
-    "scripts/floor_guard.py",
-    ".githooks/pre-push",
-    ".githooks/pre-commit",
-    ".github/workflows/ci.yml",
-    # Lint and lint-level config: removing a line can switch a rule off.
+# Lint, coverage, and mutation config: removing a line can switch a rule off, and so can adding a loose one.
+LINT_CONFIG = {
     "clippy.toml",
     "ruff.toml",
     ".squawk.toml",
     ".sqlfluff",
     ".editorconfig",
+    ".markdownlint-cli2.yaml",
+    ".cargo/mutants.toml",
+}
+# Removing a line from these lowers the bar, so each removal needs a reason.
+PROTECTED = LINT_CONFIG | {
+    "scripts/check.sh",
+    "scripts/check_coverage.py",
+    "scripts/check_doc_sizes.py",
+    "scripts/check-adrs.sh",
+    "scripts/floor_guard.py",
+    ".githooks/pre-push",
+    ".githooks/pre-commit",
+    ".github/workflows/ci.yml",
     "Cargo.toml",
 }
+LOOSENING = re.compile(r"\ballow|\bfalse\b|\boff\b|ignore|exclude|disable|examine|skip", re.IGNORECASE)
+ALLOW_LEVEL = re.compile(r"""["']allow["']""")
+# A tool reads the nearest of these first, so a new one anywhere can override the config in LINT_CONFIG.
+NEW_CONFIG = re.compile(
+    r"(^|/)(\.?clippy\.toml|\.?ruff\.toml|pyproject\.toml|\.?rustfmt\.toml|\.markdownlint[^/]*|\.sqlfluff"
+    r"|\.squawk\.toml|\.editorconfig|\.cargo/mutants\.toml)$"
+)
 CRATE_DECLARATION = re.compile(r"^(tier|kind)\s*=")
+CRATE_LINTS = re.compile(r"^\[lints\]|^workspace\s*=\s*true")
 DIFF_FLAGS = (
     "--no-renames",
     "--no-color",
@@ -54,7 +68,8 @@ SUPPRESSION = re.compile(
     r"|eslint-disable|biome-ignore|#\s*((flake8|ruff):\s*)?noqa|#\s*nosec|#\s*type:\s*ignore"
     r"|pyright:\s*ignore|#\s*pragma:\s*no cover|pylint:\s*disable|shellcheck disable"
     r"|istanbul ignore|nosemgrep|gitleaks:allow|Stryker disable|continue-on-error|exclude_re"
-    r"|squawk-ignore|--\s*noqa",
+    r"|squawk-ignore|--\s*noqa|exclude_globs|examine_(re|globs)|mutants::skip|cfg\(not\(coverage\)\)"
+    r"|coverage\(off\)",
     re.IGNORECASE,
 )
 WRITTEN_REASON = re.compile(r"\breason\s*[=:]", re.IGNORECASE)
@@ -97,27 +112,32 @@ def read_diff(merge_base):
 
 
 def parse_diff(diff):
-    """Returns (added, removed, deleted), where added and removed are (file, text) pairs."""
-    added, removed, deleted = [], [], []
+    """Returns (added, removed, deleted, created), where added and removed are (file, text) pairs."""
+    added, removed, deleted, created = [], [], [], []
     current, old, in_header = "", "", False
     for line in diff.splitlines():
         if line.startswith("diff "):
             in_header = True
         elif line.startswith("@@"):
             in_header = False
+        elif in_header and line.startswith("--- "):
+            old = header_path(line)
+        elif in_header and line.startswith("+++ "):
+            new = header_path(line)
+            current = old if new == "/dev/null" else new
+            if "/dev/null" in (old, new):
+                (deleted if new == "/dev/null" else created).append(current)
         elif in_header:
-            if line.startswith("--- "):
-                old = re.sub(r"^[ab]/", "", line[4:].rstrip("\t"))
-            elif line.startswith("+++ "):
-                new = re.sub(r"^[ab]/", "", line[4:].rstrip("\t"))
-                current = old if new == "/dev/null" else new
-                if new == "/dev/null":
-                    deleted.append(current)
+            continue
         elif line.startswith("+"):
             added.append((current, line[1:]))
         elif line.startswith("-"):
             removed.append((current, line[1:]))
-    return added, removed, deleted
+    return added, removed, deleted, created
+
+
+def header_path(line):
+    return re.sub(r"^[ab]/", "", line[4:].rstrip("\t"))
 
 
 def scan_code(added):
@@ -154,12 +174,22 @@ def scan_tests(removed, deleted):
             yield "assertion-removed", path, text
 
 
-def scan_protected(removed):
+def scan_protected(added, removed, created):
     for path, text in removed:
+        crate_manifest = path.startswith("crates/") and path.endswith("Cargo.toml")
         if path in PROTECTED:
             yield "guard-weakened", path, text
-        elif path.startswith("crates/") and path.endswith("Cargo.toml") and CRATE_DECLARATION.match(text):
+        elif crate_manifest and CRATE_DECLARATION.match(text):
             yield "tier-changed", path, text
+        elif crate_manifest and CRATE_LINTS.match(text.strip()):
+            yield "lints-dropped", path, text
+    for path, text in added:
+        loosens = LOOSENING if path in LINT_CONFIG else ALLOW_LEVEL if path.endswith("Cargo.toml") else None
+        if loosens and loosens.search(text):
+            yield "guard-weakened", path, text
+    for path in created:
+        if path not in PROTECTED and NEW_CONFIG.search(path):
+            yield "config-added", path, "new config file"
 
 
 def exception_rows():
@@ -211,11 +241,11 @@ def main():
         top = Path(git("rev-parse", "--show-toplevel").strip())
         os.chdir(top)
         merge_base = git("merge-base", base, "HEAD").strip()
-        added, removed, deleted = parse_diff(read_diff(merge_base))
+        added, removed, deleted, created = parse_diff(read_diff(merge_base))
         findings = [
             *scan_code(added),
             *scan_tests(removed, deleted),
-            *scan_protected(removed),
+            *scan_protected(added, removed, created),
             *scan_constraints(added, removed),
         ]
         if not findings:

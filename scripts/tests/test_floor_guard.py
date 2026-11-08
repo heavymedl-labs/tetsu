@@ -137,6 +137,11 @@ class Suppressions(GuardCase):
             "    continue-on-error: true",
             "#[allow(dead_code)] // no reason",
             'exclude_re = ["replace foo"]',
+            'exclude_globs = ["crates/**"]',
+            'examine_globs = ["src/one.rs"]',
+            "#[mutants::skip]",
+            "#[cfg(not(coverage))]",
+            "#[coverage(off)]",
         ):
             with self.subTest(line=line):
                 write(self.repo / "src" / "a.rs", line + "\n")
@@ -276,6 +281,10 @@ class GuardProtectsItself(GuardCase):
             ".sqlfluff",
             ".editorconfig",
             "Cargo.toml",
+            ".cargo/mutants.toml",
+            "scripts/check_doc_sizes.py",
+            "scripts/check-adrs.sh",
+            ".markdownlint-cli2.yaml",
         ):
             with self.subTest(path=path):
                 write(self.repo / path, "one\ntwo\n")
@@ -284,6 +293,49 @@ class GuardProtectsItself(GuardCase):
                 write(self.repo / path, "one\n")
                 self.assertFlags("guard-weakened")
                 write(self.repo / path, "one\ntwo\n")
+
+
+class LintConfig(GuardCase):
+    def test_flags_a_new_lint_config_file(self):
+        for path in (
+            "crates/a/clippy.toml",
+            "crates/a/.clippy.toml",
+            ".ruff.toml",
+            "scripts/ruff.toml",
+            "pyproject.toml",
+            "rustfmt.toml",
+            "crates/a/.markdownlint.yaml",
+            ".markdownlint-cli2.jsonc",
+            "crates/a/.sqlfluff",
+            "crates/a/.cargo/mutants.toml",
+        ):
+            with self.subTest(path=path):
+                write(self.repo / path, "x = 1\n")
+                self.assertFlags("config-added")
+                (self.repo / path).unlink()
+
+    def test_flags_a_loosening_line_added_to_lint_config(self):
+        for path, line in (
+            (".markdownlint-cli2.yaml", "config: {default: false}"),
+            ("ruff.toml", 'ignore = ["E501"]'),
+            (".cargo/mutants.toml", 'exclude_re = ["x"]'),
+            ("Cargo.toml", 'unwrap_used = "allow"'),
+            ("crates/a/Cargo.toml", 'panic = { level = "allow", priority = 1 }'),
+            ("Cargo.toml", "missing_errors_doc = 'allow'"),
+        ):
+            with self.subTest(path=path):
+                write(self.repo / path, "one\n")
+                self.commit("add " + path)
+                self.git("tag", "-f", "base")
+                write(self.repo / path, "one\n" + line + "\n")
+                self.assertFlags("guard-weakened")
+
+    def test_tightening_lint_config_passes(self):
+        write(self.repo / "clippy.toml", "one\n")
+        self.commit("add clippy.toml")
+        self.git("tag", "-f", "base")
+        write(self.repo / "clippy.toml", 'one\ndisallowed-names = ["foo"]\n')
+        self.assertEqual(self.guard().returncode, 0)
 
 
 class CrateTier(GuardCase):
@@ -301,6 +353,16 @@ class CrateTier(GuardCase):
     def test_flags_a_changed_kind(self):
         self.manifest.write_text(self.manifest.read_text().replace('"platform"', '"root"'))
         self.assertFlags("tier-changed")
+
+    def test_flags_dropped_workspace_lints(self):
+        self.manifest.write_text(self.manifest.read_text() + "\n[lints]\nworkspace = true\n")
+        self.commit("add lints")
+        self.git("tag", "-f", "base")
+        for dropped in ("workspace = true\n", "[lints]\nworkspace = true\n"):
+            with self.subTest(dropped=dropped):
+                self.manifest.write_text(self.manifest.read_text().replace(dropped, ""))
+                self.assertFlags("lints-dropped")
+                self.git("checkout", "--", ".")
 
     def test_other_manifest_edits_pass(self):
         self.manifest.write_text(self.manifest.read_text() + "\n[dependencies]\n")

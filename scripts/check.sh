@@ -82,9 +82,13 @@ python3 scripts/check_doc_sizes.py
 work="$(mktemp -d)"
 # Drop every test database on the way out, pass or fail. Tests drop their own, but a killed test cannot (#43).
 finish() {
+  local status=$?
   rm -rf "$work"
-  cargo run -q -p tetsu-postgres --example drop_test_databases ||
-    echo "warning: test databases were not dropped; the next test run sweeps them" >&2
+  if ! cargo run -q -p tetsu-postgres --example drop_test_databases; then
+    echo "error: test databases were not dropped; drop them or rerun the checks" >&2
+    status=1
+  fi
+  exit "$status"
 }
 trap finish EXIT
 cargo llvm-cov --json --summary-only --output-path "$work/coverage.json"

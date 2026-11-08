@@ -13,6 +13,8 @@ static NEXT: AtomicU32 = AtomicU32::new(0);
 pub const SWEEP_LOCK: i64 = 7_243_002;
 /// Far longer than any one test holds its database, which is seconds, so one this old belongs to a run that is gone.
 const STALE: Duration = Duration::from_mins(10);
+/// How long the final sweep waits for a running one to finish before failing.
+const FINAL_WAIT: Duration = Duration::from_secs(30);
 
 /// A database for one test. It derefs to its [`Settings`], and is dropped with it.
 pub struct TestDatabase {
@@ -92,25 +94,24 @@ pub async fn fresh_database_encoded(encoding: &str) -> Result<TestDatabase, Erro
 /// # Errors
 /// Fails if `TEST_DATABASE_URL` is unset or Postgres cannot be reached.
 pub async fn sweep_stale_databases() -> Result<(), Error> {
-    sweep(STALE).await
+    sweep(STALE, None).await
 }
 
 /// Drops every test database, however new. Only for when no tests are running, such as at the end of
-/// `scripts/check.sh`, since it takes databases from under any test still using them.
+/// `scripts/check.sh`, since it takes databases from under any test still using them. It waits for a sweep
+/// already running, so it never leaves the work undone.
 ///
 /// # Errors
-/// Fails if `TEST_DATABASE_URL` is unset or Postgres cannot be reached.
+/// Fails if `TEST_DATABASE_URL` is unset, Postgres cannot be reached, or another sweep runs for 30 seconds.
 pub async fn drop_all_test_databases() -> Result<(), Error> {
-    sweep(Duration::ZERO).await
+    sweep(Duration::ZERO, Some(FINAL_WAIT)).await
 }
 
-async fn sweep(older_than: Duration) -> Result<(), Error> {
+/// With no `wait`, a sweep that finds another running leaves the work to it. With one, it waits that long for
+/// the lock, then fails.
+async fn sweep(older_than: Duration, wait: Option<Duration>) -> Result<(), Error> {
     let admin = connect(&Settings::from_values(&admin_url()?, Some("disable"))).await?;
-    let taken: bool = admin
-        .query_one("SELECT pg_try_advisory_lock($1) AS taken", &[&SWEEP_LOCK])
-        .await?
-        .try_get("taken")?;
-    if !taken {
+    if !take_sweep_lock(&admin, wait).await? {
         return Ok(());
     }
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
@@ -127,6 +128,28 @@ async fn sweep(older_than: Duration) -> Result<(), Error> {
     }
     // Closing the connection releases the lock.
     Ok(())
+}
+
+/// Whether this connection now holds the sweep lock.
+async fn take_sweep_lock(
+    admin: &tokio_postgres::Client,
+    wait: Option<Duration>,
+) -> Result<bool, Error> {
+    let Some(wait) = wait else {
+        let row = admin
+            .query_one("SELECT pg_try_advisory_lock($1) AS taken", &[&SWEEP_LOCK])
+            .await?;
+        return Ok(row.try_get("taken")?);
+    };
+    admin
+        .batch_execute(&format!("SET lock_timeout = {}", wait.as_millis()))
+        .await?;
+    admin
+        .query_one("SELECT pg_advisory_lock($1)", &[&SWEEP_LOCK])
+        .await
+        .map_err(|error| format!("another sweep kept the lock: {error}"))?;
+    admin.batch_execute("RESET lock_timeout").await?;
+    Ok(true)
 }
 
 /// Whether a name is exactly `t_<seconds>_<process>_<counter>`, as [`create`] makes them, and was created at
@@ -283,6 +306,29 @@ mod tests {
             let url = format!("postgres://localhost/postgres?{query}");
             assert!(database_url(&url, "t_1_2_3").is_err(), "{query}");
         }
+    }
+
+    #[tokio::test]
+    async fn the_final_sweep_waits_for_one_running_and_fails_if_it_never_ends() {
+        let admin = Settings::from_values(&admin_url().unwrap(), Some("disable"));
+        let holder = connect(&admin).await.unwrap();
+        holder
+            .query_one("SELECT pg_advisory_lock($1)", &[&SWEEP_LOCK])
+            .await
+            .unwrap();
+        // Nothing is ever this old, so these sweeps drop nothing that tests running alongside still use.
+        let error = sweep(Duration::MAX, Some(Duration::from_millis(200)))
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("another sweep kept the lock"),
+            "{error}"
+        );
+        let waiting = tokio::spawn(sweep(Duration::MAX, Some(Duration::from_secs(10))));
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(!waiting.is_finished(), "waits for the running sweep");
+        drop(holder);
+        waiting.await.unwrap().unwrap();
     }
 
     #[test]

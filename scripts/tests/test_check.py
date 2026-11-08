@@ -212,6 +212,12 @@ class CheckScript(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("cargo run -q -p tetsu-postgres --example drop_test_databases", self.log.read_text())
 
+    def test_fails_when_the_final_sweep_cannot_drop_the_test_databases(self):
+        self.stub("cargo", f'echo "cargo $*" >> "{self.log}"; [ "$1" != run ]')
+        result = self.check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("test databases were not dropped", result.stderr)
+
     def test_the_database_hint_uses_settings_for_throwaway_data(self):
         self.no_database = True
         result = self.check()
