@@ -41,6 +41,25 @@ def earliest_open_milestone():
     return min(milestones, key=lambda milestone: milestone["number"])["title"]
 
 
+def board_item(url):
+    """The issue's item on the board. The board's auto-add workflow may add it first, and then adding it again
+    fails, so that case finds the item it made."""
+    try:
+        return json.loads(
+            gh("project", "item-add", PROJECT, "--owner", OWNER, "--url", url, "--format", "json")
+        )["id"]
+    except FileIssueError as error:
+        if "already exists" not in str(error):
+            raise
+    items = json.loads(
+        gh("project", "item-list", PROJECT, "--owner", OWNER, "--limit", "1000", "--format", "json")
+    )
+    match = next((i["id"] for i in items["items"] if (i.get("content") or {}).get("url") == url), None)
+    if match is None:
+        raise FileIssueError("the board says the issue is on it, but its item was not found")
+    return match
+
+
 def option_ids(fields, wanted):
     """The field and option ids for each (field name, option name), or an error naming what is missing."""
     by_name = {field["name"]: field for field in fields}
@@ -79,9 +98,7 @@ def file_issue(args):
         str(args.body),
     )
     try:
-        # Adding an item already on the board, as auto-add may have done, returns the same item.
-        add = gh("project", "item-add", PROJECT, "--owner", OWNER, "--url", url, "--format", "json")
-        item = json.loads(add)["id"]
+        item = board_item(url)
         for field, option in edits:
             gh(
                 "project",

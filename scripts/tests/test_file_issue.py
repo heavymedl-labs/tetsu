@@ -31,6 +31,9 @@ import json, os, sys
 args = sys.argv[1:]
 with open(os.environ["GH_LOG"], "a") as log:
     log.write(json.dumps(args) + "\\n")
+if os.environ.get("GH_ALREADY") and args[:2] == ["project", "item-add"]:
+    print("GraphQL: Content already exists in this project (addProjectV2ItemById)", file=sys.stderr)
+    sys.exit(1)
 if os.environ.get("GH_FAIL") == " ".join(args[:2]):
     print("refused", file=sys.stderr)
     sys.exit(1)
@@ -38,6 +41,15 @@ if args[:2] == ["issue", "create"]:
     print("https://github.com/o/r/issues/7")
 elif args[:2] == ["project", "item-add"]:
     print(json.dumps({{"id": "ITEM"}}))
+elif args[:2] == ["project", "item-list"]:
+    items = [
+        {{"id": "OTHER", "content": {{"url": "https://github.com/o/r/issues/6"}}}},
+        {{"id": "REDACTED", "content": None}},
+        {{"id": "AUTO", "content": {{"url": "https://github.com/o/r/issues/7"}}}},
+    ]
+    if os.environ.get("GH_ALREADY") == "missing":
+        items = items[:1]
+    print(json.dumps({{"items": items}}))
 elif args[:2] == ["project", "view"]:
     print(json.dumps({{"id": "PROJECT"}}))
 elif args[:2] == ["project", "field-list"]:
@@ -57,13 +69,14 @@ class FileIssue(unittest.TestCase):
         self.body = self.dir / "body.md"
         self.body.write_text("### Goal\n\nSomething.\n")
 
-    def file(self, *args, fail=""):
+    def file(self, *args, fail="", already=""):
         return run(
             ["python3", SCRIPT, *args],
             self.dir,
             PATH=f"{self.dir / 'bin'}:/usr/bin:/bin",
             GH_LOG=str(self.log),
             GH_FAIL=fail,
+            GH_ALREADY=already,
         )
 
     def calls(self):
@@ -122,6 +135,21 @@ class FileIssue(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Tier has no option 3", result.stderr)
         self.assertFalse(any(c[:2] == ["issue", "create"] for c in self.calls()))
+
+    def test_an_issue_auto_add_placed_first_still_gets_its_fields(self):
+        result = self.file("task", "T", self.body, "--tier", "2", "--priority", "now", already="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        edits = [c for c in self.calls() if c[:2] == ["project", "item-edit"]]
+        self.assertEqual(len(edits), 2)
+        for edit in edits:
+            self.assertEqual(edit[edit.index("--id") + 1], "AUTO")
+
+    def test_an_auto_added_item_that_cannot_be_found_names_the_filed_issue(self):
+        result = self.file("task", "T", self.body, "--tier", "2", "--priority", "now", already="missing")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("filed https://github.com/o/r/issues/7", result.stderr)
+        self.assertIn("its item was not found", result.stderr)
+        self.assertFalse(any(c[:2] == ["project", "item-edit"] for c in self.calls()))
 
     def test_a_board_that_refuses_an_edit_names_the_filed_issue(self):
         for step in ("project item-add", "project item-edit"):
