@@ -306,17 +306,17 @@ mod tests {
 
     #[test]
     fn slugs_are_lowercase_letters_digits_and_inner_hyphens() {
-        for good in ["a", "anvil-row", "lot-42", &"a".repeat(63)] {
+        for good in ["a", "sample-studio", "lot-42", &"a".repeat(63)] {
             assert_eq!(Slug::parse(good).unwrap().as_str(), good);
         }
         for bad in [
             "",
-            "Anvil",
-            "anvil_row",
-            "-anvil",
-            "anvil-",
-            "anvil--row",
-            "anvil row",
+            "Sample",
+            "sample_studio",
+            "-sample",
+            "sample-",
+            "sample--studio",
+            "sample studio",
             &"a".repeat(64),
             "é",
         ] {
@@ -329,7 +329,10 @@ mod tests {
 
     #[test]
     fn a_slug_is_reached_at_its_path() {
-        assert_eq!(Slug::parse("anvil-row").unwrap().address(), "/anvil-row");
+        assert_eq!(
+            Slug::parse("sample-studio").unwrap().address(),
+            "/sample-studio"
+        );
     }
 
     #[test]
@@ -345,9 +348,9 @@ mod tests {
 
     #[test]
     fn a_tenant_needs_a_name_of_reasonable_length() {
-        let slug = Slug::parse("anvil-row").unwrap();
-        let denver = Location::new("Denver, LoDo", "America/Denver").unwrap();
-        assert!(NewTenant::new(slug.clone(), "Anvil Row Strength", theme(), vec![denver]).is_ok());
+        let slug = Slug::parse("sample-studio").unwrap();
+        let denver = Location::new("Main Street", "America/Denver").unwrap();
+        assert!(NewTenant::new(slug.clone(), "Sample Studio", theme(), vec![denver]).is_ok());
         assert!(NewTenant::new(slug.clone(), &"a".repeat(100), theme(), vec![]).is_ok());
         for bad in ["", "   ", &"a".repeat(101)] {
             assert!(matches!(
@@ -359,9 +362,14 @@ mod tests {
 
     #[test]
     fn the_name_is_trimmed() {
-        let tenant =
-            NewTenant::new(Slug::parse("a").unwrap(), "  Anvil Row  ", theme(), vec![]).unwrap();
-        assert_eq!(tenant.name(), "Anvil Row");
+        let tenant = NewTenant::new(
+            Slug::parse("a").unwrap(),
+            "  Sample Studio  ",
+            theme(),
+            vec![],
+        )
+        .unwrap();
+        assert_eq!(tenant.name(), "Sample Studio");
     }
 
     #[test]

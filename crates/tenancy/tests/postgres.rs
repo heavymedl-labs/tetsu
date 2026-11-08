@@ -30,7 +30,7 @@ mod support {
             .collect();
         NewTenant::new(
             Slug::parse(slug).expect("slug"),
-            "Anvil Row Strength",
+            "Sample Studio",
             theme,
             locations,
         )
@@ -44,44 +44,44 @@ use support::{store_and_settings, tenant};
 async fn a_created_tenant_resolves_by_its_slug() {
     let (store, _database) = store_and_settings().await;
     let new = tenant(
-        "anvil-row",
+        "sample-studio",
         &[
-            ("Denver, LoDo", "America/Denver"),
-            ("Scottsdale", "America/Phoenix"),
+            ("Main Street", "America/Denver"),
+            ("Second Street", "America/Phoenix"),
         ],
     );
     let created = create_tenant(&store, &new).await.expect("creates");
-    let found = resolve(&store, "/anvil-row").await.expect("resolves");
+    let found = resolve(&store, "/sample-studio").await.expect("resolves");
     assert_eq!(found, created);
-    assert_eq!(found.name(), "Anvil Row Strength");
+    assert_eq!(found.name(), "Sample Studio");
     assert_eq!(found.theme().accent.as_str(), "#E5622B");
     let names: Vec<_> = found.locations().iter().map(Location::name).collect();
-    assert_eq!(names, ["Denver, LoDo", "Scottsdale"]);
+    assert_eq!(names, ["Main Street", "Second Street"]);
 }
 
 #[tokio::test]
 async fn an_address_is_matched_without_case_or_spaces() {
     let (store, _database) = store_and_settings().await;
-    create_tenant(&store, &tenant("anvil-row", &[]))
+    create_tenant(&store, &tenant("sample-studio", &[]))
         .await
         .expect("creates");
-    assert!(resolve(&store, "  /Anvil-Row ").await.is_ok());
+    assert!(resolve(&store, "  /Sample-Studio ").await.is_ok());
 }
 
 #[tokio::test]
 async fn an_unknown_address_fails_closed() {
     let (store, _database) = store_and_settings().await;
-    create_tenant(&store, &tenant("anvil-row", &[]))
+    create_tenant(&store, &tenant("sample-studio", &[]))
         .await
         .expect("creates");
     for address in [
         "",
-        "anvil-row",
-        "/juniper-lane",
-        "/anvil",
-        "/anvil-row-x",
-        "/anvil-row/",
-        "//anvil-row",
+        "sample-studio",
+        "/another-studio",
+        "/sample",
+        "/sample-studio-x",
+        "/sample-studio/",
+        "//sample-studio",
     ] {
         assert_eq!(
             resolve(&store, address).await,
@@ -96,14 +96,14 @@ async fn a_slug_is_taken_once_and_the_loser_leaves_nothing_behind() {
     let (store, _database) = store_and_settings().await;
     let first = create_tenant(
         &store,
-        &tenant("anvil-row", &[("Denver", "America/Denver")]),
+        &tenant("sample-studio", &[("Denver", "America/Denver")]),
     )
     .await
     .expect("first");
-    let second = create_tenant(&store, &tenant("anvil-row", &[("Elsewhere", "UTC")])).await;
+    let second = create_tenant(&store, &tenant("sample-studio", &[("Elsewhere", "UTC")])).await;
     assert_eq!(second, Err(Error::SlugTaken));
     assert_eq!(
-        resolve(&store, "/anvil-row").await.expect("resolves"),
+        resolve(&store, "/sample-studio").await.expect("resolves"),
         first
     );
 }
@@ -113,20 +113,20 @@ async fn tenants_see_only_their_own_locations() {
     let (store, _database) = store_and_settings().await;
     create_tenant(
         &store,
-        &tenant("anvil-row", &[("Denver", "America/Denver")]),
+        &tenant("sample-studio", &[("Denver", "America/Denver")]),
     )
     .await
     .expect("first");
     create_tenant(
         &store,
-        &tenant("juniper-lane", &[("Tucson", "America/Phoenix")]),
+        &tenant("another-studio", &[("Other Street", "America/Phoenix")]),
     )
     .await
     .expect("second");
-    let juniper = resolve(&store, "/juniper-lane").await.expect("resolves");
+    let another = resolve(&store, "/another-studio").await.expect("resolves");
     assert_eq!(
-        juniper.locations(),
-        [Location::new("Tucson", "America/Phoenix").expect("location")]
+        another.locations(),
+        [Location::new("Other Street", "America/Phoenix").expect("location")]
     );
 }
 
@@ -136,11 +136,11 @@ async fn a_lost_database_is_temporarily_unavailable() {
         tetsu_postgres::Settings::from_values("postgres://x@127.0.0.1:1/x", Some("disable"));
     let store = postgres_store(pool(&settings).expect("pool"));
     assert!(matches!(
-        resolve(&store, "/anvil-row").await,
+        resolve(&store, "/sample-studio").await,
         Err(Error::Unavailable(_))
     ));
     assert!(matches!(
-        create_tenant(&store, &tenant("anvil-row", &[])).await,
+        create_tenant(&store, &tenant("sample-studio", &[])).await,
         Err(Error::Unavailable(_))
     ));
 }
@@ -158,7 +158,8 @@ async fn a_commit_refused_by_postgres_keeps_what_postgres_said() {
         )
         .await
         .expect("adds a trigger that fires at commit");
-    let Err(Error::Storage(why)) = create_tenant(&store, &tenant("anvil-row", &[])).await else {
+    let Err(Error::Storage(why)) = create_tenant(&store, &tenant("sample-studio", &[])).await
+    else {
         panic!("a refused commit is a storage error, not worth retrying");
     };
     assert_eq!(why, "commit refused: refused at commit");
@@ -169,7 +170,7 @@ async fn a_lost_database_says_why() {
     let settings =
         tetsu_postgres::Settings::from_values("postgres://x@127.0.0.1:1/x", Some("disable"));
     let store = postgres_store(pool(&settings).expect("pool"));
-    let Err(Error::Unavailable(why)) = resolve(&store, "/anvil-row").await else {
+    let Err(Error::Unavailable(why)) = resolve(&store, "/sample-studio").await else {
         panic!("a refused connection is temporary");
     };
     assert!(why.contains("Connection refused"), "{why}");
@@ -180,11 +181,13 @@ async fn a_refused_insert_that_is_not_a_taken_slug_is_a_storage_error() {
     let (store, settings) = store_and_settings().await;
     let client = tetsu_postgres::connect(&settings).await.expect("connects");
     client
-        .batch_execute("ALTER TABLE tenancy.tenants ADD CONSTRAINT refuse CHECK (name <> 'Anvil Row Strength')")
+        .batch_execute(
+            "ALTER TABLE tenancy.tenants ADD CONSTRAINT refuse CHECK (name <> 'Sample Studio')",
+        )
         .await
         .expect("adds a check");
     assert!(matches!(
-        create_tenant(&store, &tenant("anvil-row", &[])).await,
+        create_tenant(&store, &tenant("sample-studio", &[])).await,
         Err(Error::Storage(_))
     ));
 }
@@ -206,11 +209,14 @@ async fn a_failure_after_the_tenant_row_leaves_nothing_behind() {
         )
         .await
         .expect("adds a check");
-    let refused = create_tenant(&store, &tenant("anvil-row", &[("Denver", "Refused")])).await;
+    let refused = create_tenant(&store, &tenant("sample-studio", &[("Denver", "Refused")])).await;
     assert!(matches!(refused, Err(Error::Storage(_))));
-    assert_eq!(resolve(&store, "/anvil-row").await, Err(Error::NotFound));
+    assert_eq!(
+        resolve(&store, "/sample-studio").await,
+        Err(Error::NotFound)
+    );
     assert!(
-        create_tenant(&store, &tenant("anvil-row", &[]))
+        create_tenant(&store, &tenant("sample-studio", &[]))
             .await
             .is_ok(),
         "the slug is still free"
@@ -220,10 +226,10 @@ async fn a_failure_after_the_tenant_row_leaves_nothing_behind() {
 #[tokio::test]
 async fn a_stale_cached_query_is_temporary_and_clears_the_cache() {
     let (store, settings) = store_and_settings().await;
-    create_tenant(&store, &tenant("anvil-row", &[]))
+    create_tenant(&store, &tenant("sample-studio", &[]))
         .await
         .expect("creates");
-    resolve(&store, "/anvil-row")
+    resolve(&store, "/sample-studio")
         .await
         .expect("caches the query");
     let client = tetsu_postgres::connect(&settings).await.expect("connects");
@@ -232,11 +238,11 @@ async fn a_stale_cached_query_is_temporary_and_clears_the_cache() {
         .await
         .expect("alters");
     assert!(matches!(
-        resolve(&store, "/anvil-row").await,
+        resolve(&store, "/sample-studio").await,
         Err(Error::Unavailable(_))
     ));
     assert!(
-        resolve(&store, "/anvil-row").await.is_ok(),
+        resolve(&store, "/sample-studio").await.is_ok(),
         "the next request succeeds"
     );
 }
@@ -244,7 +250,7 @@ async fn a_stale_cached_query_is_temporary_and_clears_the_cache() {
 #[tokio::test]
 async fn a_bad_stored_row_is_an_error_not_a_bad_page() {
     let (store, settings) = store_and_settings().await;
-    create_tenant(&store, &tenant("anvil-row", &[]))
+    create_tenant(&store, &tenant("sample-studio", &[]))
         .await
         .expect("creates");
     let client = tetsu_postgres::connect(&settings).await.expect("connects");
@@ -253,7 +259,7 @@ async fn a_bad_stored_row_is_an_error_not_a_bad_page() {
         .await
         .expect("corrupts the row");
     assert!(matches!(
-        resolve(&store, "/anvil-row").await,
+        resolve(&store, "/sample-studio").await,
         Err(Error::Invalid(_))
     ));
 }
@@ -270,7 +276,7 @@ async fn a_login_refused_by_the_server_is_not_worth_retrying() {
     );
     let store = postgres_store(pool(&stranger).expect("pool"));
     assert!(matches!(
-        resolve(&store, "/anvil-row").await,
+        resolve(&store, "/sample-studio").await,
         Err(Error::Storage(_))
     ));
 }
