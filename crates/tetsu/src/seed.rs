@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
-use tetsu_tenancy::{Color, Error, Location, NewTenant, Slug, TenantStore, Theme, create_tenant};
+use tetsu_tenancy::{Color, Error, Location, NewTenant, Slug, TenantStore, Tenants, Theme};
 
 /// A path as printed, with every character [`escaped`] if it needs to be, so a file name cannot split a line,
 /// drive the terminal, or reorder the text around it.
@@ -174,13 +174,13 @@ fn files(path: &Path) -> Result<Vec<PathBuf>, String> {
 /// Creates each tenant through Tenancy's use case, in order, and skips one whose slug exists, passing a line
 /// for each to `report`. A storage failure stops the run: tenants already created stay, and a rerun skips them.
 pub async fn apply(
-    store: &impl TenantStore,
+    tenants: &Tenants<impl TenantStore>,
     seeds: &[Seed],
     mut report: impl FnMut(&str) -> Result<(), String>,
 ) -> Result<(), String> {
     for seed in seeds {
         let (slug, file) = (seed.tenant.slug().as_str(), shown(&seed.path));
-        match create_tenant(store, &seed.tenant).await {
+        match tenants.create(&seed.tenant).await {
             Ok(_) => report(&format!("created {slug} from {file}"))?,
             Err(Error::SlugTaken) => report(&format!("skipped {slug}: it already exists"))?,
             Err(error) => return Err(format!("could not create {slug} from {file}: {error}")),
@@ -220,7 +220,7 @@ mod tests {
     #[tokio::test]
     async fn a_failed_write_names_the_tenant_not_a_fault_in_the_file() {
         let error = apply(
-            &Refuses(Error::Unavailable("connection closed".into())),
+            &Tenants::new(Refuses(Error::Unavailable("connection closed".into()))),
             &sample_seed(),
             |_| Ok(()),
         )
@@ -235,9 +235,13 @@ mod tests {
     #[tokio::test]
     async fn a_report_that_cannot_be_written_stops_the_run() {
         let failed = |_: &str| Err("could not write output".to_string());
-        let error = apply(&Refuses(Error::SlugTaken), &sample_seed(), failed)
-            .await
-            .unwrap_err();
+        let error = apply(
+            &Tenants::new(Refuses(Error::SlugTaken)),
+            &sample_seed(),
+            failed,
+        )
+        .await
+        .unwrap_err();
         assert_eq!(error, "could not write output");
     }
 

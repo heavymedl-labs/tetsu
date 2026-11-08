@@ -75,6 +75,7 @@ class CheckScript(unittest.TestCase):
             "cargo fmt --all --check",
             "cargo clippy",
             "cargo llvm-cov --json",
+            "cargo test --doc",
             "cargo metadata",
             "check_coverage.py",
             "cargo +nightly-2026-11-01 llvm-cov --branch",

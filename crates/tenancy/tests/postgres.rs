@@ -3,8 +3,7 @@
 use tetsu_postgres::test_support::{TestDatabase, fresh_database};
 use tetsu_postgres::{migrate, pool};
 use tetsu_tenancy::{
-    Color, Error, Location, NewTenant, Slug, Tenancy, TenantStore, Theme, create_tenant,
-    postgres_store, resolve,
+    Color, Error, Location, NewTenant, Slug, Tenancy, TenantStore, Tenants, Theme, postgres_store,
 };
 
 #[cfg(test)]
@@ -13,7 +12,7 @@ mod support {
 
     /// A migrated store, with the test database it uses. Keep both until the test ends: dropping the database
     /// drops everything in it.
-    pub async fn store_and_settings() -> (impl TenantStore, TestDatabase) {
+    pub async fn store_and_settings() -> (Tenants<impl TenantStore>, TestDatabase) {
         let settings = fresh_database().await.expect("a test database");
         migrate(&settings, &[&Tenancy]).await.expect("migrates");
         (postgres_store(pool(&settings).expect("pool")), settings)
@@ -50,8 +49,8 @@ async fn a_created_tenant_resolves_by_its_slug() {
             ("Second Street", "America/Phoenix"),
         ],
     );
-    let created = create_tenant(&store, &new).await.expect("creates");
-    let found = resolve(&store, "/sample-studio").await.expect("resolves");
+    let created = store.create(&new).await.expect("creates");
+    let found = store.resolve("/sample-studio").await.expect("resolves");
     assert_eq!(found, created);
     assert_eq!(found.name(), "Sample Studio");
     assert_eq!(found.theme().accent.as_str(), "#E5622B");
@@ -62,16 +61,18 @@ async fn a_created_tenant_resolves_by_its_slug() {
 #[tokio::test]
 async fn an_address_is_matched_without_case_or_spaces() {
     let (store, _database) = store_and_settings().await;
-    create_tenant(&store, &tenant("sample-studio", &[]))
+    store
+        .create(&tenant("sample-studio", &[]))
         .await
         .expect("creates");
-    assert!(resolve(&store, "  /Sample-Studio ").await.is_ok());
+    assert!(store.resolve("  /Sample-Studio ").await.is_ok());
 }
 
 #[tokio::test]
 async fn an_unknown_address_fails_closed() {
     let (store, _database) = store_and_settings().await;
-    create_tenant(&store, &tenant("sample-studio", &[]))
+    store
+        .create(&tenant("sample-studio", &[]))
         .await
         .expect("creates");
     for address in [
@@ -84,7 +85,7 @@ async fn an_unknown_address_fails_closed() {
         "//sample-studio",
     ] {
         assert_eq!(
-            resolve(&store, address).await,
+            store.resolve(address).await,
             Err(Error::NotFound),
             "{address:?}"
         );
@@ -94,16 +95,16 @@ async fn an_unknown_address_fails_closed() {
 #[tokio::test]
 async fn a_slug_is_taken_once_and_the_loser_leaves_nothing_behind() {
     let (store, _database) = store_and_settings().await;
-    let first = create_tenant(
-        &store,
-        &tenant("sample-studio", &[("Denver", "America/Denver")]),
-    )
-    .await
-    .expect("first");
-    let second = create_tenant(&store, &tenant("sample-studio", &[("Elsewhere", "UTC")])).await;
+    let first = store
+        .create(&tenant("sample-studio", &[("Denver", "America/Denver")]))
+        .await
+        .expect("first");
+    let second = store
+        .create(&tenant("sample-studio", &[("Elsewhere", "UTC")]))
+        .await;
     assert_eq!(second, Err(Error::SlugTaken));
     assert_eq!(
-        resolve(&store, "/sample-studio").await.expect("resolves"),
+        store.resolve("/sample-studio").await.expect("resolves"),
         first
     );
 }
@@ -111,19 +112,18 @@ async fn a_slug_is_taken_once_and_the_loser_leaves_nothing_behind() {
 #[tokio::test]
 async fn tenants_see_only_their_own_locations() {
     let (store, _database) = store_and_settings().await;
-    create_tenant(
-        &store,
-        &tenant("sample-studio", &[("Denver", "America/Denver")]),
-    )
-    .await
-    .expect("first");
-    create_tenant(
-        &store,
-        &tenant("another-studio", &[("Other Street", "America/Phoenix")]),
-    )
-    .await
-    .expect("second");
-    let another = resolve(&store, "/another-studio").await.expect("resolves");
+    store
+        .create(&tenant("sample-studio", &[("Denver", "America/Denver")]))
+        .await
+        .expect("first");
+    store
+        .create(&tenant(
+            "another-studio",
+            &[("Other Street", "America/Phoenix")],
+        ))
+        .await
+        .expect("second");
+    let another = store.resolve("/another-studio").await.expect("resolves");
     assert_eq!(
         another.locations(),
         [Location::new("Other Street", "America/Phoenix").expect("location")]
@@ -136,11 +136,11 @@ async fn a_lost_database_is_temporarily_unavailable() {
         tetsu_postgres::Settings::from_values("postgres://x@127.0.0.1:1/x", Some("disable"));
     let store = postgres_store(pool(&settings).expect("pool"));
     assert!(matches!(
-        resolve(&store, "/sample-studio").await,
+        store.resolve("/sample-studio").await,
         Err(Error::Unavailable(_))
     ));
     assert!(matches!(
-        create_tenant(&store, &tenant("sample-studio", &[])).await,
+        store.create(&tenant("sample-studio", &[])).await,
         Err(Error::Unavailable(_))
     ));
 }
@@ -158,8 +158,7 @@ async fn a_commit_refused_by_postgres_keeps_what_postgres_said() {
         )
         .await
         .expect("adds a trigger that fires at commit");
-    let Err(Error::Storage(why)) = create_tenant(&store, &tenant("sample-studio", &[])).await
-    else {
+    let Err(Error::Storage(why)) = store.create(&tenant("sample-studio", &[])).await else {
         panic!("a refused commit is a storage error, not worth retrying");
     };
     assert_eq!(why, "commit refused: refused at commit");
@@ -170,7 +169,7 @@ async fn a_lost_database_says_why() {
     let settings =
         tetsu_postgres::Settings::from_values("postgres://x@127.0.0.1:1/x", Some("disable"));
     let store = postgres_store(pool(&settings).expect("pool"));
-    let Err(Error::Unavailable(why)) = resolve(&store, "/sample-studio").await else {
+    let Err(Error::Unavailable(why)) = store.resolve("/sample-studio").await else {
         panic!("a refused connection is temporary");
     };
     assert!(why.contains("Connection refused"), "{why}");
@@ -187,7 +186,7 @@ async fn a_refused_insert_that_is_not_a_taken_slug_is_a_storage_error() {
         .await
         .expect("adds a check");
     assert!(matches!(
-        create_tenant(&store, &tenant("sample-studio", &[])).await,
+        store.create(&tenant("sample-studio", &[])).await,
         Err(Error::Storage(_))
     ));
 }
@@ -209,16 +208,13 @@ async fn a_failure_after_the_tenant_row_leaves_nothing_behind() {
         )
         .await
         .expect("adds a check");
-    let refused = create_tenant(&store, &tenant("sample-studio", &[("Denver", "Refused")])).await;
+    let refused = store
+        .create(&tenant("sample-studio", &[("Denver", "Refused")]))
+        .await;
     assert!(matches!(refused, Err(Error::Storage(_))));
-    assert_eq!(
-        resolve(&store, "/sample-studio").await,
-        Err(Error::NotFound)
-    );
+    assert_eq!(store.resolve("/sample-studio").await, Err(Error::NotFound));
     assert!(
-        create_tenant(&store, &tenant("sample-studio", &[]))
-            .await
-            .is_ok(),
+        store.create(&tenant("sample-studio", &[])).await.is_ok(),
         "the slug is still free"
     );
 }
@@ -230,7 +226,8 @@ async fn a_stale_cached_query_is_temporary_and_clears_every_connection() {
     migrate(&settings, &[&Tenancy]).await.expect("migrates");
     let pool = pool(&settings).expect("pool");
     let store = postgres_store(pool.clone());
-    create_tenant(&store, &tenant("sample-studio", &[]))
+    store
+        .create(&tenant("sample-studio", &[]))
         .await
         .expect("creates");
     let find = include_str!("../sql/find_tenant_by_address.sql");
@@ -251,7 +248,7 @@ async fn a_stale_cached_query_is_temporary_and_clears_every_connection() {
         .await
         .expect("alters");
     assert!(matches!(
-        resolve(&store, "/sample-studio").await,
+        store.resolve("/sample-studio").await,
         Err(Error::Unavailable(_))
     ));
     let (first, second) = (
@@ -265,7 +262,7 @@ async fn a_stale_cached_query_is_temporary_and_clears_every_connection() {
     );
     drop((first, second));
     assert!(
-        resolve(&store, "/sample-studio").await.is_ok(),
+        store.resolve("/sample-studio").await.is_ok(),
         "the next request succeeds"
     );
 }
@@ -277,7 +274,8 @@ async fn a_stale_cached_insert_is_temporary_and_clears_the_cache() {
     migrate(&settings, &[&Tenancy]).await.expect("migrates");
     let pool = pool(&settings).expect("pool");
     let store = postgres_store(pool.clone());
-    create_tenant(&store, &tenant("sample-studio", &[]))
+    store
+        .create(&tenant("sample-studio", &[]))
         .await
         .expect("caches the insert");
     let client = tetsu_postgres::connect(&settings).await.expect("connects");
@@ -286,7 +284,7 @@ async fn a_stale_cached_insert_is_temporary_and_clears_the_cache() {
         .await
         .expect("alters");
     assert!(matches!(
-        create_tenant(&store, &tenant("another-studio", &[])).await,
+        store.create(&tenant("another-studio", &[])).await,
         Err(Error::Unavailable(_))
     ));
     let connection = pool.get().await.expect("a connection");
@@ -296,7 +294,8 @@ async fn a_stale_cached_insert_is_temporary_and_clears_the_cache() {
 #[tokio::test]
 async fn a_bad_stored_row_is_an_error_not_a_bad_page() {
     let (store, settings) = store_and_settings().await;
-    create_tenant(&store, &tenant("sample-studio", &[]))
+    store
+        .create(&tenant("sample-studio", &[]))
         .await
         .expect("creates");
     let client = tetsu_postgres::connect(&settings).await.expect("connects");
@@ -305,7 +304,7 @@ async fn a_bad_stored_row_is_an_error_not_a_bad_page() {
         .await
         .expect("corrupts the row");
     assert!(matches!(
-        resolve(&store, "/sample-studio").await,
+        store.resolve("/sample-studio").await,
         Err(Error::Invalid(_))
     ));
 }
@@ -322,7 +321,7 @@ async fn a_login_refused_by_the_server_is_not_worth_retrying() {
     );
     let store = postgres_store(pool(&stranger).expect("pool"));
     assert!(matches!(
-        resolve(&store, "/sample-studio").await,
+        store.resolve("/sample-studio").await,
         Err(Error::Storage(_))
     ));
 }
@@ -346,7 +345,7 @@ async fn a_server_out_of_connections_is_temporary_through_the_pool() {
         ))
         .expect("pool"),
     );
-    let result = resolve(&full, "/sample-studio").await;
+    let result = full.resolve("/sample-studio").await;
     admin
         .batch_execute(&format!("DROP ROLE {role}"))
         .await
@@ -357,7 +356,8 @@ async fn a_server_out_of_connections_is_temporary_through_the_pool() {
 #[tokio::test]
 async fn an_address_padded_with_other_whitespace_is_not_found() {
     let (store, _database) = store_and_settings().await;
-    create_tenant(&store, &tenant("sample-studio", &[]))
+    store
+        .create(&tenant("sample-studio", &[]))
         .await
         .expect("creates");
     for address in [
@@ -366,7 +366,7 @@ async fn an_address_padded_with_other_whitespace_is_not_found() {
         "/sample-studio\u{a0}",
     ] {
         assert_eq!(
-            resolve(&store, address).await,
+            store.resolve(address).await,
             Err(Error::NotFound),
             "{address:?}"
         );
@@ -376,7 +376,8 @@ async fn an_address_padded_with_other_whitespace_is_not_found() {
 #[tokio::test]
 async fn an_address_with_a_control_character_is_not_found() {
     let (store, _database) = store_and_settings().await;
-    create_tenant(&store, &tenant("sample-studio", &[]))
+    store
+        .create(&tenant("sample-studio", &[]))
         .await
         .expect("creates");
     for address in [
@@ -386,7 +387,7 @@ async fn an_address_with_a_control_character_is_not_found() {
         "/sample-studio\u{9b}",
     ] {
         assert_eq!(
-            resolve(&store, address).await,
+            store.resolve(address).await,
             Err(Error::NotFound),
             "{address:?}"
         );

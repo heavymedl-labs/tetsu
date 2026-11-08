@@ -111,6 +111,9 @@ finish() {
 }
 trap finish EXIT
 cargo llvm-cov --json --summary-only --output-path "$work/coverage.json"
+# Coverage runs no doc tests on stable, and some prove what must not compile, such as a module's port being
+# out of reach (ADR-0021).
+cargo test --doc
 cargo metadata --no-deps --format-version 1 >"$work/metadata.json"
 python3 scripts/check_coverage.py "$work/metadata.json" "$work/coverage.json"
 # Branches need a nightly compiler (ADR-0020), pinned in .nightly-toolchain, in a build folder of its own. The

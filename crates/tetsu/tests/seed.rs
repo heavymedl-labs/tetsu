@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use tetsu_postgres::test_support::fresh_database;
-use tetsu_tenancy::{Error, Location, resolve};
+use tetsu_tenancy::{Error, Location};
 
 #[cfg(test)]
 mod support {
@@ -12,7 +12,7 @@ mod support {
     use std::sync::atomic::{AtomicU32, Ordering};
 
     use tetsu_postgres::{Settings, pool};
-    use tetsu_tenancy::{TenantStore, postgres_store};
+    use tetsu_tenancy::{TenantStore, Tenants, postgres_store};
 
     static NEXT: AtomicU32 = AtomicU32::new(0);
 
@@ -96,7 +96,7 @@ mod support {
         assert!(output.status.success(), "{output:?}");
     }
 
-    pub fn store(settings: &Settings) -> impl TenantStore {
+    pub fn store(settings: &Settings) -> Tenants<impl TenantStore> {
         postgres_store(pool(settings).expect("a pool"))
     }
 
@@ -205,7 +205,8 @@ async fn seed_creates_the_tenant_and_a_rerun_skips_it() {
     assert!(first.status.success(), "{first:?}");
     assert!(text(&first.stdout).contains("created sample-studio"));
 
-    let tenant = resolve(&store(&settings), "/sample-studio")
+    let tenant = store(&settings)
+        .resolve("/sample-studio")
         .await
         .expect("resolves");
     assert_eq!(tenant.name(), "Sample Studio");
@@ -229,7 +230,7 @@ async fn seed_writes_nothing_when_any_file_is_invalid() {
     let output = seed(&settings, &folder);
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(
-        resolve(&store(&settings), "/sample-studio").await,
+        store(&settings).resolve("/sample-studio").await,
         Err(Error::NotFound)
     );
 }

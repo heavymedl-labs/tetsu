@@ -9,6 +9,7 @@ use tokio_postgres::types::ToSql;
 
 use crate::domain::{Color, Error, Location, NewTenant, Slug, Tenant, TenantId, Theme};
 use crate::ports::TenantStore;
+use crate::use_cases::Tenants;
 
 pub const MIGRATIONS: &[Migration] = &[Migration {
     version: 1,
@@ -25,10 +26,10 @@ const STALE: &str = "stale cached statement: ";
 /// The Postgres function that raises it, which unlike the message does not change with the server's language.
 const STALE_ROUTINE: &str = "RevalidateCachedQuery";
 
-/// The store the composition root builds Tenancy with.
+/// Tenancy over Postgres, for the composition root. It returns the use cases, never the store itself.
 #[must_use]
-pub fn postgres_store(pool: Pool) -> impl TenantStore {
-    PostgresTenants { pool }
+pub fn postgres_store(pool: Pool) -> Tenants<impl TenantStore> {
+    Tenants::new(PostgresTenants { pool })
 }
 
 struct PostgresTenants {
