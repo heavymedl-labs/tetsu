@@ -518,3 +518,70 @@ async fn refuses_an_applied_version_missing_from_the_code() {
     );
     assert!(!table_exists(&settings, "fake.d").await.expect("checks"));
 }
+
+#[tokio::test]
+async fn a_setting_a_file_makes_does_not_reach_its_own_record() {
+    const ENCODED: &[Migration] = &[Migration {
+        version: 1,
+        sql: "CREATE TABLE enc.a (x text DEFAULT 'é'); SET client_encoding = 'LATIN1'",
+    }];
+    let settings = fresh_database().await.expect("a test database");
+    let module = Named("enc", "enc", ENCODED);
+    migrate(&settings, &[&module]).await.expect("first run");
+    migrate(&settings, &[&module])
+        .await
+        .expect("the record holds the file as written, so a rerun finds it unchanged");
+}
+
+#[tokio::test]
+async fn a_temp_table_from_one_file_does_not_take_over_the_next() {
+    const TEMP: &[Migration] = &[Migration {
+        version: 1,
+        sql: "CREATE TEMP TABLE items (id int)",
+    }];
+    const ITEMS: &[Migration] = &[Migration {
+        version: 1,
+        sql: "CREATE TABLE items (id int); INSERT INTO items VALUES (1)",
+    }];
+    let settings = fresh_database().await.expect("a test database");
+    migrate(
+        &settings,
+        &[&Named("aa", "aa", TEMP), &Named("bb", "bb", ITEMS)],
+    )
+    .await
+    .expect("migrates");
+    let client = connect(&settings).await.expect("connects");
+    let row = client
+        .query_one("SELECT count(*) AS n FROM bb.items", &[])
+        .await
+        .expect("counts");
+    assert_eq!(row.try_get::<_, i64>("n").expect("maps"), 1);
+}
+
+#[tokio::test]
+async fn a_setting_from_a_file_outside_a_transaction_does_not_reach_the_next() {
+    const OUTSIDE: &[Migration] = &[Migration {
+        version: 1,
+        sql: "-- tetsu:no-transaction\nSET lock_timeout = '7s'",
+    }];
+    const SEEN: &[Migration] = &[Migration {
+        version: 1,
+        sql: "CREATE TABLE second.seen AS SELECT current_setting('lock_timeout') AS lock_timeout",
+    }];
+    let settings = fresh_database().await.expect("a test database");
+    migrate(
+        &settings,
+        &[
+            &Named("first", "first", OUTSIDE),
+            &Named("second", "second", SEEN),
+        ],
+    )
+    .await
+    .expect("migrates");
+    let client = connect(&settings).await.expect("connects");
+    let row = client
+        .query_one("SELECT lock_timeout FROM second.seen", &[])
+        .await
+        .expect("reads");
+    assert_eq!(row.try_get::<_, String>("lock_timeout").expect("maps"), "0");
+}

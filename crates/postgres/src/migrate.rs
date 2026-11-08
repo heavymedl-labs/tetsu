@@ -14,9 +14,10 @@ pub const MIGRATION_LOCK: i64 = 7_243_001;
 const LOCK_WAIT: Duration = Duration::from_secs(60);
 const LOCK_POLL: Duration = Duration::from_millis(100);
 const NO_TRANSACTION: &str = "-- tetsu:no-transaction";
-/// Run right after each file, before the runner's own queries, so a role the file took never writes its record.
-/// `RESET ALL` leaves these two alone.
-const RESET_IDENTITY: &str = "RESET SESSION AUTHORIZATION; RESET ROLE";
+/// Run right after each file, before the runner's own queries, so nothing the file set reaches its record or the
+/// next file: its role and session authorization, which `RESET ALL` leaves alone, every setting, such as
+/// `client_encoding`, and its temp tables, which come before the schema on the search path.
+const RESET_SESSION: &str = "RESET SESSION AUTHORIZATION; RESET ROLE; RESET ALL; DISCARD TEMP";
 
 /// Applies each module's new migrations.
 ///
@@ -202,15 +203,12 @@ fn new_files<'a>(
     Ok(new)
 }
 
-/// Runs one file with its schema first on the search path, so an unqualified name lands there. Afterwards every
-/// setting returns to the session's own, so a plain `SET` in one file never reaches the next.
+/// Runs one file with its schema first on the search path, so an unqualified name lands there.
 async fn apply(client: &Client, schema: &str, migration: &Migration) -> Result<(), Error> {
     client
         .batch_execute(&format!(r#"SET search_path TO "{schema}""#))
         .await?;
-    apply_in_schema(client, schema, migration).await?;
-    client.batch_execute("RESET ALL").await?;
-    Ok(())
+    apply_in_schema(client, schema, migration).await
 }
 
 async fn apply_in_schema(
@@ -229,7 +227,7 @@ async fn apply_in_schema(
     client.batch_execute("BEGIN").await?;
     let applied = async {
         client.batch_execute(migration.sql).await?;
-        client.batch_execute(RESET_IDENTITY).await?;
+        client.batch_execute(RESET_SESSION).await?;
         client.execute(&record, &[&migration.sql]).await
     };
     if let Err(error) = applied.await {
@@ -256,7 +254,7 @@ async fn apply_outside_transaction(
         .into());
     }
     client.batch_execute(migration.sql).await?;
-    client.batch_execute(RESET_IDENTITY).await?;
+    client.batch_execute(RESET_SESSION).await?;
     refuse_invalid_indexes(client, schema).await?;
     client.execute(record, &[&migration.sql]).await?;
     Ok(())
@@ -266,8 +264,9 @@ async fn apply_outside_transaction(
 async fn refuse_invalid_indexes(client: &Client, schema: &str) -> Result<(), Error> {
     let invalid = client
         .query(
-            "SELECT i.indexrelid::regclass::text AS name FROM pg_index i
-             JOIN pg_class c ON c.oid = i.indexrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+            "SELECT i.indexrelid::pg_catalog.regclass::text AS name FROM pg_catalog.pg_index i
+             JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid
+             JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
              WHERE n.nspname = $1 AND NOT i.indisvalid",
             &[&schema],
         )
