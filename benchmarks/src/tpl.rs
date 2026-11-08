@@ -128,7 +128,7 @@ pub fn run(renders: usize) {
             spots: (i % 7) as u32,
         })
         .collect();
-    let studio = "Anvil Row Strength";
+    let studio = "Sample Studio";
     let engines: [(&str, Box<dyn Fn() -> String>); 4] = [
         (
             "askama",

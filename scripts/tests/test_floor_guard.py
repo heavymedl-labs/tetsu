@@ -142,6 +142,11 @@ class Suppressions(GuardCase):
             "#[mutants::skip]",
             "#[cfg(not(coverage))]",
             "#[coverage(off)]",
+            "// #lizard forgives",
+            "// #lizard forgive",
+            "// jscpd:ignore-start",
+            "#[rustfmt::skip]",
+            "#![rustfmt::skip]",
         ):
             with self.subTest(line=line):
                 write(self.repo / "src" / "a.rs", line + "\n")
@@ -173,6 +178,8 @@ class Stubs(GuardCase):
             "if let Err(_) = x {}",
             "Err(_) => (),",
             "Err(_error) => ()",
+            "Err(..) => {}",
+            "Err(..) => (),",
         ):
             with self.subTest(line=line):
                 write(self.repo / "src" / "a.rs", line + "\n")

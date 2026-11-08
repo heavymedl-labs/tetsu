@@ -42,7 +42,7 @@ Demo businesses live in the `tetsu-demos` repository, one tenant per file
 format = 1
 
 [tenant]
-slug = "sample-studio"    # 1 to 63 lowercase letters, digits, and inner hyphens; reached at /sample-studio
+slug = "sample-studio"    # 1 to 63 lowercase letters, digits, and inner hyphens; registered as address /sample-studio
 name = "Sample Studio"    # 1 to 100 characters
 
 [tenant.theme]

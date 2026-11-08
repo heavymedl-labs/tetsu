@@ -15,6 +15,8 @@ and CONSTRAINTS.md, then the issue and the diff. Also answer:
 2. What repeats existing code or an existing idea? Search the repository to find out.
 3. Does anything break an invariant?
 4. Did the change break the floor in CONSTRAINTS.md, or lower the bar in any other way?
+5. Does every new promise, in code comments, docs, or an ADR, have a test or check that would fail if it broke,
+   or a stated reason why not?
 
 Report only critical and required findings, with no nits, style, or optional suggestions.
 Say what you could not check.

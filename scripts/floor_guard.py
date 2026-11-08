@@ -76,7 +76,7 @@ SUPPRESSION = re.compile(
     r"|pyright:\s*ignore|#\s*pragma:\s*no cover|pylint:\s*disable|shellcheck disable"
     r"|istanbul ignore|nosemgrep|gitleaks:allow|Stryker disable|continue-on-error|exclude_re"
     r"|squawk-ignore|--\s*noqa|exclude_globs|examine_(re|globs)|mutants::skip|cfg\(not\(coverage\)\)"
-    r"|coverage\(off\)",
+    r"|coverage\(off\)|#lizard forgive|jscpd:ignore|rustfmt::skip",
     re.IGNORECASE,
 )
 WRITTEN_REASON = re.compile(r"\breason\s*[=:]", re.IGNORECASE)
@@ -85,7 +85,7 @@ MARKDOWN_SUPPRESSION = re.compile(r"markdownlint-(disable|configure)")
 STUB = re.compile(
     r"\btodo!\(|\bunimplemented!\(|raise NotImplementedError|\bTODO\b|\bFIXME\b"
     r"|catch\s*(\([^)]*\))?\s*\{\s*\}|except\b.*:\s*pass\b"
-    r"|Err\(_\w*\)\s*(=>\s*(\{\s*\}|\(\))|=\s*\S+\s*\{\s*\})"
+    r"|Err\((_\w*|\.\.)\)\s*(=>\s*(\{\s*\}|\(\))|=\s*\S+\s*\{\s*\})"
 )
 SKIP = re.compile(
     r"#\[ignore|cfg_attr\(.*\bignore\b|#!?\[cfg\(any\(\s*\)\)\]|\b(it|test|describe)\.(skip|todo|only)\b|\bxit\(|\bxdescribe\("

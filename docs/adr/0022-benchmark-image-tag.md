@@ -6,11 +6,11 @@
 ## Context
 
 [ADR-0008](0008-benchmark-harness.md) builds the benchmark harness into one image per commit, "tagged with the
-commit SHA". Since commit 22bf5dc, `.github/workflows/benchmarks.yml` tags it instead with a hash of what the
-image builds from, `benchmarks/`, `crates/`, and the workspace files, and reuses an image whose tag already
-exists. No ADR recorded the change, so the accepted rule and the workflow disagree
-([#57](https://github.com/heavymedl-labs/tetsu/issues/57)). The maintainer chose to record the change rather
-than revert it.
+commit SHA". The workflow it shipped with, in commit 4cfa0c3, already tagged the image with a hash of
+`benchmarks/` instead and reused an image whose tag existed. Commit 22bf5dc added `crates/` and the workspace
+files to the hash. The accepted rule and the workflow have disagreed from the start
+([#57](https://github.com/heavymedl-labs/tetsu/issues/57)). The maintainer chose to record the workflow's rule
+rather than change it.
 
 ## Decision
 
@@ -22,13 +22,14 @@ than revert it.
 ## Alternatives considered
 
 - **Tag by commit SHA, as ADR-0008 says.** Simple to trace, but every commit rebuilds the image, including
-  commits that change only docs, which costs CI minutes and gives identical images different names.
+  commits that change nothing it builds from, which costs CI minutes and gives identical images different names.
 - **Tag by both.** Reusable and readable at a glance, but two tags per image to keep, for no gain while the
   workflow run already records the commit.
 
 ## Consequences
 
-- Docs-only commits reuse the last image, so benchmark runs start sooner.
+- A commit that changes none of the hashed files reuses the last image, so its benchmark run starts sooner.
+  Docs inside those folders, such as a crate's README, still change the hash and force a rebuild.
 - A file the build reads that sits outside the hashed paths would not change the tag. The hash must grow with
   the build, such as when `benchmarks/Dockerfile` copies a new top-level file.
 - The cost of replacing this is one workflow step.
