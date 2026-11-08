@@ -1,0 +1,4 @@
+# The test database helper is test infrastructure. A mutant that breaks its cleanup leaves a whole test run's
+# databases behind, so it is not mutated here; its own tests in crates/postgres/tests/test_support.rs still
+# run on every check (#43).
+exclude_globs = ["crates/postgres/src/test_support.rs"]

@@ -65,7 +65,8 @@ fi
 
 if [[ -z "${TEST_DATABASE_URL:-}" ]]; then
   echo "error: set TEST_DATABASE_URL to a Postgres the tests may create databases on, for example:" >&2
-  echo "  docker run -d --name tetsu-test-pg -p 54329:5432 -e POSTGRES_HOST_AUTH_METHOD=trust postgres:18.6" >&2
+  echo "  docker run -d --name tetsu-test-pg -p 54329:5432 -e POSTGRES_HOST_AUTH_METHOD=trust postgres:18.6 \\" >&2
+  echo "    -c fsync=off -c synchronous_commit=off -c full_page_writes=off" >&2
   echo "  export TEST_DATABASE_URL=postgres://postgres@localhost:54329/postgres" >&2
   exit 1
 fi
@@ -77,7 +78,13 @@ python3 scripts/check_doc_sizes.py
 
 # Limits are in ADR-0015 and ADR-0016. Cargo skips the benchmark harness, except for formatting.
 work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
+# Drop every test database on the way out, pass or fail. Tests drop their own, but a killed test cannot (#43).
+finish() {
+  rm -rf "$work"
+  cargo run -q -p tetsu-postgres --example drop_test_databases ||
+    echo "warning: test databases were not dropped; the next test run sweeps them" >&2
+}
+trap finish EXIT
 cargo llvm-cov --json --summary-only --output-path "$work/coverage.json"
 cargo metadata --no-deps --format-version 1 >"$work/metadata.json"
 python3 scripts/check_coverage.py "$work/metadata.json" "$work/coverage.json"

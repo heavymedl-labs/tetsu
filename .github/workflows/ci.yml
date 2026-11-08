@@ -44,6 +44,13 @@ jobs:
             .tools
             target
           key: tools-${{ hashFiles('scripts/install-tools.sh', 'Cargo.lock', 'rust-toolchain.toml') }}
+      # The test Postgres holds throwaway data, so trade crash safety for speed. Services take no server flags.
+      - run: |
+          docker exec ${{ job.services.postgres.id }} psql -U postgres -q \
+            -c "ALTER SYSTEM SET fsync = off" \
+            -c "ALTER SYSTEM SET synchronous_commit = off" \
+            -c "ALTER SYSTEM SET full_page_writes = off" \
+            -c "SELECT pg_reload_conf()"
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - run: scripts/install-tools.sh
       # After a force push the old head is on no branch, so fetch it by its SHA.

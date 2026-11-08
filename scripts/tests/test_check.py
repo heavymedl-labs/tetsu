@@ -175,6 +175,23 @@ class CheckScript(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("cargo mutants", self.log.read_text())
 
+    def test_drops_every_test_database_when_it_finishes(self):
+        result = self.check()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("cargo run -q -p tetsu-postgres --example drop_test_databases", self.log.read_text())
+
+    def test_drops_every_test_database_even_after_a_failing_stage(self):
+        self.stub("cargo", f'echo "cargo $*" >> "{self.log}"; [ "$1" != llvm-cov ]')
+        result = self.check()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("cargo run -q -p tetsu-postgres --example drop_test_databases", self.log.read_text())
+
+    def test_the_database_hint_uses_settings_for_throwaway_data(self):
+        self.no_database = True
+        result = self.check()
+        for setting in ("fsync=off", "synchronous_commit=off", "full_page_writes=off"):
+            self.assertIn(setting, result.stderr)
+
     def test_stops_on_a_failing_stage(self):
         self.stub("cargo", "exit 1")
         result = self.check()
