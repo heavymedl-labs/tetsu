@@ -9,15 +9,73 @@ use tetsu_postgres::{Settings, Tls, pool};
 /// a unit test beside the code.
 const SHORT: Duration = Duration::from_millis(300);
 
+/// A server that answers Postgres's TLS request with "no", as one without TLS does. The test Postgres offers TLS,
+/// so it cannot play this part.
+async fn server_without_tls() -> std::io::Result<String> {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let port = listener.local_addr()?.port();
+    tokio::spawn(async move {
+        while let Ok((socket, _)) = listener.accept().await {
+            tokio::spawn(refuse_tls(socket));
+        }
+    });
+    Ok(format!("postgres://x@127.0.0.1:{port}/x"))
+}
+
+async fn refuse_tls(socket: tokio::net::TcpStream) -> std::io::Result<()> {
+    let (mut request, mut read) = ([0; 8], 0);
+    while read < request.len() {
+        socket.readable().await?;
+        match socket.try_read(&mut request[read..]) {
+            Ok(0) => return Ok(()),
+            Ok(n) => read += n,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(error) => return Err(error),
+        }
+    }
+    socket.writable().await?;
+    socket.try_write(b"N").map(|_| ())
+}
+
+/// The error and every cause beneath it, where the TLS library says why it refused.
+fn chain(error: &tetsu_postgres::Error) -> String {
+    std::iter::successors(Some(&**error as &dyn std::error::Error), |e| e.source())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(": ")
+}
+
 #[tokio::test]
 async fn tls_is_the_default_and_refuses_a_server_without_it() {
-    let plain = fresh_database().await.expect("a test database");
-    let required = Settings::new(plain.url());
+    let required = Settings::new(&server_without_tls().await.expect("a server"));
     assert_eq!(required.tls(), Tls::Required);
     let error = tetsu_postgres::connect(&required)
         .await
         .expect_err("must not fall back to plain text");
     assert!(error.to_string().contains("TLS"), "{error}");
+}
+
+/// The test Postgres presents its image's self-signed certificate for localhost, so only the authority is wrong.
+/// A connector that skipped verification would connect.
+#[tokio::test]
+async fn tls_refuses_a_certificate_no_trusted_authority_signed() {
+    let plain = fresh_database().await.expect("a test database");
+    let required = Settings::new(plain.url());
+    let direct = tetsu_postgres::connect(&required)
+        .await
+        .expect_err("must not trust the certificate");
+    assert!(
+        chain(&direct).contains("UnknownIssuer"),
+        "{}",
+        chain(&direct)
+    );
+    let pooled = pool(&required)
+        .expect("pool")
+        .get()
+        .await
+        .expect_err("must not trust the certificate");
+    let pooled = chain(&pooled.into());
+    assert!(pooled.contains("UnknownIssuer"), "{pooled}");
 }
 
 #[test]
@@ -46,8 +104,7 @@ fn settings_never_print_the_url() {
 
 #[tokio::test]
 async fn a_pool_requiring_tls_refuses_a_server_without_it() {
-    let plain = fresh_database().await.expect("a test database");
-    let required = Settings::new(plain.url());
+    let required = Settings::new(&server_without_tls().await.expect("a server"));
     assert!(pool(&required).expect("pool").get().await.is_err());
 }
 
@@ -229,11 +286,7 @@ async fn an_at_sign_in_the_password_never_reaches_an_error() {
     let error = tetsu_postgres::connect(&Settings::from_values(&url, Some("disable")))
         .await
         .expect_err("the database does not exist");
-    let chain: Vec<String> =
-        std::iter::successors(Some(&*error as &dyn std::error::Error), |e| e.source())
-            .map(ToString::to_string)
-            .collect();
-    let chain = chain.join(": ");
+    let chain = chain(&error);
     assert!(chain.contains("no_such_database"), "{chain}");
     assert!(!chain.contains("SECRET"), "{chain}");
 }

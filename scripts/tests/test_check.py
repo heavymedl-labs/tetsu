@@ -1,6 +1,7 @@
 """check.sh must run each stage and stop on the first failure, and the hook must call it."""
 
 import os
+import re
 import shutil
 import stat
 import tempfile
@@ -226,6 +227,15 @@ class CheckScript(unittest.TestCase):
         # No password, so only this machine may connect; and nothing worth keeping, so nothing goes to disk.
         self.assertIn("-p 127.0.0.1:54329:5432", result.stderr)
         self.assertIn("--tmpfs /var/lib/postgresql", result.stderr)
+
+    def test_ci_sets_every_server_setting_in_the_database_hint(self):
+        self.no_database = True
+        settings = re.findall(r"-c (\w+)=(\S+)", self.check().stderr)
+        self.assertIn(("ssl", "on"), settings)
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
+        for name, value in settings:
+            with self.subTest(name=name):
+                self.assertRegex(workflow, rf"ALTER SYSTEM SET {name} = '?{re.escape(value)}'?\"")
 
     def test_stops_on_a_failing_stage(self):
         self.stub("cargo", "exit 1")

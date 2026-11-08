@@ -65,6 +65,7 @@ fn a_failure_says_why_not_only_that_it_failed() {
     assert!(stderr.contains("Connection refused"), "{stderr}");
 }
 
+/// The test Postgres offers TLS with a self-signed certificate, so a binary that requires TLS refuses it.
 #[tokio::test]
 async fn tls_is_required_unless_the_environment_turns_it_off() {
     let settings = fresh_database().await.expect("a test database");
@@ -76,7 +77,7 @@ async fn tls_is_required_unless_the_environment_turns_it_off() {
         .expect("the binary runs");
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8(output.stderr).expect("output is UTF-8");
-    assert!(stderr.contains("server does not support TLS"), "{stderr}");
+    assert!(stderr.contains("UnknownIssuer"), "{stderr}");
 }
 
 #[test]

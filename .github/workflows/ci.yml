@@ -44,12 +44,16 @@ jobs:
             .tools
             target
           key: tools-${{ hashFiles('scripts/install-tools.sh', 'Cargo.lock', 'rust-toolchain.toml') }}
-      # The test Postgres holds throwaway data, so trade crash safety for speed. Services take no server flags.
+      # The settings in check.sh's setup hint, since services take no server flags: throwaway data traded for
+      # speed, and TLS with the image's self-signed certificate, which the TLS tests must refuse.
       - run: |
           docker exec ${{ job.services.postgres.id }} psql -U postgres -q \
             -c "ALTER SYSTEM SET fsync = off" \
             -c "ALTER SYSTEM SET synchronous_commit = off" \
             -c "ALTER SYSTEM SET full_page_writes = off" \
+            -c "ALTER SYSTEM SET ssl_cert_file = '/etc/ssl/certs/ssl-cert-snakeoil.pem'" \
+            -c "ALTER SYSTEM SET ssl_key_file = '/etc/ssl/private/ssl-cert-snakeoil.key'" \
+            -c "ALTER SYSTEM SET ssl = on" \
             -c "SELECT pg_reload_conf()"
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - run: scripts/install-tools.sh
