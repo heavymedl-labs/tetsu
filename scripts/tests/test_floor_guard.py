@@ -296,6 +296,7 @@ class GuardProtectsItself(GuardCase):
             ".editorconfig",
             "Cargo.toml",
             ".cargo/mutants.toml",
+            ".cargo/config.toml",
             "scripts/check_doc_sizes.py",
             "scripts/check-adrs.sh",
             ".markdownlint-cli2.yaml",
@@ -341,15 +342,22 @@ class LintConfig(GuardCase):
             (".markdownlint-cli2.yaml", "config: {default: false}"),
             ("ruff.toml", 'ignore = ["E501"]'),
             (".cargo/mutants.toml", 'exclude_re = ["x"]'),
+            (".cargo/config.toml", 'rustflags = ["-Aclippy::all"]'),
+            (".cargo/config.toml", 'TEST_DATABASE_URL = { value = "postgres://elsewhere/db", force = true }'),
+            (".cargo/config.toml", 'runner = "true"'),
+            (".cargo/config.toml", 'rustc-wrapper = "true"'),
+            (".cargo/config.toml", 'CLIPPY_CONF_DIR = "loose"'),
             ("Cargo.toml", 'unwrap_used = "allow"'),
             ("crates/a/Cargo.toml", 'panic = { level = "allow", priority = 1 }'),
             ("Cargo.toml", "missing_errors_doc = 'allow'"),
         ):
-            with self.subTest(path=path):
-                write(self.repo / path, "one\n")
+            with self.subTest(path=path, line=line):
+                # A base of its own, so a path used twice still has something to commit.
+                base = f"base for {line}\n"
+                write(self.repo / path, base)
                 self.commit("add " + path)
                 self.git("tag", "-f", "base")
-                write(self.repo / path, "one\n" + line + "\n")
+                write(self.repo / path, base + line + "\n")
                 self.assertFlags("guard-weakened")
 
     def test_tightening_lint_config_passes(self):

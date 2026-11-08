@@ -3,6 +3,7 @@
 import os
 import re
 import shutil
+import socket
 import stat
 import tempfile
 import unittest
@@ -255,6 +256,47 @@ class CheckScript(unittest.TestCase):
         result = self.check()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Node 26", result.stderr)
+
+    def default_database(self, port):
+        """Writes the local default address, as .cargo/config.toml does in the repository."""
+        url = f"postgres://postgres@localhost:{port}/postgres"
+        write(self.root / ".cargo" / "config.toml", f'[env]\nTEST_DATABASE_URL = "{url}"\n')
+        return url
+
+    def test_with_nothing_set_the_default_address_is_used_when_it_answers(self):
+        listener = socket.create_server(("127.0.0.1", 0))
+        self.addCleanup(listener.close)
+        self.default_database(listener.getsockname()[1])
+        self.stub("cargo", f'echo "cargo $* url=${{TEST_DATABASE_URL-unset}}" >> "{self.log}"')
+        self.no_database = True
+        result = self.check()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # Unset, not empty, so Cargo's own default applies to the tests.
+        self.assertIn("url=unset", self.log.read_text())
+
+    def test_a_default_address_with_nothing_listening_fails_with_a_fix(self):
+        with socket.create_server(("127.0.0.1", 0)) as closed:
+            port = closed.getsockname()[1]
+        url = self.default_database(port)
+        self.no_database = True
+        result = self.check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(f"no test Postgres answers at {url}", result.stderr)
+        self.assertIn("docker run", result.stderr)
+
+    def test_the_setup_hint_starts_postgres_at_the_default_address(self):
+        self.no_database = True
+        hint = self.check().stderr
+        config = (ROOT / ".cargo" / "config.toml").read_text()
+        default = re.search(r'^TEST_DATABASE_URL = "postgres://\w+@localhost:(\d+)/', config, re.MULTILINE)
+        self.assertIsNotNone(default, config)
+        self.assertIn(f"-p 127.0.0.1:{default.group(1)}:5432", hint)
+
+    def test_an_explicit_address_is_used_as_given(self):
+        self.default_database(1)
+        result = self.check()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("no test Postgres", result.stderr)
 
     def test_a_missing_test_database_fails_with_a_fix(self):
         self.no_database = True

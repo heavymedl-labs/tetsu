@@ -1,0 +1,5 @@
+# Defaults for local runs. Cargo applies one only when the variable is not already set, so CI's address, or any
+# exported one, still wins (Cargo's documented behavior for [env], checked by hand on 2026-11-08).
+[env]
+# The test Postgres that scripts/check.sh says how to start; a test checks the two match.
+TEST_DATABASE_URL = "postgres://postgres@localhost:54329/postgres"

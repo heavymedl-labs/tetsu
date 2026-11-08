@@ -32,6 +32,7 @@ LINT_CONFIG = {
     ".editorconfig",
     ".markdownlint-cli2.yaml",
     ".cargo/mutants.toml",
+    ".cargo/config.toml",
 }
 # Removing a line from these lowers the bar, so each removal needs a reason.
 PROTECTED = LINT_CONFIG | {
@@ -45,7 +46,10 @@ PROTECTED = LINT_CONFIG | {
     ".github/workflows/ci.yml",
     "Cargo.toml",
 }
-LOOSENING = re.compile(r"\ballow|\bfalse\b|\boff\b|ignore|exclude|disable|examine|skip", re.IGNORECASE)
+LOOSENING = re.compile(
+    r"\ballow|\bfalse\b|\boff\b|ignore|exclude|disable|examine|skip|rustflags|force|runner|wrapper|clippy_conf",
+    re.IGNORECASE,
+)
 ALLOW_LEVEL = re.compile(r"""["']allow["']""")
 # A tool reads the nearest of these first, so a new one anywhere can override the config in LINT_CONFIG.
 NEW_CONFIG = re.compile(
@@ -195,7 +199,7 @@ def scan_protected(added, removed, created):
         if loosens and loosens.search(text):
             yield "guard-weakened", path, text
     for path in created:
-        if path not in PROTECTED and NEW_CONFIG.search(path):
+        if NEW_CONFIG.search(path):
             yield "config-added", path, "new config file"
         if CRATE_MANIFEST.match(path) and not WORKSPACE_LINTS.search(Path(path).read_text(errors="replace")):
             yield "lints-dropped", path, "new crate without the workspace lints"

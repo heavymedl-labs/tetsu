@@ -63,16 +63,22 @@ if [[ "$fast" == true ]]; then
   exit 0
 fi
 
+# Unset or empty, the tests use the default in .cargo/config.toml, which Cargo applies only to a variable that is
+# not set at all. An explicit address is used as given.
 if [[ -z "${TEST_DATABASE_URL:-}" ]]; then
-  # No password, so the port is for this machine only. The data is throwaway, so it stays in memory. TLS uses the
-  # image's self-signed certificate, which the TLS tests must refuse. CI starts the same container.
-  echo "error: set TEST_DATABASE_URL to a Postgres the tests may create databases on, for example:" >&2
-  echo "  docker run -d --name tetsu-test-pg --restart unless-stopped -p 127.0.0.1:54329:5432 \\" >&2
-  echo "    -e POSTGRES_HOST_AUTH_METHOD=trust --tmpfs /var/lib/postgresql postgres:18.6 \\" >&2
-  echo "    -c fsync=off -c synchronous_commit=off -c full_page_writes=off -c ssl=on \\" >&2
-  echo "    -c ssl_cert_file=/etc/ssl/certs/ssl-cert-snakeoil.pem -c ssl_key_file=/etc/ssl/private/ssl-cert-snakeoil.key" >&2
-  echo "  export TEST_DATABASE_URL=postgres://postgres@localhost:54329/postgres" >&2
-  exit 1
+  unset TEST_DATABASE_URL
+  url="$(sed -n 's/^TEST_DATABASE_URL *= *"\(.*\)"$/\1/p' .cargo/config.toml 2>/dev/null || true)"
+  if ! [[ "$url" =~ @([^:/]+):([0-9]+)/ ]] || ! (echo >"/dev/tcp/${BASH_REMATCH[1]}/${BASH_REMATCH[2]}") 2>/dev/null; then
+    # No password, so the port is for this machine only. The data is throwaway, so it stays in memory. TLS uses
+    # the image's self-signed certificate, which the TLS tests must refuse. CI starts the same container.
+    echo "error: no test Postgres answers at ${url:-the default in .cargo/config.toml}. Start one, or set" >&2
+    echo "TEST_DATABASE_URL to a Postgres the tests may create databases on:" >&2
+    echo "  docker run -d --name tetsu-test-pg --restart unless-stopped -p 127.0.0.1:54329:5432 \\" >&2
+    echo "    -e POSTGRES_HOST_AUTH_METHOD=trust --tmpfs /var/lib/postgresql postgres:18.6 \\" >&2
+    echo "    -c fsync=off -c synchronous_commit=off -c full_page_writes=off -c ssl=on \\" >&2
+    echo "    -c ssl_cert_file=/etc/ssl/certs/ssl-cert-snakeoil.pem -c ssl_key_file=/etc/ssl/private/ssl-cert-snakeoil.key" >&2
+    exit 1
+  fi
 fi
 
 python3 scripts/floor_guard.py "$@"
