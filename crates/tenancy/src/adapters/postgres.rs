@@ -36,10 +36,18 @@ struct PostgresTenants {
 /// Sorts driver errors as ADR-0011 asks. Only a dropped connection or a stale cached statement is worth
 /// retrying, and every error keeps the driver's message.
 fn database(error: &tokio_postgres::Error) -> Error {
-    // The driver's own text is just "db error", so keep what Postgres said.
-    let message = error
-        .as_db_error()
-        .map_or_else(|| error.to_string(), |db| db.message().to_string());
+    // The driver's own text is just "db error" or "error connecting to server", so keep what Postgres said,
+    // or the cause underneath, such as a refused connection.
+    let message = error.as_db_error().map_or_else(
+        || {
+            let causes: Vec<String> =
+                std::iter::successors(Some(error as &dyn std::error::Error), |e| e.source())
+                    .map(ToString::to_string)
+                    .collect();
+            causes.join(": ")
+        },
+        |db| db.message().to_string(),
+    );
     if error.code() == Some(&SqlState::UNIQUE_VIOLATION) {
         Error::SlugTaken
     } else if error.is_closed() || is_io(error) || message.contains(STALE) {

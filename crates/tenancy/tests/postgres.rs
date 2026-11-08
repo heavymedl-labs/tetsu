@@ -148,6 +148,17 @@ async fn a_lost_database_is_temporarily_unavailable() {
 }
 
 #[tokio::test]
+async fn a_lost_database_says_why() {
+    let settings =
+        tetsu_postgres::Settings::from_values("postgres://x@127.0.0.1:1/x", Some("disable"));
+    let store = postgres_store(pool(&settings).expect("pool"));
+    let Err(Error::Unavailable(why)) = resolve(&store, "/anvil-row").await else {
+        panic!("a refused connection is temporary");
+    };
+    assert!(why.contains("Connection refused"), "{why}");
+}
+
+#[tokio::test]
 async fn a_refused_insert_that_is_not_a_taken_slug_is_a_storage_error() {
     let (store, settings) = store_and_settings().await;
     let client = tetsu_postgres::connect(&settings).await.expect("connects");
