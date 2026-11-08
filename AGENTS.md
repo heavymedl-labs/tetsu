@@ -19,9 +19,9 @@ one as current intent. The [ADR index](docs/adr/README.md) says when to read eac
 
 ## Current phase
 
-The implementation phase is open. The workspace holds the `tetsu` binary and the
-kernel, and the walking skeleton comes next, starting with
-[#19](https://github.com/heavymedl-labs/tetsu/issues/19).
+The walking skeleton is in progress. HTTP serving and deployment remain in
+[#19](https://github.com/heavymedl-labs/tetsu/issues/19). The [README](README.md)
+describes what is implemented.
 
 ## Rules
 

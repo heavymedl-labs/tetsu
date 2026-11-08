@@ -21,8 +21,9 @@ Each industry adds only what is specific to it. Industries such as fitness, salo
 campgrounds are examples that test the platform, not its definition.
 
 It is a hobby project that aims to become a real business, so designs keep real-business
-needs such as isolation, compliance, and sign-up in view. The project is early: only the
-kernel and the `tetsu` binary exist so far.
+needs such as isolation, compliance, and sign-up in view. The project is early: the kernel,
+Tenancy, Postgres infrastructure, and the `tetsu` migration and seed commands exist.
+HTTP serving and deployment are next.
 
 ## Where things live
 
