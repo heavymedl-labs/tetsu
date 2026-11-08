@@ -90,6 +90,15 @@ impl Settings {
     }
 
     fn config(&self) -> Result<Config, Error> {
+        // The driver splits at the first `@`, before anything else, so the rest of a password holding one would
+        // reach the server, and its errors, as the host or database name.
+        if let Some((_, rest)) = self.url.split_once("://")
+            && rest.matches('@').count() > 1
+        {
+            return Err(
+                "the database URL holds more than one @; write any @ in the password as %40".into(),
+            );
+        }
         // The parser's error can quote part of the URL, such as an option name split off a password, so it
         // is replaced rather than passed on with its cause.
         let mut config: Config = self

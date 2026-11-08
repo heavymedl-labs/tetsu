@@ -280,3 +280,42 @@ async fn a_login_refused_by_the_server_is_not_worth_retrying() {
         Err(Error::Storage(_))
     ));
 }
+
+#[tokio::test]
+async fn an_address_with_a_control_character_is_not_found() {
+    let (store, _database) = store_and_settings().await;
+    create_tenant(&store, &tenant("sample-studio", &[]))
+        .await
+        .expect("creates");
+    for address in [
+        "/sample-studio\0",
+        "/\0",
+        "/sample\u{7}studio",
+        "/sample-studio\u{9b}",
+    ] {
+        assert_eq!(
+            resolve(&store, address).await,
+            Err(Error::NotFound),
+            "{address:?}"
+        );
+    }
+}
+
+/// ADR-0009: every query file prepares against the migrated schema, whether or not another test runs it.
+#[tokio::test]
+async fn every_query_file_prepares() {
+    let (_store, settings) = store_and_settings().await;
+    let client = tetsu_postgres::connect(&settings).await.expect("connects");
+    let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("sql");
+    let mut prepared = 0;
+    for entry in std::fs::read_dir(folder).expect("lists sql/") {
+        let path = entry.expect("an entry").path();
+        let sql = std::fs::read_to_string(&path).expect("reads");
+        client
+            .prepare(&sql)
+            .await
+            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        prepared += 1;
+    }
+    assert_eq!(prepared, 5);
+}

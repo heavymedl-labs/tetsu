@@ -14,8 +14,12 @@ pub async fn create_tenant(store: &impl TenantStore, tenant: &NewTenant) -> Resu
 /// Finds the tenant at an address. An unknown address fails, and never falls back to a default tenant.
 ///
 /// # Errors
-/// Fails with [`Error::NotFound`] for an unknown address, or if storage fails.
+/// Fails with [`Error::NotFound`] for an unknown address, including one holding a control character, which no
+/// address does. Fails if storage fails.
 pub async fn resolve(store: &impl TenantStore, address: &str) -> Result<Tenant, Error> {
+    if address.chars().any(char::is_control) {
+        return Err(Error::NotFound);
+    }
     let address = address.trim().to_ascii_lowercase();
     store
         .find_by_address(&address)

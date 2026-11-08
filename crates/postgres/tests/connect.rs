@@ -198,3 +198,42 @@ fn check_refuses_a_url_that_sets_tls_or_breaks_the_pool_options() {
         "the database URL is not a valid connection string"
     );
 }
+
+#[tokio::test]
+async fn an_at_sign_in_the_password_never_reaches_an_error() {
+    let plain = fresh_database().await.expect("a test database");
+    let (base, _) = plain.url().rsplit_once('/').expect("a database name");
+    let with_password =
+        |password: &str| base.replacen("postgres@", &format!("postgres:{password}@"), 1);
+    // The driver splits at the first `@`, so the rest of these passwords would reach the server as a database name.
+    for url in [
+        format!("{}/SECRET@h/db", with_password("x")),
+        format!("{}/SECRET@h/db", with_password("x?a")),
+    ] {
+        let settings = Settings::from_values(&url, Some("disable"));
+        let errors = [
+            settings.check().err(),
+            tetsu_postgres::connect(&settings).await.err(),
+            pool(&settings).err(),
+        ];
+        for error in errors {
+            assert_eq!(
+                error.expect("refused").to_string(),
+                "the database URL holds more than one @; write any @ in the password as %40",
+                "{url}"
+            );
+        }
+    }
+    // Written as %40, the URL passes, and the server's error names only the database.
+    let url = format!("{}/no_such_database", with_password("x%40SECRET"));
+    let error = tetsu_postgres::connect(&Settings::from_values(&url, Some("disable")))
+        .await
+        .expect_err("the database does not exist");
+    let chain: Vec<String> =
+        std::iter::successors(Some(&*error as &dyn std::error::Error), |e| e.source())
+            .map(ToString::to_string)
+            .collect();
+    let chain = chain.join(": ");
+    assert!(chain.contains("no_such_database"), "{chain}");
+    assert!(!chain.contains("SECRET"), "{chain}");
+}

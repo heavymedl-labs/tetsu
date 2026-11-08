@@ -20,8 +20,10 @@ const INSERT_ADDRESS: &str = include_str!("../../sql/insert_address.sql");
 const INSERT_LOCATION: &str = include_str!("../../sql/insert_location.sql");
 const FIND_TENANT: &str = include_str!("../../sql/find_tenant_by_address.sql");
 const FIND_LOCATIONS: &str = include_str!("../../sql/find_locations.sql");
-/// Postgres says this when a cached statement no longer matches its table (ADR-0011).
-const STALE: &str = "cached plan must not change result type";
+/// Marks an error from a cached statement that no longer matches its table (ADR-0011).
+const STALE: &str = "stale cached statement: ";
+/// The Postgres function that raises it, which unlike the message does not change with the server's language.
+const STALE_ROUTINE: &str = "RevalidateCachedQuery";
 
 /// The store the composition root builds Tenancy with.
 #[must_use]
@@ -39,7 +41,9 @@ fn database(error: &tokio_postgres::Error) -> Error {
     let message = message(error);
     if error.code() == Some(&SqlState::UNIQUE_VIOLATION) {
         Error::SlugTaken
-    } else if error.is_closed() || is_io(error) || message.contains(STALE) {
+    } else if is_stale(error) {
+        Error::Unavailable(format!("{STALE}{message}"))
+    } else if error.is_closed() || is_io(error) {
         Error::Unavailable(message)
     } else {
         Error::Storage(message)
@@ -73,6 +77,12 @@ fn message(error: &tokio_postgres::Error) -> String {
     causes.join(": ")
 }
 
+fn is_stale(error: &tokio_postgres::Error) -> bool {
+    error.as_db_error().is_some_and(|db| {
+        db.code() == &SqlState::FEATURE_NOT_SUPPORTED && db.routine() == Some(STALE_ROUTINE)
+    })
+}
+
 fn is_io(error: &tokio_postgres::Error) -> bool {
     std::error::Error::source(error).is_some_and(<dyn std::error::Error>::is::<std::io::Error>)
 }
@@ -89,7 +99,7 @@ fn pool_error(error: deadpool_postgres::PoolError) -> Error {
 /// A stale statement stays cached until the caches are cleared. Every pooled connection may hold it,
 /// so clear them all before the next request.
 fn clear_if_stale<T>(pool: &Pool, result: Result<T, Error>) -> Result<T, Error> {
-    if matches!(&result, Err(Error::Unavailable(why)) if why.contains(STALE)) {
+    if matches!(&result, Err(Error::Unavailable(why)) if why.starts_with(STALE)) {
         pool.manager().statement_caches.clear();
     }
     result

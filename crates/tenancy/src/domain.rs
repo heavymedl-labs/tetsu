@@ -171,15 +171,18 @@ pub struct Location {
 
 impl Location {
     /// # Errors
-    /// Fails on an empty name or time zone, or control or invisible characters in either.
+    /// Fails on an empty or overlong name or time zone, or control or invisible characters in either.
     pub fn new(name: &str, time_zone: &str) -> Result<Self, Error> {
         plain("location name", name)?;
         plain("time zone", time_zone)?;
         let (name, time_zone) = (name.trim(), time_zone.trim());
-        if name.is_empty() || time_zone.is_empty() {
-            return Err(Error::Invalid(
-                "a location needs a name and a time zone".into(),
-            ));
+        if [name, time_zone]
+            .iter()
+            .any(|text| text.is_empty() || text.chars().count() > MAX_NAME)
+        {
+            return Err(Error::Invalid(format!(
+                "a location needs a name and a time zone of 1 to {MAX_NAME} characters"
+            )));
         }
         Ok(Self {
             name: name.to_string(),
@@ -382,6 +385,12 @@ mod tests {
             Location::new("Denver", " "),
             Err(Error::Invalid(_))
         ));
+        let long = "a".repeat(100);
+        assert!(Location::new(&long, &long).is_ok());
+        let longer = "a".repeat(101);
+        for (name, zone) in [(longer.as_str(), "UTC"), ("Denver", longer.as_str())] {
+            assert!(matches!(Location::new(name, zone), Err(Error::Invalid(_))));
+        }
         let location = Location::new(" Denver ", " America/Denver ").unwrap();
         assert_eq!(
             (location.name(), location.time_zone()),
