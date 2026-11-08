@@ -8,7 +8,7 @@ People and coding agents follow the same workflow and the rules in
 1. Pick or open an issue on the
    [Tetsu project](https://github.com/orgs/heavymedl-labs/projects/1). Use the
    **Task** form for work and **Decision needed** for anything that needs an
-   ADR.
+   ADR, or `scripts/file_issue.py` with a body that follows the form.
 2. Branch from `main` with a short name and a type prefix, such as
    `docs/glossary`, `adr/tenant-isolation`, or `ci/coverage`.
 3. Keep the branch and pull request to that one issue.
@@ -78,14 +78,17 @@ you sampled rather than read. For issue and board changes, say the same in your 
 ## Project board
 
 The [Tetsu project](https://github.com/orgs/heavymedl-labs/projects/1) README
-explains its fields. Keep the board true as work moves:
+explains its fields. GitHub adds each new issue and pull request to the board,
+sets its status to Todo, and to Done when it closes. Keep the rest true:
 
-- Give every new issue a milestone, priority, and tier, and place it in the
-  **Roadmap** view where it will be worked, top first.
-- When an issue closes, set its status to Done and move it below open work.
-- Post a status update (On track, At risk, or Off track) whenever an issue
-  closes or a milestone's scope changes. Say what finished, what is next, and
-  any risk.
+- Every issue needs a milestone, a tier, and a priority. `scripts/file_issue.py`
+  files one with all three in one step; set them by hand on an issue filed any
+  other way, such as from a form or as a sub-issue.
+- The **Roadmap** view groups work by status and sorts it by priority, so set
+  priority rather than moving items by hand.
+- Post a status update (On track, At risk, or Off track) when a milestone's
+  scope or risk changes, and at the end of a working session that closed
+  issues. Say what finished, what is next, and any risk.
 - Update the project README when milestones or field meanings change.
 
 ## Commits
