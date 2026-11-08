@@ -90,6 +90,8 @@ sets its status to Todo, and to Done when it closes. Keep the rest true:
   parent issue below its sub-issues. Place a new item where it belongs.
 - **The next task** is the first item in the Todo group that nothing blocks.
   Keep Now to the few items actually next, and move the rest to Next.
+- Set an issue's status to In Progress when work on it starts, since no
+  workflow does. Closing it sets Done.
 - When an issue waits on another, including a decision an `adr` issue makes,
   link it with GitHub's "blocked by" relationship, so the wait shows on both
   issues and clears when the blocker closes.
