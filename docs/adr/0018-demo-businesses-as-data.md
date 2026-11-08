@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-07
+- Versioning rule superseded by [ADR-0019](0019-seed-format-versions.md)
 
 ## Context
 
