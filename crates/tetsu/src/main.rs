@@ -51,14 +51,12 @@ fn parse_seed(rest: &[String]) -> Result<Command, String> {
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    let args: Result<Vec<String>, _> = std::env::args_os()
+    let command = std::env::args_os()
         .skip(1)
         .map(std::ffi::OsString::into_string)
-        .collect();
-    let command = match args.map_err(|_| "arguments must be UTF-8".to_string()) {
-        Ok(args) => parse(&args),
-        Err(why) => Err(why),
-    };
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| "arguments must be UTF-8".to_string())
+        .and_then(|args| parse(&args));
     let command = match command {
         Ok(command) => command,
         Err(why) => {

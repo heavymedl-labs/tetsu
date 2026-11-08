@@ -137,14 +137,15 @@ fn stale(name: &str, now: u64, older_than: Duration) -> bool {
         .unwrap_or_default()
         .split('_')
         .collect();
-    let well_formed = parts.len() == 3
-        && parts
-            .iter()
-            .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()));
-    let created = parts
-        .first()
-        .and_then(|seconds| seconds.parse::<u64>().ok());
-    well_formed && created.is_some_and(|at| at <= now && now - at >= older_than.as_secs())
+    let [seconds, _, _] = parts.as_slice() else {
+        return false;
+    };
+    parts
+        .iter()
+        .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
+        && seconds
+            .parse::<u64>()
+            .is_ok_and(|at| at <= now && now - at >= older_than.as_secs())
 }
 
 async fn create(options: &str) -> Result<TestDatabase, Error> {

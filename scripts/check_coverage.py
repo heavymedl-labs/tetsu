@@ -61,8 +61,9 @@ def path_errors(files, directories):
 def main():
     metadata = json.loads(Path(sys.argv[1]).read_text())
     files = json.loads(Path(sys.argv[2]).read_text())["data"][0]["files"]
-    errors = list(path_errors(files, [directory for _, directory, _ in crates(metadata)]))
-    for name, directory, declared in crates(metadata):
+    packages = list(crates(metadata))
+    errors = list(path_errors(files, [directory for _, directory, _ in packages]))
+    for name, directory, declared in packages:
         problems = list(declaration_errors(name, declared))
         if not problems:
             problems = list(coverage_errors(name, declared["tier"], totals(directory, files)))

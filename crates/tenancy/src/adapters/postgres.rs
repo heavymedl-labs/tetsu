@@ -63,16 +63,14 @@ fn commit_error(error: &tokio_postgres::Error) -> Error {
 /// The driver's own text is just "db error" or "error connecting to server", so this keeps what Postgres said,
 /// or the cause underneath, such as a refused connection.
 fn message(error: &tokio_postgres::Error) -> String {
-    error.as_db_error().map_or_else(
-        || {
-            let causes: Vec<String> =
-                std::iter::successors(Some(error as &dyn std::error::Error), |e| e.source())
-                    .map(ToString::to_string)
-                    .collect();
-            causes.join(": ")
-        },
-        |db| db.message().to_string(),
-    )
+    if let Some(db) = error.as_db_error() {
+        return db.message().to_string();
+    }
+    let causes: Vec<String> =
+        std::iter::successors(Some(error as &dyn std::error::Error), |e| e.source())
+            .map(ToString::to_string)
+            .collect();
+    causes.join(": ")
 }
 
 fn is_io(error: &tokio_postgres::Error) -> bool {
