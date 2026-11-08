@@ -49,6 +49,7 @@ option for most of them.
 - [Dependency checks, secrets, and a security target](https://github.com/heavymedl-labs/tetsu/issues/31)
 - [Landing page framework and host](https://github.com/heavymedl-labs/tetsu/issues/32)
 - [Load test tools, latency budgets, and memory measurement](https://github.com/heavymedl-labs/tetsu/issues/37)
+- [Where demo businesses live](https://github.com/heavymedl-labs/tetsu/issues/39)
 
 ## Finding sources
 
