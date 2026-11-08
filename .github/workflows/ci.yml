@@ -41,9 +41,10 @@ jobs:
             ~/.cargo/.crates.toml
             ~/.cargo/.crates2.json
             ~/.cargo/registry
+            ~/.rustup/toolchains/nightly-*
             .tools
             target
-          key: tools-${{ hashFiles('scripts/install-tools.sh', 'Cargo.lock', 'rust-toolchain.toml') }}
+          key: tools-${{ hashFiles('scripts/install-tools.sh', 'Cargo.lock', 'rust-toolchain.toml', '.nightly-toolchain') }}
       # The settings in check.sh's setup hint, since services take no server flags: throwaway data traded for
       # speed, and TLS with the image's self-signed certificate, which the TLS tests must refuse.
       - run: |

@@ -201,8 +201,8 @@ mod tests {
             "a\\u{1b}[31mb\\rc\\u{202e}d\\u{200b}e\\u{2028}f\\tg"
         );
         assert_eq!(
-            printable("line one\nCafe\u{301} \"quoted\" C:\\path 'x'"),
-            "line one\nCafe\u{301} \"quoted\" C:\\path 'x'"
+            printable("line one\nCafé Cafe\u{301} \"quoted\" C:\\path 'x'"),
+            "line one\nCafé Cafe\\u{301} \"quoted\" C:\\path 'x'"
         );
     }
 

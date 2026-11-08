@@ -31,7 +31,7 @@ on every push.
 
 | Language | Format and lint | Tests catch mistakes | Coverage | New duplication, outside tests | Complexity | Boundaries |
 | --- | --- | --- | --- | --- | --- | --- |
-| Rust | rustfmt, Clippy | `cargo-mutants` | `cargo-llvm-cov`, E3 | jscpd | Clippy, lizard | [#25](https://github.com/heavymedl-labs/tetsu/issues/25) |
+| Rust | rustfmt, Clippy | `cargo-mutants` | `cargo-llvm-cov`, with branches on a pinned nightly ([ADR-0020](docs/adr/0020-branch-coverage.md)) | jscpd | Clippy, lizard | [#25](https://github.com/heavymedl-labs/tetsu/issues/25) |
 | SQL | SQLFluff, and Squawk on migrations | Module tests against Postgres | E4 | E4 | E4 | [#25](https://github.com/heavymedl-labs/tetsu/issues/25) |
 | Bash | shfmt, ShellCheck | `unittest`, from Python | E2 | E2 | E2 | E2 |
 | Python | Ruff | `unittest` | E2 | E2 | Ruff | E2 |
@@ -52,5 +52,4 @@ is in [AGENTS.md](AGENTS.md#checks), and docs also get the
 | --- | --- | --- | --- | --- | --- |
 | E1 | Scripts need tests | `scripts/generate-brand.py` | One-off generator, and its output is checked by eye | Maintainer | 2027-02-04 |
 | E2 | Bash and Python coverage, duplication, and boundaries, and Bash complexity | `scripts/` | Tooling only, with no numeric limit, and too small to justify more tools yet, so the fresh review covers these | Maintainer | 2027-02-04 |
-| E3 | ADR-0005's branch coverage | `crates/` | It needs nightly Rust, so stable measures lines and regions. Settle before the first Tier 1 code | Maintainer | 2027-02-04 |
 | E4 | SQL coverage, duplication, and complexity | `crates/` | No good tool fits: module tests run every query against Postgres, and the fresh review covers the rest | Maintainer | 2027-02-04 |

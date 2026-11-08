@@ -14,13 +14,14 @@ pub fn shown(path: &Path) -> String {
 }
 
 /// A character as printed. Anything Rust would not print as is, such as a control character, a bidi control,
-/// a zero-width character, or a separator, becomes an escape like `\u{202e}`. Quotes and backslashes stay.
+/// a zero-width character, a separator, or a combining mark, becomes an escape like `\u{202e}`. Quotes and
+/// backslashes stay. Each character is judged alone, so the result does not depend on the text around it, or
+/// on how a standard library version treats combining marks within a string.
 pub fn escaped(c: char) -> String {
     if matches!(c, '"' | '\'' | '\\') {
         return c.to_string();
     }
-    // Escaped after another character, so a combining accent is kept rather than treated as starting the text.
-    format!("a{c}").escape_debug().skip(1).collect()
+    c.escape_debug().collect()
 }
 
 /// The newest format this binary reads.

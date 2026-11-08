@@ -22,6 +22,7 @@ class CheckScript(unittest.TestCase):
         self.log = self.root / "log"
         (self.root / "scripts").mkdir()
         shutil.copy(ROOT / "scripts" / "check.sh", self.root / "scripts")
+        write(self.root / ".nightly-toolchain", "nightly-2026-11-01\n")
         write(self.root / ".nvmrc", "26\n")
         self.bin = self.root / "bin"
         self.stub("node", "echo v26.1.0")
@@ -73,6 +74,8 @@ class CheckScript(unittest.TestCase):
             "cargo llvm-cov --json",
             "cargo metadata",
             "check_coverage.py",
+            "cargo +nightly-2026-11-01 llvm-cov --branch",
+            "check_coverage.py --branches",
             "lizard",
             "jscpd",
             "ruff check",
@@ -319,7 +322,8 @@ class InstallTools(unittest.TestCase):
             log = root / "log"
             (root / "scripts").mkdir()
             shutil.copy(ROOT / "scripts" / "install-tools.sh", root / "scripts")
-            for tool in ("cargo", "uv"):
+            write(root / ".nightly-toolchain", "nightly-2026-11-01\n")
+            for tool in ("cargo", "uv", "rustup"):
                 write(root / "bin" / tool, f'#!/bin/sh\necho "{tool} $*" >> "{log}"\n', EXECUTABLE)
             result = run([root / "scripts" / "install-tools.sh"], root, PATH=f"{root / 'bin'}:/usr/bin:/bin")
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -329,6 +333,27 @@ class InstallTools(unittest.TestCase):
             self.assertRegex(text, r"uv venv .*--python 3\.\d+ .*\.tools")
             for tool in ("lizard", "ruff", "squawk-cli", "shellcheck-py", "shfmt-py", "sqlfluff"):
                 self.assertRegex(text, rf"uv pip install .*{tool}==\S+")
+            nightly = (
+                "rustup toolchain install nightly-2026-11-01 --profile minimal --component llvm-tools-preview"
+            )
+            self.assertIn(nightly, text)
+            self.assertNotIn("rustup default none", text)
+
+    def test_the_nightly_never_becomes_the_default_toolchain(self):
+        """rustup makes the first toolchain it installs the default when none is set, so that is undone."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log = root / "log"
+            (root / "scripts").mkdir()
+            shutil.copy(ROOT / "scripts" / "install-tools.sh", root / "scripts")
+            write(root / ".nightly-toolchain", "nightly-2026-11-01\n")
+            for tool in ("cargo", "uv"):
+                write(root / "bin" / tool, "#!/bin/sh\n", EXECUTABLE)
+            no_default = f'[ "$1" = default ] && [ -z "$2" ] && exit 1\necho "rustup $*" >> "{log}"'
+            write(root / "bin" / "rustup", f"#!/bin/sh\n{no_default}\n", EXECUTABLE)
+            result = run([root / "scripts" / "install-tools.sh"], root, PATH=f"{root / 'bin'}:/usr/bin:/bin")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("rustup default none", log.read_text())
 
 
 class PrePushHook(unittest.TestCase):

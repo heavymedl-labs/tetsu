@@ -102,6 +102,11 @@ trap finish EXIT
 cargo llvm-cov --json --summary-only --output-path "$work/coverage.json"
 cargo metadata --no-deps --format-version 1 >"$work/metadata.json"
 python3 scripts/check_coverage.py "$work/metadata.json" "$work/coverage.json"
+# Branches need a nightly compiler (ADR-0020), pinned in .nightly-toolchain, in a build folder of its own. The
+# stable run above stays the one that tests the code we ship.
+CARGO_TARGET_DIR=target/nightly cargo +"$(<.nightly-toolchain)" llvm-cov --branch --json --summary-only \
+  --output-path "$work/branches.json"
+python3 scripts/check_coverage.py --branches "$work/metadata.json" "$work/branches.json"
 .tools/bin/lizard -l rust -C 10 -L 50 -a 5 -w crates
 npx --yes jscpd@5.4.2 crates --threshold 0 --ignore "**/tests/**" --reporters console
 

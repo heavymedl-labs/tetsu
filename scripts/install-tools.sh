@@ -5,6 +5,12 @@ cd "$(dirname "$0")/.."
 
 cargo install --locked --version 0.9.1 cargo-llvm-cov
 cargo install --locked --version 27.1.0 cargo-mutants
+# Branch coverage needs a nightly compiler (ADR-0020). rustup makes the first toolchain it installs the default
+# when none is set, which would change what this machine builds with everywhere, so that is undone.
+had_default=true
+rustup default >/dev/null 2>&1 || had_default=false
+rustup toolchain install "$(<.nightly-toolchain)" --profile minimal --component llvm-tools-preview
+[[ "$had_default" == true ]] || rustup default none
 # uv provides the tools' own Python, so it does not depend on the machine's (ADR-0017).
 if ! command -v uv >/dev/null; then
   echo "error: uv is missing. Install it from https://docs.astral.sh/uv/" >&2

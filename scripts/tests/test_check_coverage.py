@@ -23,24 +23,48 @@ def package(name, tier=2, kind="platform"):
     }
 
 
-def covered_file(name, percent):
-    return {
-        "filename": f"/repo/crates/{name}/src/lib.rs",
-        "summary": {
-            "lines": {"count": 100, "covered": percent},
-            "regions": {"count": 100, "covered": percent},
-        },
+def covered_file(name, percent, branches=None):
+    summary = {
+        "lines": {"count": 100, "covered": percent},
+        "regions": {"count": 100, "covered": percent},
+        "branches": {"count": 100, "covered": percent if branches is None else branches},
     }
+    return {"filename": f"/repo/crates/{name}/src/lib.rs", "summary": summary}
 
 
 class CheckCoverage(unittest.TestCase):
-    def check(self, packages, files):
+    def check(self, packages, files, *flags):
         with tempfile.TemporaryDirectory() as tmp:
             metadata = Path(tmp) / "metadata.json"
             report = Path(tmp) / "report.json"
             metadata.write_text(json.dumps({"packages": packages}))
             report.write_text(json.dumps({"data": [{"files": files}]}))
-            return run(["python3", SCRIPT, metadata, report], tmp)
+            return run(["python3", SCRIPT, *flags, metadata, report], tmp)
+
+    def test_branches_are_checked_only_when_asked(self):
+        files = [covered_file("a", 95, branches=50)]
+        self.assertEqual(self.check([package("a", tier=2)], files).returncode, 0)
+        result = self.check([package("a", tier=2)], files, "--branches")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("a: 50.0% of branches, under the tier 2 limit of 90%", result.stderr)
+
+    def test_branch_limits_follow_the_tier(self):
+        files = [covered_file("a", 100, branches=99)]
+        self.assertEqual(self.check([package("a", tier=1)], files, "--branches").returncode, 1)
+        self.assertEqual(self.check([package("a", tier=2)], files, "--branches").returncode, 0)
+
+    def test_a_branch_report_with_no_branches_at_all_fails(self):
+        files = [covered_file("a", 100, branches=0)]
+        files[0]["summary"]["branches"]["count"] = 0
+        result = self.check([package("a", tier=2)], files, "--branches")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("the report counts no branches", result.stderr)
+
+    def test_a_crate_with_no_branches_passes_when_others_have_them(self):
+        files = [covered_file("a", 100), covered_file("b", 100, branches=0)]
+        files[1]["summary"]["branches"]["count"] = 0
+        result = self.check([package("a"), package("b")], files, "--branches")
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_a_crate_at_its_limit_passes(self):
         result = self.check([package("a", tier=2)], [covered_file("a", 90)])
