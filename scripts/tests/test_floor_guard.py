@@ -1,9 +1,16 @@
 """The floor guard must fail each floor violation and pass a clean control."""
 
+import contextlib
+import io
+import os
+import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
+from scripts import floor_guard
 from scripts.tests.support import ROOT, run, write
 
 GUARD = ROOT / "scripts" / "floor_guard.py"
@@ -51,7 +58,24 @@ class GuardCase(unittest.TestCase):
         self.git("commit", "-q", "-m", message)
 
     def guard(self, base="base"):
-        return run(["python3", GUARD, "--base", base], self.repo)
+        """Runs the guard in this process, which skips starting Python for every case, with what a separate
+        process would get: no GIT_* variables, the test repository as the working directory, and its own
+        arguments and output."""
+        out, err, cwd = io.StringIO(), io.StringIO(), Path.cwd()
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        argv = ["floor_guard.py", "--base", base]
+        try:
+            os.chdir(self.repo)
+            with (
+                mock.patch.dict(os.environ, env, clear=True),
+                mock.patch.object(sys, "argv", argv),
+                contextlib.redirect_stdout(out),
+                contextlib.redirect_stderr(err),
+            ):
+                code = floor_guard.main()
+        finally:
+            os.chdir(cwd)
+        return types.SimpleNamespace(returncode=code, stdout=out.getvalue(), stderr=err.getvalue())
 
     def assertFlags(self, rule):
         result = self.guard()

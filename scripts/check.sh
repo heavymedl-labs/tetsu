@@ -101,7 +101,14 @@ plain=(--text --no-ext-diff --no-textconv --no-color --no-renames --src-prefix=a
 merge="$(git merge-base "$base" HEAD)"
 git diff "${plain[@]}" "$merge" -- crates >"$work/rust.diff"
 if [[ -s "$work/rust.diff" ]]; then
-  cargo mutants --in-diff "$work/rust.diff"
+  # Each job builds its own copy of the workspace, about five seconds, so jobs pay off only with many mutants:
+  # about the square root of their count over eight, so one for under 18, two up to 49, three up to 97. Never
+  # more than one per four cores, where builds start to compete. CARGO_MUTANTS_JOBS overrides it.
+  count="$(cargo mutants --in-diff "$work/rust.diff" --list | wc -l)"
+  most=$(($(getconf _NPROCESSORS_ONLN) / 4))
+  jobs=1
+  while ((jobs < most && count >= 2 * (2 * jobs + 1) ** 2)); do jobs=$((jobs + 1)); done
+  cargo mutants --in-diff "$work/rust.diff" --jobs "${CARGO_MUTANTS_JOBS:-$jobs}"
 elif ! git diff --quiet "${plain[@]}" "$merge" HEAD -- crates; then
   echo "error: commits since $base change crates/, but the files on disk undo that, so there is nothing to" >&2
   echo "mutate. Commit or restore those files first." >&2

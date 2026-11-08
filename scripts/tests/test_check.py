@@ -1,5 +1,6 @@
 """check.sh must run each stage and stop on the first failure, and the hook must call it."""
 
+import os
 import shutil
 import stat
 import tempfile
@@ -45,13 +46,14 @@ class CheckScript(unittest.TestCase):
     def stub(self, name, body):
         write(self.bin / name, f"#!/bin/sh\n{body}\n", EXECUTABLE)
 
-    def check(self, *args, nvm_dir=None):
+    def check(self, *args, nvm_dir=None, **env):
         return run(
             [self.root / "scripts" / "check.sh", *args],
             self.root,
             PATH=f"{self.bin}:/usr/bin:/bin",
             NVM_DIR=str(nvm_dir or self.root / "no-nvm"),
             TEST_DATABASE_URL="" if self.no_database else "postgres://test",
+            **env,
         )
 
     def test_runs_every_stage(self):
@@ -168,6 +170,30 @@ class CheckScript(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("commits since", result.stderr)
         self.assertNotIn("+pub fn", self.log.read_text())
+
+    def mutants_listed(self, count):
+        """Makes `cargo mutants --list` report `count` mutants, and logs every cargo call."""
+        self.stub(
+            "cargo",
+            f'echo "cargo $*" >> "{self.log}"; '
+            f'case "$*" in *--list*) for i in $(seq {count}); do echo mutant; done;; esac',
+        )
+
+    def test_a_few_mutants_run_in_one_job(self):
+        self.mutants_listed(5)
+        self.check(CARGO_MUTANTS_JOBS="")
+        self.assertIn("--jobs 1", self.log.read_text())
+
+    def test_many_mutants_run_in_parallel_up_to_the_machine(self):
+        self.mutants_listed(85)
+        self.check(CARGO_MUTANTS_JOBS="")
+        cores = os.cpu_count() or 1
+        self.assertIn(f"--jobs {max(1, min(3, cores // 4))}", self.log.read_text())
+
+    def test_the_mutant_job_count_can_be_set(self):
+        self.check(CARGO_MUTANTS_JOBS="3")
+        self.assertIn("cargo mutants --in-diff", self.log.read_text())
+        self.assertIn("--jobs 3", self.log.read_text())
 
     def test_skips_mutation_testing_when_no_rust_changed(self):
         self.stub("git", 'if [ "$1" = merge-base ]; then echo abc; fi')

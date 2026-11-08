@@ -40,3 +40,11 @@ unwrap_used = "deny"
 [profile.release]
 codegen-units = 1
 lto = "fat"
+
+# Mutation testing builds every mutant; it needs no debug info, which makes builds and links slower.
+[profile.mutants]
+inherits = "test"
+debug = false
+
+[profile.dev]
+debug = "line-tables-only"
