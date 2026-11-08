@@ -6,6 +6,21 @@ use tetsu_postgres::{MIGRATION_LOCK, connect, migrate, migrate_with_wait, requir
 
 struct Fake(&'static [Migration]);
 
+/// A module with a chosen name and schema, for checks across modules.
+struct Named(&'static str, &'static str, &'static [Migration]);
+
+impl Module for Named {
+    fn name(&self) -> &'static str {
+        self.0
+    }
+    fn storage(&self) -> Option<Storage> {
+        Some(Storage {
+            schema: self.1,
+            migrations: self.2,
+        })
+    }
+}
+
 impl Module for Fake {
     fn name(&self) -> &'static str {
         "fake"
@@ -49,6 +64,11 @@ const BAD: Migration = Migration {
 const CONCURRENT: Migration = Migration {
     version: 2,
     sql: "-- tetsu:no-transaction\nCREATE INDEX CONCURRENTLY a_id ON fake.a (id)",
+};
+
+const THIRD: Migration = Migration {
+    version: 3,
+    sql: "CREATE TABLE fake.d (id int)",
 };
 
 async fn table_exists(
@@ -277,4 +297,172 @@ async fn refuses_a_database_that_is_not_utf8() {
             .await
             .expect("checks")
     );
+}
+
+#[tokio::test]
+async fn settings_a_migration_makes_do_not_reach_the_next_module() {
+    let settings = fresh_database().await.expect("a test database");
+    let first = Named(
+        "first",
+        "first",
+        &[Migration {
+            version: 1,
+            sql: "SET lock_timeout = '5s'; SET search_path = public",
+        }],
+    );
+    let second = Named(
+        "second",
+        "second",
+        &[Migration {
+            version: 1,
+            sql: "CREATE TABLE second.seen AS SELECT current_setting('lock_timeout') AS lock_timeout",
+        }],
+    );
+    migrate(&settings, &[&first, &second])
+        .await
+        .expect("migrates");
+    let client = connect(&settings).await.expect("connects");
+    let row = client
+        .query_one("SELECT lock_timeout FROM second.seen", &[])
+        .await
+        .expect("reads");
+    assert_eq!(row.try_get::<_, String>("lock_timeout").expect("maps"), "0");
+}
+
+#[tokio::test]
+async fn an_unqualified_name_lands_in_the_module_schema() {
+    const LOOSE: &[Migration] = &[
+        Migration {
+            version: 1,
+            sql: "CREATE TABLE loose (id int)",
+        },
+        Migration {
+            version: 2,
+            sql: "-- tetsu:no-transaction\nCREATE INDEX CONCURRENTLY loose_id ON loose (id)",
+        },
+    ];
+    let settings = fresh_database().await.expect("a test database");
+    migrate(&settings, &[&Named("fake", "fake", LOOSE)])
+        .await
+        .expect("migrates");
+    assert!(table_exists(&settings, "fake.loose").await.expect("checks"));
+    assert!(
+        table_exists(&settings, "fake.loose_id")
+            .await
+            .expect("checks")
+    );
+    assert!(
+        !table_exists(&settings, "public.loose")
+            .await
+            .expect("checks")
+    );
+}
+
+/// The runner's error for modules it must refuse before touching the database. Fails if it migrates them, or
+/// creates any schema first.
+async fn refusal(modules: &[&dyn Module]) -> Result<String, tetsu_postgres::Error> {
+    let settings = fresh_database().await?;
+    let Err(error) = migrate(&settings, modules).await else {
+        return Err("the runner accepted them".into());
+    };
+    let row = connect(&settings)
+        .await?
+        .query_one(
+            "SELECT count(*) AS n FROM pg_namespace WHERE nspname NOT LIKE 'pg\\_%' \
+             AND nspname NOT IN ('public', 'information_schema')",
+            &[],
+        )
+        .await?;
+    match row.try_get::<_, i64>("n")? {
+        0 => Ok(error.to_string()),
+        _ => Err(format!("a schema was created before refusing: {error}").into()),
+    }
+}
+
+#[tokio::test]
+async fn refuses_a_schema_that_is_not_a_lowercase_identifier() {
+    let long: &'static str = "a".repeat(64).leak();
+    for schema in [
+        "Billing", "", "1st", "a-b", "a b", "a;b", "pg_x", "public", long,
+    ] {
+        let error = refusal(&[&Named("fake", schema, &[])]).await.expect(schema);
+        assert!(error.contains("schema"), "{error}");
+    }
+}
+
+#[tokio::test]
+async fn accepts_any_lowercase_identifier_up_to_the_limit() {
+    let settings = fresh_database().await.expect("a test database");
+    let longest: &'static str = "a".repeat(63).leak();
+    for schema in ["_a", "a1_b", "user", longest] {
+        migrate(&settings, &[&Named("fake", schema, &[])])
+            .await
+            .unwrap_or_else(|error| panic!("{schema}: {error}"));
+    }
+}
+
+#[tokio::test]
+async fn refuses_a_name_or_schema_used_twice() {
+    let error = refusal(&[
+        &Named("one", "one", &[]),
+        &Fake(&[]),
+        &Named("one", "two", &[]),
+    ])
+    .await
+    .expect("refused");
+    assert!(error.contains("module one is registered twice"), "{error}");
+    let error = refusal(&[&Named("one", "same", &[]), &Named("two", "same", &[])])
+        .await
+        .expect("refused");
+    assert!(
+        error.contains("schema same belongs to two modules"),
+        "{error}"
+    );
+}
+
+#[tokio::test]
+async fn refuses_versions_out_of_order() {
+    let error = refusal(&[&Fake(&[SECOND, FIRST])]).await.expect("refused");
+    assert!(error.contains("versions must grow"), "{error}");
+    let error = refusal(&[&Fake(&[FIRST, CHANGED])]).await.expect("refused");
+    assert!(error.contains("versions must grow"), "{error}");
+}
+
+#[tokio::test]
+async fn refuses_a_new_version_below_one_applied() {
+    let settings = fresh_database().await.expect("a test database");
+    migrate(&settings, &[&Fake(&[FIRST, THIRD])])
+        .await
+        .expect("first run");
+    let error = migrate(&settings, &[&Fake(&[FIRST, SECOND, THIRD])])
+        .await
+        .expect_err("must refuse");
+    assert!(
+        error
+            .to_string()
+            .contains("fake version 2 is below 3, which is applied"),
+        "{error}"
+    );
+    assert!(!table_exists(&settings, "fake.b").await.expect("checks"));
+}
+
+#[tokio::test]
+async fn every_module_is_checked_before_any_file_is_applied() {
+    let settings = fresh_database().await.expect("a test database");
+    migrate(&settings, &[&Fake(&[FIRST, THIRD])])
+        .await
+        .expect("first run");
+    let first = Named(
+        "first",
+        "first",
+        &[Migration {
+            version: 1,
+            sql: "CREATE TABLE first.a (id int)",
+        }],
+    );
+    let error = migrate(&settings, &[&first, &Fake(&[FIRST, SECOND, THIRD])])
+        .await
+        .expect_err("must refuse");
+    assert!(error.to_string().contains("below"), "{error}");
+    assert!(!table_exists(&settings, "first.a").await.expect("checks"));
 }

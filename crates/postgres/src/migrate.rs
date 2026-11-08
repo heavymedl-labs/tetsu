@@ -1,8 +1,9 @@
 //! The migration runner.
 
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-use tetsu_kernel::{Migration, Module};
+use tetsu_kernel::{Migration, Module, Storage};
 use tokio_postgres::Client;
 
 use crate::connection::{Error, Settings, connect};
@@ -17,7 +18,8 @@ const NO_TRANSACTION: &str = "-- tetsu:no-transaction";
 /// Applies each module's new migrations.
 ///
 /// # Errors
-/// Fails if the database is not UTF8, the lock stays held, a file fails, or an applied file has changed.
+/// Fails if the modules break the kernel contract, the database is not UTF8, the lock stays held, a file fails,
+/// or an applied file has changed.
 pub async fn migrate(settings: &Settings, modules: &[&dyn Module]) -> Result<(), Error> {
     migrate_with_wait(settings, modules, LOCK_WAIT).await
 }
@@ -31,16 +33,67 @@ pub async fn migrate_with_wait(
     modules: &[&dyn Module],
     wait: Duration,
 ) -> Result<(), Error> {
+    check_contract(modules)?;
     let client = connect(settings).await?;
     check_utf8(&client).await?;
     take_lock(&client, wait).await?;
-    for module in modules {
-        if let Some(storage) = module.storage() {
-            migrate_module(&client, storage.schema, storage.migrations).await?;
+    // Every module is checked before any file is applied.
+    let mut plan = Vec::new();
+    for storage in modules.iter().filter_map(|module| module.storage()) {
+        plan.push((storage.schema, pending(&client, storage).await?));
+    }
+    for (schema, migrations) in plan {
+        for migration in migrations {
+            apply(&client, schema, migration).await?;
         }
     }
     // Closing the connection releases the lock, even after a failure above.
     Ok(())
+}
+
+/// Refuses, before touching the database, modules that break the kernel contract: names and schemas are unique,
+/// a schema is a lowercase identifier Postgres keeps as written, and versions grow.
+fn check_contract(modules: &[&dyn Module]) -> Result<(), Error> {
+    let (mut names, mut schemas) = (HashSet::new(), HashSet::new());
+    for module in modules {
+        if !names.insert(module.name()) {
+            return Err(format!("module {} is registered twice", module.name()).into());
+        }
+        let Some(Storage { schema, migrations }) = module.storage() else {
+            continue;
+        };
+        if !plain_schema(schema) {
+            return Err(format!(
+                "schema {schema:?} must be a lowercase identifier of at most 63 bytes, and not a system schema"
+            )
+            .into());
+        }
+        if !schemas.insert(schema) {
+            return Err(format!("schema {schema} belongs to two modules").into());
+        }
+        if migrations
+            .windows(2)
+            .any(|pair| pair[0].version >= pair[1].version)
+        {
+            return Err(format!("{schema} versions must grow").into());
+        }
+    }
+    Ok(())
+}
+
+/// Lowercase letters, digits, and underscores, not starting with a digit, so a module's own SQL can name it unquoted
+/// and the runner can quote it safely. `public`, `information_schema`, and the reserved `pg_` prefix are never a
+/// module's own.
+fn plain_schema(schema: &str) -> bool {
+    let mut chars = schema.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase() || c == '_')
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        && schema.len() <= 63
+        && schema != "public"
+        && schema != "information_schema"
+        && !schema.starts_with("pg_")
 }
 
 /// Fails unless the database stores text as UTF8. Modules check text before storing it, and those checks
@@ -83,46 +136,69 @@ async fn take_lock(client: &Client, wait: Duration) -> Result<(), Error> {
     }
 }
 
-async fn migrate_module(
-    client: &Client,
-    schema: &str,
-    migrations: &[Migration],
-) -> Result<(), Error> {
+/// Creates the module's schema and tracking table if needed, then returns its new files. Fails if an applied file
+/// changed, or a new file comes before an applied one.
+async fn pending(client: &Client, storage: Storage) -> Result<Vec<&'static Migration>, Error> {
+    let Storage { schema, migrations } = storage;
     client
         .batch_execute(&format!(
-            "CREATE SCHEMA IF NOT EXISTS {schema};
-             CREATE TABLE IF NOT EXISTS {schema}.migrations (
+            r#"CREATE SCHEMA IF NOT EXISTS "{schema}";
+             CREATE TABLE IF NOT EXISTS "{schema}".migrations (
                  version int PRIMARY KEY,
                  sql text NOT NULL,
                  applied_at timestamptz NOT NULL DEFAULT now()
-             )"
+             )"#
         ))
         .await?;
-    for migration in migrations {
-        let applied = client
-            .query_opt(
-                &format!("SELECT sql FROM {schema}.migrations WHERE version = $1"),
-                &[&migration.version],
-            )
-            .await?;
-        match applied {
-            Some(row) if row.try_get::<_, String>("sql")? == migration.sql => {}
-            Some(_) => {
-                return Err(format!(
-                    "{schema} version {} changed after it was applied",
-                    migration.version
-                )
-                .into());
-            }
-            None => apply(client, schema, migration).await?,
-        }
+    let applied = client
+        .query(
+            &format!(r#"SELECT version, sql FROM "{schema}".migrations"#),
+            &[],
+        )
+        .await?
+        .iter()
+        .map(|row| Ok((row.try_get("version")?, row.try_get("sql")?)))
+        .collect::<Result<HashMap<i32, String>, tokio_postgres::Error>>()?;
+    if let Some(changed) = migrations
+        .iter()
+        .find(|m| applied.get(&m.version).is_some_and(|sql| sql != m.sql))
+    {
+        return Err(format!(
+            "{schema} version {} changed after it was applied",
+            changed.version
+        )
+        .into());
     }
+    let is_new = |migration: &&Migration| !applied.contains_key(&migration.version);
+    let new: Vec<_> = migrations.iter().skip_while(|m| !is_new(m)).collect();
+    if let (Some(first), Some(later)) = (new.first(), new.iter().find(|m| !is_new(m))) {
+        return Err(format!(
+            "{schema} version {} is below {}, which is applied",
+            first.version, later.version
+        )
+        .into());
+    }
+    Ok(new)
+}
+
+/// Runs one file with its schema first on the search path, so an unqualified name lands there. Afterwards every
+/// setting returns to the session's own, so a plain `SET` in one file never reaches the next.
+async fn apply(client: &Client, schema: &str, migration: &Migration) -> Result<(), Error> {
+    client
+        .batch_execute(&format!(r#"SET search_path TO "{schema}""#))
+        .await?;
+    apply_in_schema(client, schema, migration).await?;
+    client.batch_execute("RESET ALL").await?;
     Ok(())
 }
 
-async fn apply(client: &Client, schema: &str, migration: &Migration) -> Result<(), Error> {
+async fn apply_in_schema(
+    client: &Client,
+    schema: &str,
+    migration: &Migration,
+) -> Result<(), Error> {
     let record = format!(
-        "INSERT INTO {schema}.migrations (version, sql) VALUES ({}, $1)",
+        r#"INSERT INTO "{schema}".migrations (version, sql) VALUES ({}, $1)"#,
         migration.version
     );
     if let Some(statement) = migration.sql.strip_prefix(NO_TRANSACTION) {
