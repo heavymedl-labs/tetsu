@@ -28,6 +28,7 @@ number, and add a row below. Never renumber.
 | [0020](0020-branch-coverage.md) | Branch coverage | Setting coverage limits, or moving a crate to Tier 1 | Accepted |
 | [0021](0021-module-public-surface.md) | Module public surface | Deciding what a module exports | Accepted |
 | [0022](0022-benchmark-image-tag.md) | Benchmark image tag | Changing how the benchmark image is built or tagged | Proposed |
+| [0023](0023-ci-on-demand.md) | CI on demand | Changing when CI runs, or what it runs | Proposed |
 
 ## Open decisions
 
@@ -54,6 +55,7 @@ option for most of them.
 - [Dependency checks, secrets, and a security target](https://github.com/heavymedl-labs/tetsu/issues/31)
 - [Landing page framework and host](https://github.com/heavymedl-labs/tetsu/issues/32)
 - [Load test tools, latency budgets, and memory measurement](https://github.com/heavymedl-labs/tetsu/issues/37)
+- [When CI runs while one maintainer contributes](https://github.com/heavymedl-labs/tetsu/issues/70)
 
 ## Finding sources
 
