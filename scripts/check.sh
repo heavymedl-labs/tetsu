@@ -88,7 +88,8 @@ base="origin/main"
 if [[ "${1:-}" == "--base" ]]; then
   base="$2"
 fi
-git diff "$(git merge-base "$base" HEAD)" -- crates >"$work/rust.diff"
+# cargo-mutants reads only a/ and b/ paths, so override personal settings that change them.
+git -c diff.mnemonicPrefix=false -c diff.noprefix=false diff "$(git merge-base "$base" HEAD)" -- crates >"$work/rust.diff"
 if [[ -s "$work/rust.diff" ]]; then
   cargo mutants --in-diff "$work/rust.diff"
 fi

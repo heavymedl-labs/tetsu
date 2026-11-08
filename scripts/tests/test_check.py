@@ -117,6 +117,12 @@ class CheckScript(unittest.TestCase):
         self.assertIn("floor_guard.py --base abc123", log)
         self.assertIn("diff abc -- crates", log)
 
+    def test_the_mutation_diff_ignores_personal_prefix_settings(self):
+        # cargo-mutants reads only a/ and b/ paths, so a diff in another style tests nothing.
+        self.check()
+        expected = "-c diff.mnemonicPrefix=false -c diff.noprefix=false diff abc -- crates"
+        self.assertIn(expected, self.log.read_text())
+
     def test_skips_mutation_testing_when_no_rust_changed(self):
         self.stub("git", 'if [ "$1" = merge-base ]; then echo abc; fi')
         result = self.check()
