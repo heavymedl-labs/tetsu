@@ -78,3 +78,26 @@ async fn tls_is_required_unless_the_environment_turns_it_off() {
     let stderr = String::from_utf8(output.stderr).expect("output is UTF-8");
     assert!(stderr.contains("server does not support TLS"), "{stderr}");
 }
+
+#[test]
+fn a_database_url_that_is_not_utf8_is_named_as_such() {
+    use std::os::unix::ffi::OsStrExt;
+    let output = Command::new(env!("CARGO_BIN_EXE_tetsu"))
+        .arg("migrate")
+        .env(
+            "DATABASE_URL",
+            std::ffi::OsStr::from_bytes(b"postgres://x\xff"),
+        )
+        .output()
+        .expect("the binary runs");
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr).expect("output is UTF-8");
+    assert!(stderr.contains("DATABASE_URL must be UTF-8"), "{stderr}");
+}
+
+#[tokio::test]
+async fn spaces_around_the_database_url_are_ignored() {
+    let settings = fresh_database().await.expect("a test database");
+    let output = migrate(&format!("  {}\n", settings.url()));
+    assert!(output.status.success(), "{output:?}");
+}

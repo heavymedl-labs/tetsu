@@ -7,6 +7,22 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use tetsu_tenancy::{Color, Error, Location, NewTenant, Slug, TenantStore, Theme, create_tenant};
 
+/// A path as printed, with every character [`escaped`] if it needs to be, so a file name cannot split a line,
+/// drive the terminal, or reorder the text around it.
+pub fn shown(path: &Path) -> String {
+    path.display().to_string().chars().map(escaped).collect()
+}
+
+/// A character as printed. Anything Rust would not print as is, such as a control character, a bidi control,
+/// a zero-width character, or a separator, becomes an escape like `\u{202e}`. Quotes and backslashes stay.
+pub fn escaped(c: char) -> String {
+    if matches!(c, '"' | '\'' | '\\') {
+        return c.to_string();
+    }
+    // Escaped after another character, so a combining accent is kept rather than treated as starting the text.
+    format!("a{c}").escape_debug().skip(1).collect()
+}
+
 /// The newest format this binary reads.
 const FORMAT: i64 = 1;
 
@@ -56,17 +72,23 @@ struct LocationFile {
 }
 
 impl TenantFile {
-    fn checked(&self) -> Result<NewTenant, Error> {
+    /// Converts into Tenancy's checked values. A location's error says which location, counting from 1.
+    fn checked(&self) -> Result<NewTenant, String> {
         let theme = Theme {
-            primary: Color::parse(&self.theme.primary)?,
-            accent: Color::parse(&self.theme.accent)?,
+            primary: Color::parse(&self.theme.primary).map_err(|error| error.to_string())?,
+            accent: Color::parse(&self.theme.accent).map_err(|error| error.to_string())?,
         };
         let locations = self
             .locations
             .iter()
-            .map(|location| Location::new(&location.name, &location.time_zone))
+            .enumerate()
+            .map(|(index, location)| {
+                Location::new(&location.name, &location.time_zone)
+                    .map_err(|error| format!("location {}: {error}", index + 1))
+            })
             .collect::<Result<Vec<_>, _>>()?;
-        NewTenant::new(Slug::parse(&self.slug)?, &self.name, theme, locations)
+        let slug = Slug::parse(&self.slug).map_err(|error| error.to_string())?;
+        NewTenant::new(slug, &self.name, theme, locations).map_err(|error| error.to_string())
     }
 }
 
@@ -83,11 +105,11 @@ fn parse(text: &str) -> Result<NewTenant, String> {
         return Err(format!("format {format} is not one tetsu has used"));
     }
     let file: File = toml::from_str(text).map_err(|error| error.to_string())?;
-    file.tenant.checked().map_err(|error| error.to_string())
+    file.tenant.checked()
 }
 
-/// Reads and checks a file, or every `.toml` file at the top of a folder in name order. Every problem is
-/// reported, and nothing is returned unless every file passes.
+/// Reads and checks a file, or every `.toml` file at the top of a folder in name order, leaving out hidden
+/// files. Every problem is reported, and nothing is returned unless every file passes.
 pub fn read(path: &Path) -> Result<Vec<Seed>, String> {
     let mut seeds: Vec<Seed> = Vec::new();
     let mut problems = Vec::new();
@@ -96,13 +118,15 @@ pub fn read(path: &Path) -> Result<Vec<Seed>, String> {
         let tenant = match load(&file) {
             Ok(tenant) => tenant,
             Err(why) => {
-                problems.push(format!("{}: {why}", file.display()));
+                // TOML errors run over several lines, so indent the rest under the file they belong to.
+                let why = why.trim_end().replace('\n', "\n  ");
+                problems.push(format!("{}: {why}", shown(&file)));
                 continue;
             }
         };
         let slug = tenant.slug().as_str().to_string();
         if let Some(first) = slugs.get(&slug) {
-            let (file, first) = (file.display(), first.display());
+            let (file, first) = (shown(&file), shown(first));
             problems.push(format!("{file}: slug {slug:?} is also in {first}"));
         } else {
             slugs.insert(slug, file.clone());
@@ -116,7 +140,12 @@ pub fn read(path: &Path) -> Result<Vec<Seed>, String> {
     }
 }
 
+/// Reads only a regular file, so a device, a pipe, or a broken link fails rather than hanging or vanishing.
 fn load(file: &Path) -> Result<NewTenant, String> {
+    let metadata = std::fs::metadata(file).map_err(|error| error.to_string())?;
+    if !metadata.is_file() {
+        return Err("not a regular file".into());
+    }
     let text = std::fs::read_to_string(file).map_err(|error| error.to_string())?;
     parse(&text)
 }
@@ -125,34 +154,35 @@ fn files(path: &Path) -> Result<Vec<PathBuf>, String> {
     if !path.is_dir() {
         return Ok(vec![path.to_path_buf()]);
     }
-    let failed = |error: std::io::Error| format!("{}: {error}", path.display());
+    let failed = |error: std::io::Error| format!("{}: {error}", shown(path));
     let mut files = Vec::new();
     for entry in std::fs::read_dir(path).map_err(failed)? {
         let file = entry.map_err(failed)?.path();
-        if file.is_file()
-            && file
-                .extension()
-                .is_some_and(|extension| extension == "toml")
-        {
+        let name = file.file_name().unwrap_or_default().to_string_lossy();
+        if name.ends_with(".toml") && !name.starts_with('.') {
             files.push(file);
         }
     }
     if files.is_empty() {
-        return Err(format!("{}: no .toml files", path.display()));
+        return Err(format!("{}: no .toml files", shown(path)));
     }
     files.sort();
     Ok(files)
 }
 
-/// Creates each tenant through Tenancy's use case, in order, and skips one whose slug exists. A storage
-/// failure stops the run: tenants already created stay, and a rerun skips them.
-pub async fn apply(store: &impl TenantStore, seeds: &[Seed]) -> Result<(), String> {
+/// Creates each tenant through Tenancy's use case, in order, and skips one whose slug exists, passing a line
+/// for each to `report`. A storage failure stops the run: tenants already created stay, and a rerun skips them.
+pub async fn apply(
+    store: &impl TenantStore,
+    seeds: &[Seed],
+    mut report: impl FnMut(&str) -> Result<(), String>,
+) -> Result<(), String> {
     for seed in seeds {
-        let slug = seed.tenant.slug().as_str();
+        let (slug, file) = (seed.tenant.slug().as_str(), shown(&seed.path));
         match create_tenant(store, &seed.tenant).await {
-            Ok(_) => println!("created {slug} from {}", seed.path.display()),
-            Err(Error::SlugTaken) => println!("skipped {slug}: it already exists"),
-            Err(error) => return Err(format!("{}: {error}", seed.path.display())),
+            Ok(_) => report(&format!("created {slug} from {file}"))?,
+            Err(Error::SlugTaken) => report(&format!("skipped {slug}: it already exists"))?,
+            Err(error) => return Err(format!("could not create {slug} from {file}: {error}")),
         }
     }
     Ok(())
@@ -161,6 +191,54 @@ pub async fn apply(store: &impl TenantStore, seeds: &[Seed]) -> Result<(), Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tetsu_tenancy::Tenant;
+
+    /// Refuses every write with one error, such as a lost database or a taken slug.
+    struct Refuses(Error);
+
+    impl TenantStore for Refuses {
+        fn insert(&self, _: &NewTenant) -> impl Future<Output = Result<Tenant, Error>> + Send {
+            std::future::ready(Err(self.0.clone()))
+        }
+
+        fn find_by_address(
+            &self,
+            _: &str,
+        ) -> impl Future<Output = Result<Option<Tenant>, Error>> + Send {
+            std::future::ready(Ok(None))
+        }
+    }
+
+    fn sample_seed() -> [Seed; 1] {
+        [Seed {
+            path: PathBuf::from("demos/sample.toml"),
+            tenant: parse(SAMPLE).unwrap(),
+        }]
+    }
+
+    #[tokio::test]
+    async fn a_failed_write_names_the_tenant_not_a_fault_in_the_file() {
+        let error = apply(
+            &Refuses(Error::Unavailable("connection closed".into())),
+            &sample_seed(),
+            |_| Ok(()),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            error,
+            "could not create sample-studio from demos/sample.toml: temporarily unavailable: connection closed"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_report_that_cannot_be_written_stops_the_run() {
+        let failed = |_: &str| Err("could not write output".to_string());
+        let error = apply(&Refuses(Error::SlugTaken), &sample_seed(), failed)
+            .await
+            .unwrap_err();
+        assert_eq!(error, "could not write output");
+    }
 
     const SAMPLE: &str = include_str!("../tests/fixtures/sample.toml");
 
@@ -220,7 +298,11 @@ mod tests {
                 "lowercase letters",
             ),
             ("\"#3A4250\"", "\"navy\"", "must be #RRGGBB"),
-            ("\"America/Phoenix\"", "\" \"", "a time zone"),
+            (
+                "\"America/Phoenix\"",
+                "\" \"",
+                "location 2: invalid: a location needs",
+            ),
             ("\"Sample Studio\"", "\"\"", "a name must be"),
             // Postgres cannot store a NUL, so it must fail here, before anything is written.
             (

@@ -67,14 +67,74 @@ impl Settings {
         self.tls
     }
 
+    /// Checks the URL without connecting, so bad settings fail before any work starts.
+    ///
+    /// # Errors
+    /// Fails if the URL is not a valid connection string, or sets its own TLS mode.
+    pub fn check(&self) -> Result<(), Error> {
+        self.config().map(|_| ())
+    }
+
     fn config(&self) -> Result<Config, Error> {
-        let mut config: Config = self.url.parse()?;
+        // The parser's error can quote part of the URL, such as an option name split off a password, so it
+        // is replaced rather than passed on with its cause.
+        let mut config: Config = self
+            .url
+            .parse()
+            .map_err(|_| "the database URL is not a valid connection string")?;
+        // The URL's own mode would be overridden below without a word, so it is refused instead. The parsed mode
+        // catches what the driver decoded; the keys catch an explicit `prefer`, which parses as the default.
+        if config.get_ssl_mode() != SslMode::Prefer || sets_sslmode(&self.url) {
+            return Err("the database URL must not set sslmode; TLS is set separately".into());
+        }
+        // A trailing backslash would escape the space before the timeout the pool adds to these options.
+        if config
+            .get_options()
+            .is_some_and(|options| options.ends_with('\\'))
+        {
+            return Err("the database URL's options must not end in a backslash".into());
+        }
         config.ssl_mode(match self.tls {
             Tls::Required => SslMode::Require,
             Tls::Disabled => SslMode::Disable,
         });
         Ok(config)
     }
+}
+
+/// Whether the URL names `sslmode` as a key: in the query of a `postgres://` URL, where keys may be
+/// percent-encoded, or as a `key=value` pair otherwise.
+fn sets_sslmode(url: &str) -> bool {
+    if let Some((_, rest)) = url.split_once("://") {
+        let query = rest.split_once('?').map_or("", |(_, query)| query);
+        query
+            .split('&')
+            .any(|pair| decoded(pair.split('=').next().unwrap_or_default()) == "sslmode")
+    } else {
+        url.split_whitespace()
+            .any(|word| word.split('=').next() == Some("sslmode"))
+    }
+}
+
+/// Percent-decodes text, keeping any escape that is not two hex digits as written.
+fn decoded(text: &str) -> String {
+    let mut out = Vec::with_capacity(text.len());
+    let mut rest = text.as_bytes();
+    while let Some((&first, tail)) = rest.split_first() {
+        let escaped = tail
+            .get(..2)
+            .filter(|_| first == b'%')
+            .and_then(|pair| std::str::from_utf8(pair).ok())
+            .and_then(|pair| u8::from_str_radix(pair, 16).ok());
+        if let Some(byte) = escaped {
+            out.push(byte);
+            rest = tail.get(2..).unwrap_or_default();
+        } else {
+            out.push(first);
+            rest = tail;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 fn rustls_connector() -> MakeRustlsConnect {
@@ -91,7 +151,12 @@ fn rustls_connector() -> MakeRustlsConnect {
 /// Fails if the URL is invalid.
 pub fn pool(settings: &Settings) -> Result<Pool, Error> {
     let mut config = settings.config()?;
-    config.options(STATEMENT_TIMEOUT);
+    // Added to the URL's own options, which setting them alone would replace.
+    let options = config.get_options().map_or_else(
+        || STATEMENT_TIMEOUT.to_string(),
+        |own| format!("{own} {STATEMENT_TIMEOUT}"),
+    );
+    config.options(&options);
     let recycling = ManagerConfig {
         recycling_method: RecyclingMethod::Fast,
     };
@@ -130,4 +195,39 @@ where
         .map_err(|_| "Postgres did not answer in time")??;
     tokio::spawn(connection);
     Ok(client)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn percent_escapes_decode_and_anything_else_stays() {
+        assert_eq!(decoded("ss%6Cmode"), "sslmode");
+        assert_eq!(decoded("%41%42c"), "ABc");
+        for kept in ["%zz", "%4", "%", "a%", "plain"] {
+            assert_eq!(decoded(kept), kept);
+        }
+    }
+
+    #[test]
+    fn sslmode_is_found_only_as_a_key() {
+        for url in [
+            "postgres://h/db?sslmode=prefer",
+            "postgres://h/db?a=1&sslmode=prefer",
+            "postgres://h/db?ss%6Cmode=disable",
+            "host=h sslmode=prefer",
+            "host=h sslmode = prefer",
+        ] {
+            assert!(sets_sslmode(url), "{url}");
+        }
+        for url in [
+            "postgres://u:sslmode@h/sslmode",
+            "postgres://h/db?application_name=sslmode",
+            "postgres://h/db",
+            "host=h password=sslmode",
+        ] {
+            assert!(!sets_sslmode(url), "{url}");
+        }
+    }
 }

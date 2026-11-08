@@ -3,6 +3,7 @@
 mod seed;
 mod settings;
 
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -34,11 +35,13 @@ fn parse(args: &[String]) -> Result<Command, String> {
 
 fn parse_seed(rest: &[String]) -> Result<Command, String> {
     match rest {
-        [flag, path] if flag == "--check" => Ok(Command::Seed {
-            path: PathBuf::from(path),
-            check_only: true,
-        }),
-        [path] if !path.starts_with('-') => Ok(Command::Seed {
+        [flag, path] if flag == "--check" && !path.is_empty() && !path.starts_with('-') => {
+            Ok(Command::Seed {
+                path: PathBuf::from(path),
+                check_only: true,
+            })
+        }
+        [path] if !path.is_empty() && !path.starts_with('-') => Ok(Command::Seed {
             path: PathBuf::from(path),
             check_only: false,
         }),
@@ -48,18 +51,25 @@ fn parse_seed(rest: &[String]) -> Result<Command, String> {
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let command = match parse(&args) {
+    let args: Result<Vec<String>, _> = std::env::args_os()
+        .skip(1)
+        .map(std::ffi::OsString::into_string)
+        .collect();
+    let command = match args.map_err(|_| "arguments must be UTF-8".to_string()) {
+        Ok(args) => parse(&args),
+        Err(why) => Err(why),
+    };
+    let command = match command {
         Ok(command) => command,
         Err(why) => {
-            eprintln!("error: {why}\n{USAGE}");
+            complain(&format!("{why}\n{USAGE}"));
             return ExitCode::from(2);
         }
     };
     match run(command).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(why) => {
-            eprintln!("error: {why}");
+            complain(&why);
             ExitCode::FAILURE
         }
     }
@@ -67,13 +77,13 @@ async fn main() -> ExitCode {
 
 async fn run(command: Command) -> Result<(), String> {
     match command {
-        Command::Summary => println!("{}", summary(MODULES)),
+        Command::Summary => say(&summary(MODULES))?,
         Command::Migrate => {
-            let settings = settings::database(|name| std::env::var(name).ok())?;
+            let settings = settings::database(|name| std::env::var(name))?;
             tetsu_postgres::migrate(&settings, MODULES)
                 .await
                 .map_err(|error| explain(&*error))?;
-            println!("migrated: {}", names(MODULES));
+            say(&format!("migrated: {}", names(MODULES)))?;
         }
         Command::Seed { path, check_only } => run_seed(&path, check_only).await?,
     }
@@ -86,13 +96,44 @@ async fn run_seed(path: &std::path::Path, check_only: bool) -> Result<(), String
     if check_only {
         for checked in &seeds {
             let slug = checked.tenant.slug().as_str();
-            println!("checked {slug} from {}", checked.path.display());
+            say(&format!(
+                "checked {slug} from {}",
+                seed::shown(&checked.path)
+            ))?;
         }
         return Ok(());
     }
-    let settings = settings::database(|name| std::env::var(name).ok())?;
+    let settings = settings::database(|name| std::env::var(name))?;
+    tetsu_postgres::require_utf8(&settings)
+        .await
+        .map_err(|error| explain(&*error))?;
     let pool = tetsu_postgres::pool(&settings).map_err(|error| explain(&*error))?;
-    seed::apply(&tetsu_tenancy::postgres_store(pool), &seeds).await
+    seed::apply(&tetsu_tenancy::postgres_store(pool), &seeds, say).await
+}
+
+/// Writes a line to stdout. A closed pipe or a full disk is an error rather than a panic.
+fn say(line: &str) -> Result<(), String> {
+    writeln!(std::io::stdout(), "{}", printable(line))
+        .map_err(|error| format!("could not write output: {error}"))
+}
+
+/// Writes an error to stderr. If even that fails there is nowhere left to report it, so the exit code carries it.
+fn complain(why: &str) {
+    let _ = writeln!(std::io::stderr(), "error: {}", printable(why));
+}
+
+/// Escapes what could drive the terminal, reorder text, or hide in it, other than the line breaks errors use,
+/// so text quoted from a file or a server cannot rewrite the lines around it.
+fn printable(text: &str) -> String {
+    text.chars()
+        .map(|c| {
+            if c == '\n' {
+                c.to_string()
+            } else {
+                seed::escaped(c)
+            }
+        })
+        .collect()
 }
 
 /// An error and each cause under it. The driver's own text is often only "error connecting to server".
@@ -156,6 +197,18 @@ mod tests {
     }
 
     #[test]
+    fn output_escapes_what_could_drive_reorder_or_hide_text() {
+        assert_eq!(
+            printable("a\u{1b}[31mb\rc\u{202E}d\u{200B}e\u{2028}f\tg"),
+            "a\\u{1b}[31mb\\rc\\u{202e}d\\u{200b}e\\u{2028}f\\tg"
+        );
+        assert_eq!(
+            printable("line one\nCafe\u{301} \"quoted\" C:\\path 'x'"),
+            "line one\nCafe\u{301} \"quoted\" C:\\path 'x'"
+        );
+    }
+
+    #[test]
     fn commands_are_parsed_exactly() {
         assert_eq!(parse(&args(&[])), Ok(Command::Summary));
         assert_eq!(parse(&args(&["migrate"])), Ok(Command::Migrate));
@@ -189,6 +242,10 @@ mod tests {
             &["seed", "--force", "demos"],
             &["seed", "a", "b"],
             &["seed", "--chekc"],
+            &["seed", "--check", "--check"],
+            &["seed", "--check", "-x.toml"],
+            &["seed", ""],
+            &["seed", "--check", ""],
         ] {
             assert_eq!(parse(&args(bad)), wrong, "{bad:?}");
         }

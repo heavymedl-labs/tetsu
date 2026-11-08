@@ -32,7 +32,7 @@ pub async fn migrate_with_wait(
     wait: Duration,
 ) -> Result<(), Error> {
     let client = connect(settings).await?;
-    require_utf8(&client).await?;
+    check_utf8(&client).await?;
     take_lock(&client, wait).await?;
     for module in modules {
         if let Some(storage) = module.storage() {
@@ -43,8 +43,16 @@ pub async fn migrate_with_wait(
     Ok(())
 }
 
-/// Modules check text before storing it, and those checks assume the database can hold any Unicode text.
-async fn require_utf8(client: &Client) -> Result<(), Error> {
+/// Fails unless the database stores text as UTF8. Modules check text before storing it, and those checks
+/// assume the database can hold any Unicode text, so anything that writes checked text calls this first.
+///
+/// # Errors
+/// Fails if the database is unreachable or uses another encoding.
+pub async fn require_utf8(settings: &Settings) -> Result<(), Error> {
+    check_utf8(&connect(settings).await?).await
+}
+
+async fn check_utf8(client: &Client) -> Result<(), Error> {
     let row = client
         .query_one("SELECT current_setting('server_encoding') AS encoding", &[])
         .await?;

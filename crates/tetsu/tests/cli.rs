@@ -56,3 +56,21 @@ fn migrate_needs_a_database_url() {
     assert_eq!(output.status.code(), Some(1));
     assert!(stderr(&output).contains("DATABASE_URL must be set"));
 }
+
+#[test]
+fn an_argument_that_is_not_utf8_is_a_usage_error() {
+    use std::os::unix::ffi::OsStrExt;
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_tetsu"))
+        .arg(std::ffi::OsStr::from_bytes(b"seed\xff"))
+        .output()
+        .expect("the binary runs");
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("arguments must be UTF-8"));
+}
+
+#[test]
+fn a_seed_path_may_not_look_like_an_option_even_after_check() {
+    let output = tetsu(&["seed", "--check", "--check"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("usage: tetsu"));
+}

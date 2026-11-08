@@ -1,6 +1,6 @@
 //! Tenancy against a real Postgres.
 
-use tetsu_postgres::test_support::fresh_database;
+use tetsu_postgres::test_support::{TestDatabase, fresh_database};
 use tetsu_postgres::{migrate, pool};
 use tetsu_tenancy::{
     Color, Error, Location, NewTenant, Slug, Tenancy, TenantStore, Theme, create_tenant,
@@ -11,11 +11,9 @@ use tetsu_tenancy::{
 mod support {
     use super::*;
 
-    pub async fn store() -> impl TenantStore {
-        store_and_settings().await.0
-    }
-
-    pub async fn store_and_settings() -> (impl TenantStore, tetsu_postgres::Settings) {
+    /// A migrated store, with the test database it uses. Keep both until the test ends: dropping the database
+    /// drops everything in it.
+    pub async fn store_and_settings() -> (impl TenantStore, TestDatabase) {
         let settings = fresh_database().await.expect("a test database");
         migrate(&settings, &[&Tenancy]).await.expect("migrates");
         (postgres_store(pool(&settings).expect("pool")), settings)
@@ -40,11 +38,11 @@ mod support {
     }
 }
 
-use support::{store, store_and_settings, tenant};
+use support::{store_and_settings, tenant};
 
 #[tokio::test]
 async fn a_created_tenant_resolves_by_its_slug() {
-    let store = store().await;
+    let (store, _database) = store_and_settings().await;
     let new = tenant(
         "anvil-row",
         &[
@@ -63,7 +61,7 @@ async fn a_created_tenant_resolves_by_its_slug() {
 
 #[tokio::test]
 async fn an_address_is_matched_without_case_or_spaces() {
-    let store = store().await;
+    let (store, _database) = store_and_settings().await;
     create_tenant(&store, &tenant("anvil-row", &[]))
         .await
         .expect("creates");
@@ -72,7 +70,7 @@ async fn an_address_is_matched_without_case_or_spaces() {
 
 #[tokio::test]
 async fn an_unknown_address_fails_closed() {
-    let store = store().await;
+    let (store, _database) = store_and_settings().await;
     create_tenant(&store, &tenant("anvil-row", &[]))
         .await
         .expect("creates");
@@ -95,7 +93,7 @@ async fn an_unknown_address_fails_closed() {
 
 #[tokio::test]
 async fn a_slug_is_taken_once_and_the_loser_leaves_nothing_behind() {
-    let store = store().await;
+    let (store, _database) = store_and_settings().await;
     let first = create_tenant(
         &store,
         &tenant("anvil-row", &[("Denver", "America/Denver")]),
@@ -112,7 +110,7 @@ async fn a_slug_is_taken_once_and_the_loser_leaves_nothing_behind() {
 
 #[tokio::test]
 async fn tenants_see_only_their_own_locations() {
-    let store = store().await;
+    let (store, _database) = store_and_settings().await;
     create_tenant(
         &store,
         &tenant("anvil-row", &[("Denver", "America/Denver")]),
@@ -145,6 +143,25 @@ async fn a_lost_database_is_temporarily_unavailable() {
         create_tenant(&store, &tenant("anvil-row", &[])).await,
         Err(Error::Unavailable(_))
     ));
+}
+
+#[tokio::test]
+async fn a_commit_refused_by_postgres_keeps_what_postgres_said() {
+    let (store, settings) = store_and_settings().await;
+    let client = tetsu_postgres::connect(&settings).await.expect("connects");
+    client
+        .batch_execute(
+            "CREATE FUNCTION tenancy.refuse() RETURNS trigger LANGUAGE plpgsql AS
+                 $$ BEGIN RAISE EXCEPTION 'refused at commit'; END $$;
+             CREATE CONSTRAINT TRIGGER refuse AFTER INSERT ON tenancy.tenants
+                 DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION tenancy.refuse()",
+        )
+        .await
+        .expect("adds a trigger that fires at commit");
+    let Err(Error::Storage(why)) = create_tenant(&store, &tenant("anvil-row", &[])).await else {
+        panic!("a refused commit is a storage error, not worth retrying");
+    };
+    assert_eq!(why, "commit refused: refused at commit");
 }
 
 #[tokio::test]

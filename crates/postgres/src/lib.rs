@@ -7,4 +7,4 @@ pub mod test_support;
 
 pub use connection::{Error, Settings, Tls, connect, pool};
 pub use deadpool_postgres::{Object, Pool};
-pub use migrate::{MIGRATION_LOCK, migrate, migrate_with_wait};
+pub use migrate::{MIGRATION_LOCK, migrate, migrate_with_wait, require_utf8};

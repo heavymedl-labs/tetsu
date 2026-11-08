@@ -20,16 +20,42 @@ mod support {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample.toml")
     }
 
-    /// An empty folder of its own under Cargo's scratch space.
-    pub fn folder() -> PathBuf {
+    /// An empty folder of its own under Cargo's scratch space, removed when the test ends, even if it fails (#43).
+    pub struct Folder(PathBuf);
+
+    impl std::ops::Deref for Folder {
+        type Target = Path;
+
+        fn deref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for Folder {
+        fn drop(&mut self) {
+            if let Err(error) = std::fs::remove_dir_all(&self.0) {
+                eprintln!(
+                    "warning: scratch folder {} was not removed: {error}",
+                    self.0.display()
+                );
+            }
+        }
+    }
+
+    pub fn folder() -> Folder {
+        // The time keeps a later run from reusing a folder a killed run left, under a recycled process id.
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("a clock")
+            .as_nanos();
         let name = format!(
-            "seed-{}-{}",
+            "seed-{}-{}-{nanos}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         );
         let path = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
-        std::fs::create_dir_all(&path).expect("a scratch folder");
-        path
+        std::fs::create_dir(&path).expect("a new, empty scratch folder");
+        Folder(path)
     }
 
     /// The sample file with one line replaced, written into `folder`.
@@ -216,5 +242,100 @@ async fn seed_before_migrate_fails_and_says_why() {
     assert!(
         text(&output.stderr).contains("tenancy.tenants"),
         "{output:?}"
+    );
+}
+
+#[test]
+fn check_reports_a_broken_link_and_skips_hidden_files() {
+    let folder = folder();
+    variant(&folder, "a-good.toml", "", "");
+    variant(&folder, ".draft.toml", "accent =", "acent =");
+    std::os::unix::fs::symlink(folder.join("missing.toml"), folder.join("b-link.toml"))
+        .expect("links");
+    let output = check(&folder);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = text(&output.stderr);
+    assert!(stderr.contains("b-link.toml"), "{stderr}");
+    assert!(!stderr.contains(".draft.toml"), "{stderr}");
+}
+
+#[test]
+fn check_refuses_an_entry_that_is_not_a_regular_file() {
+    // A device or pipe takes the same path, but reading one would hang the test if the check broke.
+    let folder = folder();
+    std::fs::create_dir(folder.join("nested.toml")).expect("a folder named like a file");
+    let output = check(&folder);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(text(&output.stderr).contains("nested.toml: not a regular file"));
+}
+
+#[test]
+fn every_line_of_a_problem_is_tied_to_its_file() {
+    let folder = folder();
+    variant(&folder, "a-typo.toml", "accent =", "acent =");
+    variant(&folder, "b-typo.toml", "primary =", "primry =");
+    let stderr = text(&check(&folder).stderr);
+    for line in stderr.lines().filter(|line| !line.starts_with(' ')) {
+        assert!(line.contains("-typo.toml: "), "{line:?} in {stderr}");
+    }
+}
+
+#[test]
+fn a_database_failure_is_not_blamed_on_the_file() {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_tetsu"))
+        .arg("seed")
+        .arg(sample())
+        .env("DATABASE_URL", "postgres://tetsu@127.0.0.1:1/tetsu")
+        .env("DATABASE_TLS", "disable")
+        .output()
+        .expect("the binary runs");
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = text(&output.stderr);
+    assert!(stderr.contains("Connection refused"), "{stderr}");
+    assert!(!stderr.contains("sample.toml"), "{stderr}");
+}
+
+#[test]
+fn output_never_carries_raw_control_characters() {
+    let folder = folder();
+    variant(
+        &folder,
+        "a-escape.toml",
+        "Sample Studio",
+        "x\u{1b}[31mRED\rOVER",
+    );
+    variant(&folder, "b-split\nsecond.toml", "accent =", "acent =");
+    let stderr = text(&check(&folder).stderr);
+    assert!(
+        !stderr.contains('\u{1b}') && !stderr.contains('\r'),
+        "{stderr:?}"
+    );
+    assert!(stderr.contains("b-split\\nsecond.toml: "), "{stderr}");
+    for line in stderr.lines().filter(|line| !line.starts_with(' ')) {
+        assert!(line.contains(".toml: "), "{line:?} in {stderr}");
+    }
+}
+
+#[test]
+fn a_scratch_folder_is_removed_when_the_test_is_done_with_it() {
+    let folder = folder();
+    variant(&folder, "a.toml", "", "");
+    let path = folder.to_path_buf();
+    assert!(path.join("a.toml").exists());
+    drop(folder);
+    assert!(!path.exists());
+}
+
+#[tokio::test]
+async fn seed_refuses_a_database_that_is_not_utf8_before_writing() {
+    let settings = tetsu_postgres::test_support::fresh_database_encoded("LATIN1")
+        .await
+        .expect("a LATIN1 database");
+    let output = seed(&settings, &sample());
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = text(&output.stderr);
+    assert!(
+        stderr.contains("the database must use UTF8, not LATIN1"),
+        "{stderr}"
     );
 }

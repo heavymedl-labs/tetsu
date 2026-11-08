@@ -27,14 +27,65 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-/// Refuses control characters, such as a NUL that Postgres cannot store or a line break in a name.
-fn plain(what: &str, value: &str) -> Result<(), Error> {
-    if value.chars().any(char::is_control) {
+/// Checks text as given, before trimming, so a line break at either end is refused rather than trimmed away.
+/// It refuses control characters, such as a NUL that Postgres cannot store, and characters that show nothing:
+/// Unicode's default ignorables (soft hyphen, fillers, tags, bidi marks and controls, zero-width spaces) and
+/// line and paragraph separators. Joiners and variation selectors stay, since emoji and scripts such as Persian
+/// need them, but text that is not blank must show at least one other character. The braille blank counts as
+/// blank.
+fn plain(what: &str, raw: &str) -> Result<(), Error> {
+    if raw.chars().any(|c| c.is_control() || hidden(c)) {
         return Err(Error::Invalid(format!(
-            "{what} {value:?} must not hold control characters"
+            "{what} {raw:?} must not hold control characters or invisible formatting"
+        )));
+    }
+    let trimmed = raw.trim();
+    let shows = |c: char| !c.is_whitespace() && !joiner(c) && c != '\u{2800}';
+    if !trimmed.is_empty() && !trimmed.chars().any(shows) {
+        return Err(Error::Invalid(format!(
+            "{what} {raw:?} must hold a visible character"
         )));
     }
     Ok(())
+}
+
+/// Shows nothing and joins nothing: a default ignorable code point (Unicode's `DerivedCoreProperties`) other
+/// than a joiner, or a line or paragraph separator.
+fn hidden(c: char) -> bool {
+    let ignorable = matches!(
+        c,
+        '\u{00AD}'
+            | '\u{034F}'
+            | '\u{061C}'
+            | '\u{115F}'..='\u{1160}'
+            | '\u{17B4}'..='\u{17B5}'
+            | '\u{180B}'..='\u{180F}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{206F}'
+            | '\u{3164}'
+            | '\u{FE00}'..='\u{FE0F}'
+            | '\u{FEFF}'
+            | '\u{FFA0}'
+            | '\u{FFF0}'..='\u{FFF8}'
+            | '\u{1BCA0}'..='\u{1BCA3}'
+            | '\u{1D173}'..='\u{1D17A}'
+            | '\u{E0000}'..='\u{E0FFF}'
+    );
+    (ignorable && !joiner(c)) || matches!(c, '\u{2028}' | '\u{2029}')
+}
+
+/// Zero-width joiners and variation selectors, Mongolian ones included, which shape the characters beside them.
+fn joiner(c: char) -> bool {
+    matches!(
+        c,
+        '\u{200C}'
+            | '\u{200D}'
+            | '\u{180B}'..='\u{180D}'
+            | '\u{180F}'
+            | '\u{FE00}'..='\u{FE0F}'
+            | '\u{E0100}'..='\u{E01EF}'
+    )
 }
 
 /// Assigned by storage, never by a caller.
@@ -120,16 +171,16 @@ pub struct Location {
 
 impl Location {
     /// # Errors
-    /// Fails on an empty name or time zone, or control characters in either.
+    /// Fails on an empty name or time zone, or control or invisible characters in either.
     pub fn new(name: &str, time_zone: &str) -> Result<Self, Error> {
+        plain("location name", name)?;
+        plain("time zone", time_zone)?;
         let (name, time_zone) = (name.trim(), time_zone.trim());
         if name.is_empty() || time_zone.is_empty() {
             return Err(Error::Invalid(
                 "a location needs a name and a time zone".into(),
             ));
         }
-        plain("location name", name)?;
-        plain("time zone", time_zone)?;
         Ok(Self {
             name: name.to_string(),
             time_zone: time_zone.to_string(),
@@ -158,20 +209,20 @@ pub struct NewTenant {
 
 impl NewTenant {
     /// # Errors
-    /// Fails on an empty or overlong name, or control characters in it.
+    /// Fails on an empty or overlong name, or control or invisible characters in it.
     pub fn new(
         slug: Slug,
         name: &str,
         theme: Theme,
         locations: Vec<Location>,
     ) -> Result<Self, Error> {
+        plain("name", name)?;
         let name = name.trim();
         if name.is_empty() || name.chars().count() > MAX_NAME {
             return Err(Error::Invalid(format!(
                 "a name must be 1 to {MAX_NAME} characters"
             )));
         }
-        plain("name", name)?;
         Ok(Self {
             slug,
             name: name.to_string(),
@@ -331,9 +382,34 @@ mod tests {
     }
 
     #[test]
-    fn text_refuses_control_characters_storage_could_not_keep() {
+    fn text_refuses_control_and_invisible_characters() {
         let slug = Slug::parse("a").unwrap();
-        for bad in ["Bad\u{0}Name", "Two\nLines", "Tab\there"] {
+        for bad in [
+            "Bad\u{0}Name",
+            "Two\nLines",
+            "Tab\there",
+            "Line\u{2028}Two",
+            "Para\u{2029}Two",
+            "Ab\u{202E}cd",
+            "Ab\u{2067}cd\u{2069}",
+            "\u{200B}",
+            "Word\u{2060}Joiner",
+            "\u{FEFF}Name",
+            "\u{200D}",
+            "\u{200D}\u{FE0F}",
+            "\u{3164}",
+            "\u{115F}Name",
+            "So\u{AD}ft",
+            "A\u{E0041}\u{E0042}",
+            "A\u{200F}B",
+            "A\u{61C}B",
+            "Studio\u{2028}",
+            "\u{2029}Studio",
+            "Studio\n",
+            "\tStudio",
+            "\u{2800}",
+            "\u{2800}\u{2800}",
+        ] {
             assert!(
                 matches!(
                     NewTenant::new(slug.clone(), bad, theme(), vec![]),
@@ -351,6 +427,21 @@ mod tests {
             );
         }
         assert!(NewTenant::new(slug, "Café Ünïcode", theme(), vec![]).is_ok());
+    }
+
+    #[test]
+    fn joiners_that_scripts_and_emoji_need_are_kept() {
+        let slug = Slug::parse("a").unwrap();
+        for good in [
+            "Lift \u{1F3CB}\u{FE0F}\u{200D}\u{2640}\u{FE0F}",
+            "می\u{200C}خواهم",
+            "\u{182E}\u{180B}\u{1823}\u{1829}",
+        ] {
+            assert!(
+                NewTenant::new(slug.clone(), good, theme(), vec![]).is_ok(),
+                "{good:?}"
+            );
+        }
     }
 
     #[test]

@@ -36,9 +36,34 @@ struct PostgresTenants {
 /// Sorts driver errors as ADR-0011 asks. Only a dropped connection or a stale cached statement is worth
 /// retrying, and every error keeps the driver's message.
 fn database(error: &tokio_postgres::Error) -> Error {
-    // The driver's own text is just "db error" or "error connecting to server", so keep what Postgres said,
-    // or the cause underneath, such as a refused connection.
-    let message = error.as_db_error().map_or_else(
+    let message = message(error);
+    if error.code() == Some(&SqlState::UNIQUE_VIOLATION) {
+        Error::SlugTaken
+    } else if error.is_closed() || is_io(error) || message.contains(STALE) {
+        Error::Unavailable(message)
+    } else {
+        Error::Storage(message)
+    }
+}
+
+/// A commit Postgres answered was refused and rolled back, so it is sorted like any other error. One with no
+/// answer may still have been saved, so a retry is not safe: it is never temporary (ADR-0011).
+fn commit_error(error: &tokio_postgres::Error) -> Error {
+    if error.as_db_error().is_none() {
+        return Error::Storage(format!("commit outcome unknown: {}", message(error)));
+    }
+    match database(error) {
+        Error::Storage(why) | Error::Unavailable(why) => {
+            Error::Storage(format!("commit refused: {why}"))
+        }
+        other => other,
+    }
+}
+
+/// The driver's own text is just "db error" or "error connecting to server", so this keeps what Postgres said,
+/// or the cause underneath, such as a refused connection.
+fn message(error: &tokio_postgres::Error) -> String {
+    error.as_db_error().map_or_else(
         || {
             let causes: Vec<String> =
                 std::iter::successors(Some(error as &dyn std::error::Error), |e| e.source())
@@ -47,14 +72,7 @@ fn database(error: &tokio_postgres::Error) -> Error {
             causes.join(": ")
         },
         |db| db.message().to_string(),
-    );
-    if error.code() == Some(&SqlState::UNIQUE_VIOLATION) {
-        Error::SlugTaken
-    } else if error.is_closed() || is_io(error) || message.contains(STALE) {
-        Error::Unavailable(message)
-    } else {
-        Error::Storage(message)
-    }
+    )
 }
 
 fn is_io(error: &tokio_postgres::Error) -> bool {
@@ -101,11 +119,7 @@ async fn insert_in_transaction(client: &mut Object, tenant: &NewTenant) -> Resul
     let transaction = client.transaction().await.map_err(|e| database(&e))?;
     let id = insert_tenant_and_address(&transaction, tenant).await?;
     insert_locations(&transaction, id, tenant.locations()).await?;
-    // The tenant may be saved even if the commit reply is lost, so a retry is not safe (ADR-0011).
-    transaction
-        .commit()
-        .await
-        .map_err(|e| Error::Storage(format!("commit outcome unknown: {e}")))?;
+    transaction.commit().await.map_err(|e| commit_error(&e))?;
     Ok(id)
 }
 

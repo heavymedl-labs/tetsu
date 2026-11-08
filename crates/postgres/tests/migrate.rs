@@ -1,8 +1,8 @@
 //! Runs the migration runner against a real Postgres.
 
 use tetsu_kernel::{Migration, Module, Storage};
-use tetsu_postgres::test_support::fresh_database;
-use tetsu_postgres::{connect, migrate};
+use tetsu_postgres::test_support::{fresh_database, fresh_database_encoded};
+use tetsu_postgres::{MIGRATION_LOCK, connect, migrate, migrate_with_wait, require_utf8};
 
 struct Fake(&'static [Migration]);
 
@@ -245,33 +245,33 @@ async fn gives_up_when_the_lock_stays_held() {
 
 #[tokio::test]
 async fn refuses_a_database_that_is_not_utf8() {
-    let admin_url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is set");
-    let admin = connect(&tetsu_postgres::Settings::from_values(
-        &admin_url,
-        Some("disable"),
-    ))
-    .await
-    .expect("connects");
-    let name = format!("latin1_{}", std::process::id());
-    admin
-        .batch_execute(&format!("DROP DATABASE IF EXISTS {name}"))
+    let settings = fresh_database_encoded("LATIN1")
         .await
-        .expect("drops a leftover database");
-    admin
-        .batch_execute(&format!(
-            "CREATE DATABASE {name} ENCODING 'LATIN1' TEMPLATE template0 LC_COLLATE 'C' LC_CTYPE 'C'"
-        ))
-        .await
-        .expect("creates a LATIN1 database");
-    let (base, _) = admin_url.rsplit_once('/').expect("names a database");
-    let settings =
-        tetsu_postgres::Settings::from_values(&format!("{base}/{name}"), Some("disable"));
+        .expect("a LATIN1 database");
 
-    let error = migrate(&settings, &[&Fake(&[FIRST])]).await.unwrap_err();
+    // Hold the lock elsewhere: a check that ran after taking it would report the lock instead.
+    let holder = connect(&settings).await.expect("connects");
+    holder
+        .query_one("SELECT pg_advisory_lock($1)", &[&MIGRATION_LOCK])
+        .await
+        .expect("holds the lock");
+    let error = migrate_with_wait(
+        &settings,
+        &[&Fake(&[FIRST])],
+        std::time::Duration::from_millis(200),
+    )
+    .await
+    .unwrap_err();
     assert!(
         error.to_string().contains("must use UTF8, not LATIN1"),
         "{error}"
     );
+    let seeding = require_utf8(&settings).await.unwrap_err();
+    assert_eq!(
+        seeding.to_string(),
+        "the database must use UTF8, not LATIN1"
+    );
+    drop(holder);
     assert!(
         !table_exists(&settings, "fake.migrations")
             .await
