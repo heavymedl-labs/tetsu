@@ -102,13 +102,14 @@ pub async fn sweep_stale_databases() -> Result<(), Error> {
 /// already running, so it never leaves the work undone.
 ///
 /// # Errors
-/// Fails if `TEST_DATABASE_URL` is unset, Postgres cannot be reached, or another sweep runs for 30 seconds.
+/// Fails if `TEST_DATABASE_URL` is unset, Postgres cannot be reached, another sweep runs for 30 seconds, or a
+/// test database will not drop.
 pub async fn drop_all_test_databases() -> Result<(), Error> {
     sweep(Duration::ZERO, Some(FINAL_WAIT)).await
 }
 
-/// With no `wait`, a sweep that finds another running leaves the work to it. With one, it waits that long for
-/// the lock, then fails.
+/// With no `wait`, a sweep that finds another running leaves the work to it, and a database it cannot drop is
+/// only reported. With one, it waits that long for the lock, and fails if any database is left.
 async fn sweep(older_than: Duration, wait: Option<Duration>) -> Result<(), Error> {
     let admin = connect(&Settings::from_values(&admin_url()?, Some("disable"))).await?;
     if !take_sweep_lock(&admin, wait).await? {
@@ -121,13 +122,18 @@ async fn sweep(older_than: Duration, wait: Option<Duration>) -> Result<(), Error
     let names = rows
         .iter()
         .filter_map(|row| row.try_get::<_, String>("datname").ok());
+    let mut left = Vec::new();
     for name in names.filter(|name| stale(name, now, older_than)) {
         if let Err(error) = admin.batch_execute(&drop_statement(&name)).await {
             eprintln!("warning: stale test database {name} was not dropped: {error}");
+            left.push(name);
         }
     }
-    // Closing the connection releases the lock.
-    Ok(())
+    // Closing the connection releases the lock. A sweep that waited is the last one, so nothing may be left.
+    match (wait, left.is_empty()) {
+        (Some(_), false) => Err(format!("test databases were left: {}", left.join(", ")).into()),
+        _ => Ok(()),
+    }
 }
 
 /// Whether this connection now holds the sweep lock.
@@ -329,6 +335,38 @@ mod tests {
         assert!(!waiting.is_finished(), "waits for the running sweep");
         drop(holder);
         waiting.await.unwrap().unwrap();
+    }
+
+    /// Postgres refuses to drop a template database, so this one cannot be dropped until it is unmarked.
+    #[tokio::test]
+    async fn the_final_sweep_fails_when_a_database_is_left() {
+        let admin = connect(&Settings::from_values(
+            &admin_url().unwrap(),
+            Some("disable"),
+        ))
+        .await
+        .unwrap();
+        // Created long ago by its name, so only a sweep of stale databases reaches it, never a test's own.
+        let name = format!("t_1000_{}_0", std::process::id());
+        // One statement per call: Postgres runs a batch as one transaction, which CREATE and DROP refuse.
+        for statement in [
+            format!("CREATE DATABASE {name}"),
+            format!("ALTER DATABASE {name} IS_TEMPLATE true"),
+        ] {
+            admin.batch_execute(&statement).await.unwrap();
+        }
+        let swept = sweep(STALE, Some(Duration::from_secs(10))).await;
+        for statement in [
+            format!("ALTER DATABASE {name} IS_TEMPLATE false"),
+            format!("DROP DATABASE {name}"),
+        ] {
+            admin.batch_execute(&statement).await.unwrap();
+        }
+        let error = swept.unwrap_err().to_string();
+        assert!(
+            error.contains(&format!("test databases were left: {name}")),
+            "{error}"
+        );
     }
 
     #[test]

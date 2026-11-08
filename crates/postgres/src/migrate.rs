@@ -14,6 +14,9 @@ pub const MIGRATION_LOCK: i64 = 7_243_001;
 const LOCK_WAIT: Duration = Duration::from_secs(60);
 const LOCK_POLL: Duration = Duration::from_millis(100);
 const NO_TRANSACTION: &str = "-- tetsu:no-transaction";
+/// Run right after each file, before the runner's own queries, so a role the file took never writes its record.
+/// `RESET ALL` leaves these two alone.
+const RESET_IDENTITY: &str = "RESET SESSION AUTHORIZATION; RESET ROLE";
 
 /// Applies each module's new migrations.
 ///
@@ -136,8 +139,7 @@ async fn take_lock(client: &Client, wait: Duration) -> Result<(), Error> {
     }
 }
 
-/// Creates the module's schema and tracking table if needed, then returns its new files. Fails if an applied file
-/// changed, or a new file comes before an applied one.
+/// Creates the module's schema and tracking table if needed, then returns its new files.
 async fn pending(client: &Client, storage: Storage) -> Result<Vec<&'static Migration>, Error> {
     let Storage { schema, migrations } = storage;
     client
@@ -159,6 +161,16 @@ async fn pending(client: &Client, storage: Storage) -> Result<Vec<&'static Migra
         .iter()
         .map(|row| Ok((row.try_get("version")?, row.try_get("sql")?)))
         .collect::<Result<HashMap<i32, String>, tokio_postgres::Error>>()?;
+    new_files(schema, migrations, &applied)
+}
+
+/// The files not yet applied. Fails if an applied file changed or is missing from the code, or a new file comes
+/// before an applied one.
+fn new_files<'a>(
+    schema: &str,
+    migrations: &'a [Migration],
+    applied: &HashMap<i32, String>,
+) -> Result<Vec<&'a Migration>, Error> {
     if let Some(changed) = migrations
         .iter()
         .find(|m| applied.get(&m.version).is_some_and(|sql| sql != m.sql))
@@ -168,6 +180,15 @@ async fn pending(client: &Client, storage: Storage) -> Result<Vec<&'static Migra
             changed.version
         )
         .into());
+    }
+    if let Some(missing) = applied
+        .keys()
+        .filter(|version| !migrations.iter().any(|m| m.version == **version))
+        .min()
+    {
+        return Err(
+            format!("{schema} version {missing} is applied but missing from the code").into(),
+        );
     }
     let is_new = |migration: &&Migration| !applied.contains_key(&migration.version);
     let new: Vec<_> = migrations.iter().skip_while(|m| !is_new(m)).collect();
@@ -208,6 +229,7 @@ async fn apply_in_schema(
     client.batch_execute("BEGIN").await?;
     let applied = async {
         client.batch_execute(migration.sql).await?;
+        client.batch_execute(RESET_IDENTITY).await?;
         client.execute(&record, &[&migration.sql]).await
     };
     if let Err(error) = applied.await {
@@ -234,6 +256,7 @@ async fn apply_outside_transaction(
         .into());
     }
     client.batch_execute(migration.sql).await?;
+    client.batch_execute(RESET_IDENTITY).await?;
     refuse_invalid_indexes(client, schema).await?;
     client.execute(record, &[&migration.sql]).await?;
     Ok(())

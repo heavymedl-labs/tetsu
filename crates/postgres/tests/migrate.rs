@@ -466,3 +466,55 @@ async fn every_module_is_checked_before_any_file_is_applied() {
     assert!(error.to_string().contains("below"), "{error}");
     assert!(!table_exists(&settings, "first.a").await.expect("checks"));
 }
+
+#[tokio::test]
+async fn a_role_a_migration_takes_reaches_neither_its_record_nor_the_next_module() {
+    const SET_ROLE: &[Migration] = &[Migration {
+        version: 1,
+        sql: "SET ROLE pg_monitor",
+    }];
+    const SET_AUTHORIZATION: &[Migration] = &[Migration {
+        version: 1,
+        sql: "SET SESSION AUTHORIZATION pg_monitor",
+    }];
+    const SEEN: &[Migration] = &[Migration {
+        version: 1,
+        sql: "CREATE TABLE second.seen AS SELECT current_user::text AS who",
+    }];
+    for first in [SET_ROLE, SET_AUTHORIZATION] {
+        let settings = fresh_database().await.expect("a test database");
+        migrate(
+            &settings,
+            &[
+                &Named("first", "first", first),
+                &Named("second", "second", SEEN),
+            ],
+        )
+        .await
+        .expect("records each file and migrates the next as the session's own user");
+        let client = connect(&settings).await.expect("connects");
+        let row = client
+            .query_one("SELECT who FROM second.seen", &[])
+            .await
+            .expect("reads");
+        assert_eq!(row.try_get::<_, String>("who").expect("maps"), "postgres");
+    }
+}
+
+#[tokio::test]
+async fn refuses_an_applied_version_missing_from_the_code() {
+    let settings = fresh_database().await.expect("a test database");
+    migrate(&settings, &[&Fake(&[FIRST, SECOND])])
+        .await
+        .expect("first run");
+    let error = migrate(&settings, &[&Fake(&[FIRST, THIRD])])
+        .await
+        .expect_err("must refuse");
+    assert!(
+        error
+            .to_string()
+            .contains("fake version 2 is applied but missing from the code"),
+        "{error}"
+    );
+    assert!(!table_exists(&settings, "fake.d").await.expect("checks"));
+}
