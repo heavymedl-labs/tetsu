@@ -4,8 +4,11 @@ Hard rules for every change. A change that breaks one needs a superseding ADR.
 
 - The platform never depends on, imports, or names a vertical.
 - A module's public surface is its use cases, its driven ports, its domain
-  events, and the `Router` the composition root mounts
-  ([ADR-0007](adr/0007-server-stack.md)).
+  events, the `Router` the composition root mounts
+  ([ADR-0007](adr/0007-server-stack.md)), the domain types those name, the type
+  that registers it with the kernel, and its adapter constructors, which return
+  a handle offering only the use cases
+  ([ADR-0021](adr/0021-module-public-surface.md)).
 - Modules talk only through each other's use cases and domain events.
 - Domain models, use cases, and driven ports name no HTTP framework, database
   driver, or template engine types

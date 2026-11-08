@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-06
 - Branch coverage exception superseded by [ADR-0020](0020-branch-coverage.md)
+- Public surface rule for `lib.rs` superseded by [ADR-0021](0021-module-public-surface.md)
 
 ## Context
 

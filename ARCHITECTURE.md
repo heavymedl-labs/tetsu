@@ -172,7 +172,9 @@ flowchart TB
 
 ### Module
 
-Every module has the same hexagonal shape: use cases in, driven ports out.
+Every module has the same hexagonal shape: use cases in, driven ports out. Outside the module, its use cases
+are reached only through a handle that its adapter constructors return, so no caller can skip them by calling a
+port ([ADR-0021](docs/adr/0021-module-public-surface.md)).
 
 ```mermaid
 flowchart LR
