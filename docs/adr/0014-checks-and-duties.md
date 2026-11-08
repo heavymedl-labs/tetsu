@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-06
+- CI after every push suspended by [ADR-0023](0023-ci-on-demand.md)
 
 ## Context
 

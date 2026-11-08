@@ -1,6 +1,6 @@
 # 0023. CI on demand
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-08
 
 ## Context
@@ -30,6 +30,9 @@ and workflow lint.
   workflow lint in the other.
 - **A session that pushed code ends with a CI run,** and its status update, which CONTRIBUTING.md already asks
   for, says whether that run passed.
+- **A CI run passes on the exact commit before it deploys,** once deploys exist
+  ([#19](https://github.com/heavymedl-labs/tetsu/issues/19)), so nothing a clean machine has not checked goes
+  live.
 - **On acceptance,** ADR-0014's third run is marked superseded by this ADR, for as long as this ADR stands.
 
 ## Alternatives considered
