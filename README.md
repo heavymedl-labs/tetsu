@@ -17,8 +17,12 @@ Tetsu (working name) is a multi-tenant platform in Rust that includes:
 - **customer profiles**, messaging, and reports
 - a **public API** with a sandbox and webhooks
 
-Each industry adds only what is specific to it. The project is early: only the kernel
-and the `tetsu` binary exist so far.
+Each industry adds only what is specific to it. Industries such as fitness, salons, and
+campgrounds are examples that test the platform, not its definition.
+
+It is a hobby project that aims to become a real business, so designs keep real-business
+needs such as isolation, compliance, and sign-up in view. The project is early: only the
+kernel and the `tetsu` binary exist so far.
 
 ## Where things live
 
