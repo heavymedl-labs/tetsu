@@ -87,8 +87,8 @@ sets its status to Todo, and to Done when it closes. Keep the rest true:
 - The **Roadmap** view groups work by status and sorts it by priority, so set
   priority rather than moving items by hand.
 - Post a status update (On track, At risk, or Off track) when a milestone's
-  scope or risk changes, and at the end of a working session that closed
-  issues. Say what finished, what is next, any risk, and whether the CI run
+  scope or risk changes, and at the end of a working session that pushed code
+  or closed issues. Say what finished, what is next, any risk, and whether the CI run
   that ended the session passed ([ADR-0023](docs/adr/0023-ci-on-demand.md)).
 - Update the project README when milestones or field meanings change.
 

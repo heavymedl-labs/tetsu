@@ -5,6 +5,10 @@ name: CI
 on:
   pull_request:
   workflow_dispatch:
+    inputs:
+      base:
+        description: Commit to check every change since. Empty means the last commit a successful manual run checked.
+        required: false
 
 permissions:
   contents: read
@@ -60,19 +64,25 @@ jobs:
             -c "SELECT pg_reload_conf()"
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - run: scripts/install-tools.sh
-      # A pull request checks against its base. A manual run checks every change since the commit the last
-      # successful run checked, or since the parent commit when there is none.
+      # A pull request checks against its base. A manual run checks every change since the base it is given, or
+      # since the commit the last successful manual run on main checked. Only manual runs count: a pull request
+      # run checks its own diff, not main's batch. With neither, it fails rather than check too little.
       - id: base
         env:
           GH_TOKEN: ${{ github.token }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
+          INPUT_BASE: ${{ inputs.base }}
         run: |
-          base="$PR_BASE"
+          base="${PR_BASE:-$INPUT_BASE}"
           if [[ -z "$base" ]]; then
-            base="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --status success \
-              --limit 1 --json headSha --jq '.[0].headSha // empty')"
+            base="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch main \
+              --event workflow_dispatch --status success --limit 1 --json headSha --jq '.[0].headSha // empty')"
           fi
-          echo "sha=${base:-$(git rev-parse HEAD^)}" >>"$GITHUB_OUTPUT"
+          if [[ -z "$base" ]]; then
+            echo "::error::No successful manual run on main to check changes since. Run again with the base input set."
+            exit 1
+          fi
+          echo "sha=$base" >>"$GITHUB_OUTPUT"
       # After a force push the old head is on no branch, so fetch it by its SHA.
       - run: |
           git fetch --quiet origin "$BASE" || true
