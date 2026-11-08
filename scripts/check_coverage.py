@@ -54,7 +54,8 @@ BRANCH_EXCEPTION = re.compile(
 
 
 def branch_exceptions(today):
-    """Lowered branch limits by crate directory name, and an error for each exception past its date. The floor
+    """Lowered branch limits by crate directory name, and an error for each exception past its date, in UTC as
+    CI keeps it. The floor
     guard reads the same rows, so every row that lowers a limit is one it flags for the maintainer."""
     limits, errors = {}, []
     for line in sorted(exception_rows()):
@@ -102,7 +103,8 @@ def main():
     packages = list(crates(metadata))
     errors = list(path_errors(files, [directory for _, directory, _ in packages]))
     errors.extend(empty_errors(files, measures) if files else [])
-    lowered, expired = branch_exceptions(datetime.date.today()) if measures is BRANCHES else ({}, [])
+    today = datetime.datetime.now(datetime.UTC).date()
+    lowered, expired = branch_exceptions(today) if measures is BRANCHES else ({}, [])
     errors.extend(expired)
     for name, directory, declared in packages:
         problems = list(declaration_errors(name, declared))

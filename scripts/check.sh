@@ -36,6 +36,17 @@ for tool in cargo-llvm-cov cargo-mutants .tools/bin/lizard .tools/bin/ruff .tool
   fi
 done
 
+# Checked before any slow stage, even the linters, so a clone set up before the nightly was pinned, or since its
+# date moved, learns at once. Otherwise rustup could also install it alone, without the coverage tools.
+nightly="$(<.nightly-toolchain)"
+if [[ "$fast" == false ]]; then
+  components="$(rustup component list --toolchain "$nightly" --installed 2>/dev/null || true)"
+  if [[ $'\n'"$components" != *$'\n'llvm-tools* ]]; then
+    echo "error: $nightly with llvm-tools-preview is missing. Run scripts/install-tools.sh" >&2
+    exit 1
+  fi
+fi
+
 # Formatters and linters, fast enough to run on every commit (ADR-0017).
 lint() {
   cargo fmt --all --check
@@ -61,15 +72,6 @@ lint() {
 lint
 if [[ "$fast" == true ]]; then
   exit 0
-fi
-
-# Checked before the slow stages, so a clone set up before the nightly was pinned, or since its date moved, learns
-# at once. Otherwise rustup could also install it alone, without the coverage tools.
-nightly="$(<.nightly-toolchain)"
-components="$(rustup component list --toolchain "$nightly" --installed 2>/dev/null || true)"
-if [[ $'\n'"$components" != *$'\n'llvm-tools* ]]; then
-  echo "error: $nightly with llvm-tools-preview is missing. Run scripts/install-tools.sh" >&2
-  exit 1
 fi
 
 # Unset or empty, the tests use the default in .cargo/config.toml, which Cargo applies only to a variable that is

@@ -78,7 +78,6 @@ class CheckScript(unittest.TestCase):
             "cargo metadata",
             "check_coverage.py",
             "cargo +nightly-2026-11-01 llvm-cov --branch",
-            "dir=target/nightly",
             "check_coverage.py --branches",
             "lizard",
             "jscpd",
@@ -312,13 +311,22 @@ class CheckScript(unittest.TestCase):
         self.assertIn("TEST_DATABASE_URL", result.stderr)
         self.assertIn("docker run", result.stderr)
 
+    def test_only_the_nightly_pass_builds_in_its_own_folder(self):
+        result = self.check()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        log = self.log.read_text()
+        self.assertRegex(log, r"(?m)^cargo \+nightly-2026-11-01 llvm-cov --branch .* dir=target/nightly$")
+        self.assertRegex(log, r"(?m)^cargo llvm-cov --json .* dir=$")
+
     def test_a_missing_nightly_fails_before_the_slow_stages(self):
         self.stub("rustup", "exit 1")
         result = self.check()
         self.assertEqual(result.returncode, 1)
         self.assertIn("nightly-2026-11-01 with llvm-tools-preview is missing", result.stderr)
         self.assertIn("scripts/install-tools.sh", result.stderr)
-        self.assertNotIn("cargo llvm-cov", self.log.read_text())
+        log = self.log.read_text() if self.log.exists() else ""
+        for stage in ("cargo fmt", "cargo clippy", "floor_guard.py", "unittest", "cargo llvm-cov"):
+            self.assertNotIn(stage, log)
 
     def test_a_nightly_without_its_coverage_tools_fails_too(self):
         self.stub("rustup", 'echo "rust-std-x86_64-unknown-linux-gnu"')

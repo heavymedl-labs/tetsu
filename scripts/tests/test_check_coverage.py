@@ -1,5 +1,6 @@
 """Each crate must meet the coverage limit for its own tier."""
 
+import datetime
 import json
 import tempfile
 import unittest
@@ -33,7 +34,7 @@ def covered_file(name, percent, branches=None):
 
 
 class CheckCoverage(unittest.TestCase):
-    def check(self, packages, files, *flags, exceptions=()):
+    def check(self, packages, files, *flags, exceptions=(), tz=None):
         with tempfile.TemporaryDirectory() as tmp:
             rows = "".join(f"{row}\n" for row in exceptions)
             (Path(tmp) / "CONSTRAINTS.md").write_text(
@@ -44,7 +45,8 @@ class CheckCoverage(unittest.TestCase):
             report = Path(tmp) / "report.json"
             metadata.write_text(json.dumps({"packages": packages}))
             report.write_text(json.dumps({"data": [{"files": files}]}))
-            return run(["python3", SCRIPT, *flags, metadata, report], tmp)
+            env = {"TZ": tz} if tz else {}
+            return run(["python3", SCRIPT, *flags, metadata, report], tmp, **env)
 
     def test_branches_are_checked_only_when_asked(self):
         files = [covered_file("a", 95, branches=50)]
@@ -83,6 +85,27 @@ class CheckCoverage(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("E9 expired on 2000-01-01", result.stderr)
         self.assertIn("a: 85.0% of branches, under the tier 2 limit of 90%", result.stderr)
+
+    def test_expiry_uses_the_utc_date_whatever_the_time_zone(self):
+        """CI runs in UTC. Fourteen hours either side, a local date would differ from it at some hour of every
+        day, so between them these two cases catch a local comparison whenever the test runs."""
+        today = datetime.datetime.now(datetime.UTC).date()
+        files = [covered_file("a", 100, branches=85)]
+
+        def row(expires):
+            return f"| E9 | Branch limit 80% | `crates/a` | Unreachable | Maintainer | {expires} |"
+
+        ahead = self.check([package("a")], files, "--branches", exceptions=[row(today)], tz="Etc/GMT-14")
+        self.assertEqual(ahead.returncode, 0, ahead.stderr)
+        behind = self.check(
+            [package("a")],
+            files,
+            "--branches",
+            exceptions=[row(today - datetime.timedelta(days=1))],
+            tz="Etc/GMT+12",
+        )
+        self.assertEqual(behind.returncode, 1)
+        self.assertIn("expired", behind.stderr)
 
     def test_a_branch_report_with_no_branches_at_all_fails(self):
         files = [covered_file("a", 100, branches=0)]
