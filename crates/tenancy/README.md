@@ -1,8 +1,8 @@
 # Tenancy
 
-The businesses that use Tetsu, the addresses that reach them, and their themes and locations. Tier 2 until
-[ADR-0020](../../docs/adr/0020-branch-coverage.md) is accepted ([#51](https://github.com/heavymedl-labs/tetsu/issues/51)),
-which moves it to Tier 1.
+The businesses that use Tetsu, the addresses that reach them, and their themes and locations. Tier 2 until it
+meets the Tier 1 bar ([#63](https://github.com/heavymedl-labs/tetsu/issues/63)), since it decides which tenant
+a request reaches.
 
 ## Hot paths
 
