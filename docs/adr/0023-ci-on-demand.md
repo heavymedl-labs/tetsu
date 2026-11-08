@@ -70,5 +70,5 @@ batch run finds something the hook missed twice in a month.
   2,000 minutes a month on Free for private repositories.
 - [Blacksmith: how to reduce spend in GitHub Actions](https://www.blacksmith.sh/blog/how-to-reduce-spend-in-github-actions):
   each job is billed rounded up to a minute, so fewer jobs cost less.
-- [UK Ministry of Justice: low GitHub Actions minutes procedure](https://runbooks.operations-engineering.service.justice.gov.uk/documentation/internal/low-github-actions-minutes-procedure.html):
-  cut triggers first when minutes run low.
+- [Imperial College RSE: a more rational use of CI with GitHub Actions](https://blogs.imperial.ac.uk/research-software-engineering/2024/06/26/adopting-a-more-rational-use-of-continuous-integration-with-github-actions):
+  trigger fewer runs, and use `workflow_dispatch` to run checks when they are wanted.
