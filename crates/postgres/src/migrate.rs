@@ -17,7 +17,7 @@ const NO_TRANSACTION: &str = "-- tetsu:no-transaction";
 /// Applies each module's new migrations.
 ///
 /// # Errors
-/// Fails if the lock stays held, a file fails, or an applied file has changed.
+/// Fails if the database is not UTF8, the lock stays held, a file fails, or an applied file has changed.
 pub async fn migrate(settings: &Settings, modules: &[&dyn Module]) -> Result<(), Error> {
     migrate_with_wait(settings, modules, LOCK_WAIT).await
 }
@@ -32,6 +32,7 @@ pub async fn migrate_with_wait(
     wait: Duration,
 ) -> Result<(), Error> {
     let client = connect(settings).await?;
+    require_utf8(&client).await?;
     take_lock(&client, wait).await?;
     for module in modules {
         if let Some(storage) = module.storage() {
@@ -40,6 +41,19 @@ pub async fn migrate_with_wait(
     }
     // Closing the connection releases the lock, even after a failure above.
     Ok(())
+}
+
+/// Modules check text before storing it, and those checks assume the database can hold any Unicode text.
+async fn require_utf8(client: &Client) -> Result<(), Error> {
+    let row = client
+        .query_one("SELECT current_setting('server_encoding') AS encoding", &[])
+        .await?;
+    let encoding: String = row.try_get("encoding")?;
+    if encoding == "UTF8" {
+        Ok(())
+    } else {
+        Err(format!("the database must use UTF8, not {encoding}").into())
+    }
 }
 
 async fn take_lock(client: &Client, wait: Duration) -> Result<(), Error> {

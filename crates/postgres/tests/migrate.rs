@@ -242,3 +242,39 @@ async fn gives_up_when_the_lock_stays_held() {
             .expect_err("must give up");
     assert!(error.to_string().contains("lock"), "{error}");
 }
+
+#[tokio::test]
+async fn refuses_a_database_that_is_not_utf8() {
+    let admin_url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is set");
+    let admin = connect(&tetsu_postgres::Settings::from_values(
+        &admin_url,
+        Some("disable"),
+    ))
+    .await
+    .expect("connects");
+    let name = format!("latin1_{}", std::process::id());
+    admin
+        .batch_execute(&format!("DROP DATABASE IF EXISTS {name}"))
+        .await
+        .expect("drops a leftover database");
+    admin
+        .batch_execute(&format!(
+            "CREATE DATABASE {name} ENCODING 'LATIN1' TEMPLATE template0 LC_COLLATE 'C' LC_CTYPE 'C'"
+        ))
+        .await
+        .expect("creates a LATIN1 database");
+    let (base, _) = admin_url.rsplit_once('/').expect("names a database");
+    let settings =
+        tetsu_postgres::Settings::from_values(&format!("{base}/{name}"), Some("disable"));
+
+    let error = migrate(&settings, &[&Fake(&[FIRST])]).await.unwrap_err();
+    assert!(
+        error.to_string().contains("must use UTF8, not LATIN1"),
+        "{error}"
+    );
+    assert!(
+        !table_exists(&settings, "fake.migrations")
+            .await
+            .expect("checks")
+    );
+}
