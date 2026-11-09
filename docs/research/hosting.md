@@ -368,6 +368,23 @@ creates then. Expect under $20 if the resources are deleted afterward.
    Record the time, any hang, and whether the pool's `create` timeout stops it. Also check
    that pooled connections recover after the service wakes.
 
+## First deploy, 2026-11-09
+
+The free setup went live on 2026-11-09 ([demo environment](../operations/demo-environment.md)). Findings so far:
+
+- **Render runs the image behind Cloudflare** (`server: cloudflare`). A 70 KB header was dropped at the edge before
+  any response. A 20 KB header or path, and a malformed header line, which the edge cleaned up, reached `tetsu`
+  and came back with its security headers. So the 400, 414, and 431 that hyper answers before our headers, noted in
+  the review of [#76](https://github.com/heavymedl-labs/tetsu/issues/76), were not seen through Render.
+- **Render's command replaces the image's entrypoint,** not only its `CMD`: `serve` exited with status 128, and
+  `/usr/local/bin/tetsu serve` runs.
+- **Test 8, connection details, in part:** `tetsu migrate` from a laptop and from Actions reached Neon's direct
+  endpoint over TLS with the public roots and `channel_binding=require`, and took the migration lock. The
+  application role under row-level security waits on [#8](https://github.com/heavymedl-labs/tetsu/issues/8).
+- **A deploy** bills 33 seconds of job time: finding the CI run's digest, pulling, migrating, and waiting on
+  Render, whose own deploy took about 20 seconds.
+- **Test 9, waking from idle,** has not run yet.
+
 ## Sources
 
 Read 2026-11-04. Sources for most options we ruled out are in the full version.
