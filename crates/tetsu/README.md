@@ -11,6 +11,7 @@ names no business.
 | `tetsu migrate` | Runs each module's new migrations |
 | `tetsu seed <file or folder>` | Creates the tenants in seed files, and skips any whose slug exists |
 | `tetsu seed --check <file or folder>` | Checks seed files without a database |
+| `tetsu serve` | Serves the public pages until SIGTERM or SIGINT, then finishes open requests for up to 10 seconds |
 
 A folder means its `.toml` files at the top level, in name order, leaving out hidden files. One that is not a
 regular file fails the run. Seeding
@@ -23,8 +24,10 @@ Exit codes are 0 for success, 1 for a failure, and 2 for a command or arguments 
 
 | Variable | Used by | Meaning |
 | --- | --- | --- |
-| `DATABASE_URL` | `migrate`, `seed` | The Postgres to use, which must store text as UTF8. Required, and may not set `sslmode` |
-| `DATABASE_TLS` | `migrate`, `seed` | `require` (the default) or `disable`, for local tests only ([ADR-0013](../../docs/adr/0013-postgres-tls.md)) |
+| `DATABASE_URL` | `migrate`, `seed`, `serve` | The Postgres to use, which must store text as UTF8. Required, and may not set `sslmode` |
+| `DATABASE_TLS` | `migrate`, `seed`, `serve` | `require` (the default) or `disable`, for local tests only ([ADR-0013](../../docs/adr/0013-postgres-tls.md)) |
+| `TETSU_DEMO` | `serve` | `true` or `false`, with no default: whether every page says its business is a demo and asks not to be indexed ([ADR-0018](../../docs/adr/0018-demo-businesses-as-data.md)) |
+| `PORT` | `serve` | The port a host such as Render sets, listened on at every interface. Without it, `serve` listens on `127.0.0.1:8080` |
 
 TLS trusts only public certificate authorities until a custom authority file arrives with the first deploy
 ([#19](https://github.com/heavymedl-labs/tetsu/issues/19)), so a Postgres with a privately signed certificate
