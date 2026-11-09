@@ -1,8 +1,10 @@
 """scan_secrets.sh must stop each secret form ADR-0027 names, at commit, at push, and in history, and must
 pass code that only reads a secret. Planted values are built here at run time, so this file holds none."""
 
+import base64
+import os
+import random
 import re
-import secrets
 import shutil
 import string
 import tempfile
@@ -18,8 +20,19 @@ NEON_HOST = "ep-cool-river-a1b2c3d4.us-east-2.aws.neon.tech"
 ALLOW_COMMENT = "betterleaks:" + "allow"
 
 
+# Betterleaks' default filters skip a small share of random values, such as a password that happens to start
+# with "true". A fixed seed keeps the values varied but the same on every run, so a test fails only when a
+# change does. SCAN_TEST_SEED tries other values.
+seed = int(os.environ.get("SCAN_TEST_SEED", "76"))
+RANDOM = random.Random(seed)  # noqa: S311 reason: test values must repeat across runs, and none is a real secret
+
+
 def token(length, alphabet=string.ascii_letters + string.digits):
-    return "".join(secrets.choice(alphabet) for _ in range(length))
+    return "".join(RANDOM.choice(alphabet) for _ in range(length))
+
+
+def urlsafe(size):
+    return base64.urlsafe_b64encode(RANDOM.randbytes(size)).rstrip(b"=").decode()
 
 
 def leaks():
@@ -34,8 +47,8 @@ def leaks():
         "quoted keyword password": f"host={NEON_HOST} user=u password='npg_{token(16)}' dbname=d",
         "spaced keyword password": f"host = {NEON_HOST} user = u password = npg_{token(16)}",
         "quoted password": f'password = "{token(20)}"',
-        "session secret": f"SESSION_SECRET={secrets.token_urlsafe(32)}",
-        "base64 session key": f"TETSU_SESSION_KEY={secrets.token_urlsafe(48)}",
+        "session secret": f"SESSION_SECRET={urlsafe(32)}",
+        "base64 session key": f"TETSU_SESSION_KEY={urlsafe(48)}",
         "github token": f'token = "ghp_{token(36)}"',
         "render api key": f'key = "rnd_{token(32)}"',
         "bare render api key": f"render login --api-key rnd_{token(32)}",

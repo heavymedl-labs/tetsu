@@ -55,8 +55,10 @@ description = "Fake test credentials"
 regexTarget = "secret"
 regexes = ['''^fake-[A-Za-z0-9._%-]+$''']
 
-# A type or name in CamelCase, such as `password: SecretString`, declares a secret rather than holding one.
+# A type or name in CamelCase, such as `password: SecretString`, declares a secret rather than holding one. Only
+# the rules that match a name followed by any value need this; a key in a known format can look CamelCase too.
 [[allowlists]]
 description = "Type and identifier names"
+targetRules = ["generic-password", "generic-api-key", "app-secret"]
 regexTarget = "secret"
 regexes = ['''^(?:[A-Z][a-z]+)+(?:<[^>]*>)?,?$''']

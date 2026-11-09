@@ -10,6 +10,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 
 const HOME: &str = include_str!("home.html");
+const HOME_DEMO: &str = "<p class=\"demo\" role=\"note\"><strong>Demo.</strong> The businesses on this site are \
+                         fictional, made up to show what Tetsu does.</p>";
 
 /// How long requests in progress may take to finish once the server is asked to stop. A client that never
 /// finishes its request cannot hold the server open past it.
@@ -35,14 +37,16 @@ const HEADERS: [(HeaderName, &str); 5] = [
 /// The whole site: the root page, then the modules' routers, which answer every other path. In a demo
 /// environment every response also asks search engines not to index it (ADR-0018).
 pub fn app(tenancy: Router, demo: bool) -> Router {
+    let marking = if demo { HOME_DEMO } else { "" };
+    let page = HOME.replace("<!-- demo -->", marking);
     Router::new()
-        .route("/", get(home))
+        .route("/", get(move || std::future::ready(home(page.clone()))))
         .merge(tenancy)
         .layer(axum::middleware::map_response_with_state(demo, secure))
 }
 
-async fn home() -> Response {
-    ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], HOME).into_response()
+fn home(page: String) -> Response {
+    ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], page).into_response()
 }
 
 async fn secure(State(demo): State<bool>, mut response: Response) -> Response {
@@ -90,29 +94,37 @@ pub async fn run(
     }
 }
 
-/// Finishes when the process is asked to stop: Ctrl-C, or the SIGTERM a host sends before it replaces a server.
-/// A signal whose handler cannot be set up never finishes, rather than stopping the server at once.
-pub async fn stopped() {
-    let interrupt = async {
+/// Finishes when the process is asked to stop: SIGTERM, which a host sends before it replaces a server, or
+/// Ctrl-C. On Unix, which every host Tetsu runs on uses, the handlers are set up when this is called, not when it
+/// is first awaited, so a signal that arrives while the server starts lets it finish starting and then stop
+/// cleanly, rather than killing it. Call it before anything slow. Elsewhere, Ctrl-C is watched only once this is
+/// awaited. A handler that cannot be set up never finishes, rather than stopping the server at once.
+pub fn stop_signal() -> impl Future<Output = ()> + Send + 'static {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{Signal, SignalKind, signal};
+        async fn received(signal: Option<Signal>) {
+            match signal {
+                Some(mut signal) => {
+                    signal.recv().await;
+                }
+                None => std::future::pending::<()>().await,
+            }
+        }
+        let terminate = signal(SignalKind::terminate()).ok();
+        let interrupt = signal(SignalKind::interrupt()).ok();
+        async move {
+            tokio::select! {
+                () = received(terminate) => {},
+                () = received(interrupt) => {},
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    async {
         if tokio::signal::ctrl_c().await.is_err() {
             std::future::pending::<()>().await;
         }
-    };
-    #[cfg(unix)]
-    let terminate = async {
-        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
-            Ok(mut signal) => {
-                signal.recv().await;
-            }
-            // Without the handler, Ctrl-C still stops it, and the host's later SIGKILL always does.
-            Err(_) => std::future::pending::<()>().await,
-        }
-    };
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-    tokio::select! {
-        () = interrupt => {},
-        () = terminate => {},
     }
 }
 
@@ -263,6 +275,30 @@ mod tests {
         };
         let server = tokio::spawn(run(listener, app(module(), true), shutdown, grace));
         (address, stop, server)
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_sigterm_sent_before_the_signal_is_awaited_still_stops_it() {
+        // Sent before anything awaits the signal: without the handler already set up, this kills the test.
+        let stop = stop_signal();
+        let pid = std::process::id().to_string();
+        let sent = std::process::Command::new("kill")
+            .args(["-TERM", &pid])
+            .status()
+            .unwrap();
+        assert!(sent.success());
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), stop)
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn the_root_page_says_when_the_site_shows_demos() {
+        assert!(get_path("/").await.contains("<strong>Demo.</strong>"));
+        assert!(!send_to(false, &get_request("/")).await.contains("Demo"));
     }
 
     #[tokio::test]

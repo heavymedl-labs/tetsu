@@ -5,7 +5,7 @@ mod support {
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::{TcpListener, TcpStream};
     use std::path::Path;
-    use std::process::{Child, ChildStdout, Command, Stdio};
+    use std::process::{Child, ChildStderr, ChildStdout, Command, Stdio};
 
     use tetsu_postgres::Settings;
 
@@ -13,6 +13,7 @@ mod support {
     pub struct Server {
         pub child: Child,
         pub stdout: BufReader<ChildStdout>,
+        pub stderr: ChildStderr,
         port: u16,
     }
 
@@ -44,8 +45,12 @@ mod support {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample.toml")
     }
 
-    /// Starts the server on a free port, and waits until it says it is listening.
+    /// Starts the server on a free port in a demo environment, and waits until it says it is listening.
     pub fn start(settings: &Settings) -> Server {
+        start_marked(settings, "true")
+    }
+
+    pub fn start_marked(settings: &Settings, demo: &str) -> Server {
         let port = TcpListener::bind("127.0.0.1:0")
             .unwrap()
             .local_addr()
@@ -53,16 +58,20 @@ mod support {
             .port();
         let mut child = tetsu(settings, &["serve"])
             .env("PORT", port.to_string())
+            .env("TETSU_DEMO", demo)
             .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn()
             .expect("the binary runs");
         let mut stdout = BufReader::new(child.stdout.take().unwrap());
+        let stderr = child.stderr.take().unwrap();
         let mut line = String::new();
         stdout.read_line(&mut line).unwrap();
         assert_eq!(line.trim(), format!("serving on http://0.0.0.0:{port}"));
         Server {
             child,
             stdout,
+            stderr,
             port,
         }
     }
@@ -83,7 +92,7 @@ mod support {
 use std::io::Read;
 use std::process::Command;
 
-use support::{get, ready, start, tetsu};
+use support::{get, ready, start, start_marked, tetsu};
 use tetsu_postgres::test_support::fresh_database;
 
 #[tokio::test]
@@ -168,5 +177,37 @@ async fn it_refuses_a_port_that_is_not_one() {
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("PORT must be a number"),
         "{output:?}"
+    );
+}
+
+#[tokio::test]
+async fn outside_a_demo_environment_no_page_is_marked_as_a_demo() {
+    let database = fresh_database().await.expect("a test database");
+    ready(&database);
+    let server = start_marked(&database, "false");
+    for path in ["/sample-studio", "/", "/another-studio"] {
+        let raw = get(&server, path);
+        let lower = raw.to_ascii_lowercase();
+        assert!(!raw.contains("Demo"), "{path}: {raw}");
+        assert!(!lower.contains("noindex"), "{path}: {raw}");
+    }
+    assert!(get(&server, "/sample-studio").contains("<h1>Sample Studio</h1>"));
+}
+
+#[tokio::test]
+async fn a_page_that_cannot_load_tells_the_operator_why_but_not_the_visitor() {
+    // Never migrated, so Tenancy's tables do not exist and every lookup fails.
+    let database = fresh_database().await.expect("a test database");
+    let mut server = start(&database);
+    let page = get(&server, "/sample-studio");
+    assert!(page.starts_with("HTTP/1.1 503"), "{page}");
+    assert!(!page.contains("relation"), "{page}");
+    server.child.kill().unwrap();
+    server.child.wait().unwrap();
+    let mut stderr = String::new();
+    server.stderr.read_to_string(&mut stderr).unwrap();
+    assert!(
+        stderr.contains("tenancy: could not load /sample-studio: "),
+        "{stderr}"
     );
 }

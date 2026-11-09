@@ -31,34 +31,42 @@ struct TenantPage<'a> {
 
 #[derive(Template)]
 #[template(path = "not_found.html")]
-struct NotFoundPage;
+struct NotFoundPage {
+    demo: bool,
+}
 
 #[derive(Template)]
 #[template(path = "unavailable.html")]
-struct UnavailablePage;
+struct UnavailablePage {
+    demo: bool,
+}
 
 /// Serves each tenant's public page at its address, `/<slug>`, and a not found page at every other path. An
-/// address no tenant holds gets the not found page, never another tenant's. With `demo`, each tenant page says
-/// the business is a demo and asks search engines not to index it (ADR-0018).
-pub fn router<S>(tenants: Tenants<S>, demo: bool) -> Router
+/// address no tenant holds gets the not found page, never another tenant's. With `demo`, every page says it shows
+/// demo businesses and asks search engines not to index it (ADR-0018). A page that could not be loaded is shown
+/// as unavailable, and `report` gets a line for the operator, since where such lines go is the composition
+/// root's choice (#27).
+pub fn router<S>(tenants: Tenants<S>, demo: bool, report: fn(&str)) -> Router
 where
     S: TenantStore + Send + Sync + 'static,
 {
-    routes(tenants, demo, RESOLVE_TIMEOUT)
+    routes(tenants, demo, RESOLVE_TIMEOUT, report)
 }
 
-/// The router, with the time a lookup may take as a parameter so tests need not wait out the real one.
-fn routes<S>(tenants: Tenants<S>, demo: bool, timeout: Duration) -> Router
+/// The router, with the time a lookup may take and where failures are reported as parameters, so tests need not
+/// wait out the real timeout and can read what the operator would see.
+fn routes<S>(tenants: Tenants<S>, demo: bool, timeout: Duration, report: fn(&str)) -> Router
 where
     S: TenantStore + Send + Sync + 'static,
 {
     Router::new()
         .route("/{address}", get(page::<S>))
-        .fallback(not_found)
+        .fallback(fallback::<S>)
         .with_state(Arc::new(Served {
             tenants,
             demo,
             timeout,
+            report,
         }))
 }
 
@@ -66,6 +74,7 @@ struct Served<S> {
     tenants: Tenants<S>,
     demo: bool,
     timeout: Duration,
+    report: fn(&str),
 }
 
 async fn page<S: TenantStore>(
@@ -74,15 +83,37 @@ async fn page<S: TenantStore>(
 ) -> Response {
     // A path that does not decode, such as one that is not UTF-8, is no tenant's address.
     let Ok(Path(segment)) = segment else {
-        return not_found().await;
+        return not_found(served.demo);
     };
     let address = format!("/{segment}");
-    match tokio::time::timeout(served.timeout, served.tenants.resolve(&address)).await {
-        Ok(Ok(tenant)) => show(&tenant, served.demo),
-        Ok(Err(Error::NotFound)) => not_found().await,
-        // Storage failed or took too long. The page says so without the detail, which could name the database.
-        Ok(Err(_)) | Err(_) => html(StatusCode::SERVICE_UNAVAILABLE, &UnavailablePage),
-    }
+    let failure = match tokio::time::timeout(served.timeout, served.tenants.resolve(&address)).await
+    {
+        Ok(Ok(tenant)) => return show(&tenant, served.demo),
+        Ok(Err(Error::NotFound)) => return not_found(served.demo),
+        Ok(Err(error)) => error.to_string(),
+        Err(_) => format!("no answer within {} seconds", served.timeout.as_secs_f32()),
+    };
+    // The page says only that it is unavailable, since the detail could name the database. The operator gets
+    // the detail on stderr; where logs go is #27's decision.
+    (served.report)(&failure_line(&address, &failure));
+    html(
+        StatusCode::SERVICE_UNAVAILABLE,
+        &UnavailablePage { demo: served.demo },
+    )
+}
+
+async fn fallback<S>(State(served): State<Arc<Served<S>>>) -> Response {
+    not_found(served.demo)
+}
+
+/// What the operator sees when a page could not be loaded. Both parts are escaped, so an address or a server
+/// message cannot write control characters to the log.
+fn failure_line(address: &str, failure: &str) -> String {
+    format!(
+        "tenancy: could not load {}: {}",
+        address.escape_debug(),
+        failure.escape_debug()
+    )
 }
 
 fn show(tenant: &Tenant, demo: bool) -> Response {
@@ -101,8 +132,8 @@ fn show(tenant: &Tenant, demo: bool) -> Response {
     html(StatusCode::OK, &page)
 }
 
-async fn not_found() -> Response {
-    html(StatusCode::NOT_FOUND, &NotFoundPage)
+fn not_found(demo: bool) -> Response {
+    html(StatusCode::NOT_FOUND, &NotFoundPage { demo })
 }
 
 /// Renders a page as HTML. A template that fails to render, which a compiled template does only if writing
@@ -115,6 +146,7 @@ fn html(status: StatusCode, page: &impl Template) -> Response {
             body,
         )
             .into_response(),
+        // A compiled template fails only if writing fails, so there is nothing for the operator to act on.
         Err(_) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
     }
 }
@@ -184,7 +216,13 @@ mod tests {
         for (slug, name) in names {
             tenants.create(&tenant(slug, name)).await.unwrap();
         }
-        routes(tenants, true, Duration::from_millis(100))
+        routes(tenants, true, Duration::from_millis(100), record)
+    }
+
+    static REPORTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+    fn record(line: &str) {
+        REPORTED.lock().unwrap().push(line.to_string());
     }
 
     /// Serves the app on a port of its own and sends it one HTTP/1.1 request, as a browser would.
@@ -239,12 +277,47 @@ mod tests {
             .create(&tenant("anvil-row", "Anvil Row Strength"))
             .await
             .unwrap();
-        let app = routes(tenants, false, Duration::from_millis(100));
+        let app = routes(tenants, false, Duration::from_millis(100), record);
         let (status, _, body) = get(app, "/anvil-row").await;
         assert_eq!(status, StatusCode::OK);
         assert!(body.contains("<h1>Anvil Row Strength</h1>"), "{body}");
         assert!(!body.contains("Demo business."), "{body}");
         assert!(!body.contains("noindex"), "{body}");
+        let tenants = Tenants::new(Memory::default());
+        let (status, _, body) = get(
+            routes(tenants, false, Duration::from_millis(100), record),
+            "/nobody",
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(
+            !body.contains("Demo") && !body.contains("noindex"),
+            "{body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn in_a_demo_environment_every_page_says_so() {
+        let (status, _, missing) = get(serving(None, &[]).await, "/nobody").await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let (status, _, unavailable) =
+            get(serving(Some(Failure::Storage), &[]).await, "/anvil-row").await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        for body in [missing, unavailable] {
+            assert!(body.contains("<strong>Demo.</strong>"), "{body}");
+            assert!(
+                body.contains(r#"<meta name="robots" content="noindex">"#),
+                "{body}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_operator_line_names_the_address_and_cause_with_control_characters_escaped() {
+        assert_eq!(
+            failure_line("/anvil-row\n", "db \u{1b}[31mdown"),
+            "tenancy: could not load /anvil-row\\n: db \\u{1b}[31mdown"
+        );
     }
 
     #[tokio::test]
@@ -254,7 +327,7 @@ mod tests {
             .create(&tenant("anvil-row", "Anvil Row Strength"))
             .await
             .unwrap();
-        let (status, _, body) = get(router(tenants, true), "/anvil-row").await;
+        let (status, _, body) = get(router(tenants, true, record), "/anvil-row").await;
         assert_eq!(status, StatusCode::OK);
         assert!(body.contains("<h1>Anvil Row Strength</h1>"), "{body}");
     }
@@ -299,6 +372,22 @@ mod tests {
         assert!(
             body.contains("&#60;script&#62;alert(1)&#60;/script&#62; &#38; &#34;Co&#34;"),
             "{body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failure_reaches_the_operator_with_its_detail() {
+        get(
+            serving(Some(Failure::Storage), &[]).await,
+            "/reported-studio",
+        )
+        .await;
+        let reported = REPORTED.lock().unwrap().clone();
+        assert!(
+            reported.iter().any(|line| line
+                .starts_with("tenancy: could not load /reported-studio: ")
+                && line.contains("password authentication failed")),
+            "{reported:?}"
         );
     }
 

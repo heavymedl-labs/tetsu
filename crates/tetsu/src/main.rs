@@ -96,10 +96,11 @@ async fn run(command: Command) -> Result<(), String> {
 /// Serves the public site until asked to stop. Settings are checked and the database reached before it listens,
 /// so a bad setting fails at start rather than on the first request.
 async fn run_serve() -> Result<(), String> {
+    let stop = serve::stop_signal();
     let demo = settings::demo(|name| std::env::var(name))?;
     let address = settings::listen(|name| std::env::var(name))?;
     let pool = connect().await?;
-    let tenancy = tetsu_tenancy::router(tetsu_tenancy::postgres_store(pool), demo);
+    let tenancy = tetsu_tenancy::router(tetsu_tenancy::postgres_store(pool), demo, complain);
     let app = serve::app(tenancy, demo);
     let listener = tokio::net::TcpListener::bind(address)
         .await
@@ -108,7 +109,7 @@ async fn run_serve() -> Result<(), String> {
         .local_addr()
         .map_err(|error| format!("could not read the listening address: {error}"))?;
     say(&format!("serving on http://{bound}"))?;
-    serve::run(listener, app, serve::stopped(), serve::GRACE)
+    serve::run(listener, app, stop, serve::GRACE)
         .await
         .map_err(|error| format!("serving stopped: {error}"))?;
     say("stopped")

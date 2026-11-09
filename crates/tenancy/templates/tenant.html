@@ -1,12 +1,11 @@
 {% extends "base.html" %}
 {% block title %}{{ name }}{% endblock %}
-{% block head %}{% if demo %}<meta name="robots" content="noindex">{% endif %}{% endblock %}
 {% block primary %}{{ primary }}{% endblock %}
 {% block accent %}{{ accent }}{% endblock %}
+{% block demo %}<strong>Demo business.</strong> {{ name }} is fictional, made up to show what Tetsu does. Nothing
+here can be booked or bought.{% endblock %}
 {% block body %}
-{% if demo %}<p class="demo" role="note"><strong>Demo business.</strong> {{ name }} is fictional, made up to show what
-Tetsu does. Nothing here can be booked or bought.</p>
-{% endif %}<header><h1>{{ name }}</h1></header>
+<header><h1>{{ name }}</h1></header>
 <main>
 <h2>Locations</h2>
 <ul>
