@@ -37,6 +37,7 @@ number, and add a row below. Never renumber.
 | [0029](0029-security-target-revised.md) | Security target, revised | Building identity, tenant data, or payments, or planning a security review | Accepted |
 | [0030](0030-front-end-model.md) | Front-end model | Building pages, components, themes, or anything a business embeds | Superseded by 0031 |
 | [0031](0031-front-end-model-revised.md) | Front-end model, revised | Building pages, islands, themes, embeds, or the security headers | Accepted |
+| [0032](0032-styling-engine.md) | Styling engine | Styling pages or templates, or using Tailwind Plus | Accepted |
 
 ## Open decisions
 
