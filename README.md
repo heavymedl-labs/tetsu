@@ -22,8 +22,8 @@ campgrounds are examples that test the platform, not its definition.
 
 It is a hobby project that aims to become a real business, so designs keep real-business
 needs such as isolation, compliance, and sign-up in view. The project is early: the kernel,
-Tenancy, Postgres infrastructure, and the `tetsu` migration and seed commands exist.
-HTTP serving and deployment are next, then sign-in.
+Tenancy, Postgres infrastructure, and the `tetsu` migrate, seed, and serve commands exist;
+`tetsu serve` shows each tenant's public page at its address. Deployment is next, then sign-in.
 
 ## Where things live
 

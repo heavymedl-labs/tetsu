@@ -8,3 +8,5 @@ a request reaches.
 
 - **`resolve`.** Every request finds its tenant by address: one indexed lookup and one location query.
   Benchmarks come with [#37](https://github.com/heavymedl-labs/tetsu/issues/37).
+- **The public page.** `router` serves `GET /<slug>`: one `resolve`, then an Askama render. A lookup that
+  takes over 5 seconds, or fails, gets an unavailable page without the detail.

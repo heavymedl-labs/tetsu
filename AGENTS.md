@@ -19,7 +19,7 @@ one as current intent. The [ADR index](docs/adr/README.md) says when to read eac
 
 ## Current phase
 
-The walking skeleton is in progress. HTTP serving and deployment remain in
+The walking skeleton is in progress. Deployment remains in
 [#19](https://github.com/heavymedl-labs/tetsu/issues/19), then sign-in in
 [#20](https://github.com/heavymedl-labs/tetsu/issues/20). The [README](README.md)
 describes what is implemented.

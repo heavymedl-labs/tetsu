@@ -3416,6 +3416,7 @@ dependencies = [
 name = "tetsu"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "serde",
  "tetsu-kernel",
  "tetsu-postgres",
@@ -3477,6 +3478,8 @@ dependencies = [
 name = "tetsu-tenancy"
 version = "0.1.0"
 dependencies = [
+ "askama",
+ "axum",
  "deadpool-postgres",
  "tetsu-kernel",
  "tetsu-postgres",

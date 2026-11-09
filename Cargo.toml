@@ -11,6 +11,11 @@ rust-version = "1.99"
 publish = false
 
 [workspace.dependencies]
+# HTML templates (ADR-0007). Without the default config feature, which reads askama.toml and pulls in an
+# unmaintained crate (ADR-0028).
+askama = { version = "0.16", default-features = false, features = ["derive", "std"] }
+# HTTP (ADR-0007): HTTP/1 serving on Tokio, and nothing else.
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 deadpool-postgres = "0.14"
 rustls = "0.23.46"
 # Seed files only; derives stay on file types in crates/tetsu (ADR-0018).

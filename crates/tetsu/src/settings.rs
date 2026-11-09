@@ -1,6 +1,7 @@
 //! Settings from the environment.
 
 use std::env::VarError;
+use std::net::{Ipv4Addr, SocketAddr};
 
 use tetsu_postgres::Settings;
 
@@ -17,6 +18,30 @@ pub fn database(var: impl Fn(&str) -> Result<String, VarError>) -> Result<Settin
     };
     settings.check().map_err(|error| error.to_string())?;
     Ok(settings)
+}
+
+/// Where `tetsu serve` listens. A host such as Render sets `PORT` and expects every interface, so with `PORT` it
+/// listens on `0.0.0.0`. Without it, it listens on this machine only, at port 8080.
+pub fn listen(var: impl Fn(&str) -> Result<String, VarError>) -> Result<SocketAddr, String> {
+    match value(&var, "PORT")? {
+        None => Ok(SocketAddr::from((Ipv4Addr::LOCALHOST, 8080))),
+        Some(port) => match port.parse::<u16>() {
+            Ok(port) if port > 0 => Ok(SocketAddr::from((Ipv4Addr::UNSPECIFIED, port))),
+            _ => Err(format!(
+                "PORT must be a number from 1 to 65535, not {port:?}"
+            )),
+        },
+    }
+}
+
+/// Whether this environment holds demo businesses, from `TETSU_DEMO`. It must be `true` or `false`, with no
+/// default, so an environment never serves real businesses marked as demos or demos left unmarked (ADR-0018).
+pub fn demo(var: impl Fn(&str) -> Result<String, VarError>) -> Result<bool, String> {
+    match value(&var, "TETSU_DEMO")?.as_deref() {
+        Some("true") => Ok(true),
+        Some("false") => Ok(false),
+        _ => Err("TETSU_DEMO must be set to true or false".into()),
+    }
 }
 
 /// A missing or blank variable is `None`, and surrounding spaces are dropped. One that is not UTF-8 is an error,
@@ -36,6 +61,60 @@ fn value(
 mod tests {
     use super::*;
     use tetsu_postgres::Tls;
+
+    fn listening(port: Option<&str>) -> Result<SocketAddr, String> {
+        listen(|name| match (name, port) {
+            ("PORT", Some(port)) => Ok(port.to_string()),
+            _ => Err(VarError::NotPresent),
+        })
+    }
+
+    fn marked(value: Option<&str>) -> Result<bool, String> {
+        demo(|name| match (name, value) {
+            ("TETSU_DEMO", Some(value)) => Ok(value.to_string()),
+            _ => Err(VarError::NotPresent),
+        })
+    }
+
+    #[test]
+    fn demo_marking_must_be_set_to_true_or_false() {
+        assert_eq!(marked(Some("true")), Ok(true));
+        assert_eq!(marked(Some(" false ")), Ok(false));
+        for unset in [None, Some(""), Some("yes"), Some("TRUE"), Some("1")] {
+            assert_eq!(
+                marked(unset),
+                Err("TETSU_DEMO must be set to true or false".into()),
+                "{unset:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn it_listens_on_this_machine_unless_a_host_sets_the_port() {
+        assert_eq!(listening(None), Ok("127.0.0.1:8080".parse().unwrap()));
+        assert_eq!(listening(Some(" ")), Ok("127.0.0.1:8080".parse().unwrap()));
+        assert_eq!(
+            listening(Some("10000")),
+            Ok("0.0.0.0:10000".parse().unwrap())
+        );
+        assert_eq!(
+            listening(Some("65535")),
+            Ok("0.0.0.0:65535".parse().unwrap())
+        );
+    }
+
+    #[test]
+    fn a_port_that_is_not_one_is_refused() {
+        for bad in ["0", "65536", "-1", "80a", "8080 9090"] {
+            assert_eq!(
+                listening(Some(bad)),
+                Err(format!(
+                    "PORT must be a number from 1 to 65535, not {bad:?}"
+                )),
+                "{bad}"
+            );
+        }
+    }
 
     fn read(url: Option<&str>, tls: Option<&str>) -> Result<Settings, String> {
         let found = |value: Option<&str>| value.map(str::to_string).ok_or(VarError::NotPresent);

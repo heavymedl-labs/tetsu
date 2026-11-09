@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{% endblock %}</title>
+{% block head %}{% endblock %}
+<style>
+:root { --primary: {% block primary %}#1F2937{% endblock %}; --accent: {% block accent %}#2563EB{% endblock %}; }
+body { margin: 0; font: 1rem/1.5 system-ui, sans-serif; color: #111827; background: #FFFFFF; }
+.demo { margin: 0; padding: 0.5rem 1rem; background: #FEF3C7; color: #78350F; text-align: center; }
+header { padding: 2rem 1rem; background: var(--primary); color: #FFFFFF; }
+main { padding: 1rem; max-width: 40rem; margin: 0 auto; }
+h1 { margin: 0; }
+h2 { color: var(--accent); }
+</style>
+</head>
+<body>
+{% block body %}{% endblock %}
+</body>
+</html>

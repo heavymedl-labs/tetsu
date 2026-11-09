@@ -1,6 +1,7 @@
 //! The composition root (ADR-0003).
 
 mod seed;
+mod serve;
 mod settings;
 
 use std::io::Write;
@@ -12,13 +13,14 @@ use tetsu_tenancy::Tenancy;
 
 /// Every module the binary runs, in the order their migrations apply.
 const MODULES: &[&dyn Module] = &[&Tenancy];
-const USAGE: &str = "usage: tetsu [migrate | seed [--check] <file or folder>]";
+const USAGE: &str = "usage: tetsu [migrate | seed [--check] <file or folder> | serve]";
 
 #[derive(Debug, PartialEq, Eq)]
 enum Command {
     Summary,
     Migrate,
     Seed { path: PathBuf, check_only: bool },
+    Serve,
 }
 
 fn parse(args: &[String]) -> Result<Command, String> {
@@ -28,6 +30,8 @@ fn parse(args: &[String]) -> Result<Command, String> {
     match command.as_str() {
         "migrate" if rest.is_empty() => Ok(Command::Migrate),
         "migrate" => Err("migrate takes no arguments".into()),
+        "serve" if rest.is_empty() => Ok(Command::Serve),
+        "serve" => Err("serve takes no arguments; set PORT to choose the port".into()),
         "seed" => parse_seed(rest),
         _ => Err(format!("unknown command {command:?}")),
     }
@@ -84,8 +88,30 @@ async fn run(command: Command) -> Result<(), String> {
             say(&format!("migrated: {}", names(MODULES)))?;
         }
         Command::Seed { path, check_only } => run_seed(&path, check_only).await?,
+        Command::Serve => run_serve().await?,
     }
     Ok(())
+}
+
+/// Serves the public site until asked to stop. Settings are checked and the database reached before it listens,
+/// so a bad setting fails at start rather than on the first request.
+async fn run_serve() -> Result<(), String> {
+    let demo = settings::demo(|name| std::env::var(name))?;
+    let address = settings::listen(|name| std::env::var(name))?;
+    let pool = connect().await?;
+    let tenancy = tetsu_tenancy::router(tetsu_tenancy::postgres_store(pool), demo);
+    let app = serve::app(tenancy, demo);
+    let listener = tokio::net::TcpListener::bind(address)
+        .await
+        .map_err(|error| format!("could not listen on {address}: {error}"))?;
+    let bound = listener
+        .local_addr()
+        .map_err(|error| format!("could not read the listening address: {error}"))?;
+    say(&format!("serving on http://{bound}"))?;
+    serve::run(listener, app, serve::stopped(), serve::GRACE)
+        .await
+        .map_err(|error| format!("serving stopped: {error}"))?;
+    say("stopped")
 }
 
 /// Checks every file before anything is written, and writes only through Tenancy's use cases (ADR-0018).
@@ -101,12 +127,17 @@ async fn run_seed(path: &std::path::Path, check_only: bool) -> Result<(), String
         }
         return Ok(());
     }
+    let pool = connect().await?;
+    seed::apply(&tetsu_tenancy::postgres_store(pool), &seeds, say).await
+}
+
+/// Reads the database settings, checks the database stores text as UTF-8, and opens a pool to it.
+async fn connect() -> Result<tetsu_postgres::Pool, String> {
     let settings = settings::database(|name| std::env::var(name))?;
     tetsu_postgres::require_utf8(&settings)
         .await
         .map_err(|error| explain(&*error))?;
-    let pool = tetsu_postgres::pool(&settings).map_err(|error| explain(&*error))?;
-    seed::apply(&tetsu_tenancy::postgres_store(pool), &seeds, say).await
+    tetsu_postgres::pool(&settings).map_err(|error| explain(&*error))
 }
 
 /// Writes a line to stdout. A closed pipe or a full disk is an error rather than a panic.
@@ -217,6 +248,15 @@ mod tests {
         assert_eq!(
             parse(&args(&["Migrate"])),
             Err("unknown command \"Migrate\"".into())
+        );
+    }
+
+    #[test]
+    fn serve_takes_no_arguments() {
+        assert_eq!(parse(&args(&["serve"])), Ok(Command::Serve));
+        assert_eq!(
+            parse(&args(&["serve", "8080"])),
+            Err("serve takes no arguments; set PORT to choose the port".into())
         );
     }
 
