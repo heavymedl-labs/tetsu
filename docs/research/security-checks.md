@@ -152,6 +152,57 @@ Run with Kingfisher 2.17.0 in throwaway repositories and a `--no-local` clone of
 - On GitHub Free, environment secrets are only for public repositories, per GitHub's docs.
 - On crates.io, the name `kingfisher` is an unrelated project.
 
+### Second review: Betterleaks
+
+A second fresh review found Kingfisher misses four planted forms at `--confidence low`: `PGPASSWORD=`,
+`password=` in a keyword connection string, `password = "..."`, and `SESSION_SECRET=`. Its rule list
+lacks Betterleaks' `generic-password` and `generic-api-key`. Loading the full Betterleaks rule file, or
+those two rules alone, fails with "Failed to compile rules" or "Failed to load rules".
+
+Betterleaks v1.10.0, read and run 2026-11-08:
+
+- MIT, Go, started 2026-02-03, about 2,900 stars, 141 open issues and pull requests, no published
+  security advisories. Gitleaks' original author wrote 50 of the last ~80 commits; about 20 people
+  committed in three months, including Kingfisher's main author.
+- No PyPI or npm package. The release archive matched the SHA-256 in `checksums.txt`. There is no GitHub
+  attestation; the checksum file has a Sigstore signature, not verified here.
+- Validation is off unless `--validation` is passed. A scan with networking removed ran normally.
+
+| Case, staged in a throwaway repository | Default rules | With `.betterleaks.toml` |
+| --- | --- | --- |
+| `PGPASSWORD=npg_...` | Missed | Caught by `postgres-password` |
+| `password=npg_...` in a keyword connection string | Missed | Caught by `postgres-password` |
+| `password = "..."` | Caught, `generic-password` | Caught |
+| `SESSION_SECRET=...` | Caught, `generic-api-key` | Caught |
+| `ghp_` token | Caught | Caught |
+| Neon URL in a `tests/` path | Caught | Caught |
+| `postgres://tetsu:fake-pw-1@...` | Flagged | Skipped by the allowlist |
+| Real password with `fake-` in the database name or a comment | n/a | Caught |
+| `fake-p%40ss` | n/a | Skipped |
+| `betterleaks:allow` comment | Silenced | Caught with `--ignore-gitleaks-allow` |
+| Not a git repository, or a bad `--log-opts` ref | Exit 1 | Exit 1 |
+
+The config adds one rule, `postgres-password`, matching `PGPASSWORD` or `password=` followed by eight
+or more characters, and an allowlist on the secret matching `^fake-[A-Za-z0-9._%-]+$`.
+
+On a clean clone of tetsu, a full history scan took 0.17 s and found 8 findings, all existing test
+fixtures. Their fingerprints are `commit:file:rule:line`. Listed in `.betterleaksignore`, with a comment
+line, they cleared the scan, and stayed cleared after a later commit moved lines in the same file.
+
+### Second review: dependency checks
+
+In a clone, on 2026-11-08:
+
+- `actix-web` with `default-features = false, features = ["macros"]` drops h2 and RUSTSEC-2026-0258.
+  The harness builds.
+- `askama` without its default `config` feature drops basic-toml (RUSTSEC-2026-0374).
+- `cargo update -p actix-web -p actix-http` held actix at 3.11.2 and 4.12.1, the newest supporting Rust
+  1.85, which `benchmarks/cornucopia` declares. With `--ignore-rust-version` it took 3.20.5 and 4.18.2,
+  which clear the other four advisories, and the harness builds.
+- Then cargo-deny passed all four checks, with ignore entries for fxhash and pin-utils only.
+- cargo-deny rejects keys other than `id` and `reason` in an ignore entry. `-D advisory-not-detected`
+  turns a stale ignore entry into an error, and `maximum-db-staleness` is an accepted setting.
+
 ### Review: dependency checks
 
 - webpki-roots 1.0.11, a dependency of `crates/postgres`, is `CDLA-Permissive-2.0`.

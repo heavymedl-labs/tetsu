@@ -6,91 +6,103 @@
 
 ## Context
 
-[ADR-0024](0024-secrets.md) chose Kingfisher to scan for secrets. A fresh review the same day, with
-the failures reproduced, found it would not work as written
-([research](../research/security-checks.md#review-on-2026-11-08)):
+[ADR-0024](0024-secrets.md) chose Kingfisher to scan for secrets. Two fresh reviews the same day, each
+finding reproduced ([research](../research/security-checks.md#review-on-2026-11-08)), showed it does not
+fit:
 
-- At the default confidence, Kingfisher misses a real database URL inside a `tests/` path.
-- Scanning `.` reads unreachable local git objects and ignored files. So pushes fail on the
-  maintainer's machine while a clean CI checkout passes.
-- A rotated secret left in history fails every scan, but the baseline allowed only fake credentials.
-- Baseline fingerprints include file offsets, so they break on unrelated edits. Inline
-  `kingfisher:ignore` comments silence any finding.
-- GitHub Free has no environment secrets for private repositories, so a secret cannot be limited to
-  one job.
+- **It misses the password forms our secrets take.** Kingfisher leaves out Betterleaks' `generic-password`
+  and `generic-api-key` rules, and would not load them. It missed `PGPASSWORD=`, `password=` in a keyword
+  connection string, `password = "..."`, and `SESSION_SECRET=`. Two of our four production secrets are
+  database passwords.
+- **Tuning did not fix it.** It misses a database URL in a `tests/` path at its default confidence. Its
+  baseline fingerprints shift with unrelated edits. Scanning `.` reads unreachable local git objects.
 
-The tool still fits: it is Rust and free, carries Betterleaks' rules, and runs offline. Its PyPI
-wheel is the same release prebuilt, with 67,000 downloads last month.
+Betterleaks v1.10.0, from the authors of Gitleaks, caught every planted form once our config added one
+rule. It also passed the edge cases. On GitHub Free, environment secrets are only for public
+repositories, so a secret cannot be fenced to one job by GitHub.
 
 ## Decision
 
-- **Kingfisher scans for secrets,** pinned as the PyPI package `kingfisher-bin` in
-  `scripts/install-tools.sh`. It installs through uv into `.tools`, like shellcheck and shfmt, so local
-  machines and CI run the same binary.
-- **Every scan passes these flags:**
-  - `--no-validate --no-update-check`, so nothing leaves the machine.
-  - `--confidence low`, so test paths are not downgraded out of the report.
-  - `--no-ignore`, so inline comments cannot silence a finding.
-  - `--skip-regex '^fake-[a-z0-9-]+$'`.
-- **It runs in two places:** on staged changes in the pre-commit hook, and on the history reachable from
-  `HEAD` (`--branch HEAD`) in `scripts/check.sh`, so in the pre-push hook and CI. The pre-push hook is
-  the gate; CI runs after the push.
-- **Fake credentials in tests start with `fake-`,** such as `postgres://tetsu:fake-pw@...`. The pattern
-  matches only the secret itself, so a real password next to a `fake-` word is still caught.
-- **The baseline holds only rotated real secrets** that remain in history, each added with the
-  maintainer's approval and the date it was rotated. The floor guard protects
-  `.kingfisher-baseline.yml`, and treats `kingfisher:ignore` as a suppression.
-- **A secret has leaked** once its value is anywhere outside its store: a commit, a CI log, an issue, or
-  an agent's or chat's context. Rotate it at its provider first, then remove it. Rewriting history is
-  optional, since the old value no longer works and the baseline records it.
-- **Each secret has one use and the narrowest scope** its provider allows. Secrets are repository-level
-  on GitHub Free, so only the deploy workflow references them, and that workflow never runs on
-  `pull_request`. Review checks every new `secrets.` reference.
-- **`docs/operations/secrets.md` lists every secret** by name: its store, scope, what uses it, and when
-  it was last rotated. That includes the maintainer's local CLI keys for Render and Neon that
-  [ADR-0012](0012-first-hosting-and-deploys.md) uses. It never holds a value. The first deploy
-  ([#77](https://github.com/heavymedl-labs/tetsu/issues/77)) creates it.
-- **Secrets rotate** when someone with access leaves, after a leak, and otherwise yearly, the date read
-  from that list.
+- **Betterleaks scans for secrets,** pinned to v1.10.0. `scripts/install-tools.sh` downloads its release
+  archive for the machine's platform, checks the SHA-256 written in the script, and installs it in
+  `.tools/bin`. Local machines and CI run the same binary.
+- **`.betterleaks.toml` extends the default rules** with two additions:
+  - a `postgres-password` rule for `PGPASSWORD` and keyword connection strings
+  - an allowlist matching only a secret that itself starts with `fake-`
+- **Every scan passes `-c .betterleaks.toml --redact --ignore-gitleaks-allow`.** So findings never print
+  the secret, and inline `betterleaks:allow` comments do nothing. Scans never pass `--validation`, so
+  nothing leaves the machine.
+- **It runs in three places:**
+  - the pre-commit hook, on staged changes (`git --staged`)
+  - the pre-push hook, on every commit being pushed, read from the refs git passes the hook
+  - `scripts/check.sh`, on all history reachable from `HEAD`, so in CI too
+
+  Any error fails the scan, as Betterleaks exits non-zero.
+- **New fake credentials in tests start with `fake-`.** Keys and certificates that tests need are
+  generated when the test runs, never committed.
+- **`.betterleaksignore` lists findings by commit, file, rule, and line.** Commits never change, so an
+  entry cannot drift. It holds only two kinds of entry, each under a comment saying why:
+  - **Fake credentials committed before the scan was adopted,** reviewed once in
+    [#81](https://github.com/heavymedl-labs/tetsu/issues/81).
+  - **Rotated real secrets left in history,** with the date they were rotated.
+- **The floor guard protects `.betterleaks.toml` and `.betterleaksignore`.** Any added line needs a
+  `Floor-reason:` trailer recording the maintainer's approval.
+- **A secret has leaked** once its value is anywhere outside its store. That includes a pushed commit, a
+  CI log, an issue, and an agent's or chat's context. Rotate it at its provider first, then remove it and
+  record its old commit in `.betterleaksignore`. Agents do not run commands that print a secret's value.
+- **Workflows use secrets narrowly.** Secrets are repository-level on GitHub Free, so:
+  - Only the deploy workflow references them, and only in the `env:` of the step that needs each one,
+    never at job level.
+  - That workflow runs only on `workflow_dispatch` or a push to `main`, never on `pull_request` or
+    `workflow_run`.
+  - The floor guard flags any `secrets` reference in another workflow, including `secrets: inherit` and
+    `toJSON(secrets)`.
+- **`docs/operations/secrets.md` lists every secret** by name, never by value. It records each one's
+  store, scope, use, and the date it was last rotated. That includes the maintainer's local CLI keys for
+  Render and Neon that [ADR-0012](0012-first-hosting-and-deploys.md) uses, and each workflow's
+  `GITHUB_TOKEN` permissions. The first deploy ([#77](https://github.com/heavymedl-labs/tetsu/issues/77))
+  creates it.
+- **Secrets rotate** when someone with access leaves, after a leak, and otherwise yearly. `check.sh` fails
+  when a date in that list is more than 13 months old.
 - **When the scan lands** ([#81](https://github.com/heavymedl-labs/tetsu/issues/81)), CONSTRAINTS.md's
   note that only the fresh review covers secrets names it.
 
 ## Alternatives considered
 
-- **ADR-0024 as written.** Missed test-path secrets and diverged between local and CI.
-- **A committed baseline for test fixtures.** Fingerprints shift with every edit above a fixture.
-- **A skip word instead of a pattern.** Tested: `--skip-word fake-` also hid a real password when `fake-`
-  appeared elsewhere in the URL.
-- **`cargo install` or a release download in CI.** The build takes about 9 minutes and 3.7 GB. A download
-  needs its own checksum step. The wheel avoids both.
-- **Betterleaks.** Its rules already ship inside Kingfisher. Written in Go, and v2 is a release
-  candidate. The fallback.
-- **Gitleaks, TruffleHog, ripsecrets, GitHub secret scanning.** As in ADR-0024. GitHub's Secret
-  Protection also needs a Team or Enterprise plan.
+- **Kingfisher.** Rust, and installable from PyPI, but it missed four of the six planted forms, and its
+  rules could not be extended with Betterleaks'.
+- **Kingfisher with our own rules for the forms it misses.** We would maintain detection for the most
+  common secret type ourselves, in a format only Kingfisher reads.
+- **Gitleaks.** The same lineage and config format, but feature complete, with security patches only.
+  The fallback, since our config would carry over.
+- **TruffleHog.** Strong at checking whether keys still work, which we turn off. AGPL-3.0 and heavier.
+- **GitHub secret scanning.** Needs a paid Secret Protection plan on Team or Enterprise.
 
 ## Consequences
 
-- A secret is stopped at commit, and at push if the commit hook was skipped. CI checks again later, but
-  by then the secret is on GitHub, so it must be rotated.
-- Merge commits skip the pre-commit hook, so pre-push catches them.
-- Existing fixtures (`s3cret-pw`, `hunter2`, `mysslmodepw`, `secret`, and `sslmode` used as a password)
-  are renamed to the `fake-` form in #81.
-- Kingfisher upgrades follow its releases, roughly weekly. We take them on purpose, not automatically.
-- Replacing it means swapping one command in `check.sh` and one line in `install-tools.sh`.
+- A secret is stopped at commit, and at push for every commit pushed, including merges and rebases. CI
+  checks again when it runs, but by then the secret is on GitHub and must be rotated.
+- Writes made on GitHub itself skip both hooks: the web editor, MCP tools that write files, and merges.
+  CI's history scan catches them on its next run.
+- The scanner is Go, not Rust, a preference given up for detection. Upgrades are deliberate: v2, now a
+  release candidate, changes its config and output.
+- The `postgres-password` rule is ours, and the fresh review checks changes to it.
+- Replacing it means swapping the command in the hooks and `check.sh`. Gitleaks reads the same config and
+  ignore file.
 
-**Weakest evidence.** Few projects run Kingfisher in CI: 23 to 43 workflow files, against about 59,000
-for Gitleaks. One MongoDB engineer writes most of it. Detection was tested on planted secrets in common
-formats, and one outside test had it find 9 of 10.
+**Weakest evidence.** Betterleaks started in 2026-02. Detection was tested once, with planted secrets in
+the forms we expect, plus one rule we wrote. The release download is checked against its SHA-256, but its
+Sigstore signature is not verified.
 
-**Revisit** under [ADR-0011](0011-server-stack-guardrails.md)'s triggers. Also revisit if Kingfisher
-stops syncing Betterleaks' rules, misses a planted secret in a format we use, or Betterleaks v2 is
-stable and in wide use.
+**Revisit** under [ADR-0011](0011-server-stack-guardrails.md)'s triggers, when Betterleaks v2 is stable,
+or if it misses a planted secret in a form we use.
 
 ## Sources
 
-- [Security checks research](../research/security-checks.md), 2026-11-08, including the review.
-- [Kingfisher](https://github.com/mongodb/kingfisher) README, usage guide, and changelog, v2.17.0;
-  [kingfisher-bin on PyPI](https://pypi.org/project/kingfisher-bin/).
+- [Security checks research](../research/security-checks.md), 2026-11-08, including the reviews.
+- [Betterleaks](https://github.com/betterleaks/betterleaks) README and v1.10.0 release, with
+  `checksums.txt`.
+- [Gitleaks README](https://github.com/gitleaks/gitleaks): feature complete, security patches only.
 - [GitHub Docs: deployments and environments](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments):
   on GitHub Free, environment secrets are only for public repositories.
 - [OWASP DevSecOps Guideline: secrets management](https://owasp.org/www-project-devsecops-guideline/latest/01a-Secrets-Management).
