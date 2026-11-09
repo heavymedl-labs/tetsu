@@ -298,7 +298,8 @@ sequenceDiagram
 
 The shape stays the same as we grow. The first environment runs on free tiers of Render
 and Neon with fictional data, and moves to paid before a real business depends on Tetsu
-([ADR-0012](docs/adr/0012-first-hosting-and-deploys.md)). Here "instances" are running
+([ADR-0012](docs/adr/0012-first-hosting-and-deploys.md)). The maintainer deploys a commit CI has checked, using
+the image CI built ([ADR-0033](docs/adr/0033-deploys-on-demand.md)). Here "instances" are running
 copies of the `tetsu` OCI image, not C4 containers.
 
 ```mermaid

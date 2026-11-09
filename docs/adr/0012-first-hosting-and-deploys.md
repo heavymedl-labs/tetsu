@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-04
+- Deploy trigger and image build superseded by [ADR-0033](0033-deploys-on-demand.md)
 
 ## Context
 
