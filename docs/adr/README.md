@@ -52,7 +52,7 @@ option for most of them.
 - [Domain event delivery](https://github.com/heavymedl-labs/tetsu/issues/11)
 - [Public API design](https://github.com/heavymedl-labs/tetsu/issues/12)
 - [Data import from competitors](https://github.com/heavymedl-labs/tetsu/issues/13)
-- [Front ends: staff app framework, customer web or native](https://github.com/heavymedl-labs/tetsu/issues/14); ADR-0031 decided the customer-facing model, and the staff app's framework is still open
+- [Front ends: the staff app and native apps](https://github.com/heavymedl-labs/tetsu/issues/14); ADR-0031 decided customers on the web
 - [Payroll: build or integrate](https://github.com/heavymedl-labs/tetsu/issues/15)
 - [Time zones and recurring schedules](https://github.com/heavymedl-labs/tetsu/issues/21)
 - [Data export, retention, and deletion](https://github.com/heavymedl-labs/tetsu/issues/22)
