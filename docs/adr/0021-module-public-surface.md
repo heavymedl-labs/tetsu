@@ -58,7 +58,7 @@ driven adapter needs wiring the composition root cannot do through a constructor
 
 ## Sources
 
-- [AWS Prescriptive Guidance: Hexagonal architecture](https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/hexagonal-architecture.html):
+- [AWS Prescriptive Guidance: Hexagonal architecture](https://docs.aws.eu/prescriptive-guidance/latest/cloud-design-patterns/hexagonal-architecture.html):
   adapters are wired at the edge, and the core exposes ports.
 - [Evans: Domain-Driven Design Reference](https://www.domainlanguage.com/ddd/reference/): bounded contexts
   expose a published language, here the domain types their use cases name.

@@ -73,10 +73,12 @@ straight to the processor's hosted fields and never reach Tetsu
 ([ADR-0004](docs/adr/0004-security.md)).
 
 Customers use the booking pages in a browser, on Tetsu's address or the business's
-own domain, and later embedded in the business's own site. These are server-rendered
-HTML. The staff app and any native customer apps call the API. Their technology is
-open ([#14](https://github.com/heavymedl-labs/tetsu/issues/14)), with WebAssembly the
-intended choice for the staff app. Every surface goes through the same use cases.
+own domain. These are server-rendered HTML, whose interactive parts are Web Components
+that a business can also embed in its own site
+([ADR-0030](docs/adr/0030-front-end-model.md)). The staff app, native customer apps, and
+sites businesses build call the API. The staff app's technology is open
+([#14](https://github.com/heavymedl-labs/tetsu/issues/14)), with WebAssembly the
+intended choice. Every surface goes through the same use cases.
 
 ```mermaid
 flowchart TB

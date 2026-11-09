@@ -35,6 +35,7 @@ number, and add a row below. Never renumber.
 | [0027](0027-secrets-revised.md) | Secrets, revised | Adding, storing, or rotating a secret, or changing the secret scan | Accepted |
 | [0028](0028-dependency-checks-revised.md) | Dependency checks, revised | Adding a dependency, or handling an advisory or license | Accepted |
 | [0029](0029-security-target-revised.md) | Security target, revised | Building identity, tenant data, or payments, or planning a security review | Accepted |
+| [0030](0030-front-end-model.md) | Front-end model | Building pages, components, themes, or anything a business embeds | Accepted |
 
 ## Open decisions
 
@@ -50,7 +51,7 @@ option for most of them.
 - [Domain event delivery](https://github.com/heavymedl-labs/tetsu/issues/11)
 - [Public API design](https://github.com/heavymedl-labs/tetsu/issues/12)
 - [Data import from competitors](https://github.com/heavymedl-labs/tetsu/issues/13)
-- [Front ends: staff app framework, customer web or native](https://github.com/heavymedl-labs/tetsu/issues/14)
+- [Front ends: staff app framework, customer web or native](https://github.com/heavymedl-labs/tetsu/issues/14); ADR-0030 decided the customer-facing model, and the staff app's framework is still open
 - [Payroll: build or integrate](https://github.com/heavymedl-labs/tetsu/issues/15)
 - [Time zones and recurring schedules](https://github.com/heavymedl-labs/tetsu/issues/21)
 - [Data export, retention, and deletion](https://github.com/heavymedl-labs/tetsu/issues/22)
@@ -69,7 +70,7 @@ Each ADR cites one of these catalogs or a primary source.
 | Catalog | Use it for |
 | --- | --- |
 | [Microsoft Azure: Cloud design patterns](https://learn.microsoft.com/en-us/azure/architecture/patterns/) | Reliability and data patterns: retry, circuit breaker, CQRS, anti-corruption layer. Provider-neutral despite the branding |
-| [AWS Prescriptive Guidance: Cloud design patterns](https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/introduction.html) | Hexagonal architecture, transactional outbox, saga, strangler fig for migrations |
+| [AWS Prescriptive Guidance: Cloud design patterns](https://docs.aws.eu/prescriptive-guidance/latest/cloud-design-patterns/introduction.html) | Hexagonal architecture, transactional outbox, saga, strangler fig for migrations |
 | [AWS SaaS Lens](https://docs.aws.amazon.com/wellarchitected/latest/saas-lens/saas-lens.html) | Multi-tenancy: isolation models, tenant onboarding, noisy neighbors |
 | [Fowler: Patterns of Enterprise Application Architecture](https://martinfowler.com/eaaCatalog/) | Application internals: Money, Repository, Unit of Work, optimistic locking |
 | [Richardson: microservices.io](https://microservices.io/patterns/) | Data consistency and messaging: transactional outbox, saga, idempotent consumer |
