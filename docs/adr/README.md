@@ -35,7 +35,8 @@ number, and add a row below. Never renumber.
 | [0027](0027-secrets-revised.md) | Secrets, revised | Adding, storing, or rotating a secret, or changing the secret scan | Accepted |
 | [0028](0028-dependency-checks-revised.md) | Dependency checks, revised | Adding a dependency, or handling an advisory or license | Accepted |
 | [0029](0029-security-target-revised.md) | Security target, revised | Building identity, tenant data, or payments, or planning a security review | Accepted |
-| [0030](0030-front-end-model.md) | Front-end model | Building pages, components, themes, or anything a business embeds | Accepted |
+| [0030](0030-front-end-model.md) | Front-end model | Building pages, components, themes, or anything a business embeds | Superseded by 0031 |
+| [0031](0031-front-end-model-revised.md) | Front-end model, revised | Building pages, islands, themes, embeds, or the security headers | Accepted |
 
 ## Open decisions
 
@@ -51,7 +52,7 @@ option for most of them.
 - [Domain event delivery](https://github.com/heavymedl-labs/tetsu/issues/11)
 - [Public API design](https://github.com/heavymedl-labs/tetsu/issues/12)
 - [Data import from competitors](https://github.com/heavymedl-labs/tetsu/issues/13)
-- [Front ends: staff app framework, customer web or native](https://github.com/heavymedl-labs/tetsu/issues/14); ADR-0030 decided the customer-facing model, and the staff app's framework is still open
+- [Front ends: staff app framework, customer web or native](https://github.com/heavymedl-labs/tetsu/issues/14); ADR-0031 decided the customer-facing model, and the staff app's framework is still open
 - [Payroll: build or integrate](https://github.com/heavymedl-labs/tetsu/issues/15)
 - [Time zones and recurring schedules](https://github.com/heavymedl-labs/tetsu/issues/21)
 - [Data export, retention, and deletion](https://github.com/heavymedl-labs/tetsu/issues/22)

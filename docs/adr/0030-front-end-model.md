@@ -1,6 +1,6 @@
 # 0030. Front-end model
 
-- Status: Accepted
+- Status: Superseded by 0031
 - Date: 2026-11-09
 
 ## Context

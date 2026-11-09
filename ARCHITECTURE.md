@@ -72,10 +72,11 @@ documents and media. Card details go from the browser or app
 straight to the processor's hosted fields and never reach Tetsu
 ([ADR-0004](docs/adr/0004-security.md)).
 
-Customers use the booking pages in a browser, on Tetsu's address or the business's
-own domain. These are server-rendered HTML, whose interactive parts are Web Components
-that a business can also embed in its own site
-([ADR-0030](docs/adr/0030-front-end-model.md)). The staff app, native customer apps, and
+Customers use the booking pages in a browser on Tetsu's address; a business's own domain
+waits on [#8](https://github.com/heavymedl-labs/tetsu/issues/8). These are server-rendered
+HTML with Web Component islands. A business can embed them in its own site as a frame for
+browsing, and signing in and paying always happen at the top level
+([ADR-0031](docs/adr/0031-front-end-model-revised.md)). The staff app, native customer apps, and
 sites businesses build call the API. The staff app's technology is open
 ([#14](https://github.com/heavymedl-labs/tetsu/issues/14)), with WebAssembly the
 intended choice. Every surface goes through the same use cases.
@@ -83,7 +84,7 @@ intended choice. Every surface goes through the same use cases.
 ```mermaid
 flowchart TB
     accTitle: Containers
-    accDescr: Customers book and pay on their business's booking pages in a browser, hosted or embedded, and prospective businesses read about Tetsu, both served by the Tetsu server. Staff run the business in the staff app, and customers may use native apps; their technology is open. Apps and partner software call the server's API over HTTPS, and the server sends webhooks to partner software. Browsers and apps send card details straight to payment processors' hosted fields. The server, one Rust binary, reads and writes PostgreSQL over SQL with one schema per module, stores documents and media in object storage, charges and refunds through payment processors, and messages, syncs, and imports through other outside systems: email and SMS, marketplaces, accounting tools, video, and previous systems.
+    accDescr: Customers browse their business's booking pages in a browser, hosted or framed in its own site, and book and pay on Tetsu's pages, and prospective businesses read about Tetsu, both served by the Tetsu server. Staff run the business in the staff app, and customers may use native apps; their technology is open. Apps and partner software call the server's API over HTTPS, and the server sends webhooks to partner software. Browsers and apps send card details straight to payment processors' hosted fields. The server, one Rust binary, reads and writes PostgreSQL over SQL with one schema per module, stores documents and media in object storage, charges and refunds through payment processors, and messages, syncs, and imports through other outside systems: email and SMS, marketplaces, accounting tools, video, and previous systems.
 
     prospects([Prospective businesses])
     staff([Staff of each business])
@@ -102,7 +103,7 @@ flowchart TB
     customers -- may use --> apps
     prospects -- reads about Tetsu, HTTPS --> server
     apps -- calls API, HTTPS --> server
-    customers -- books and pays on booking pages, hosted or embedded, HTTPS --> server
+    customers -- browses booking pages, hosted or framed; books and pays at the top level, HTTPS --> server
     customers -- enters card details in a browser, HTTPS --> processors
     partners -- calls API, HTTPS --> server
     server -- sends webhooks, HTTPS --> partners

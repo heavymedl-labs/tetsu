@@ -37,14 +37,24 @@ tenancy, identity and access, and audit.
 repository and shown only in the demo environment, which never holds a real
 business. See [ADR-0018](adr/0018-demo-businesses-as-data.md).
 
+**Design token.** A named design value, such as a color or a spacing step, kept in one file and generated
+into the `--tetsu-*` CSS properties every page uses. A tenant's theme is its token values
+([ADR-0031](adr/0031-front-end-model-revised.md)).
+
 **Domain event.** A record that something happened in a module, published for
 other modules to react to. Past tense, such as `BookingCancelled`.
 
 **Duty.** Judgment an agent or person must carry out because no tool can, such as
 simplifying a change. Listed in [AGENTS.md](../AGENTS.md#duties).
 
+**Embed.** A frame of a Tetsu page placed in a business's own website by the `<tetsu-embed>` element, for
+browsing only: nothing signed in is ever framed ([ADR-0031](adr/0031-front-end-model-revised.md)).
+
 **Fresh review.** A review by an agent that did not write the change, seeing only
 the issue and the diff. See [docs/review.md](review.md).
+
+**Island.** A small Web Component that adds behavior to server-rendered HTML on a Tetsu page, without
+rendering markup of its own ([ADR-0031](adr/0031-front-end-model-revised.md)).
 
 **Kernel.** The small core that defines the module contract: traits and types,
 with no domain knowledge and no runtime plug-in loading.
