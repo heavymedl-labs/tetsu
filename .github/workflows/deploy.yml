@@ -17,6 +17,12 @@ concurrency:
   group: deploy
   cancel-in-progress: false
 
+# Naming bash adds -o pipefail, which the default run shell (bash -e) leaves off, so a failed command in a pipe
+# fails its step.
+defaults:
+  run:
+    shell: bash
+
 env:
   RENDER_CLI_VERSION: 2.31.0
   RENDER_CLI_SHA256: 1cbebf1c0e083fd4410df7096fd76205bd5d6e81c7893f2587b34f1cfe2cdf85
