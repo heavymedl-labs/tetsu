@@ -13,9 +13,10 @@ it could never pass as written:
 - webpki-roots, which Postgres TLS needs, is `CDLA-Permissive-2.0`, a permissive license missing from
   the list.
 - Our crates are already `publish = false`. cargo-deny skips them only with `private.ignore`.
-- Ignore entries accept only `id` and `reason`, and never expire. That would hide
+- Ignore entries never expire, and accept a bare advisory ID with no reason. That would hide
   [ADR-0011](0011-server-stack-guardrails.md)'s triggers.
 - The floor guard only flags removed lines in a protected file, so a new ignore entry would pass.
+  cargo-deny also reads `deny.exceptions.toml` files that no one would think to guard.
 - Dependabot security updates open pull requests, and each runs CI.
 
 A trial in a clone cleared most of the harness's advisories:
@@ -24,7 +25,8 @@ A trial in a clone cleared most of the harness's advisories:
   HTTP/1.
 - Turning off Askama's `config` feature drops the unmaintained basic-toml, and we use no `askama.toml`.
 - Updating actix past the Rust version that the vendored `cornucopia` crate declares (1.85) clears the
-  other four advisories. That declared version also explains the downgrades seen earlier.
+  other four advisories. That declared version also explains the downgrades seen earlier, and a plain
+  `cargo update` would bring them back.
 
 Only fxhash and pin-utils remain. Both are unmaintained and come through monoio, in the harness only.
 
@@ -42,18 +44,28 @@ Only fxhash and pin-utils remain. Both are unmaintained and come through monoio,
   - **Sources:** crates.io only. Unknown registries and git sources fail.
   - **Bans:** wildcard versions fail, except path dependencies. Duplicate versions warn.
 - **Dependencies enable only the features we use,** so optional crates with advisories stay out.
-- **An advisory we cannot clear gets an ignore entry,** whose `reason` ends with
-  `Tracked in #<issue>. Review by <YYYY-MM-DD>.`:
+- **A fix for an advisory sets a minimum version** in `Cargo.toml`, such as `actix-web = "4.18"`, so a
+  later `cargo update` cannot resolve back to a vulnerable one.
+- **An advisory we cannot clear gets an ignore entry,** a table whose `reason` ends with
+  `Tracked in #<issue>. Review by <YYYY-MM-DD>.` `check.sh` fails on any entry without that ending,
+  including a bare advisory ID:
   - The issue is a **Decision needed** issue, as ADR-0011 asks: replace the crate, or keep it with a stated
     reason.
-  - The date is at most 30 days after the entry is added or renewed.
-  - `check.sh` reads the dates and fails once one has passed in UTC.
-  - The script that reads them has tests.
-- **The floor guard protects `deny.toml` for any changed line,** added or removed. So every ignore entry,
-  renewal, license, or source change needs a `Floor-reason:` trailer recording the maintainer's approval.
+  - The date is at most 30 days after the commit that added or renewed the entry, which `check.sh`
+    reads from git.
+  - `check.sh` fails once a date has passed in UTC.
+  - When the issue decides to keep the crate, the entry stays and is still renewed monthly, so each year
+    holds twelve reviews of it. The script that reads the entries has tests.
+- **The floor guard protects `deny.toml` for any changed line,** added or removed, and flags creating any
+  other file cargo-deny reads: `.deny.toml`, `.cargo/deny.toml`, and the `deny.exceptions.toml` forms. So
+  every ignore entry, renewal, license, or source change needs a `Floor-reason:` trailer recording the
+  maintainer's approval.
 - **Advisories need the network; the rest do not.** `check.sh` fetches the advisory database each run. If
-  the fetch fails, it uses a cached copy under 7 days old (`maximum-db-staleness`), and fails otherwise.
-  Licenses, bans, and sources run offline.
+  the fetch fails, it reruns with `--offline`, which accepts a cached copy under 7 days old
+  (`maximum-db-staleness`) and fails otherwise. Licenses, bans, and sources run offline.
+- **cargo-deny covers one of ADR-0011's triggers, not all.** It reports advisories, including RustSec's
+  notices that a crate is unmaintained. "No release in 18 months", a maintainer stepping away, and a
+  license change before the lockfile moves stay duties, checked when a dependency is added or updated.
 - **Dependabot alerts are on, and its automatic pull requests are off.** Alerts warn about a vulnerability
   published between pushes, at no CI cost, and the fix is made by hand. GitHub Actions version updates
   move from weekly to monthly, grouped into one pull request, since each pull request costs a CI run
@@ -77,7 +89,11 @@ Only fxhash and pin-utils remain. Both are unmaintained and come through monoio,
   interrupt unrelated work.
 - The same commit can pass now and fail tomorrow, as the advisory database grows. A failing CI run on an
   old commit may mean a new advisory, not a regression.
-- Each ignore entry needs renewing at least monthly, with approval, until its Decision needed issue closes.
+- Each ignore entry needs renewing at least monthly, with approval, for as long as it stays.
+- Yanked status comes from cargo's local index cache, which CI restores with its cache. A crate yanked
+  after the cache was saved may pass in CI until `Cargo.lock` changes.
+- The floor guard accepts one `Floor-reason:` trailer for every change to a file in a push, so approval is
+  per push, not per entry. Commits that change `deny.toml` say what each change is.
 - Dependabot alerts and cargo-deny ignore entries are separate lists, so dismissing one does not dismiss
   the other. cargo-deny is what reports unmaintained crates.
 - Duplicate-version warnings print on every run and are left alone unless they cost build time.

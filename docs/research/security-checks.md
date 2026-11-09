@@ -152,6 +152,29 @@ Run with Kingfisher 2.17.0 in throwaway repositories and a `--no-local` clone of
 - On GitHub Free, environment secrets are only for public repositories, per GitHub's docs.
 - On crates.io, the name `kingfisher` is an unrelated project.
 
+### Review: dependency checks
+
+- webpki-roots 1.0.11, a dependency of `crates/postgres`, is `CDLA-Permissive-2.0`.
+- Our crates already inherit `publish = false`. cargo-deny flags them until `private.ignore` is set.
+- actix-http 3.20.5, the newest, requires `h2 ^0.3.27`. RUSTSEC-2026-0258 is fixed only in h2 0.4.16.
+- basic-toml comes through Askama, the chosen HTML engine, and has no safe upgrade. fxhash and
+  pin-utils come through monoio in the harness.
+- With targets set to Linux and macOS, `private.ignore`, and CDLA-Permissive-2.0 allowed, licenses,
+  bans, and sources pass. Advisories fail only on the harness crates above, and duplicate warnings drop
+  from 37 to 25.
+
+### Review: security target
+
+From the ASVS 5.0 chapters:
+
+- V6.3: "L2 applications must force the use of multi-factor authentication." 6.3.3 (L2) adds that
+  relaxing it "requires a fully documented rationale and a comprehensive set of mitigating controls".
+- 6.2.12 (L2): breached-password checks. 6.3.1 (L1): brute-force controls. 6.3.5 and 6.3.7 (L3):
+  notify users of suspicious sign-ins and of changed credentials.
+- 8.4.1 (L2): cross-tenant controls in multi-tenant applications. 8.2.2 (L1): object-level access.
+- Meeting a level means meeting all requirements of the levels below it. A minor ASVS release needs
+  compliance re-checked; a patch release does not. IDs are best cited as `v<version>-<id>`.
+
 ### Second review: Betterleaks
 
 A second fresh review found Kingfisher misses four planted forms at `--confidence low`: `PGPASSWORD=`,
@@ -203,28 +226,34 @@ In a clone, on 2026-11-08:
 - cargo-deny rejects keys other than `id` and `reason` in an ignore entry. `-D advisory-not-detected`
   turns a stale ignore entry into an error, and `maximum-db-staleness` is an accepted setting.
 
-### Review: dependency checks
+### Third review
 
-- webpki-roots 1.0.11, a dependency of `crates/postgres`, is `CDLA-Permissive-2.0`.
-- Our crates already inherit `publish = false`. cargo-deny flags them until `private.ignore` is set.
-- actix-http 3.20.5, the newest, requires `h2 ^0.3.27`. RUSTSEC-2026-0258 is fixed only in h2 0.4.16.
-- basic-toml comes through Askama, the chosen HTML engine, and has no safe upgrade. fxhash and
-  pin-utils come through monoio in the harness.
-- With targets set to Linux and macOS, `private.ignore`, and CDLA-Permissive-2.0 allowed, licenses,
-  bans, and sources pass. Advisories fail only on the harness crates above, and duplicate warnings drop
-  from 37 to 25.
+A third fresh review found the `postgres-password` rule flagged code that reads a password, such as
+`let password = config.database_password;`, and other gaps. Tested 2026-11-08 with Betterleaks v1.10.0:
 
-### Review: security target
-
-From the ASVS 5.0 chapters:
-
-- V6.3: "L2 applications must force the use of multi-factor authentication." 6.3.3 (L2) adds that
-  relaxing it "requires a fully documented rationale and a comprehensive set of mitigating controls".
-- 6.2.12 (L2): breached-password checks. 6.3.1 (L1): brute-force controls. 6.3.5 and 6.3.7 (L3):
-  notify users of suspicious sign-ins and of changed credentials.
-- 8.4.1 (L2): cross-tenant controls in multi-tenant applications. 8.2.2 (L1): object-level access.
-- Meeting a level means meeting all requirements of the levels below it. A minor ASVS release needs
-  compliance re-checked; a patch release does not. IDs are best cited as `v<version>-<id>`.
+- **Tightened `postgres-password`:** `PGPASSWORD=` followed by a secret-like value, or `password=` after
+  `host=`, `user=`, `dbname=`, or `port=` in a keyword connection string. It flagged none of five lines
+  that read a password from config or the environment, and caught four real forms. It skipped a `fake-`
+  password.
+- **`app-secret`:** a value of 32 or more characters assigned to a name containing `SECRET`,
+  `SESSION_KEY`, `SIGNING_KEY`, or `COOKIE_KEY`. It caught 900 of 900 random session keys (URL-safe,
+  base64, and hex). The default `generic-api-key` rule missed about 2.5% of the first two kinds, per the
+  review. It flagged none of three lines that only read a secret.
+- **`render-deploy-hook`:** caught a Render deploy hook URL, which the default rules missed.
+- **Merges:** a secret added while resolving a merge passed `--log-opts HEAD`, and was caught with `-m`.
+- **Pre-push range:** `-m HEAD --not --remotes` passed a clean new commit, caught a leaky one, and passed
+  when nothing was new. `<remote>..<local>` fails when the remote has commits the local repository lacks.
+- **Commit messages:** the git scan ignores them. `git log --format=%B` piped to `betterleaks stdin`
+  caught a token in a message, and passed on all of tetsu's messages.
+- **tetsu's history** with the tightened config: 7 findings, all fixture URLs in `crates/postgres` and
+  `crates/tetsu`.
+- Betterleaks skips files git treats as binary, and its default config skips paths such as
+  `node_modules`. It also reads `.gitleaksignore` when `.betterleaksignore` is absent.
+- cargo-deny accepts a bare advisory ID in `ignore`, with no reason, and reads `deny.exceptions.toml`
+  files besides `deny.toml`. A plain `cargo update` resolves actix back to the versions with advisories
+  while `benchmarks/cornucopia` declares Rust 1.85.
+- ASVS: 13.3.1, 14.1.2, 15.3.3 (mass assignment), and 16.4.3 (logs sent to a separate system) are all
+  Level 2.
 
 ## What this cannot show
 

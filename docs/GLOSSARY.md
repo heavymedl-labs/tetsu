@@ -4,6 +4,9 @@ The project's shared vocabulary. Use these terms in code, docs, issues, and
 conversation. Add a term when it first matters; change one only with care,
 because code will follow it.
 
+**Accepted risk.** A security requirement Tetsu should meet but does not yet, recorded with the
+maintainer's approval, an issue, and a fix-by date ([ADR-0029](adr/0029-security-target-revised.md)).
+
 **Adapter.** Code at a module's edge. An inbound adapter (HTTP API,
 server-rendered pages) calls the module's use cases. An outbound adapter
 implements a driven port with a specific technology, such as Postgres or a
