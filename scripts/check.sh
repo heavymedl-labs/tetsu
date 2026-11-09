@@ -99,6 +99,7 @@ scripts/scan_secrets.sh --history
 python3 -m unittest discover -b -s scripts/tests -t .
 scripts/check-adrs.sh
 python3 scripts/check_doc_sizes.py
+python3 scripts/check_secrets.py
 
 # Limits are in ADR-0015 and ADR-0016. Cargo skips the benchmark harness, except for formatting.
 work="$(mktemp -d)"
