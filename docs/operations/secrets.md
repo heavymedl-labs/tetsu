@@ -8,9 +8,9 @@ or when a workflow sets a `GITHUB_TOKEN` permission its row does not list.
 
 ## Secrets
 
-None of the deploy secrets exist yet. The deploy key and migration URL, the app's database URL, the registry read
-token, and the maintainer's local Render and Neon CLI keys join this table when they are created, with the first
-deploy ([#77](https://github.com/heavymedl-labs/tetsu/issues/77)).
+None of the deploy secrets exist yet. The migration URL and Render API key, the app's database URL, the registry
+read token Render pulls the image with, and the maintainer's local Render and Neon CLI keys join this table when
+they are created, with the first deploy ([#77](https://github.com/heavymedl-labs/tetsu/issues/77)).
 
 | Secret | Store | Scope | Use | Last rotated |
 | --- | --- | --- | --- | --- |
@@ -20,5 +20,5 @@ deploy ([#77](https://github.com/heavymedl-labs/tetsu/issues/77)).
 
 | Workflow | `GITHUB_TOKEN` permissions |
 | --- | --- |
-| `ci.yml` | `contents: read`, and `actions: read` to find the commit the last successful run checked |
+| `ci.yml` | `contents: read`, and `actions: read` to find the commit the last successful run checked; its publish job, which runs only GitHub's own actions after every check passes, has `packages: write` alone, to publish the image a manual run on main checked |
 | `benchmarks.yml` | `contents: read`; its image job adds `packages: write` to push the benchmark image, and its run job `packages: read` to pull it |
