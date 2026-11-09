@@ -3,7 +3,8 @@
 Research for [#31](https://github.com/heavymedl-labs/tetsu/issues/31), following
 [ADR-0010](../adr/0010-evaluating-technology.md). This is research, not a decision. Where it
 disagrees with an ADR, the ADR wins. It feeds [ADR-0024](../adr/0024-secrets.md),
-[ADR-0025](../adr/0025-dependency-checks.md), and [ADR-0026](../adr/0026-security-target.md).
+[ADR-0025](../adr/0025-dependency-checks.md), and [ADR-0026](../adr/0026-security-target.md), and the
+[review](#review-on-2026-11-08) below feeds their revisions, ADR-0027 to ADR-0029.
 
 ## Criteria
 
@@ -118,6 +119,61 @@ released 2025-05-30, read 2026-11-08:
 
 Tetsu will hold several businesses' customer data, staff accounts, and payment records, though card
 data stays with the processor ([ADR-0004](../adr/0004-security.md)).
+
+## Review on 2026-11-08
+
+A fresh-context adversarial review of ADR-0024 to ADR-0026, the same day they were accepted. Each
+finding below was reproduced or checked against its source. Findings above this section stand, except
+where this section corrects them.
+
+### Review: secret scanning
+
+Run with Kingfisher 2.17.0 in throwaway repositories and a `--no-local` clone of tetsu.
+
+| Case | Result |
+| --- | --- |
+| Neon-format URL in a `tests/` path, default confidence | Missed, exit 0. Kingfisher lowers test paths to `low` |
+| The same, `--confidence low` | Caught, exit 200 |
+| A token staged, then unstaged and deleted, full scan of `.` | Caught from an unreachable local object, exit 200 |
+| The same, `--branch HEAD` | Not reported. Scans only reachable history |
+| `# kingfisher:ignore` beside a token | Silenced by default. Reported with `--no-ignore` |
+| `--skip-word fake-` | Also hid a real password when `fake-` was in the database name |
+| `--skip-regex '^fake-[a-z0-9-]+$'` | Skipped `fake-pw-1`. Still caught a real password next to a `fake-` word |
+| URL with host `example.com` | Never reported, even with no skip settings |
+
+- The earlier `s3cret-pw` finding came from an unreachable local object. A clean clone flags the
+  fixtures in `crates/postgres` and `crates/tetsu` only.
+- Baseline fingerprints include file offsets, per Kingfisher's baseline docs, so an edit above a
+  fixture makes it new again.
+- `kingfisher-bin` 2.17.0 is on PyPI as prebuilt wheels for Linux, macOS, and Windows, with 67,119
+  downloads in the last month (pypistats.org). It installs with uv in seconds, and reports the same
+  version as the cargo build. The crates.io package has 114 downloads in total. Kingfisher has no
+  published security advisories.
+- On GitHub Free, environment secrets are only for public repositories, per GitHub's docs.
+- On crates.io, the name `kingfisher` is an unrelated project.
+
+### Review: dependency checks
+
+- webpki-roots 1.0.11, a dependency of `crates/postgres`, is `CDLA-Permissive-2.0`.
+- Our crates already inherit `publish = false`. cargo-deny flags them until `private.ignore` is set.
+- actix-http 3.20.5, the newest, requires `h2 ^0.3.27`. RUSTSEC-2026-0258 is fixed only in h2 0.4.16.
+- basic-toml comes through Askama, the chosen HTML engine, and has no safe upgrade. fxhash and
+  pin-utils come through monoio in the harness.
+- With targets set to Linux and macOS, `private.ignore`, and CDLA-Permissive-2.0 allowed, licenses,
+  bans, and sources pass. Advisories fail only on the harness crates above, and duplicate warnings drop
+  from 37 to 25.
+
+### Review: security target
+
+From the ASVS 5.0 chapters:
+
+- V6.3: "L2 applications must force the use of multi-factor authentication." 6.3.3 (L2) adds that
+  relaxing it "requires a fully documented rationale and a comprehensive set of mitigating controls".
+- 6.2.12 (L2): breached-password checks. 6.3.1 (L1): brute-force controls. 6.3.5 and 6.3.7 (L3):
+  notify users of suspicious sign-ins and of changed credentials.
+- 8.4.1 (L2): cross-tenant controls in multi-tenant applications. 8.2.2 (L1): object-level access.
+- Meeting a level means meeting all requirements of the levels below it. A minor ASVS release needs
+  compliance re-checked; a patch release does not. IDs are best cited as `v<version>-<id>`.
 
 ## What this cannot show
 

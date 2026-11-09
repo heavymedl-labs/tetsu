@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-08
+- Revision proposed in [ADR-0028](0028-dependency-checks-revised.md)
 
 ## Context
 

@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-08
+- Revision proposed in [ADR-0029](0029-security-target-revised.md)
 
 ## Context
 

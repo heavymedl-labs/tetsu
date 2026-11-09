@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-08
+- Revision proposed in [ADR-0027](0027-secrets-revised.md)
 
 ## Context
 
