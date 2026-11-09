@@ -1,8 +1,7 @@
 # 0024. Secrets
 
-- Status: Accepted
+- Status: Superseded by 0027
 - Date: 2026-11-08
-- Revision proposed in [ADR-0027](0027-secrets-revised.md)
 
 ## Context
 

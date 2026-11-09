@@ -1,6 +1,6 @@
 # 0027. Secrets, revised
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-08
 - Supersedes [ADR-0024](0024-secrets.md)
 

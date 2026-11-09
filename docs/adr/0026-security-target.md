@@ -1,8 +1,7 @@
 # 0026. Security target
 
-- Status: Accepted
+- Status: Superseded by 0029
 - Date: 2026-11-08
-- Revision proposed in [ADR-0029](0029-security-target-revised.md)
 
 ## Context
 

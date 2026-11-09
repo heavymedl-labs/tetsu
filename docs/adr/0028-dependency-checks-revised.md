@@ -1,6 +1,6 @@
 # 0028. Dependency checks, revised
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-08
 - Supersedes [ADR-0025](0025-dependency-checks.md)
 

@@ -1,8 +1,7 @@
 # 0025. Dependency checks
 
-- Status: Accepted
+- Status: Superseded by 0028
 - Date: 2026-11-08
-- Revision proposed in [ADR-0028](0028-dependency-checks-revised.md)
 
 ## Context
 

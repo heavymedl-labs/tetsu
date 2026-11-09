@@ -17,6 +17,9 @@ and CONSTRAINTS.md, then the issue and the diff. Also answer:
 4. Did the change break the floor in CONSTRAINTS.md, or lower the bar in any other way?
 5. Does every new promise, in code comments, docs, or an ADR, have a test or check that would fail if it broke,
    or a stated reason why not?
+6. Does the change meet each ASVS requirement the issue names, and at least Level 1 of every ASVS
+   chapter that applies to the code it changes (Level 2 for Tier 1 code)? Which apply but the issue
+   left out? See ADR-0029.
 
 Report only critical and required findings, with no nits, style, or optional suggestions.
 Say what you could not check.
