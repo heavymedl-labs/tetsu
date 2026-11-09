@@ -28,8 +28,8 @@ if [[ "${1:-}" == "--fast" ]]; then
   shift
 fi
 
-for tool in cargo-llvm-cov cargo-mutants .tools/bin/lizard .tools/bin/ruff .tools/bin/shellcheck \
-  .tools/bin/shfmt .tools/bin/squawk .tools/bin/sqlfluff; do
+for tool in cargo-llvm-cov cargo-mutants .tools/bin/betterleaks .tools/bin/lizard .tools/bin/ruff \
+  .tools/bin/shellcheck .tools/bin/shfmt .tools/bin/squawk .tools/bin/sqlfluff; do
   if ! command -v "$tool" >/dev/null; then
     echo "error: $tool is missing. Run scripts/install-tools.sh" >&2
     exit 1
@@ -71,6 +71,8 @@ lint() {
 
 lint
 if [[ "$fast" == true ]]; then
+  # The pre-commit hook runs this mode, so staged secrets stop here (ADR-0027).
+  scripts/scan_secrets.sh --staged
   exit 0
 fi
 
@@ -93,6 +95,7 @@ if [[ -z "${TEST_DATABASE_URL:-}" ]]; then
 fi
 
 python3 scripts/floor_guard.py "$@"
+scripts/scan_secrets.sh --history
 python3 -m unittest discover -b -s scripts/tests -t .
 scripts/check-adrs.sh
 python3 scripts/check_doc_sizes.py

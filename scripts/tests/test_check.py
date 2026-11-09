@@ -46,6 +46,9 @@ class CheckScript(unittest.TestCase):
             )
         write(self.root / "crates" / "a" / "migrations" / "0001.sql", "SELECT 1;\n")
         write(self.root / "scripts" / "check-adrs.sh", f'#!/bin/sh\necho adrs >> "{self.log}"\n', EXECUTABLE)
+        scan = f'#!/bin/sh\necho "scan $1" >> "{self.log}"\n'
+        write(self.root / "scripts" / "scan_secrets.sh", scan, EXECUTABLE)
+        write(self.root / ".tools" / "bin" / "betterleaks", "#!/bin/sh\n", EXECUTABLE)
 
     no_database = False
 
@@ -68,6 +71,7 @@ class CheckScript(unittest.TestCase):
         log = self.log.read_text()
         for stage in (
             "floor_guard.py",
+            "scan --history",
             "unittest",
             "adrs",
             "check_doc_sizes.py",
@@ -106,10 +110,17 @@ class CheckScript(unittest.TestCase):
             "squawk",
             "sqlfluff lint",
             "markdownlint-cli2",
+            "scan --staged",
         ):
             self.assertIn(stage, log)
-        for slow in ("floor_guard.py", "unittest", "cargo llvm-cov", "cargo mutants"):
+        for slow in ("floor_guard.py", "scan --history", "unittest", "cargo llvm-cov", "cargo mutants"):
             self.assertNotIn(slow, log)
+
+    def test_a_failing_secret_scan_fails_both_modes(self):
+        write(self.root / "scripts" / "scan_secrets.sh", "#!/bin/sh\nexit 1\n", EXECUTABLE)
+        for args in (("--fast",), ()):
+            with self.subTest(args=args):
+                self.assertNotEqual(self.check(*args).returncode, 0)
 
     def test_skips_squawk_when_there_are_no_migrations(self):
         shutil.rmtree(self.root / "crates")
@@ -359,7 +370,8 @@ class InstallTools(unittest.TestCase):
             (root / "scripts").mkdir()
             shutil.copy(ROOT / "scripts" / "install-tools.sh", root / "scripts")
             write(root / ".nightly-toolchain", "nightly-2026-11-01\n")
-            for tool in ("cargo", "uv", "rustup"):
+            write(root / ".tools" / "bin" / "betterleaks", "#!/bin/sh\necho 1.10.0\n", EXECUTABLE)
+            for tool in ("cargo", "uv", "rustup", "curl"):
                 write(root / "bin" / tool, f'#!/bin/sh\necho "{tool} $*" >> "{log}"\n', EXECUTABLE)
             result = run([root / "scripts" / "install-tools.sh"], root, PATH=f"{root / 'bin'}:/usr/bin:/bin")
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -374,6 +386,7 @@ class InstallTools(unittest.TestCase):
             )
             self.assertIn(nightly, text)
             self.assertNotIn("rustup default none", text)
+            self.assertNotIn("curl", text, "a scanner already at the pinned version is not downloaded again")
 
     def test_the_nightly_never_becomes_the_default_toolchain(self):
         """rustup makes the first toolchain it installs the default when none is set, so that is undone."""
@@ -383,6 +396,7 @@ class InstallTools(unittest.TestCase):
             (root / "scripts").mkdir()
             shutil.copy(ROOT / "scripts" / "install-tools.sh", root / "scripts")
             write(root / ".nightly-toolchain", "nightly-2026-11-01\n")
+            write(root / ".tools" / "bin" / "betterleaks", "#!/bin/sh\necho 1.10.0\n", EXECUTABLE)
             for tool in ("cargo", "uv"):
                 write(root / "bin" / tool, "#!/bin/sh\n", EXECUTABLE)
             no_default = f'[ "$1" = default ] && [ -z "$2" ] && exit 1\necho "rustup $*" >> "{log}"'
@@ -393,6 +407,30 @@ class InstallTools(unittest.TestCase):
             # Unset after the install, which is what set it.
             self.assertLess(text.index("rustup toolchain install"), text.index("rustup default none"))
 
+    def test_a_scanner_download_that_fails_its_checksum_is_not_installed(self):
+        """A missing or outdated scanner is downloaded, from the pinned release, and installed only if it
+        matches the SHA-256 in the script."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log = root / "log"
+            (root / "scripts").mkdir()
+            shutil.copy(ROOT / "scripts" / "install-tools.sh", root / "scripts")
+            write(root / ".nightly-toolchain", "nightly-2026-11-01\n")
+            write(root / ".tools" / "bin" / "betterleaks", "#!/bin/sh\necho 1.9.0\n", EXECUTABLE)
+            for tool in ("cargo", "uv", "rustup"):
+                write(root / "bin" / tool, "#!/bin/sh\n", EXECUTABLE)
+            # Writes a file that is not the release, wherever -o points.
+            curl = f'echo "curl $*" >> "{log}"\nwhile [ "$1" != -o ]; do shift; done\necho tampered > "$2"'
+            write(root / "bin" / "curl", f"#!/bin/sh\n{curl}\n", EXECUTABLE)
+            result = run([root / "scripts" / "install-tools.sh"], root, PATH=f"{root / 'bin'}:/usr/bin:/bin")
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("does not match its published SHA-256", result.stderr)
+            self.assertRegex(
+                log.read_text(),
+                r"releases/download/v1\.10\.0/betterleaks_1\.10\.0_(linux|darwin)_(x64|arm64)\.tar\.gz",
+            )
+            self.assertIn("1.9.0", (root / ".tools" / "bin" / "betterleaks").read_text())
+
 
 class PrePushHook(unittest.TestCase):
     def setUp(self):
@@ -402,6 +440,9 @@ class PrePushHook(unittest.TestCase):
         run(["git", "init", "-q"], self.root)
         (self.root / ".githooks").mkdir()
         shutil.copy(ROOT / ".githooks" / "pre-push", self.root / ".githooks")
+        self.pushed = self.root / "pushed"
+        scan = f'[ "$1" = --push ] || exit 5\necho "$2" > "{self.pushed}"\ncat >> "{self.pushed}"'
+        write(self.root / "scripts" / "scan_secrets.sh", f"#!/bin/sh\n{scan}\n", EXECUTABLE)
 
     def test_hook_fails_when_the_script_fails(self):
         write(self.root / "scripts" / "check.sh", "#!/bin/sh\nexit 3\n", EXECUTABLE)
@@ -418,6 +459,22 @@ class PrePushHook(unittest.TestCase):
         write(self.root / "scripts" / "check.sh", "#!/bin/sh\nexit 0\n", EXECUTABLE)
         result = run([self.root / ".githooks" / "pre-push"], self.root)
         self.assertEqual(result.returncode, 0)
+
+    def test_hook_scans_the_refs_git_pushes(self):
+        write(self.root / "scripts" / "check.sh", "#!/bin/sh\nexit 0\n", EXECUTABLE)
+        refs = f"refs/heads/main {'a' * 40} refs/heads/main {'b' * 40}\n"
+        result = run(
+            [self.root / ".githooks" / "pre-push", "origin", "git@example.com:o/r"], self.root, input=refs
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.pushed.read_text(), "origin\n" + refs)
+
+    def test_hook_fails_and_skips_the_checks_when_the_scan_fails(self):
+        write(self.root / "scripts" / "scan_secrets.sh", "#!/bin/sh\nexit 1\n", EXECUTABLE)
+        write(self.root / "scripts" / "check.sh", f'#!/bin/sh\ntouch "{self.root / "checked"}"\n', EXECUTABLE)
+        result = run([self.root / ".githooks" / "pre-push"], self.root)
+        self.assertEqual(result.returncode, 1)
+        self.assertFalse((self.root / "checked").exists())
 
 
 if __name__ == "__main__":

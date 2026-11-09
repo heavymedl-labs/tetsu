@@ -299,6 +299,8 @@ class GuardProtectsItself(GuardCase):
             ".cargo/config.toml",
             "scripts/check_doc_sizes.py",
             "scripts/check-adrs.sh",
+            "scripts/scan_secrets.sh",
+            "scripts/install-tools.sh",
             ".markdownlint-cli2.yaml",
         ):
             with self.subTest(path=path):
@@ -366,6 +368,174 @@ class LintConfig(GuardCase):
         self.git("tag", "-f", "base")
         write(self.repo / "clippy.toml", 'one\ndisallowed-names = ["foo"]\n')
         self.assertEqual(self.guard().returncode, 0)
+
+
+class SecretScan(GuardCase):
+    """ADR-0027: the scan's inputs change only with the maintainer's approval, in either direction, and
+    secrets reach only the deploy workflow."""
+
+    def test_any_changed_line_in_the_scan_inputs_is_flagged(self):
+        for path in (
+            ".betterleaks.toml",
+            ".betterleaksignore",
+            ".gitattributes",
+            "crates/a/.gitattributes",
+            ".gitleaksignore",
+            ".gitleaks.toml",
+        ):
+            for change in ("add", "remove"):
+                with self.subTest(path=path, change=change):
+                    write(self.repo / path, f"one {change}\ntwo\n")
+                    self.commit(f"add {path} for {change}\n\nFloor-reason: test setup")
+                    self.git("tag", "-f", "base")
+                    text = f"one {change}\n" if change == "remove" else f"one {change}\ntwo\nthree\n"
+                    write(self.repo / path, text)
+                    self.assertFlags("scan-input-changed")
+
+    def test_an_added_line_in_the_scan_or_its_hooks_is_flagged(self):
+        for path in ("scripts/scan_secrets.sh", ".githooks/pre-push", ".githooks/pre-commit"):
+            with self.subTest(path=path):
+                write(self.repo / path, "#!/bin/sh\nscan\n")
+                self.commit(f"add {path}\n\nFloor-reason: test setup")
+                self.git("tag", "-f", "base")
+                write(self.repo / path, "#!/bin/sh\nexit 0\nscan\n")
+                self.assertFlags("scan-input-changed")
+                write(self.repo / path, "#!/bin/sh\nscan\n")
+
+    def test_creating_the_scan_inputs_is_flagged(self):
+        for path in (
+            ".betterleaks.toml",
+            ".betterleaksignore",
+            ".gitattributes",
+            "crates/a/.gitattributes",
+            ".gitleaks.toml",
+            ".gitleaksignore",
+            "crates/a/.gitleaksignore",
+        ):
+            with self.subTest(path=path):
+                write(self.repo / path, "one\n")
+                self.assertFlags("scan-input-changed")
+                (self.repo / path).unlink()
+
+    def test_a_scan_input_changed_as_binary_is_flagged(self):
+        """A NUL byte makes git show a file as binary, with no lines to check."""
+        for path in (".betterleaksignore", ".gitattributes", "crates/a/.gitattributes"):
+            with self.subTest(path=path, file="new"):
+                (self.repo / path).parent.mkdir(parents=True, exist_ok=True)
+                (self.repo / path).write_bytes(b"# \x00\n*.rs -diff\n")
+                self.assertFlags("binary-change")
+            with self.subTest(path=path, file="changed"):
+                write(self.repo / path, "one\n")
+                self.commit(f"add {path}\n\nFloor-reason: test setup")
+                self.git("tag", "-f", "base")
+                (self.repo / path).write_bytes(b"one\n\x00\nabc:src/a.rs:generic-api-key:1\n")
+                self.assertFlags("binary-change")
+                (self.repo / path).unlink()
+                self.commit(f"remove {path}\n\nFloor-reason: test setup")
+                self.git("tag", "-f", "base")
+
+    def test_a_text_file_changed_as_binary_is_flagged_but_an_image_is_not(self):
+        for path in ("CONSTRAINTS.md", ".github/workflows/ci.yml", "src/lib.rs"):
+            with self.subTest(path=path):
+                original = (self.repo / path).read_bytes() if (self.repo / path).exists() else None
+                (self.repo / path).parent.mkdir(parents=True, exist_ok=True)
+                (self.repo / path).write_bytes(b"\x00 rules gone\n")
+                self.assertFlags("binary-change")
+                if original is None:
+                    (self.repo / path).unlink()
+                else:
+                    (self.repo / path).write_bytes(original)
+        (self.repo / "docs").mkdir()
+        (self.repo / "docs" / "logo.png").write_bytes(b"\x89PNG\x00\x01")
+        self.assertEqual(self.guard().returncode, 0, self.guard().stderr)
+
+    def test_deleting_a_binary_scan_input_is_flagged(self):
+        (self.repo / ".betterleaksignore").write_bytes(b"# \x00\n")
+        self.commit("add\n\nFloor-reason: test setup")
+        self.git("tag", "-f", "base")
+        (self.repo / ".betterleaksignore").unlink()
+        self.assertFlags("binary-change")
+
+    def test_paths_git_quotes_are_still_checked(self):
+        """Git quotes a path with a non-ASCII byte, a quote, or a backslash."""
+        for folder in ("caf\u00e9", 'say "hi"', "back\\slash"):
+            with self.subTest(folder=folder, file="attributes"):
+                write(self.repo / folder / ".gitattributes", "*.env -diff\n")
+                self.assertFlags("scan-input-changed")
+                (self.repo / folder / ".gitattributes").unlink()
+            with self.subTest(folder=folder, file="binary"):
+                (self.repo / folder / ".gitattributes").write_bytes(b"\x00* -diff\n")
+                self.assertFlags("binary-change")
+                (self.repo / folder / ".gitattributes").unlink()
+        write(self.repo / ".github" / "workflows" / "caf\u00e9.yml", "env:\n  T: ${{ secrets.T }}\n")
+        self.assertFlags("secret-referenced")
+
+    def test_a_line_naming_the_scanner_added_to_a_check_script_is_flagged(self):
+        for path, line in (
+            ("scripts/check.sh", "scripts/scan_secrets.sh --staged || true"),
+            ("scripts/install-tools.sh", "printf 'exit 0' > .tools/bin/betterleaks"),
+            (".github/workflows/ci.yml", "      - run: echo 'exit 0' > scripts/scan_secrets.sh"),
+        ):
+            with self.subTest(path=path):
+                write(self.repo / path, "one\n")
+                self.commit(f"add {path}\n\nFloor-reason: test setup")
+                self.git("tag", "-f", "base")
+                write(self.repo / path, f"one\n{line}\n")
+                self.assertFlags("scan-input-changed")
+                write(self.repo / path, "one\n")
+
+    def test_a_mode_change_on_a_hook_is_flagged(self):
+        hook = self.repo / ".githooks" / "pre-commit"
+        write(hook, "#!/bin/sh\nscan\n")
+        hook.chmod(0o755)
+        self.commit("add hook\n\nFloor-reason: test setup")
+        self.git("tag", "-f", "base")
+        hook.chmod(0o644)
+        self.assertFlags("mode-changed")
+
+    def test_an_empty_scan_input_or_a_committed_tool_is_flagged(self):
+        for path in (
+            ".gitleaksignore",
+            ".gitleaks.toml",
+            "crates/a/.betterleaks.toml",
+            ".tools/bin/betterleaks",
+        ):
+            with self.subTest(path=path):
+                write(self.repo / path, "")
+                self.assertFlags("scan-input-changed")
+                (self.repo / path).unlink()
+
+    def test_an_image_in_a_quoted_folder_may_change_as_binary(self):
+        (self.repo / "caf\u00e9").mkdir()
+        (self.repo / "caf\u00e9" / "logo.png").write_bytes(b"\x89PNG\x00\x01")
+        self.assertEqual(self.guard().returncode, 0, self.guard().stderr)
+
+    def test_an_allow_comment_is_a_suppression(self):
+        write(self.repo / "src" / "a.rs", 'let t = "x"; // betterleaks:allow\n')
+        self.assertFlags("silenced-checker")
+
+    def test_a_secret_in_a_workflow_other_than_deploy_is_flagged(self):
+        for line in (
+            "      TOKEN: ${{ secrets.TOKEN }}",
+            "    secrets: inherit",
+            "      ALL: ${{ toJSON(secrets) }}",
+            "      TOKEN: ${{secrets['TOKEN']}}",
+            "      ALL: ${{ toJson(secrets) }}",
+            "      TOKEN: ${{ SECRETS.TOKEN }}",
+            '    secrets: "inherit"',
+            "        secrets) }}",
+        ):
+            with self.subTest(line=line):
+                write(self.repo / ".github" / "workflows" / "ci.yml", f"jobs:\n{line}\n")
+                self.assertFlags("secret-referenced")
+
+    def test_the_deploy_workflow_may_use_secrets(self):
+        write(self.repo / ".github" / "workflows" / "deploy.yml", "env:\n  TOKEN: ${{ secrets.TOKEN }}\n")
+        self.assertEqual(self.guard().returncode, 0, self.guard().stderr)
+
+    def test_the_github_token_is_not_a_secret_reference(self):
+        write(self.repo / ".github" / "workflows" / "ci.yml", "env:\n  GH_TOKEN: ${{ github.token }}\n")
+        self.assertEqual(self.guard().returncode, 0, self.guard().stderr)
 
 
 class CrateTier(GuardCase):

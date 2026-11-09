@@ -255,6 +255,38 @@ A third fresh review found the `postgres-password` rule flagged code that reads 
 - ASVS: 13.3.1, 14.1.2, 15.3.3 (mass assignment), and 16.4.3 (logs sent to a separate system) are all
   Level 2.
 
+### Implementation reviews
+
+Two adversarial reviews of the #81 implementation, 2026-11-08, each finding reproduced:
+
+- Messages piped through one `betterleaks stdin` run get fingerprints by line in the whole log, which
+  shift with each new commit. Scanning one file per commit or tag, named by its id, gives
+  `<object>:<rule>:<line>`, which held after later commits.
+- `postgres-password` missed libpq strings with the password first, quoted, spaced around `=`, or next to
+  keywords such as `channel_binding`. Split into two rules, one per order, matching any keyword and
+  staying on one line, they caught all of these, and passed code that reads or declares a password.
+- The default `generic-password` rule flagged Rust declarations such as `password: SecretString`. An
+  allowlist for CamelCase names passed them.
+- Bare `rnd_` keys and `npg_` passwords outside an assignment were missed; the `provider-key` rule
+  catches them.
+- An ignore entry without a commit (`file:rule:line`) skipped that line in every commit. A config with
+  `extend = { path = ... }` loaded rules from an unguarded file. The scan now refuses both.
+- A third review found the scan fell back to an unchecked `.gitleaksignore` when `.betterleaksignore` was
+  missing or a folder, a dotted `extend.path` key still pointed at another file, and a local
+  `.gitattributes` with `-diff` hid files from the staged scan. The scan now refuses all three. It also
+  found a hook made non-executable is skipped by git, which the floor guard now flags.
+- Postgres passwords given as a URI query parameter (`?password=`) and Render keys longer than 32
+  characters were missed; `postgres-uri-password` and a wider `provider-key` catch them.
+- Accepted limits:
+  - tags that point at a blob or tree, nested tag messages, and quoted libpq passwords with spaces are not
+    scanned
+  - a non-Neon password in a quoted Rust string, such as `const DB_PASSWORD: &str = "..."`, or one with
+    punctuation in its first eight characters after `PGPASSWORD=`, is missed
+  - a push uses the working tree's rules, trusts the remote's tracking refs, and fails closed when pushing
+    to a URL with a space
+  - the floor guard catches a line naming the scanner added to a check script, but not a generic early
+    exit, and one `Floor-reason:` covers every change to a file in a push
+
 ## What this cannot show
 
 The scanner tests ran once, on one small repository, with planted secrets in common formats.

@@ -27,11 +27,14 @@ protection, or rulesets, so GitHub cannot fence a secret to one job or branch.
   archive for the machine's platform, checks the SHA-256 written in the script, and installs it in
   `.tools/bin`. Local machines and CI run the same binary.
 - **`.betterleaks.toml` extends the default rules** with:
-  - `postgres-password`, for `PGPASSWORD` and `password=` inside a keyword connection string
+  - `postgres-password`, for `PGPASSWORD` and `password=` inside a keyword connection string, with
+    `postgres-password-first` for a password before the other keywords
+  - `provider-key`, for a Render API key (`rnd_`) or Neon role password (`npg_`) wherever it appears
   - `app-secret`, for a value of 32 or more characters assigned to a name containing `SECRET`,
     `SESSION_KEY`, `SIGNING_KEY`, or `COOKIE_KEY`
   - `render-deploy-hook`, for a Render deploy hook URL's key
   - an allowlist matching only a secret that itself starts with `fake-`
+  - an allowlist for type and identifier names in CamelCase, such as `password: SecretString`
 
   The research page records each rule's pattern and the tests it passed, including code that only reads a
   secret, which the rules must not flag.
@@ -40,11 +43,14 @@ protection, or rulesets, so GitHub cannot fence a secret to one job or branch.
   nothing leaves the machine. Git scans pass `-m`, so changes made in a merge commit are scanned too.
 - **It runs in three places:**
   - **The pre-commit hook** scans staged changes (`git --staged`).
-  - **The pre-push hook** scans every commit not yet on any remote branch (`-m <ref> --not --remotes`),
-    for each ref pushed. A deleted ref is skipped. It also pipes those commits' messages through
-    `betterleaks stdin`.
-  - **`scripts/check.sh`** scans all history reachable from `HEAD`, and every commit message, so CI does
-    too. CI already fetches full history.
+  - **The pre-push hook** scans every commit the remote being pushed to does not have yet
+    (`-m <ref> --not --remotes=<remote>`), for each ref pushed. A deleted ref is skipped. It also scans
+    those commits' messages, and a pushed tag's message.
+  - **`scripts/check.sh`** scans all history reachable from `HEAD`, and every commit and tag message, so CI
+    does too. CI already fetches full history.
+
+  Messages are scanned one file per commit or tag, named by its id, so a message finding's fingerprint
+  stays put as history grows.
 
   Any error fails the scan, since Betterleaks exits non-zero for errors as well as findings.
 - **Test values never look like real secrets.**
@@ -53,7 +59,8 @@ protection, or rulesets, so GitHub cannot fence a secret to one job or branch.
   - Keys and certificates are generated when the test runs, never committed.
   - Docs show secrets only in shortened form, such as `npg_...`.
 - **`.betterleaksignore` lists findings by commit, file, rule, and line.** Commits never change, so an
-  entry cannot drift. It holds only two kinds of entry, each under a comment saying why:
+  entry cannot drift. The scan refuses an entry without a commit or tag id, which would skip that file and
+  line everywhere, and a config that names another file to read rules from. It holds only two kinds of entry, each under a comment saying why:
   - **Fake credentials committed before the scan was adopted,** reviewed once in
     [#81](https://github.com/heavymedl-labs/tetsu/issues/81).
   - **Rotated real secrets left in history,** with the date they were rotated.
@@ -104,11 +111,14 @@ protection, or rulesets, so GitHub cannot fence a secret to one job or branch.
 - A branch's copy of the deploy workflow could drop the `main` check. GitHub Free cannot prevent that,
   so only the maintainer pushes branches, and review reads every workflow change.
 - Betterleaks skips files git treats as binary, and paths its default config excludes, such as
-  `node_modules`. Secrets in those forms rely on review.
+  `node_modules`. Secrets in those forms rely on review. The staged scan refuses a `.gitattributes` that
+  turns diffs off, since that would hide files from it.
 - The rotation check depends on the date, so a commit that passed can fail later once a secret is due.
 - The scanner is Go, not Rust, a preference given up for detection. Upgrades are deliberate: v2, now a
   release candidate, changes its config and output.
-- The three added rules are ours, and the fresh review checks changes to them.
+- The added rules are ours, and the fresh review checks changes to them. A real password made only of
+  capitalized words, such as `CorrectHorseBattery`, passes as a type name.
+- A finding is reported by commit, file, line, and rule, never by its content.
 - Replacing it means swapping the command in the hooks and `check.sh`, and rebuilding the ignore file.
 
 **Weakest evidence.** Betterleaks started in 2026-02. Detection was tested once, with planted secrets in

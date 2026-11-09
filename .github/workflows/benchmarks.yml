@@ -58,7 +58,7 @@ jobs:
       - name: Build and push unless present
         env:
           IMAGE: ${{ steps.tag.outputs.image }}
-          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TOKEN: ${{ github.token }}
           ACTOR: ${{ github.actor }}
         run: |
           echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
@@ -97,7 +97,7 @@ jobs:
       - name: Run suites
         env:
           IMAGE: ${{ needs.image.outputs.image }}
-          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TOKEN: ${{ github.token }}
           ACTOR: ${{ github.actor }}
           RUN: ${{ matrix.run }}
           SUITES: ${{ inputs.suites }}

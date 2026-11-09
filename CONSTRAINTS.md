@@ -9,9 +9,9 @@ Only the maintainer approves loosening anything here.
 ## Floor
 
 These apply to every change. [scripts/floor_guard.py](scripts/floor_guard.py) catches the common
-forms, and the [fresh review](docs/review.md) covers the rest, including secrets until
-the scan in [#81](https://github.com/heavymedl-labs/tetsu/issues/81) lands. A `Floor-reason:` trailer on a commit
-records the maintainer's approval for the files that commit touches.
+forms, [scripts/scan_secrets.sh](scripts/scan_secrets.sh) finds secrets
+([ADR-0027](docs/adr/0027-secrets-revised.md)), and the [fresh review](docs/review.md) covers the rest. A
+`Floor-reason:` trailer on a commit records the maintainer's approval for the files that commit touches.
 
 - No new suppression comment without a written reason beside it, such as `#[allow]` or `# noqa`.
 - No unfinished stubs or empty error handlers.

@@ -14,7 +14,7 @@ def clean_env(**extra):
     return env
 
 
-def run(args, cwd, check=False, **extra_env):
+def run(args, cwd, check=False, input=None, **extra_env):
     return subprocess.run(
         [str(a) for a in args],
         cwd=cwd,
@@ -22,6 +22,9 @@ def run(args, cwd, check=False, **extra_env):
         capture_output=True,
         text=True,
         check=check,
+        # With no input, stdin is closed rather than inherited, so a script that reads it cannot hang.
+        input=input,
+        stdin=subprocess.DEVNULL if input is None else None,
     )
 
 

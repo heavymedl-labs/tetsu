@@ -1,0 +1,62 @@
+# Secret scanning rules (ADR-0027). Betterleaks' default rules, plus forms our own secrets take that the
+# defaults miss. scripts/tests/test_scan_secrets.py tests each rule, including code that only reads a
+# secret, which no rule may flag. Every changed line here needs a Floor-reason: trailer.
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "postgres-password"
+description = "Postgres password in PGPASSWORD, or after another keyword in a keyword connection string"
+regex = '''(?i)(?:\bPGPASSWORD[ \t]*[=:][ \t]*['"]?([^\s'"{}$()<>,;&.\x60]{8,})|\b[a-z_]+[ \t]*=[ \t]*[^\s=]+[ \t]+(?:[a-z_]+[ \t]*=[ \t]*[^\s=]+[ \t]+)*?password[ \t]*=[ \t]*'?([^\s'"{}$()<>,;&\x60]{8,}))'''
+keywords = ["pgpassword", "password"]
+
+# libpq takes keywords in any order, and the regex engine has no lookahead, so the password-first order is its
+# own rule. Any keyword counts, so options like channel_binding do too.
+[[rules]]
+id = "postgres-password-first"
+description = "Postgres password before another keyword in a keyword connection string"
+regex = '''(?i)\bpassword[ \t]*=[ \t]*'?([^\s'"{}$()<>,;&\x60]{8,})'?[ \t]+[a-z_]+[ \t]*='''
+secretGroup = 1
+keywords = ["password"]
+
+[[rules]]
+id = "postgres-uri-password"
+description = "Postgres password given as a query parameter of a connection URI"
+regex = '''(?i)\bpostgres(?:ql)?://[^\s'"]*[?&]password=([^\s'"&#{}$()<>\x60]{8,})'''
+secretGroup = 1
+keywords = ["password="]
+
+[[rules]]
+id = "app-secret"
+description = "A secret, session, or signing key assigned in config or environment form"
+regex = '''(?i)\b[A-Z0-9_]*(?:SECRET|SESSION_KEY|SIGNING_KEY|COOKIE_KEY)[A-Z0-9_]*\s*[=:]\s*['"]?([A-Za-z0-9_+/=-]{32,})(?:['"\s;]|$)'''
+secretGroup = 1
+keywords = ["secret", "session_key", "signing_key", "cookie_key"]
+
+[[rules]]
+id = "render-deploy-hook"
+description = "Render deploy hook URL, whose key deploys the service"
+regex = '''https://api\.render\.com/deploy/srv-[a-z0-9]+\?(?:[^\s&#]*&)*key=([A-Za-z0-9_-]{8,})'''
+secretGroup = 1
+keywords = ["api.render.com/deploy"]
+
+[[rules]]
+id = "provider-key"
+description = "A Render API key or a Neon role password, by its prefix, wherever it appears"
+regex = '''\b((?:rnd_[A-Za-z0-9_-]{24,}|npg_[A-Za-z0-9]{12,}))'''
+secretGroup = 1
+keywords = ["rnd_", "npg_"]
+
+# Fake credentials in tests start with fake-. This matches only the secret itself, so a real password
+# beside a fake- word elsewhere on the line is still caught.
+[[allowlists]]
+description = "Fake test credentials"
+regexTarget = "secret"
+regexes = ['''^fake-[A-Za-z0-9._%-]+$''']
+
+# A type or name in CamelCase, such as `password: SecretString`, declares a secret rather than holding one.
+[[allowlists]]
+description = "Type and identifier names"
+regexTarget = "secret"
+regexes = ['''^(?:[A-Z][a-z]+)+(?:<[^>]*>)?,?$''']

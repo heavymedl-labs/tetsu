@@ -1,0 +1,11 @@
+# Findings the secret scan skips, by commit, file, rule, and line (ADR-0027). Every changed line needs a
+# Floor-reason: trailer.
+#
+# Fake test credentials committed before the scan was adopted, reviewed 2026-11-08 in #81: hunter2,
+# secret, s3cret-pw, mysslmodepw, and sslmode used as passwords in connection string tests.
+0fdd447c6fce7da8225232d22322436d286d8686:crates/tetsu/tests/migrate.rs:generic-credential-uri:50
+110b9a0285440e3581320d30ac78cd65dddcf739:crates/postgres/src/connection.rs:generic-credential-uri:225
+110b9a0285440e3581320d30ac78cd65dddcf739:crates/postgres/tests/connect.rs:generic-credential-uri:188
+110b9a0285440e3581320d30ac78cd65dddcf739:crates/tetsu/src/settings.rs:generic-credential-uri:65
+110b9a0285440e3581320d30ac78cd65dddcf739:crates/tetsu/src/settings.rs:generic-credential-uri:94
+a38f49e59b998e458919efd798d04fc65fdb1eb8:crates/postgres/tests/connect.rs:generic-credential-uri:37
