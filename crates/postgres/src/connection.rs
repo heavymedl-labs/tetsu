@@ -1,8 +1,11 @@
 //! Pools and direct connections.
 
+use std::path::Path;
 use std::time::Duration;
 
 use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod, Runtime};
+use rustls::pki_types::CertificateDer;
+use rustls::pki_types::pem::PemObject;
 use tokio_postgres::config::SslMode;
 use tokio_postgres::tls::MakeTlsConnect;
 use tokio_postgres::{Client, Config, NoTls, Socket};
@@ -28,6 +31,8 @@ pub enum Tls {
 pub struct Settings {
     url: String,
     tls: Tls,
+    /// The authorities from a CA file, trusted instead of the public roots (ADR-0013, ASVS `v5.0.0-12.3.4`).
+    authorities: Option<rustls::RootCertStore>,
     connect_timeout: Duration,
     pool_wait: Duration,
 }
@@ -58,6 +63,7 @@ impl Settings {
         Self {
             url: url.to_string(),
             tls,
+            authorities: None,
             connect_timeout: CONNECT_TIMEOUT,
             pool_wait: POOL_WAIT,
         }
@@ -69,6 +75,31 @@ impl Settings {
         self.connect_timeout = connect;
         self.pool_wait = pool_wait;
         self
+    }
+
+    /// Trusts only the certificate authorities in a PEM file, such as a provider's own, instead of the public roots
+    /// (ADR-0013, ASVS `v5.0.0-12.3.4`). Verification stays on: a certificate must chain to one of them and name
+    /// the host.
+    ///
+    /// # Errors
+    /// Fails if the file cannot be read, holds no PEM certificate, or holds one that cannot be an authority. No
+    /// error quotes the file.
+    pub fn with_ca_file(mut self, path: &Path) -> Result<Self, Error> {
+        let pem = std::fs::read(path)
+            .map_err(|error| format!("the CA file could not be read: {error}"))?;
+        let authorities = CertificateDer::pem_slice_iter(&pem)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| "the CA file is not valid PEM")?;
+        if authorities.is_empty() {
+            return Err("the CA file holds no PEM certificate".into());
+        }
+        let mut store = rustls::RootCertStore::empty();
+        let (_, unusable) = store.add_parsable_certificates(authorities);
+        if unusable > 0 {
+            return Err("the CA file holds a certificate that cannot be an authority".into());
+        }
+        self.authorities = Some(store);
+        Ok(self)
     }
 
     #[must_use]
@@ -160,12 +191,20 @@ fn decoded(text: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-fn rustls_connector() -> MakeRustlsConnect {
-    let roots = rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    let config = rustls::ClientConfig::builder()
-        .with_root_certificates(roots)
-        .with_no_client_auth();
-    MakeRustlsConnect::new(config)
+impl Settings {
+    /// The authorities from the CA file, or the public roots when there is none.
+    fn roots(&self) -> rustls::RootCertStore {
+        self.authorities.clone().unwrap_or_else(|| {
+            rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned())
+        })
+    }
+
+    fn rustls_connector(&self) -> MakeRustlsConnect {
+        let config = rustls::ClientConfig::builder()
+            .with_root_certificates(self.roots())
+            .with_no_client_auth();
+        MakeRustlsConnect::new(config)
+    }
 }
 
 /// A pool for serving requests, with the timeouts ADR-0011 requires.
@@ -184,7 +223,7 @@ pub fn pool(settings: &Settings) -> Result<Pool, Error> {
         recycling_method: RecyclingMethod::Fast,
     };
     let manager = match settings.tls {
-        Tls::Required => Manager::from_config(config, rustls_connector(), recycling),
+        Tls::Required => Manager::from_config(config, settings.rustls_connector(), recycling),
         Tls::Disabled => Manager::from_config(config, NoTls, recycling),
     };
     let pool = Pool::builder(manager)
@@ -203,7 +242,14 @@ pub fn pool(settings: &Settings) -> Result<Pool, Error> {
 pub async fn connect(settings: &Settings) -> Result<Client, Error> {
     let config = settings.config()?;
     match settings.tls {
-        Tls::Required => connect_with(&config, rustls_connector(), settings.connect_timeout).await,
+        Tls::Required => {
+            connect_with(
+                &config,
+                settings.rustls_connector(),
+                settings.connect_timeout,
+            )
+            .await
+        }
         Tls::Disabled => connect_with(&config, NoTls, settings.connect_timeout).await,
     }
 }
@@ -264,5 +310,84 @@ mod tests {
         ] {
             assert!(!sets_sslmode(url), "{url}");
         }
+    }
+
+    fn written(name: &str, contents: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("tetsu-{}-{name}", std::process::id()));
+        std::fs::write(&path, contents).unwrap();
+        path
+    }
+
+    #[test]
+    fn a_ca_file_that_cannot_be_read_fails_without_quoting_it() {
+        let missing = std::env::temp_dir().join("tetsu-no-such-ca.pem");
+        let error = Settings::new("postgres://h/db")
+            .with_ca_file(&missing)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.starts_with("the CA file could not be read"),
+            "{error}"
+        );
+
+        let text = written("not-a-certificate.pem", "fake-secret-not-a-certificate");
+        let error = Settings::new("postgres://h/db")
+            .with_ca_file(&text)
+            .unwrap_err()
+            .to_string();
+        std::fs::remove_file(&text).unwrap();
+        assert_eq!(error, "the CA file holds no PEM certificate");
+        assert!(!error.contains("fake-secret"), "{error}");
+    }
+
+    #[test]
+    fn a_ca_file_must_be_whole_pem_holding_real_certificates() {
+        for (name, contents, expected) in [
+            (
+                "unterminated.pem",
+                "-----BEGIN CERTIFICATE-----\nAAAA\n",
+                "the CA file is not valid PEM",
+            ),
+            (
+                "not-der.pem",
+                "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n",
+                "the CA file holds a certificate that cannot be an authority",
+            ),
+        ] {
+            let path = written(name, contents);
+            let error = Settings::new("postgres://h/db")
+                .with_ca_file(&path)
+                .unwrap_err()
+                .to_string();
+            std::fs::remove_file(&path).unwrap();
+            assert_eq!(error, expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn without_a_ca_file_the_public_roots_are_trusted() {
+        assert_eq!(
+            Settings::new("postgres://h/db").roots().len(),
+            webpki_roots::TLS_SERVER_ROOTS.len()
+        );
+    }
+
+    /// The test Postgres's own certificate, read over SQL so none is committed, stands in for a provider's.
+    #[tokio::test]
+    async fn a_ca_file_replaces_the_public_roots() {
+        let database = crate::test_support::fresh_database().await.unwrap();
+        let client = connect(&database).await.unwrap();
+        let pem: String = client
+            .query_one("SELECT pg_read_file(current_setting('ssl_cert_file'))", &[])
+            .await
+            .unwrap()
+            .try_get(0)
+            .unwrap();
+        let path = written("server.pem", &pem);
+        let settings = Settings::new("postgres://h/db")
+            .with_ca_file(&path)
+            .unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(settings.roots().len(), 1);
     }
 }

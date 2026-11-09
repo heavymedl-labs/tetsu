@@ -2,20 +2,30 @@
 
 use std::env::VarError;
 use std::net::{Ipv4Addr, SocketAddr};
+use std::path::Path;
 
-use tetsu_postgres::Settings;
+use tetsu_postgres::{Settings, Tls};
 
-/// Reads `DATABASE_URL` and `DATABASE_TLS`, through `var` so tests need not touch the real environment.
-/// TLS stays required unless `DATABASE_TLS` is `disable`, and any other value is refused rather than guessed.
-/// The URL is checked here, so a bad one fails before any connection; it may not choose TLS itself.
+/// Reads `DATABASE_URL`, `DATABASE_TLS`, and `DATABASE_CA_FILE`, through `var` so tests need not touch the real
+/// environment. TLS stays required unless `DATABASE_TLS` is `disable`, and any other value is refused rather than
+/// guessed. `DATABASE_CA_FILE` names a PEM file of authorities trusted instead of the public roots (ADR-0013). The
+/// URL and the file are checked here, so bad settings fail before any connection; the URL may not choose TLS.
 pub fn database(var: impl Fn(&str) -> Result<String, VarError>) -> Result<Settings, String> {
     let url = value(&var, "DATABASE_URL")?.ok_or("DATABASE_URL must be set")?;
     let tls = value(&var, "DATABASE_TLS")?;
-    let settings = match tls.as_deref() {
+    let mut settings = match tls.as_deref() {
         None | Some("require" | "disable") => Settings::from_values(&url, tls.as_deref()),
         // The value is not repeated: a URL pasted into this variable by mistake would print its password.
         Some(_) => return Err("DATABASE_TLS must be require or disable".into()),
     };
+    if let Some(ca_file) = value(&var, "DATABASE_CA_FILE")? {
+        if settings.tls() == Tls::Disabled {
+            return Err("DATABASE_CA_FILE needs TLS, which DATABASE_TLS turns off".into());
+        }
+        settings = settings
+            .with_ca_file(Path::new(&ca_file))
+            .map_err(|error| format!("DATABASE_CA_FILE: {error}"))?;
+    }
     settings.check().map_err(|error| error.to_string())?;
     Ok(settings)
 }
@@ -60,7 +70,6 @@ fn value(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tetsu_postgres::Tls;
 
     fn listening(port: Option<&str>) -> Result<SocketAddr, String> {
         listen(|name| match (name, port) {
@@ -123,6 +132,39 @@ mod tests {
             "DATABASE_TLS" => found(tls),
             _ => Err(VarError::NotPresent),
         })
+    }
+
+    fn read_with_ca(tls: Option<&str>, ca: Option<&str>) -> Result<Settings, String> {
+        let found = |value: Option<&str>| value.map(str::to_string).ok_or(VarError::NotPresent);
+        database(|name| match name {
+            "DATABASE_URL" => Ok("postgres://localhost/tetsu".to_string()),
+            "DATABASE_TLS" => found(tls),
+            "DATABASE_CA_FILE" => found(ca),
+            _ => Err(VarError::NotPresent),
+        })
+    }
+
+    #[test]
+    fn a_ca_file_that_cannot_be_used_names_its_variable() {
+        let error = read_with_ca(None, Some("/no/such/tetsu-ca.pem")).unwrap_err();
+        assert!(
+            error.starts_with("DATABASE_CA_FILE: the CA file could not be read"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_ca_file_without_tls_is_refused_rather_than_ignored() {
+        assert_eq!(
+            read_with_ca(Some("disable"), Some("/no/such/tetsu-ca.pem")).unwrap_err(),
+            "DATABASE_CA_FILE needs TLS, which DATABASE_TLS turns off"
+        );
+    }
+
+    #[test]
+    fn a_blank_ca_file_is_no_ca_file() {
+        assert_eq!(read_with_ca(None, Some(" ")).unwrap().tls(), Tls::Required);
+        assert_eq!(read_with_ca(None, None).unwrap().tls(), Tls::Required);
     }
 
     #[test]

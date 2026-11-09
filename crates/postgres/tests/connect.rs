@@ -1,5 +1,6 @@
 //! Connection rules from ADR-0011 and ADR-0013.
 
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use tetsu_postgres::test_support::fresh_database;
@@ -76,6 +77,99 @@ async fn tls_refuses_a_certificate_no_trusted_authority_signed() {
         .expect_err("must not trust the certificate");
     let pooled = chain(&pooled.into());
     assert!(pooled.contains("UnknownIssuer"), "{pooled}");
+}
+
+/// The test Postgres's own certificate, read over SQL when the test runs, so no certificate is committed. It is
+/// self-signed for localhost, so trusting it makes it the authority.
+async fn server_certificate(
+    database: &tetsu_postgres::test_support::TestDatabase,
+) -> Result<PathBuf, tetsu_postgres::Error> {
+    let client = tetsu_postgres::connect(database).await?;
+    let pem: String = client
+        .query_one("SELECT pg_read_file(current_setting('ssl_cert_file'))", &[])
+        .await?
+        .try_get(0)?;
+    let path = std::env::temp_dir().join(format!("{}.pem", database.name()));
+    std::fs::write(&path, pem)?;
+    Ok(path)
+}
+
+/// What rustls says when a trusted certificate names another host.
+const NOT_LOCALHOST: &str = r#"certificate not valid for name "127.0.0.1""#;
+
+#[tokio::test]
+async fn a_ca_file_is_trusted_but_only_for_the_hostname_its_certificate_names() {
+    let database = fresh_database().await.expect("a test database");
+    assert!(
+        database.url().contains("@localhost:"),
+        "the test needs a localhost URL"
+    );
+    let ca = server_certificate(&database)
+        .await
+        .expect("the server's certificate");
+
+    let trusted = Settings::new(database.url())
+        .with_ca_file(&ca)
+        .expect("the file holds a certificate");
+    let client = tetsu_postgres::connect(&trusted)
+        .await
+        .expect("trusts the authority in the file");
+    client
+        .simple_query("SELECT 1")
+        .await
+        .expect("a query over TLS");
+    let pooled = pool(&trusted)
+        .expect("pool")
+        .get()
+        .await
+        .expect("the pool trusts it too");
+    drop(pooled);
+
+    let elsewhere = Settings::new(&database.url().replacen("@localhost:", "@127.0.0.1:", 1))
+        .with_ca_file(&ca)
+        .expect("the file holds a certificate");
+    let direct = tetsu_postgres::connect(&elsewhere)
+        .await
+        .expect_err("the certificate names localhost, not 127.0.0.1");
+    assert!(chain(&direct).contains(NOT_LOCALHOST), "{}", chain(&direct));
+    let pooled = pool(&elsewhere)
+        .expect("pool")
+        .get()
+        .await
+        .expect_err("the pool checks the name too");
+    let pooled = chain(&pooled.into());
+    assert!(pooled.contains(NOT_LOCALHOST), "{pooled}");
+    std::fs::remove_file(ca).expect("cleanup");
+}
+
+/// A DNS name is checked by a different path than an IP address, and providers use names. `hostaddr` sends the
+/// connection to the test Postgres while TLS checks the certificate against the name in `host`.
+#[tokio::test]
+async fn a_ca_file_still_refuses_a_certificate_for_another_dns_name() {
+    let database = fresh_database().await.expect("a test database");
+    assert!(
+        database.url().contains("@localhost:"),
+        "the test needs a localhost URL"
+    );
+    let ca = server_certificate(&database)
+        .await
+        .expect("the server's certificate");
+    let wrong_name = format!(
+        "{}?hostaddr=127.0.0.1",
+        database.url().replacen("@localhost:", "@wrong.example:", 1)
+    );
+    let wrong_name = Settings::new(&wrong_name)
+        .with_ca_file(&ca)
+        .expect("the file holds a certificate");
+    let refused = tetsu_postgres::connect(&wrong_name)
+        .await
+        .expect_err("the certificate names localhost, not wrong.example");
+    assert!(
+        chain(&refused).contains(r#"certificate not valid for name "wrong.example""#),
+        "{}",
+        chain(&refused)
+    );
+    std::fs::remove_file(ca).expect("cleanup");
 }
 
 #[test]

@@ -26,12 +26,13 @@ Exit codes are 0 for success, 1 for a failure, and 2 for a command or arguments 
 | --- | --- | --- |
 | `DATABASE_URL` | `migrate`, `seed`, `serve` | The Postgres to use, which must store text as UTF8. Required, and may not set `sslmode` |
 | `DATABASE_TLS` | `migrate`, `seed`, `serve` | `require` (the default) or `disable`, for local tests only ([ADR-0013](../../docs/adr/0013-postgres-tls.md)) |
+| `DATABASE_CA_FILE` | `migrate`, `seed`, `serve` | Optional: a PEM file of certificate authorities, such as a provider's own, trusted instead of the public ones. Refused with `DATABASE_TLS=disable` |
 | `TETSU_DEMO` | `serve` | `true` or `false`, with no default: whether every page says its business is a demo and asks not to be indexed ([ADR-0018](../../docs/adr/0018-demo-businesses-as-data.md)) |
 | `PORT` | `serve` | The port a host such as Render sets, listened on at every interface. Without it, `serve` listens on `127.0.0.1:8080` |
 
-TLS trusts only public certificate authorities until a custom authority file arrives with the first deploy
-([#19](https://github.com/heavymedl-labs/tetsu/issues/19)), so a Postgres with a privately signed certificate
-cannot be reached over TLS yet.
+TLS always verifies the certificate: it must chain to a public authority, or only to one in `DATABASE_CA_FILE` when
+that is set, and name the host in the URL. Settings are checked before any connection, so a missing or unusable CA file fails at
+start.
 
 Errors never print the database URL or its password, and a URL with an unencoded `@` in its password is refused,
 so write it as `%40`. Messages from Postgres may name the user or the database.
