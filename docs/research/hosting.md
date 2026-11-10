@@ -362,8 +362,9 @@ creates then. Expect under $20 if the resources are deleted afterward.
    check that our `connection closed` handling recovers. This is the deciding test.
 6. **Point-in-time restore:** measure the time, and how close to the failure it can reach.
 7. **Exit drill:** move the database out with `pg_dump` and time the move.
-8. **Connection details:** TLS with `tokio-postgres`, the application role under
-   row-level security, and the migration runner's lock on a direct connection.
+8. **Connection details:** TLS with `tokio-postgres`, and the migration runner's lock on a
+   direct connection. The application role under row-level security is checked in
+   [#8](https://github.com/heavymedl-labs/tetsu/issues/8)'s work, once it decides isolation.
 9. **Waking from idle, free setup only:** connect after each sleep, at least 50 times.
    Record the time, any hang, and whether the pool's `create` timeout stops it. Also check
    that pooled connections recover after the service wakes.
@@ -378,9 +379,9 @@ The free setup went live on 2026-11-09 ([demo environment](../operations/demo-en
   the review of [#76](https://github.com/heavymedl-labs/tetsu/issues/76), were not seen through Render.
 - **Render's command replaces the image's entrypoint,** not only its `CMD`: `serve` exited with status 128, and
   `/usr/local/bin/tetsu serve` runs.
-- **Test 8, connection details, in part:** `tetsu migrate` from a laptop and from Actions reached Neon's direct
+- **Test 8, connection details:** `tetsu migrate` from a laptop and from Actions reached Neon's direct
   endpoint over TLS with the public roots and `channel_binding=require`, and took the migration lock. The
-  application role under row-level security waits on [#8](https://github.com/heavymedl-labs/tetsu/issues/8).
+  application role under row-level security moved to [#8](https://github.com/heavymedl-labs/tetsu/issues/8).
 - **A deploy** bills 33 seconds of job time: finding the CI run's digest, pulling, migrating, and waiting on
   Render, whose own deploy took about 20 seconds.
 - **Test 9, waking from idle,** has not run yet.
