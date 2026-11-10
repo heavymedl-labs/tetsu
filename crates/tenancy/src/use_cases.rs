@@ -44,4 +44,16 @@ impl<S: TenantStore> Tenants<S> {
             .await?
             .ok_or(Error::NotFound)
     }
+
+    /// The stored addresses that a name reserved for Tetsu's own pages now claims. A site route always wins
+    /// over a tenant's address, so the tenant at one would be hidden without a word; the composition root
+    /// refuses to serve while any is held (#90).
+    ///
+    /// # Errors
+    /// Fails if storage fails.
+    pub async fn reserved_addresses_in_use(&self) -> Result<Vec<String>, Error> {
+        self.store
+            .find_addresses_in_use(&crate::domain::reserved_addresses())
+            .await
+    }
 }

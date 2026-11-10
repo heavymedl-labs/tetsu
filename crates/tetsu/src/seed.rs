@@ -208,6 +208,13 @@ mod tests {
         ) -> impl Future<Output = Result<Option<Tenant>, Error>> + Send {
             std::future::ready(Ok(None))
         }
+
+        fn find_addresses_in_use(
+            &self,
+            _: &[String],
+        ) -> impl Future<Output = Result<Vec<String>, Error>> + Send {
+            std::future::ready(Err(self.0.clone()))
+        }
     }
 
     fn sample_seed() -> [Seed; 1] {

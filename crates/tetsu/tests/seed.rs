@@ -157,6 +157,15 @@ fn check_applies_the_domain_rules() {
 }
 
 #[test]
+fn check_refuses_a_slug_reserved_for_tetsus_own_pages() {
+    let folder = folder();
+    let bad = variant(&folder, "slug.toml", "\"sample-studio\"", "\"assets\"");
+    let stderr = text(&check(&bad).stderr);
+    assert!(stderr.contains("slug.toml"), "{stderr}");
+    assert!(stderr.contains("reserved"), "{stderr}");
+}
+
+#[test]
 fn check_reports_every_bad_file_in_a_folder() {
     let folder = folder();
     variant(&folder, "a-good.toml", "", "");

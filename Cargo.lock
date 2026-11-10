@@ -3416,6 +3416,7 @@ dependencies = [
 name = "tetsu"
 version = "0.1.0"
 dependencies = [
+ "askama",
  "axum",
  "serde",
  "tetsu-kernel",

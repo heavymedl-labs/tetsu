@@ -61,3 +61,16 @@ Web service `tetsu-demo` (`srv-dbp542rbc2fs73962k4g`) in Ohio, on the free insta
   once in 50 tries took 8 minutes ([test 9](../research/hosting.md#first-deploy-2026-11-09)).
 
 The GitHub repository variable `RENDER_SERVICE_ID` names the service for `deploy.yml`.
+
+## When `serve` refuses to start
+
+`tetsu serve` will not start while a stored tenant holds an address a release has since reserved for Tetsu's own
+pages ([#90](https://github.com/heavymedl-labs/tetsu/issues/90)), since a site route would hide that tenant. A
+forward deploy then fails at Render's start and the previous instance keeps serving; a rollback is never blocked,
+since older releases reserve fewer names. Its log names each address. Until a command for it exists, give the
+tenant a new slug and address as `tetsu_migrate`, then deploy again:
+
+```sql
+UPDATE tenancy.tenants SET slug = 'new-slug' WHERE slug = 'login';
+UPDATE tenancy.addresses SET address = '/new-slug' WHERE address = '/login';
+```

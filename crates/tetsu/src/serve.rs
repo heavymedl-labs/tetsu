@@ -3,15 +3,26 @@
 use std::future::{Future, IntoFuture};
 use std::time::Duration;
 
+use askama::Template;
 use axum::Router;
 use axum::extract::State;
-use axum::http::{HeaderName, HeaderValue, header};
+use axum::http::{HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{MethodRouter, get};
 
-const HOME: &str = include_str!("home.html");
-const HOME_DEMO: &str = "<p class=\"demo\" role=\"note\"><strong>Demo.</strong> The businesses on this site are \
-                         fictional, made up to show what Tetsu does.</p>";
+/// Tetsu's own page at the root.
+#[derive(Template)]
+#[template(path = "home.html")]
+struct HomePage {
+    demo: bool,
+}
+
+/// The site's page for a path nothing answers.
+#[derive(Template)]
+#[template(path = "not_found.html")]
+struct NotFoundPage {
+    demo: bool,
+}
 
 /// How long requests in progress may take to finish once the server is asked to stop. A client that never
 /// finishes its request cannot hold the server open past it.
@@ -34,19 +45,48 @@ const HEADERS: [(HeaderName, &str); 5] = [
     (header::X_FRAME_OPTIONS, "DENY"),
 ];
 
-/// The whole site: the root page, then the modules' routers, which answer every other path. In a demo
-/// environment every response also asks search engines not to index it (ADR-0018).
-pub fn app(tenancy: Router, demo: bool) -> Router {
-    let marking = if demo { HOME_DEMO } else { "" };
-    let page = HOME.replace("<!-- demo -->", marking);
-    Router::new()
-        .route("/", get(move || std::future::ready(home(page.clone()))))
-        .merge(tenancy)
+/// The whole site: its own routes, then the modules' routers, then `not_found` at any path none of them
+/// answers, which is [`not_found`] outside tests. Modules set no fallback, since axum panics when two merged
+/// routers both have one (#90). In a demo environment every response also asks search engines not to index it
+/// (ADR-0018).
+pub fn app(modules: Router, demo: bool, not_found: fn(bool) -> Response) -> Router {
+    site_routes(demo)
+        .into_iter()
+        .fold(Router::new(), |site, (path, route)| site.route(path, route))
+        .merge(modules)
+        .fallback(move || std::future::ready(not_found(demo)))
         .layer(axum::middleware::map_response_with_state(demo, secure))
 }
 
-fn home(page: String) -> Response {
-    ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], page).into_response()
+/// The site's page for a path nothing answers. It is the site's own, since a module's page would speak for
+/// every other module's paths too.
+pub fn not_found(demo: bool) -> Response {
+    html(StatusCode::NOT_FOUND, &NotFoundPage { demo })
+}
+
+/// Renders one of the site's pages. A compiled template fails only if writing fails, so a failure gets a bare
+/// unavailable status rather than half a page. Tenancy renders its own pages the same way; ADR-0021 keeps such a
+/// helper out of its public surface, so each crate has its own.
+fn html(status: StatusCode, page: &impl Template) -> Response {
+    let Ok(body) = page.render() else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
+    let mut response = (status, body).into_response();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/html; charset=utf-8"),
+    );
+    response
+}
+
+/// Tetsu's own routes. Every route the site adds goes here, never straight into [`app`], and each starts with a
+/// name no tenant may hold, which a test checks, so none hides a tenant. Routes in the modules' routers are not
+/// checked yet; #20, the first module to add top-level routes, adds that check.
+fn site_routes(demo: bool) -> Vec<(&'static str, MethodRouter)> {
+    vec![(
+        "/",
+        get(move || std::future::ready(html(StatusCode::OK, &HomePage { demo }))),
+    )]
 }
 
 async fn secure(State(demo): State<bool>, mut response: Response) -> Response {
@@ -130,7 +170,6 @@ pub fn stop_signal() -> impl Future<Output = ()> + Send + 'static {
 
 #[cfg(test)]
 mod tests {
-    use axum::http::StatusCode;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{TcpListener, TcpStream};
 
@@ -153,11 +192,18 @@ mod tests {
     const POST: &str =
         "POST / HTTP/1.1\r\nHost: test\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
 
-    /// Stands in for a module's router: a page at one path, and its own not found page everywhere else.
+    /// Stands in for a module's router: a page at one path, and no fallback, which is the site's alone.
     fn module() -> Router {
-        Router::new()
-            .route("/studio", get(|| async { "studio" }))
-            .fallback(|| async { (StatusCode::NOT_FOUND, "module not found") })
+        Router::new().route("/studio", get(|| async { "studio" }))
+    }
+
+    /// Stands in for the site's own not found page, so these tests can tell which page answered.
+    fn not_found(demo: bool) -> Response {
+        (
+            StatusCode::NOT_FOUND,
+            format!("demo {demo}: module not found"),
+        )
+            .into_response()
     }
 
     /// Sends one request to the site on a port of its own, and returns the raw response.
@@ -166,7 +212,7 @@ mod tests {
         let address = listener.local_addr().unwrap();
         tokio::spawn(run(
             listener,
-            app(module(), demo),
+            app(module(), demo, not_found),
             std::future::pending(),
             GRACE,
         ));
@@ -214,6 +260,49 @@ mod tests {
         let raw = get_path("/elsewhere").await;
         assert!(raw.starts_with("HTTP/1.1 404"), "{raw}");
         assert!(raw.ends_with("module not found"), "{raw}");
+    }
+
+    /// The site sets the one fallback, so a path no route answers, however deep, gets the page it was given.
+    #[tokio::test]
+    async fn a_path_nothing_answers_gets_the_not_found_page_for_its_environment() {
+        let deeper = get_path("/studio/deeper").await;
+        assert!(deeper.starts_with("HTTP/1.1 404"), "{deeper}");
+        assert!(deeper.ends_with("demo true: module not found"), "{deeper}");
+        let outside = send_to(false, &get_request("/elsewhere")).await;
+        assert!(
+            outside.ends_with("demo false: module not found"),
+            "{outside}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_sites_not_found_page_is_html_marked_for_its_environment() {
+        for demo in [true, false] {
+            let response = super::not_found(demo);
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+            assert_eq!(
+                response.headers().get(header::CONTENT_TYPE).unwrap(),
+                "text/html; charset=utf-8"
+            );
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            let body = String::from_utf8(body.to_vec()).unwrap();
+            assert!(body.contains("Nothing is at this address."), "{body}");
+            assert_eq!(body.contains("Demo."), demo, "{body}");
+        }
+    }
+
+    /// A route at a name a tenant could hold would hide that tenant (#90), so each of the site's own routes
+    /// starts with a segment no slug may be.
+    #[test]
+    fn every_route_the_site_serves_starts_with_a_reserved_name() {
+        for (path, _) in site_routes(true) {
+            let segment = path.trim_start_matches('/').split('/').next().unwrap_or("");
+            if !segment.is_empty() {
+                assert!(tetsu_tenancy::Slug::parse(segment).is_err(), "{path}");
+            }
+        }
     }
 
     #[tokio::test]
@@ -273,7 +362,12 @@ mod tests {
         let shutdown = async {
             let _ = stopped.await;
         };
-        let server = tokio::spawn(run(listener, app(module(), true), shutdown, grace));
+        let server = tokio::spawn(run(
+            listener,
+            app(module(), true, not_found),
+            shutdown,
+            grace,
+        ));
         (address, stop, server)
     }
 

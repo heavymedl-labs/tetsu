@@ -309,6 +309,49 @@ async fn a_bad_stored_row_is_an_error_not_a_bad_page() {
     ));
 }
 
+/// A site route always wins over a tenant's address, so a stored address a later release reserves would hide its
+/// tenant without a word; the composition root asks for them before serving (#90).
+#[tokio::test]
+async fn stored_addresses_reserved_since_are_found() {
+    let (store, settings) = store_and_settings().await;
+    store
+        .create(&tenant("sample-studio", &[]))
+        .await
+        .expect("creates");
+    assert_eq!(
+        store.reserved_addresses_in_use().await.expect("checks"),
+        Vec::<String>::new()
+    );
+    let client = tetsu_postgres::connect(&settings).await.expect("connects");
+    client
+        .batch_execute("UPDATE tenancy.addresses SET address = '/login'")
+        .await
+        .expect("stores an address reserved since");
+    assert_eq!(
+        store.reserved_addresses_in_use().await.expect("checks"),
+        ["/login"]
+    );
+}
+
+/// A slug a later release reserves fails when its row is read, rather than showing a page.
+#[tokio::test]
+async fn a_stored_tenant_whose_slug_is_now_reserved_is_an_error() {
+    let (store, settings) = store_and_settings().await;
+    store
+        .create(&tenant("sample-studio", &[]))
+        .await
+        .expect("creates");
+    let client = tetsu_postgres::connect(&settings).await.expect("connects");
+    client
+        .batch_execute("UPDATE tenancy.tenants SET slug = 'assets'")
+        .await
+        .expect("stores a slug reserved since");
+    assert!(matches!(
+        store.resolve("/sample-studio").await,
+        Err(Error::Invalid(message)) if message.contains("reserved")
+    ));
+}
+
 #[tokio::test]
 async fn a_login_refused_by_the_server_is_not_worth_retrying() {
     let (_, settings) = store_and_settings().await;
@@ -410,5 +453,5 @@ async fn every_query_file_prepares() {
             .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
         prepared += 1;
     }
-    assert_eq!(prepared, 5);
+    assert_eq!(prepared, 6);
 }

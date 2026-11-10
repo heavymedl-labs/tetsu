@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Tetsu</title>
+<title>{% block title %}{% endblock %}</title>
 <style>
 body { margin: 0; font: 1rem/1.5 system-ui, sans-serif; color: #111827; background: #FFFFFF; }
 main { padding: 2rem 1rem; max-width: 40rem; margin: 0 auto; }
@@ -11,10 +11,10 @@ main { padding: 2rem 1rem; max-width: 40rem; margin: 0 auto; }
 </style>
 </head>
 <body>
-<!-- demo -->
-<main>
-<h1>Tetsu</h1>
-<p>Software for the businesses people book with, in development.</p>
+{% if demo %}<p class="demo" role="note"><strong>Demo.</strong> The businesses on this site are fictional, made up to
+show what Tetsu does.</p>
+{% endif %}<main>
+{% block main %}{% endblock %}
 </main>
 </body>
 </html>

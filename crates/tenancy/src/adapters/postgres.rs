@@ -21,6 +21,7 @@ const INSERT_ADDRESS: &str = include_str!("../../sql/insert_address.sql");
 const INSERT_LOCATION: &str = include_str!("../../sql/insert_location.sql");
 const FIND_TENANT: &str = include_str!("../../sql/find_tenant_by_address.sql");
 const FIND_LOCATIONS: &str = include_str!("../../sql/find_locations.sql");
+const FIND_ADDRESSES_IN_USE: &str = include_str!("../../sql/find_addresses_in_use.sql");
 /// Marks an error from a cached statement that no longer matches its table (ADR-0011).
 const STALE: &str = "stale cached statement: ";
 /// The Postgres function that raises it, which unlike the message does not change with the server's language.
@@ -170,6 +171,26 @@ impl TenantStore for PostgresTenants {
         let result = find(&client, address).await;
         clear_if_stale(&self.pool, result)
     }
+
+    async fn find_addresses_in_use(&self, addresses: &[String]) -> Result<Vec<String>, Error> {
+        let client = self.pool.get().await.map_err(pool_error)?;
+        let result = addresses_in_use(&client, addresses).await;
+        clear_if_stale(&self.pool, result)
+    }
+}
+
+async fn addresses_in_use(client: &Object, addresses: &[String]) -> Result<Vec<String>, Error> {
+    let statement = client
+        .prepare_cached(FIND_ADDRESSES_IN_USE)
+        .await
+        .map_err(|e| database(&e))?;
+    client
+        .query(&statement, &[&addresses])
+        .await
+        .map_err(|e| database(&e))?
+        .iter()
+        .map(|row| row.try_get("address").map_err(|e| database(&e)))
+        .collect()
 }
 
 /// One transaction, so a failure at any step leaves no tenant, address, or location behind.

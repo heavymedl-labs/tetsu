@@ -14,4 +14,10 @@ pub trait TenantStore {
         &self,
         address: &str,
     ) -> impl Future<Output = Result<Option<Tenant>, Error>> + Send;
+
+    /// Which of these normalized addresses some tenant holds, in no particular order.
+    fn find_addresses_in_use(
+        &self,
+        addresses: &[String],
+    ) -> impl Future<Output = Result<Vec<String>, Error>> + Send;
 }

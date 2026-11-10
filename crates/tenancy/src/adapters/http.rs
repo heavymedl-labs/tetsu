@@ -41,8 +41,9 @@ struct UnavailablePage {
     demo: bool,
 }
 
-/// Serves each tenant's public page at its address, `/<slug>`, and a not found page at every other path. An
-/// address no tenant holds gets the not found page, never another tenant's. With `demo`, every page says it shows
+/// Serves each tenant's public page at its address, `/<slug>`. An address no tenant holds gets the not found
+/// page, never another tenant's. It sets no fallback, since axum allows one per site and the composition root
+/// sets it (#90). With `demo`, every page says it shows
 /// demo businesses and asks search engines not to index it (ADR-0018). A page that could not be loaded is shown
 /// as unavailable, and `report` gets a line for the operator, since where such lines go is the composition
 /// root's choice (#27).
@@ -61,7 +62,6 @@ where
 {
     Router::new()
         .route("/{address}", get(page::<S>))
-        .fallback(fallback::<S>)
         .with_state(Arc::new(Served {
             tenants,
             demo,
@@ -100,10 +100,6 @@ async fn page<S: TenantStore>(
         StatusCode::SERVICE_UNAVAILABLE,
         &UnavailablePage { demo: served.demo },
     )
-}
-
-async fn fallback<S>(State(served): State<Arc<Served<S>>>) -> Response {
-    not_found(served.demo)
 }
 
 /// What the operator sees when a page could not be loaded. Both parts are escaped, so an address or a server
@@ -193,6 +189,15 @@ mod tests {
                 Some(Failure::Stall) => std::future::pending().await,
                 None => Ok(self.tenants.lock().unwrap().get(address).cloned()),
             }
+        }
+
+        fn find_addresses_in_use(
+            &self,
+            addresses: &[String],
+        ) -> impl Future<Output = Result<Vec<String>, Error>> + Send {
+            let tenants = self.tenants.lock().unwrap();
+            let held = addresses.iter().filter(|a| tenants.contains_key(*a));
+            std::future::ready(Ok(held.cloned().collect()))
         }
     }
 
@@ -320,6 +325,18 @@ mod tests {
         );
     }
 
+    /// Axum panics when two merged routers both have a fallback, so the site sets the only one (#90).
+    #[tokio::test]
+    async fn the_router_leaves_the_fallback_to_the_site() {
+        let names = [("anvil-row", "Anvil Row Strength")];
+        let site = Router::new()
+            .fallback(|| async { (StatusCode::NOT_FOUND, "site") })
+            .merge(serving(None, &names).await);
+        let (status, _, body) = get(site, "/anvil-row/extra").await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(body, "site");
+    }
+
     #[tokio::test]
     async fn the_public_router_serves_tenant_pages() {
         let tenants = Tenants::new(Memory::default());
@@ -348,7 +365,6 @@ mod tests {
         let names = [("anvil-row", "Anvil Row Strength")];
         for path in [
             "/nobody",
-            "/anvil-row/extra",
             "/anvil-row-",
             "/%20anvil-row%0A",
             "/%FF",

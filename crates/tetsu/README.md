@@ -11,7 +11,7 @@ names no business.
 | `tetsu migrate` | Runs each module's new migrations |
 | `tetsu seed <file or folder>` | Creates the tenants in seed files, and skips any whose slug exists |
 | `tetsu seed --check <file or folder>` | Checks seed files without a database |
-| `tetsu serve` | Serves the public pages until SIGTERM or SIGINT, then finishes open requests for up to 10 seconds |
+| `tetsu serve` | Serves the public pages until SIGTERM or SIGINT, then finishes open requests for up to 10 seconds. Refuses to start before `migrate`, or while a tenant holds an address now reserved for Tetsu's own pages |
 
 A folder means its `.toml` files at the top level, in name order, leaving out hidden files. One that is not a
 regular file fails the run. Seeding
@@ -46,7 +46,7 @@ Demo businesses live in the `tetsu-demos` repository, one tenant per file
 format = 1
 
 [tenant]
-slug = "sample-studio"    # 1 to 63 lowercase letters, digits, and inner hyphens; registered as address /sample-studio
+slug = "sample-studio"    # 1 to 63 lowercase letters, digits, and inner hyphens, not a reserved name such as assets; address /sample-studio
 name = "Sample Studio"    # 1 to 100 characters
 
 [tenant.theme]

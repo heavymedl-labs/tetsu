@@ -93,6 +93,24 @@ async fn run(command: Command) -> Result<(), String> {
     Ok(())
 }
 
+/// Refuses to serve while a tenant holds an address a reserved name now claims, since a site route would hide
+/// that tenant without a word (#90).
+async fn refuse_reserved_addresses<S: tetsu_tenancy::TenantStore>(
+    tenants: &tetsu_tenancy::Tenants<S>,
+) -> Result<(), String> {
+    let held = tenants
+        .reserved_addresses_in_use()
+        .await
+        .map_err(|error| format!("could not check tenants' addresses: {error}"))?;
+    if held.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "tenants hold addresses reserved for Tetsu's own pages: {}; give each a new address before serving",
+        held.join(", ")
+    ))
+}
+
 /// Serves the public site until asked to stop. Settings are checked and the database reached before it listens,
 /// so a bad setting fails at start rather than on the first request.
 async fn run_serve() -> Result<(), String> {
@@ -100,8 +118,13 @@ async fn run_serve() -> Result<(), String> {
     let demo = settings::demo(|name| std::env::var(name))?;
     let address = settings::listen(|name| std::env::var(name))?;
     let pool = connect().await?;
-    let tenancy = tetsu_tenancy::router(tetsu_tenancy::postgres_store(pool), demo, complain);
-    let app = serve::app(tenancy, demo);
+    let tenants = tetsu_tenancy::postgres_store(pool);
+    refuse_reserved_addresses(&tenants).await?;
+    let app = serve::app(
+        tetsu_tenancy::router(tenants, demo, complain),
+        demo,
+        serve::not_found,
+    );
     let listener = tokio::net::TcpListener::bind(address)
         .await
         .map_err(|error| format!("could not listen on {address}: {error}"))?;

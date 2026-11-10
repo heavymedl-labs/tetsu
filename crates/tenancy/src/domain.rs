@@ -1,6 +1,56 @@
 //! Tenant values. Fields are private, so every value passes its checks when it is made.
 
 const MAX_SLUG: usize = 63;
+
+/// Names no tenant may hold, since a tenant is reached at `/<slug>` and Tetsu's own pages need these, now or
+/// later (#90). Reserved generously before real tenants exist: a name reserved later hides the tenant holding it,
+/// which then fails to load rather than vanishing. The list doubles as the subdomain reserve if #8 picks them.
+const RESERVED: &[&str] = &[
+    // Routes Tetsu serves or plans.
+    "account",
+    "admin",
+    "api",
+    "app",
+    "assets",
+    "auth",
+    "book",
+    "booking",
+    "checkout",
+    "dashboard",
+    "embed",
+    "files",
+    "health",
+    "login",
+    "logout",
+    "media",
+    "oauth",
+    "pay",
+    "register",
+    "settings",
+    "signin",
+    "signout",
+    "signup",
+    "staff",
+    "static",
+    "webhooks",
+    // Tetsu's own pages, and names a subdomain or a person would expect to be Tetsu's.
+    "about",
+    "blog",
+    "contact",
+    "docs",
+    "help",
+    "home",
+    "legal",
+    "mail",
+    "pricing",
+    "privacy",
+    "security",
+    "status",
+    "support",
+    "tetsu",
+    "terms",
+    "www",
+];
 const MAX_NAME: usize = 100;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,13 +171,24 @@ impl TenantId {
     }
 }
 
+/// The address of each reserved name, which no tenant may hold.
+pub(crate) fn reserved_addresses() -> Vec<String> {
+    RESERVED.iter().map(|name| format!("/{name}")).collect()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Slug(String);
 
 impl Slug {
     /// # Errors
-    /// Fails unless the slug is 1 to 63 lowercase letters, digits, and inner hyphens.
+    /// Fails unless the slug is 1 to 63 lowercase letters, digits, and inner hyphens, and not a name reserved for
+    /// Tetsu's own pages.
     pub fn parse(value: &str) -> Result<Self, Error> {
+        if RESERVED.contains(&value) {
+            return Err(Error::Invalid(format!(
+                "slug {value:?} is reserved for Tetsu's own pages"
+            )));
+        }
         let allowed = value
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
@@ -322,6 +383,17 @@ mod tests {
         Theme {
             primary: Color::parse("#3A4250").unwrap(),
             accent: Color::parse("#E5622B").unwrap(),
+        }
+    }
+
+    #[test]
+    fn names_reserved_for_tetsus_own_pages_are_refused() {
+        for reserved in ["assets", "api", "login", "admin", "www", "status", "embed"] {
+            let error = Slug::parse(reserved).unwrap_err().to_string();
+            assert!(error.contains("reserved"), "{reserved}: {error}");
+        }
+        for near in ["assets-co", "my-api", "apis", "login2", "wwww"] {
+            assert_eq!(Slug::parse(near).unwrap().as_str(), near);
         }
     }
 

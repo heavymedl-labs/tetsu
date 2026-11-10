@@ -76,6 +76,25 @@ mod support {
         }
     }
 
+    /// Runs `serve` expecting it to refuse to start, and gives up after 10 seconds, so a server that starts
+    /// anyway fails the test rather than hanging it.
+    pub fn refused(command: &mut Command) -> std::process::Output {
+        let mut child = command
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("the binary runs");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while child.try_wait().expect("checks the child").is_none() {
+            if std::time::Instant::now() > deadline {
+                let _ = child.kill();
+                panic!("serve started instead of refusing");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        child.wait_with_output().expect("collects its output")
+    }
+
     pub fn get(server: &Server, path: &str) -> String {
         let mut stream = TcpStream::connect(("127.0.0.1", server.port)).unwrap();
         write!(
@@ -92,7 +111,7 @@ mod support {
 use std::io::Read;
 use std::process::Command;
 
-use support::{get, ready, start, start_marked, tetsu};
+use support::{get, ready, refused, start, start_marked, tetsu};
 use tetsu_postgres::test_support::fresh_database;
 
 #[tokio::test]
@@ -121,6 +140,12 @@ async fn a_visitor_sees_a_tenants_page_tetsus_page_and_not_found_elsewhere() {
     let missing = get(&server, "/another-studio");
     assert!(missing.starts_with("HTTP/1.1 404"), "{missing}");
     assert!(!missing.contains("Sample Studio"), "{missing}");
+
+    // A deeper path reaches the site's own fallback, and its not found page.
+    let deeper = get(&server, "/sample-studio/extra");
+    assert!(deeper.starts_with("HTTP/1.1 404"), "{deeper}");
+    assert!(deeper.contains("Nothing is at this address."), "{deeper}");
+    assert!(!deeper.contains("Sample Studio"), "{deeper}");
 }
 
 #[cfg(unix)]
@@ -137,6 +162,37 @@ async fn it_stops_cleanly_when_the_host_sends_sigterm() {
     let mut rest = String::new();
     server.stdout.read_to_string(&mut rest).unwrap();
     assert_eq!(rest.trim(), "stopped");
+}
+
+/// Serving checks tenants' addresses before it listens, so a database never migrated stops it at start.
+#[tokio::test]
+async fn it_refuses_to_start_before_migrating() {
+    let database = fresh_database().await.expect("a test database");
+    let output = refused(&mut tetsu(&database, &["serve"]));
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("could not check tenants' addresses"),
+        "{stderr}"
+    );
+}
+
+/// A site route would hide a tenant whose address a later release reserved, so serving refuses to start (#90).
+#[tokio::test]
+async fn it_refuses_to_start_while_a_tenant_holds_a_reserved_address() {
+    let database = fresh_database().await.expect("a test database");
+    ready(&database);
+    tetsu_postgres::connect(&database)
+        .await
+        .expect("connects")
+        .batch_execute("UPDATE tenancy.addresses SET address = '/login'")
+        .await
+        .expect("stores an address reserved since");
+    let output = refused(&mut tetsu(&database, &["serve"]));
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("/login"), "{stderr}");
+    assert!(stderr.contains("reserved"), "{stderr}");
 }
 
 #[tokio::test]
@@ -196,9 +252,16 @@ async fn outside_a_demo_environment_no_page_is_marked_as_a_demo() {
 
 #[tokio::test]
 async fn a_page_that_cannot_load_tells_the_operator_why_but_not_the_visitor() {
-    // Never migrated, so Tenancy's tables do not exist and every lookup fails.
+    // Tenancy's tables go once it is serving, so every lookup fails.
     let database = fresh_database().await.expect("a test database");
+    ready(&database);
     let mut server = start(&database);
+    tetsu_postgres::connect(&database)
+        .await
+        .expect("connects")
+        .batch_execute("DROP SCHEMA tenancy CASCADE")
+        .await
+        .expect("drops Tenancy's tables");
     let page = get(&server, "/sample-studio");
     assert!(page.starts_with("HTTP/1.1 503"), "{page}");
     assert!(!page.contains("relation"), "{page}");
