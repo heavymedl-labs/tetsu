@@ -153,6 +153,7 @@ async fn pending(client: &Client, storage: Storage) -> Result<Vec<&'static Migra
              )"#
         ))
         .await?;
+    client.batch_execute(&read_only_record(schema)).await?;
     let applied = client
         .query(
             &format!(r#"SELECT version, sql FROM "{schema}".migrations"#),
@@ -163,6 +164,31 @@ async fn pending(client: &Client, storage: Storage) -> Result<Vec<&'static Migra
         .map(|row| Ok((row.try_get("version")?, row.try_get("sql")?)))
         .collect::<Result<HashMap<i32, String>, tokio_postgres::Error>>()?;
     new_files(schema, migrations, &applied)
+}
+
+/// Only the runner writes a module's record of applied files. A role given rights on every new table, as the app's
+/// role is through default privileges, keeps reading it but loses every other right, on each run, so a later grant
+/// goes too. It names no role: `PUBLIC` and every role but the owner and the runner lose what the owner granted on
+/// the table, with anything granted on from it. Column grants and grants from other roles are left alone.
+fn read_only_record(schema: &str) -> String {
+    let table = format!(r#""{schema}".migrations"#);
+    let rights = "INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN";
+    format!(
+        r"REVOKE {rights} ON {table} FROM PUBLIC CASCADE;
+        DO $$
+        DECLARE grantee regrole;
+        BEGIN
+          FOR grantee IN
+            SELECT DISTINCT a.grantee::regrole
+            FROM pg_catalog.pg_class c, pg_catalog.aclexplode(c.relacl) a
+            WHERE c.oid = '{table}'::regclass AND a.privilege_type <> 'SELECT'
+              AND a.grantee NOT IN (0, c.relowner)
+              AND a.grantee <> (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = current_user)
+          LOOP
+            EXECUTE format('REVOKE {rights} ON {table} FROM %s CASCADE', grantee);
+          END LOOP;
+        END $$"
+    )
 }
 
 /// The files not yet applied. Fails if an applied file changed or is missing from the code, or a new file comes

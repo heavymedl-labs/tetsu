@@ -38,9 +38,10 @@ on the direct endpoint, never the pooler.
   ALTER DEFAULT PRIVILEGES FOR ROLE tetsu_migrate GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO tetsu_app;
   ALTER DEFAULT PRIVILEGES FOR ROLE tetsu_migrate GRANT USAGE, SELECT ON SEQUENCES TO tetsu_app;
   REVOKE CREATE ON SCHEMA public FROM PUBLIC;
-  -- By hand for each module until #93:
-  REVOKE INSERT, UPDATE, DELETE ON tenancy.migrations FROM tetsu_app;
   ```
+
+  Each module's `migrations` table stays read-only to it, since the migration runner takes back every other right
+  on it.
 
   Its password was generated and set with `ALTER ROLE`, then written only into Render's environment.
 

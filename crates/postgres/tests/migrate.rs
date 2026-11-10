@@ -585,3 +585,69 @@ async fn a_setting_from_a_file_outside_a_transaction_does_not_reach_the_next() {
         .expect("reads");
     assert_eq!(row.try_get::<_, String>("lock_timeout").expect("maps"), "0");
 }
+
+/// The table rights `role` holds on `table`, in Postgres's order.
+async fn rights(
+    client: &tokio_postgres::Client,
+    role: &str,
+    table: &str,
+) -> Result<Vec<String>, tetsu_postgres::Error> {
+    let row = client
+        .query_one(
+            "SELECT coalesce(array_agg(p ORDER BY n), '{}') AS held
+             FROM unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER',
+                               'MAINTAIN']) WITH ORDINALITY AS r(p, n)
+             WHERE has_table_privilege($1, $2, p)",
+            &[&role, &table],
+        )
+        .await?;
+    Ok(row.try_get("held")?)
+}
+
+/// The demo's app role gets rights on every table the migration role creates (#93). It keeps them on a module's
+/// own tables but may only read the record of applied files. A later grant, to it, to `PUBLIC`, or passed on from
+/// it, is taken back on the next run.
+#[tokio::test]
+async fn a_role_with_rights_on_every_new_table_may_only_read_the_record() {
+    let settings = fresh_database().await.expect("a test database");
+    let role = format!("t_app_{}", std::process::id());
+    let admin = connect(&settings).await.expect("connects");
+    admin
+        .batch_execute(&format!(
+            "CREATE ROLE {role};
+             ALTER DEFAULT PRIVILEGES GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON TABLES TO {role}"
+        ))
+        .await
+        .expect("creates the role");
+    // Every result is kept until the role is dropped, so a failure cannot leave it behind in the cluster.
+    let checked = async {
+        migrate(&settings, &[&Fake(&[FIRST])]).await?;
+        let after_create = rights(&admin, &role, "fake.migrations").await?;
+        let own_table = rights(&admin, &role, "fake.a").await?;
+        admin
+            .batch_execute(&format!(
+                "GRANT USAGE ON SCHEMA fake TO {role};
+                 GRANT ALL ON fake.migrations TO {role} WITH GRANT OPTION;
+                 GRANT TRUNCATE ON fake.migrations TO PUBLIC;
+                 SET ROLE {role}; GRANT INSERT ON fake.migrations TO PUBLIC; RESET ROLE"
+            ))
+            .await?;
+        migrate(&settings, &[&Fake(&[FIRST])]).await?;
+        let after_rerun = rights(&admin, &role, "fake.migrations").await?;
+        let public = rights(&admin, "public", "fake.migrations").await?;
+        Ok::<_, tetsu_postgres::Error>((after_create, own_table, after_rerun, public))
+    }
+    .await;
+    admin
+        .batch_execute(&format!("DROP OWNED BY {role}; DROP ROLE {role}"))
+        .await
+        .expect("drops the role");
+    let (after_create, own_table, after_rerun, public) = checked.expect("migrates and checks");
+    assert_eq!(after_create, ["SELECT"]);
+    assert_eq!(
+        own_table,
+        ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE"]
+    );
+    assert_eq!(after_rerun, ["SELECT"]);
+    assert!(public.is_empty(), "{public:?}");
+}
