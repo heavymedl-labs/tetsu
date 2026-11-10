@@ -57,6 +57,7 @@ Web service `tetsu-demo` (`srv-dbp542rbc2fs73962k4g`) in Ohio, on the free insta
   alone exits with status 128.
 - **Environment:** `TETSU_DEMO=true` and `DATABASE_URL`. Render sets `PORT`.
 - **Health check:** `/`.
-- **Free instance:** sleeps after 15 minutes without traffic and takes about a minute to wake.
+- **Free instance:** sleeps after 15 minutes without traffic. Waking takes about 12 seconds, Neon's included, and
+  once in 50 tries took 8 minutes ([test 9](../research/hosting.md#first-deploy-2026-11-09)).
 
 The GitHub repository variable `RENDER_SERVICE_ID` names the service for `deploy.yml`.

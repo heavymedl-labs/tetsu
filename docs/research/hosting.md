@@ -384,7 +384,15 @@ The free setup went live on 2026-11-09 ([demo environment](../operations/demo-en
   application role under row-level security moved to [#8](https://github.com/heavymedl-labs/tetsu/issues/8).
 - **A deploy** bills 33 seconds of job time: finding the CI run's digest, pulling, migrating, and waiting on
   Render, whose own deploy took about 20 seconds.
-- **Test 9, waking from idle,** has not run yet.
+- **Test 9, waking from idle,** ran 50 times from 2026-11-10 00:16 to 14:23 UTC: a request to `/anvil-row` after
+  17 idle minutes each time, so both Render and Neon had slept, then a second request. Each waited at most 120
+  seconds.
+  - 49 woke with a 200 in a median of 12.3 seconds, Neon's wake included; the slowest took 21 seconds. The
+    request after each took 0.15 seconds, so the new process's pool worked at once.
+  - Once, Render took 8 minutes to start the instance: it stopped at 11:59:54, the request came at 12:01:54, and
+    its log shows `serving` at 12:09:54. Both requests timed out, and nothing reached `tetsu`.
+  - No hang reached the database, and no 503 came back, so the pool's `create` timeout never had to act. That
+    leaves ADR-0012's revisit condition unmet. The wake was faster than its "about a minute" expected.
 
 ## Sources
 
