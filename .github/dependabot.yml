@@ -1,6 +1,11 @@
+# Each pull request costs a CI run (ADR-0023), so Actions updates come monthly in one group. Security alerts are
+# on, and automatic security pull requests are off: fixes are made by hand (ADR-0028).
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]

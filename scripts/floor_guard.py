@@ -40,8 +40,10 @@ LINT_CONFIG = {
 PROTECTED = LINT_CONFIG | {
     "scripts/check.sh",
     "scripts/check_coverage.py",
+    "scripts/check_dated_entries.py",
     "scripts/check_doc_sizes.py",
     "scripts/check-adrs.sh",
+    "scripts/check_secrets.py",
     "scripts/scan_secrets.sh",
     "scripts/install-tools.sh",
     "scripts/floor_guard.py",
@@ -55,6 +57,9 @@ PROTECTED = LINT_CONFIG | {
 SCAN_INPUT = re.compile(
     r"(^|/)(\.betterleaks\.toml|\.betterleaksignore|\.gitleaks\.toml|\.gitleaksignore|\.gitattributes)$"
 )
+# cargo-deny's config, and the other files it would read: an ignore entry, renewal, license, or source change
+# needs the maintainer's approval, added or removed (ADR-0028).
+DEPENDENCY_CONFIG = re.compile(r"(^|/)(\.?deny\.toml|\.cargo/deny\.toml|\.?deny\.exceptions\.toml)$")
 # The scan itself and the hooks that run it: one added line, such as an early exit, could switch it off.
 SCAN_FILES = {"scripts/scan_secrets.sh", ".githooks/pre-commit", ".githooks/pre-push"}
 # A line added to a check script that names the scanner could bypass or replace it.
@@ -269,6 +274,16 @@ def scan_secret_files(created, diff):
             yield "binary-change", path, "changed as a binary file, so its lines cannot be checked"
 
 
+def scan_dependency_config(added, removed, created):
+    """Changes to what cargo-deny reads, line by line, and any new file it would read."""
+    for path, text in [*added, *removed]:
+        if DEPENDENCY_CONFIG.search(path):
+            yield "dependency-config-changed", path, text
+    for path in sorted(created):
+        if DEPENDENCY_CONFIG.search(path):
+            yield "dependency-config-changed", path, "new file cargo-deny reads"
+
+
 def exception_rows():
     """Returns the table rows in the Exceptions section of CONSTRAINTS.md today."""
     path = Path("CONSTRAINTS.md")
@@ -326,6 +341,7 @@ def main():
             *scan_protected(added, removed, created),
             *scan_secret_guards(added, removed),
             *scan_secret_files(created, diff),
+            *scan_dependency_config(added, removed, created),
             *scan_constraints(added, removed),
         ]
         if not findings:

@@ -17,6 +17,8 @@ forms, [scripts/scan_secrets.sh](scripts/scan_secrets.sh) finds secrets
 - No unfinished stubs or empty error handlers.
 - No skipped or deleted test without a reason in the commit message.
 - No secrets in source.
+- No dependency with an advisory, a license outside [deny.toml](deny.toml)'s list, or a source other than
+  crates.io, as cargo-deny checks ([ADR-0028](docs/adr/0028-dependency-checks-revised.md)).
 - No bypassing checks with `--no-verify`.
 - `AGENTS.md` stays at or under 100 lines, because agents load it every session.
 - This file is not weakened to make a change pass.

@@ -7,9 +7,13 @@ publish = false
 description = "Stack benchmarks for ADR-0007 and ADR-0008. Not product code."
 
 [dependencies]
-askama = "0.16"
+# Without askama's default config feature, which pulls in the unmaintained basic-toml (RUSTSEC-2026-0374).
+askama = { version = "0.16", default-features = false, features = ["derive", "std"] }
 axum = "0.8"
-actix-web = "4"
+# Without default features, which bring h2 (RUSTSEC-2026-0258). 4.19 is the first that needs actix-http 3.21,
+# past both actix advisories' fixes (RUSTSEC-2026-0446 and -0447), so a later `cargo update` cannot resolve back
+# to them (ADR-0028).
+actix-web = { version = "4.19", default-features = false, features = ["macros"] }
 chrono = "0.4"
 cornucopia = { path = "cornucopia", default-features = false, features = ["deadpool"] }
 deadpool-postgres = "0.14"

@@ -370,6 +370,39 @@ class LintConfig(GuardCase):
         self.assertEqual(self.guard().returncode, 0)
 
 
+class DependencyChecks(GuardCase):
+    """ADR-0028: an ignore entry, renewal, license, or source change in cargo-deny's config needs the
+    maintainer's approval, and so does creating any other file cargo-deny reads."""
+
+    def test_any_changed_line_in_deny_toml_is_flagged(self):
+        for change in ("add", "remove"):
+            with self.subTest(change=change):
+                write(self.repo / "deny.toml", f"one {change}\ntwo\n")
+                self.commit(f"add deny.toml for {change}\n\nFloor-reason: test setup")
+                self.git("tag", "-f", "base")
+                text = f"one {change}\n" if change == "remove" else f"one {change}\ntwo\nthree\n"
+                write(self.repo / "deny.toml", text)
+                self.assertFlags("dependency-config-changed")
+
+    def test_creating_another_file_cargo_deny_reads_is_flagged(self):
+        for path in (
+            "deny.toml",
+            ".deny.toml",
+            ".cargo/deny.toml",
+            "deny.exceptions.toml",
+            ".deny.exceptions.toml",
+            "crates/a/deny.exceptions.toml",
+        ):
+            with self.subTest(path=path):
+                write(self.repo / path, "one\n")
+                self.assertFlags("dependency-config-changed")
+                (self.repo / path).unlink()
+
+    def test_a_file_that_only_mentions_deny_is_not_flagged(self):
+        write(self.repo / "docs" / "deny.md", "one\n")
+        self.assertEqual(self.guard().returncode, 0)
+
+
 class SecretScan(GuardCase):
     """ADR-0027: the scan's inputs change only with the maintainer's approval, in either direction, and
     secrets reach only the deploy workflow."""

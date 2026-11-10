@@ -101,6 +101,20 @@ scripts/check-adrs.sh
 python3 scripts/check_doc_sizes.py
 python3 scripts/check_secrets.py
 
+# Dependencies (ADR-0028). The version is checked, not only that the tool exists. Advisories need the network:
+# when the fetch fails, the check runs offline on a cache deny.toml lets be at most 7 days old.
+if [[ "$(cargo deny --version 2>/dev/null)" != "cargo-deny 0.20.2" ]]; then
+  echo "error: cargo-deny 0.20.2 is needed. Run scripts/install-tools.sh" >&2
+  exit 1
+fi
+offline=()
+if ! cargo deny fetch >/dev/null 2>&1; then
+  echo "warning: could not fetch the advisory database; checking against the cached copy" >&2
+  offline=(--offline)
+fi
+cargo deny ${offline[@]+"${offline[@]}"} check --hide-inclusion-graph -D advisory-not-detected
+python3 scripts/check_dated_entries.py deny.toml advisories ignore
+
 # Limits are in ADR-0015 and ADR-0016. Cargo skips the benchmark harness, except for formatting.
 work="$(mktemp -d)"
 # Drop every test database on the way out, pass or fail. Tests drop their own, but a killed test cannot (#43).

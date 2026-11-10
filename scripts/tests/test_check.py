@@ -12,6 +12,11 @@ from pathlib import Path
 from scripts.tests.support import ROOT, run, write
 
 EXECUTABLE = stat.S_IRWXU
+# Every cargo stand-in reports the cargo-deny version the environment names, and fails a fetch when asked to.
+CARGO_DENY = (
+    'if [ "$1 $2" = "deny --version" ]; then echo "cargo-deny ${DENY_VERSION-0.20.2}"; exit 0; fi\n'
+    'if [ "$1 $2" = "deny fetch" ]; then exit "${DENY_FETCH-0}"; fi\n'
+)
 
 
 class CheckScript(unittest.TestCase):
@@ -53,7 +58,8 @@ class CheckScript(unittest.TestCase):
     no_database = False
 
     def stub(self, name, body):
-        write(self.bin / name, f"#!/bin/sh\n{body}\n", EXECUTABLE)
+        prefix = CARGO_DENY if name == "cargo" else ""
+        write(self.bin / name, f"#!/bin/sh\n{prefix}{body}\n", EXECUTABLE)
 
     def check(self, *args, nvm_dir=None, **env):
         return run(
@@ -75,6 +81,8 @@ class CheckScript(unittest.TestCase):
             "unittest",
             "adrs",
             "check_doc_sizes.py",
+            "cargo deny check --hide-inclusion-graph -D advisory-not-detected",
+            "check_dated_entries.py deny.toml advisories",
             "markdownlint-cli2",
             "cargo fmt --all --check",
             "cargo clippy",
@@ -95,6 +103,20 @@ class CheckScript(unittest.TestCase):
             "cargo mutants",
         ):
             self.assertIn(stage, log)
+
+    def test_cargo_deny_must_be_the_pinned_version(self):
+        for version in ("0.20.1", ""):
+            with self.subTest(version=version):
+                result = self.check(DENY_VERSION=version)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("cargo-deny 0.20.2 is needed", result.stderr)
+                self.assertNotIn("cargo llvm-cov", self.log.read_text())
+
+    def test_without_the_network_dependencies_are_checked_against_the_cache(self):
+        result = self.check(DENY_FETCH="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("cached copy", result.stderr)
+        self.assertIn("cargo deny --offline check", self.log.read_text())
 
     def test_fast_mode_runs_only_formatters_and_linters(self):
         result = self.check("--fast")

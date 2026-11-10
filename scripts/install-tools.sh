@@ -5,6 +5,7 @@ cd "$(dirname "$0")/.."
 
 cargo install --locked --version 0.9.1 cargo-llvm-cov
 cargo install --locked --version 27.1.0 cargo-mutants
+cargo install --locked --version 0.20.2 cargo-deny
 # Branch coverage needs a nightly compiler (ADR-0020). rustup makes the first toolchain it installs the default
 # when none is set, which would change what this machine builds with everywhere, so that is undone.
 had_default=true

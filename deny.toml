@@ -1,0 +1,49 @@
+# Dependency checks (ADR-0028), run by scripts/check.sh. Every rule is set here, since several of cargo-deny's
+# defaults only warn. Any changed line needs a Floor-reason: trailer.
+
+[graph]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+]
+all-features = false
+
+[advisories]
+# A vulnerability always fails; these make unmaintained, unsound, and yanked crates fail too.
+unmaintained = "all"
+unsound = "all"
+yanked = "deny"
+# Offline, a cached database older than this fails.
+maximum-db-staleness = "P7D"
+# Each entry is a table whose reason ends "Tracked in #<issue>. Review by <YYYY-MM-DD>.", which check.sh reads.
+ignore = [
+    { id = "RUSTSEC-2025-0057", reason = "fxhash, unmaintained, comes only through monoio in the benchmark harness. Tracked in #94. Review by 2026-12-10." },
+    { id = "RUSTSEC-2026-0441", reason = "pin-utils, unmaintained, comes only through monoio in the benchmark harness. Tracked in #94. Review by 2026-12-10." },
+]
+
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.93
+# Our own crates are unpublished.
+private = { ignore = true }
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
