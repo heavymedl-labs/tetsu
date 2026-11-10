@@ -20,6 +20,10 @@ and CONSTRAINTS.md, then the issue and the diff. Also answer:
 6. Does the change meet each ASVS requirement the issue names, and at least Level 1 of every ASVS
    chapter that applies to the code it changes (Level 2 for Tier 1 code)? Which apply but the issue
    left out? See ADR-0029.
+7. For a page or component, compare it with its nearest Tailwind Plus counterpart, through the
+   tailwind-plus skill's local library. Where does it fall short on spacing, type, behavior at each
+   breakpoint, states, accessibility, or either color scheme? Does any of it copy Tailwind Plus
+   markup? See ADR-0035.
 
 Report only critical and required findings, with no nits, style, or optional suggestions.
 Say what you could not check.

@@ -40,6 +40,7 @@ number, and add a row below. Never renumber.
 | [0032](0032-styling-engine.md) | Styling engine | Styling pages or templates, or using Tailwind Plus | Accepted |
 | [0033](0033-deploys-on-demand.md) | Deploys on demand | Deploying, rolling back, or publishing the image | Accepted |
 | [0034](0034-front-end-build.md) | Front-end build | Building or serving front-end assets, or adding a Node tool | Accepted |
+| [0035](0035-component-sources-and-look.md) | Component sources and look | Building a page or component, or choosing colors or type | Accepted |
 
 ## Open decisions
 

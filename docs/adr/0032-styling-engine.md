@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-09
 - Standalone CLI and build script superseded by [ADR-0034](0034-front-end-build.md)
+- Tailwind Plus as a source, and the `dark` variant being off, superseded by [ADR-0035](0035-component-sources-and-look.md)
 
 ## Context
 
