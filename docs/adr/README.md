@@ -68,6 +68,10 @@ option for most of them.
 - [Landing page framework and host](https://github.com/heavymedl-labs/tetsu/issues/32)
 - [Load test tools, latency budgets, and memory measurement](https://github.com/heavymedl-labs/tetsu/issues/37)
 - [The benchmark image tag rule, proposed as ADR-0022](https://github.com/heavymedl-labs/tetsu/issues/75)
+- [Whether the benchmark harness keeps monoio](https://github.com/heavymedl-labs/tetsu/issues/94)
+- [How long to override markdownlint-cli2's vulnerable dependencies](https://github.com/heavymedl-labs/tetsu/issues/95)
+- [Object storage for files](https://github.com/heavymedl-labs/tetsu/issues/99)
+- [Whether a CDN serves Tetsu's assets and pages](https://github.com/heavymedl-labs/tetsu/issues/100)
 
 ## Finding sources
 
