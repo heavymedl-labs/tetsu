@@ -1,6 +1,6 @@
 # 0034. Front-end build
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-10
 - Supersedes the standalone CLI and its build script in [ADR-0032](0032-styling-engine.md)
 
