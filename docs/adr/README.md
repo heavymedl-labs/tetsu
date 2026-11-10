@@ -39,6 +39,7 @@ number, and add a row below. Never renumber.
 | [0031](0031-front-end-model-revised.md) | Front-end model, revised | Building pages, islands, themes, embeds, or the security headers | Accepted |
 | [0032](0032-styling-engine.md) | Styling engine | Styling pages or templates, or using Tailwind Plus | Accepted |
 | [0033](0033-deploys-on-demand.md) | Deploys on demand | Deploying, rolling back, or publishing the image | Accepted |
+| [0034](0034-front-end-build.md) | Front-end build | Building or serving front-end assets, or adding a Node tool | Proposed |
 
 ## Open decisions
 
