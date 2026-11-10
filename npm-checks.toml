@@ -1,0 +1,41 @@
+# npm checks (ADR-0034), run by scripts/check_npm.py from scripts/check.sh. Any changed line needs a
+# Floor-reason: trailer. Dated lists are one-line tables whose reason ends
+# "Tracked in #<issue>. Review by <YYYY-MM-DD>.", which scripts/check_dated_entries.py reads.
+
+[licenses]
+# ADR-0028's list, and four more. MPL-2.0 is Lightning CSS, which Vite and Tailwind use to write our CSS; it asks
+# only that changes to its own files be shared, and we change none. 0BSD is tslib, and Python-2.0 and PSF-2.0
+# are argparse, which markdownlint-cli2 uses.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "CDLA-Permissive-2.0",
+    "0BSD",
+    "MPL-2.0",
+    "Python-2.0",
+    "PSF-2.0",
+]
+
+[advisories]
+# An advisory we cannot clear, by its GHSA id.
+ignore = [
+]
+
+[overrides]
+# Each entry in package.json's overrides, by package name: a fix the direct dependency lacks.
+entries = [
+    { id = "katex", reason = "markdownlint-cli2 0.24.0 brings 0.16.47, which has GHSA-238p-pmpm-9mq7. Tracked in #95. Review by 2026-12-10." },
+    { id = "re2js", reason = "markdownlint-cli2 0.24.0 brings 2.8.6, which has GHSA-gg6h-894w-4m9c. Tracked in #95. Review by 2026-12-10." },
+]
+
+[install-scripts]
+# Each locked package with an install script, which package.json's allowScripts denies, so it never runs.
+denied = [
+    # An optional macOS file watcher that Vite works without.
+    "fsevents",
+]

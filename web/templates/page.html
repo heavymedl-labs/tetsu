@@ -1,0 +1,26 @@
+{#- The shell of every page Tetsu renders, which each crate's templates extend (ADR-0031's base layer). A page's
+    struct gives `demo` and `stylesheet`, the shared sheet's hashed URL; a tenant's page adds its theme sheet in
+    the `head` block, after the shared one, so its colors win. -#}
+<!doctype html>
+<html lang="en" class="h-full bg-white">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{% endblock %}</title>
+{% if demo %}<meta name="robots" content="noindex">{% endif %}
+<link rel="stylesheet" href="{{ stylesheet }}">
+{% block head %}{% endblock %}
+</head>
+<body class="flex min-h-full flex-col font-sans text-gray-900 antialiased">
+{% if demo %}<div class="border-b border-amber-200 bg-amber-50 px-6 py-2.5 sm:px-3.5">
+<p role="note" class="text-center text-sm/6 text-amber-900">{% block demo %}<strong>Demo.</strong> The businesses on
+this site are fictional, made up to show what Tetsu does.{% endblock %}</p>
+</div>
+{% endif %}{% block body %}{% endblock %}
+{% block footer %}<footer class="border-t border-gray-100 bg-white">
+<div class="mx-auto max-w-7xl px-6 py-10 text-center text-sm/6 text-gray-600 lg:px-8">
+<p>Runs on <a href="/" class="font-semibold text-gray-900 hover:text-gray-600">Tetsu</a></p>
+</div>
+</footer>{% endblock %}
+</body>
+</html>

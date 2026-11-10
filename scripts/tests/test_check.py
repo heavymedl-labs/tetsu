@@ -33,10 +33,34 @@ class CheckScript(unittest.TestCase):
         self.stub("node", "echo v26.1.0")
         for tool in ("npx", "cargo", "cargo-llvm-cov", "cargo-mutants"):
             self.stub(tool, f'echo "{tool} $*" >> "{self.log}"')
+        write(self.root / "package.json", '{\n  "packageManager": "npm@11.20.0"\n}\n')
+        write(self.root / "package-lock.json", "{}\n")
+        write(self.root / "crates" / "tetsu" / "assets" / "build" / "a.css", "built\n")
+        # npm reports its version and an audit, and its install makes node_modules.
+        self.stub(
+            "npm",
+            'case "$1" in --version) echo "${NPM_VERSION-11.20.0}";; '
+            f'audit) echo "{{}}"; echo "npm $*" >> "{self.log}";; ls) exit "${{NPM_LS-0}}";; '
+            f'ci) [ -n "${{NPM_CI_FAILS-}}" ] && exit 1; mkdir -p node_modules; '
+            f'echo "npm $*" >> "{self.root / "installs"}";; esac',
+        )
+        # A build copies the committed one, unless the test says it differs.
+        self.stub(
+            "npx",
+            'if [ "$2" = vite ]; then out=""; prev=""; for a in "$@"; do [ "$prev" = --outDir ] && out="$a"; '
+            'prev="$a"; done; mkdir -p "$out"; cp -R crates/tetsu/assets/build/. "$out"; '
+            '[ -n "${BUILD_DIFFERS-}" ] && echo x > "$out/b.css"; fi\n'
+            f'echo "npx $*" >> "{self.log}"',
+        )
         # Cargo also logs its build folder, which the nightly pass keeps apart.
         self.stub("cargo", f'echo "cargo $* dir=${{CARGO_TARGET_DIR-}}" >> "{self.log}"')
         self.stub("rustup", 'echo "llvm-tools-x86_64-unknown-linux-gnu"')
-        self.stub("python3", f'echo "python $1 $2 $3" >> "{self.log}"')
+        # The npm check exits with the status the environment names, as when the registry cannot be reached.
+        self.stub(
+            "python3",
+            f'echo "python $1 $2 $3" >> "{self.log}"\n'
+            'if [ "$1 $3" = "scripts/check_npm.py --audit" ]; then exit "${NPM_CHECK-0}"; fi',
+        )
         self.stub(
             "git",
             'if [ "$1" = merge-base ]; then echo abc; else echo "$@" >> "'
@@ -83,6 +107,15 @@ class CheckScript(unittest.TestCase):
             "check_doc_sizes.py",
             "cargo deny check --hide-inclusion-graph -D advisory-not-detected",
             "check_dated_entries.py deny.toml advisories",
+            "check_dated_entries.py npm-checks.toml advisories",
+            "check_dated_entries.py npm-checks.toml overrides",
+            "check_npm.py . --audit",
+            "check_templates.py",
+            "npm audit --json --include=dev",
+            "vite build",
+            "biome check --error-on-warnings",
+            "tsc -p .",
+            "lizard -l typescript",
             "markdownlint-cli2",
             "cargo fmt --all --check",
             "cargo clippy",
@@ -118,6 +151,62 @@ class CheckScript(unittest.TestCase):
         self.assertIn("cached copy", result.stderr)
         self.assertIn("cargo deny --offline check", self.log.read_text())
 
+    def test_npm_must_be_the_version_package_json_names(self):
+        result = self.check(NPM_VERSION="11.19.0")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("npm 11.20.0 is required", result.stderr)
+
+    def test_the_tree_is_installed_without_scripts_only_when_the_lockfile_changes(self):
+        installs = self.root / "installs"
+        self.assertEqual(self.check("--fast").returncode, 0)
+        self.assertEqual(
+            installs.read_text(),
+            "npm ci --ignore-scripts --include=dev --no-audit --no-fund --loglevel=error\n",
+        )
+        self.check("--fast")
+        self.assertEqual(len(installs.read_text().splitlines()), 1)
+        write(self.root / "package-lock.json", '{"changed": true}\n')
+        self.check("--fast")
+        self.assertEqual(len(installs.read_text().splitlines()), 2)
+
+    def test_a_failed_install_says_what_to_run(self):
+        result = self.check("--fast", NPM_CI_FAILS="1")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("npm ci --ignore-scripts --include=dev", result.stderr)
+
+    def test_a_node_modules_changed_by_hand_fails(self):
+        result = self.check(NPM_LS="1")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("does not match package-lock.json", result.stderr)
+
+    def test_a_pass_of_another_lockfile_or_older_than_7_days_does_not_count(self):
+        self.assertEqual(self.check().returncode, 0)
+        stamp = self.root / ".tools" / "npm-audit-pass"
+        lock_sum, passed_at = stamp.read_text().split()
+        for text in (f"{'0' * 64} {passed_at}", f"{lock_sum} {int(passed_at) - 7 * 86400 - 60}"):
+            with self.subTest(stamp=text):
+                stamp.write_text(text + "\n")
+                result = self.check(NPM_CHECK="3")
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn("no passing check in 7 days", result.stderr)
+
+    def test_without_the_registry_a_recent_pass_of_the_same_lockfile_counts(self):
+        result = self.check(NPM_CHECK="3")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("no passing check in 7 days", result.stderr)
+        self.assertEqual(self.check().returncode, 0)
+        result = self.check(NPM_CHECK="3")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("using the last passing check", result.stderr)
+
+    def test_a_failing_npm_check_fails(self):
+        self.assertEqual(self.check(NPM_CHECK="1").returncode, 1)
+
+    def test_a_committed_build_that_differs_from_a_clean_one_fails(self):
+        result = self.check(BUILD_DIFFERS="1")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("differs from a clean build", result.stderr)
+
     def test_fast_mode_runs_only_formatters_and_linters(self):
         result = self.check("--fast")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -132,6 +221,7 @@ class CheckScript(unittest.TestCase):
             "squawk",
             "sqlfluff lint",
             "markdownlint-cli2",
+            "check_templates.py",
             "scan --staged",
         ):
             self.assertIn(stage, log)

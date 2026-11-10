@@ -1,0 +1,22 @@
+/* Tetsu's shared stylesheet (ADR-0032). Tailwind reads only templates, each crate's and the shared ones, and a
+   tenant's colors come from the --tetsu-* properties its theme sheet sets after this one. */
+@import "tailwindcss" source(none);
+@source "../../crates/*/templates/**/*.html";
+@source "../templates/**/*.html";
+
+/* No dark set exists in the tokens yet, so dark: classes from a snippet match nothing. */
+@custom-variant dark (&:where([data-tetsu-dark-is-off]));
+
+@theme inline {
+  --color-primary: var(--tetsu-color-primary);
+  --color-on-primary: var(--tetsu-color-on-primary);
+  --color-accent: var(--tetsu-color-accent);
+  --color-on-accent: var(--tetsu-color-on-accent);
+}
+
+:root {
+  --tetsu-color-primary: #1f2937;
+  --tetsu-color-on-primary: #ffffff;
+  --tetsu-color-accent: #2563eb;
+  --tetsu-color-on-accent: #ffffff;
+}

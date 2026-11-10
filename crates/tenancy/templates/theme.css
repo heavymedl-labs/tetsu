@@ -1,0 +1,6 @@
+{#- A tenant's colors as the tokens the shared stylesheet reads (ADR-0032). Color::parse allows only #RRGGBB,
+    so a value cannot leave its declaration. -#}
+:root {
+  --tetsu-color-primary: {{ primary }};
+  --tetsu-color-accent: {{ accent }};
+}

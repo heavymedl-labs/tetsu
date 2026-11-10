@@ -1,4 +1,22 @@
-{% extends "base.html" %}
+{% extends "../../../web/templates/page.html" %}
 {% block title %}Tetsu{% endblock %}
-{% block main %}<h1>Tetsu</h1>
-<p>Software for the businesses people book with, in development.</p>{% endblock %}
+{% block body %}
+<main class="relative isolate flex-1 px-6 lg:px-8">
+<div aria-hidden="true" class="absolute inset-x-0 -top-40 -z-10 transform-gpu overflow-hidden blur-3xl sm:-top-80">
+<div class="relative left-[calc(50%-11rem)] aspect-1155/678 w-144.5 -translate-x-1/2 rotate-30 bg-linear-to-tr from-[#ff80b5] to-[#9089fc] opacity-30 [clip-path:polygon(74.1%_44.1%,100%_61.6%,97.5%_26.9%,85.5%_0.1%,80.7%_2%,72.5%_32.5%,60.2%_62.4%,52.4%_68.1%,47.5%_58.3%,45.2%_34.5%,27.5%_76.7%,0.1%_64.9%,17.9%_100%,27.6%_76.8%,76.1%_97.7%,74.1%_44.1%)] sm:left-[calc(50%-30rem)] sm:w-288.75"></div>
+</div>
+<div class="mx-auto max-w-2xl py-32 sm:py-48 lg:py-56">
+<div class="mb-8 flex justify-center">
+<p class="rounded-full px-3 py-1 text-sm/6 text-gray-600 ring-1 ring-gray-900/10">In development</p>
+</div>
+<div class="text-center">
+<div class="text-5xl font-semibold tracking-tight text-balance text-gray-900 sm:text-7xl"><h1>Tetsu</h1></div>
+<p class="mt-8 text-lg font-medium text-pretty text-gray-500 sm:text-xl/8">Software for the businesses people book with:
+classes, appointments, memberships, and payments, for studios, gyms, and salons.</p>
+</div>
+</div>
+<div aria-hidden="true" class="absolute inset-x-0 top-[calc(100%-13rem)] -z-10 transform-gpu overflow-hidden blur-3xl sm:top-[calc(100%-30rem)]">
+<div class="relative left-[calc(50%+3rem)] aspect-1155/678 w-144.5 -translate-x-1/2 bg-linear-to-tr from-[#ff80b5] to-[#9089fc] opacity-30 [clip-path:polygon(74.1%_44.1%,100%_61.6%,97.5%_26.9%,85.5%_0.1%,80.7%_2%,72.5%_32.5%,60.2%_62.4%,52.4%_68.1%,47.5%_58.3%,45.2%_34.5%,27.5%_76.7%,0.1%_64.9%,17.9%_100%,27.6%_76.8%,76.1%_97.7%,74.1%_44.1%)] sm:left-[calc(50%+36rem)] sm:w-288.75"></div>
+</div>
+</main>
+{% endblock %}

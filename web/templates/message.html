@@ -1,0 +1,13 @@
+{#- A page that only says why there is nothing to show, after Tailwind Plus's simple 404 page. -#}
+{% macro message(code, title, text) %}
+<main class="grid flex-1 place-items-center bg-white px-6 py-24 sm:py-32 lg:px-8">
+<div class="text-center">
+<p class="text-base font-semibold text-accent">{{ code }}</p>
+<div class="mt-4 text-5xl font-semibold tracking-tight text-balance text-gray-900 sm:text-7xl"><h1>{{ title }}</h1></div>
+<div class="mt-6 text-lg font-medium text-pretty text-gray-500 sm:text-xl/8"><p>{{ text }}</p></div>
+<div class="mt-10 flex items-center justify-center">
+<a href="/" class="rounded-md bg-gray-900 px-3.5 py-2.5 text-sm font-semibold text-white shadow-xs hover:bg-gray-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-900">Go to Tetsu</a>
+</div>
+</div>
+</main>
+{% endmacro %}

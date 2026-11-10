@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "../../../web/templates/page.html" %}
+{% import "../../../web/templates/message.html" as page %}
 {% block title %}Not found{% endblock %}
-{% block main %}<h1>Not found</h1>
-<p>Nothing is at this address. <a href="/">Tetsu</a></p>{% endblock %}
+{% block body %}{% call page::message("404", "Not found", "Nothing is at this address.") %}{% endcall %}{% endblock %}

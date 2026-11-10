@@ -37,6 +37,8 @@ on every push.
 | SQL | SQLFluff, and Squawk on migrations | Module tests against Postgres | E4 | E4 | E4 | [#25](https://github.com/heavymedl-labs/tetsu/issues/25) |
 | Bash | shfmt, ShellCheck | `unittest`, from Python | E2 | E2 | E2 | E2 |
 | Python | Ruff | `unittest` | E2 | E2 | Ruff | E2 |
+| Askama templates | `scripts/check_templates.py`: classes the built stylesheet defines, no inline styles ([ADR-0032](docs/adr/0032-styling-engine.md)) | The Rust tests that render each page | Gap | jscpd | Gap | Gap |
+| TypeScript and CSS | Biome, and `tsc --noEmit` for types ([ADR-0034](docs/adr/0034-front-end-build.md)) | E5 | E5 | jscpd | lizard | E5 |
 
 Docs and workflows have no row, because tests and complexity do not apply. What runs on them today
 is in [AGENTS.md](AGENTS.md#checks), and docs also get the
@@ -55,3 +57,4 @@ is in [AGENTS.md](AGENTS.md#checks), and docs also get the
 | E1 | Scripts need tests | `scripts/generate-brand.py` | One-off generator, and its output is checked by eye | Maintainer | 2027-02-04 |
 | E2 | Bash and Python coverage, duplication, and boundaries, and Bash complexity | `scripts/` | Tooling only, with no numeric limit, and too small to justify more tools yet, so the fresh review covers these | Maintainer | 2027-02-04 |
 | E4 | SQL coverage, duplication, and complexity | `crates/` | No good tool fits: module tests run every query against Postgres, and the fresh review covers the rest | Maintainer | 2027-02-04 |
+| E5 | TypeScript and CSS tests, coverage, and boundaries | `web/` | Only build configuration and the shared stylesheet exist; the first island ([#88](https://github.com/heavymedl-labs/tetsu/issues/88)) fills these | Maintainer | 2027-02-10 |

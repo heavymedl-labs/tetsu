@@ -4,3 +4,4 @@
 mutants.out*
 .tools
 docs
+node_modules

@@ -3268,6 +3268,7 @@ dependencies = [
  "askama",
  "axum",
  "serde",
+ "serde_json",
  "tetsu-kernel",
  "tetsu-postgres",
  "tetsu-tenancy",

@@ -1,0 +1,11 @@
+{
+  "src/tetsu.css": {
+    "file": "assets/tetsu-CA-FW2Uw.css",
+    "name": "tetsu",
+    "names": [
+      "tetsu.css"
+    ],
+    "src": "src/tetsu.css",
+    "isEntry": true
+  }
+}

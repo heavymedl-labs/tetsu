@@ -10,12 +10,20 @@ publish.workspace = true
 askama.workspace = true
 axum.workspace = true
 serde.workspace = true
+# The manifest reader build.rs shares is compiled here too, so its tests and mutants cover it; the binary uses none
+# of it.
+serde_json.workspace = true
 tetsu-kernel.workspace = true
 tetsu-postgres.workspace = true
 tetsu-tenancy.workspace = true
 # Signals to stop serving, and a channel to bound the drain once stopping.
 tokio = { workspace = true, features = ["signal", "sync"] }
 toml.workspace = true
+
+[build-dependencies]
+# Reads Vite's manifest, to embed the front-end build (ADR-0034).
+serde.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 # Reading and writing sockets in its tests.

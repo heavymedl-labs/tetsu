@@ -1,5 +1,12 @@
 //! The composition root (ADR-0003).
 
+mod assets;
+// build.rs embeds the front-end build with it. Compiled here too, its tests and mutants cover it.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "only build.rs and the tests call it")
+)]
+mod manifest;
 mod seed;
 mod serve;
 mod settings;
@@ -121,7 +128,7 @@ async fn run_serve() -> Result<(), String> {
     let tenants = tetsu_tenancy::postgres_store(pool);
     refuse_reserved_addresses(&tenants).await?;
     let app = serve::app(
-        tetsu_tenancy::router(tenants, demo, complain),
+        tetsu_tenancy::router(tenants, demo, assets::STYLESHEET, complain),
         demo,
         serve::not_found,
     );

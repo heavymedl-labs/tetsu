@@ -117,6 +117,14 @@ Spikes in scratch folders, installed with `--ignore-scripts`:
   `noUndeclaredDependencies` with `devDependencies: false` failed a file in `src/` that imported `vite`, while the
   config could.
 
+## Reading the manifest in Rust
+
+ADR-0010 steps 1, 4, and 7 for `serde_json`, read 2026-11-10. It must parse Vite's JSON manifest in `build.rs`
+and in the crate's tests. It is already in the lockfile through the benchmark harness. License MIT or Apache-2.0;
+version 1.0.154; 1.6 billion downloads, 422 million in the last 90 days; last push 2026-10-16, with 251 open
+issues; by serde's maintainers. The binary calls none of it, so the linker drops it. A hand-written parser would
+avoid the dependency but repeat what serde already does, for a file Vite controls.
+
 ## Where it stands
 
 Options 1 and 2 both meet C1, C2, C3 (shared code checked for Vite, and for esbuild with its splitting), and C5.

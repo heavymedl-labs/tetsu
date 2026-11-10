@@ -6,7 +6,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 wanted="$(cat .nvmrc)"
-right_node() { [[ "$(node --version 2>/dev/null)" == "v$wanted."* ]]; }
+# .nvmrc names an exact release, which fixes npm's version too, or a major version.
+right_node() {
+  local found
+  found="$(node --version 2>/dev/null)"
+  [[ "$found" == "v$wanted" || "$found" == "v$wanted."* ]]
+}
 nvm_script="${NVM_DIR:-$HOME/.nvm}/nvm.sh"
 
 if ! right_node && [[ -s "$nvm_script" ]]; then
@@ -20,6 +25,24 @@ fi
 if ! right_node; then
   echo "error: Node $wanted is required. Install it, for example: nvm install $wanted" >&2
   exit 1
+fi
+# npm is checked like cargo-deny, against the version package.json names (ADR-0034).
+wanted_npm="$(sed -n 's/.*"packageManager": *"npm@\([0-9.]*\)".*/\1/p' package.json)"
+if [[ "$(npm --version 2>/dev/null)" != "$wanted_npm" ]]; then
+  echo "error: npm $wanted_npm is required, the one Node $wanted bundles" >&2
+  exit 1
+fi
+# The tree the lockfile names, installed without scripts whatever .npmrc or the environment say, and only when the
+# lockfile has changed since the last install, so the hooks, CI, and a run by hand all use the same tree.
+lock_sum="$( (sha256sum package-lock.json 2>/dev/null || shasum -a 256 package-lock.json) | cut -d' ' -f1)"
+# Development packages are installed and audited whatever NODE_ENV or an omit setting says, since every one is.
+if [[ "$(cat node_modules/.tetsu-lock 2>/dev/null)" != "$lock_sum" ]]; then
+  if ! npm ci --ignore-scripts --include=dev --no-audit --no-fund --loglevel=error; then
+    echo "error: could not install the Node tools, which needs the network once per lockfile change." >&2
+    echo "Run: npm ci --ignore-scripts --include=dev" >&2
+    exit 1
+  fi
+  echo "$lock_sum" >node_modules/.tetsu-lock
 fi
 
 fast=false
@@ -66,7 +89,13 @@ lint() {
   if ((${#sql[@]} > 0)); then
     .tools/bin/sqlfluff lint "${sql[@]}"
   fi
-  npx --yes markdownlint-cli2@0.24.0 "**/*.md"
+  npx --no-install markdownlint-cli2 "**/*.md"
+  npx --no-install biome check --error-on-warnings
+  npx --no-install tsc -p .
+  # Templates use only classes the committed build defines, and no inline styles (ADR-0032).
+  local templates=()
+  while IFS= read -r file; do templates+=("$file"); done < <(find crates web -path '*/templates/*.html' | sort)
+  python3 scripts/check_templates.py crates/tetsu/assets/build/assets/tetsu-*.css ${templates[@]+"${templates[@]}"}
 }
 
 lint
@@ -114,6 +143,8 @@ if ! cargo deny fetch >/dev/null 2>&1; then
 fi
 cargo deny ${offline[@]+"${offline[@]}"} check --hide-inclusion-graph -D advisory-not-detected
 python3 scripts/check_dated_entries.py deny.toml advisories ignore
+python3 scripts/check_dated_entries.py npm-checks.toml advisories ignore
+python3 scripts/check_dated_entries.py npm-checks.toml overrides entries
 
 # Limits are in ADR-0015 and ADR-0016. Cargo skips the benchmark harness, except for formatting.
 work="$(mktemp -d)"
@@ -128,6 +159,37 @@ finish() {
   exit "$status"
 }
 trap finish EXIT
+
+# npm dependencies (ADR-0034). Advisories and deprecations need the network: when the audit or the registry cannot
+# be reached, the last passing check of the same lockfile counts for 7 days, and everything else still runs.
+audit_stamp=.tools/npm-audit-pass
+# A node_modules changed by hand, such as with npm install --no-save, no longer matches the lockfile.
+if ! npm ls --all --include=dev >/dev/null 2>&1; then
+  echo "error: node_modules does not match package-lock.json. Run: npm ci --ignore-scripts --include=dev" >&2
+  exit 1
+fi
+npm audit --json --include=dev >"$work/audit.json" 2>/dev/null || true
+npm_status=0
+python3 scripts/check_npm.py . --audit "$work/audit.json" || npm_status=$?
+if ((npm_status == 0)); then
+  echo "$lock_sum $(date -u +%s)" >"$audit_stamp"
+elif ((npm_status == 3)); then
+  read -r passed_sum passed_at <"$audit_stamp" 2>/dev/null || true
+  if [[ "${passed_sum:-}" != "$lock_sum" ]] || (($(date -u +%s) - ${passed_at:-0} > 7 * 86400)); then
+    echo "error: npm advisories could not be checked, and this lockfile has no passing check in 7 days" >&2
+    exit 1
+  fi
+  echo "warning: npm advisories could not be checked; using the last passing check of this lockfile" >&2
+  python3 scripts/check_npm.py .
+else
+  exit "$npm_status"
+fi
+# The committed build matches a clean one, including files added or removed (ADR-0034).
+npx --no-install vite build --config web/vite.config.ts --outDir "$work/build" --emptyOutDir --logLevel error
+if ! diff -r "$work/build" crates/tetsu/assets/build >/dev/null; then
+  echo "error: crates/tetsu/assets/build differs from a clean build. Run npm run build and commit it" >&2
+  exit 1
+fi
 cargo llvm-cov --json --summary-only --output-path "$work/coverage.json"
 # Coverage runs no doc tests, and some prove what must not compile, such as a module's port being out of reach
 # (ADR-0021). Stable proves the examples on the toolchain we ship; only nightly's rustdoc checks the error code
@@ -142,7 +204,8 @@ CARGO_TARGET_DIR=target/nightly cargo +"$nightly" llvm-cov --branch --json --sum
   --output-path "$work/branches.json"
 python3 scripts/check_coverage.py --branches "$work/metadata.json" "$work/branches.json"
 .tools/bin/lizard -l rust -C 10 -L 50 -a 5 -w crates
-npx --yes jscpd@5.4.2 crates --threshold 0 --ignore "**/tests/**" --reporters console
+.tools/bin/lizard -l typescript -C 10 -L 50 -a 5 -w web
+npx --no-install jscpd crates web --threshold 0 --ignore "**/tests/**,**/assets/build/**" --reporters console
 
 base="origin/main"
 if [[ "${1:-}" == "--base" ]]; then

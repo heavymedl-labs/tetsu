@@ -8,7 +8,8 @@ a request reaches.
 
 - **`resolve`.** Every request finds its tenant by address: one indexed lookup and one location query.
   Benchmarks come with [#37](https://github.com/heavymedl-labs/tetsu/issues/37).
-- **The public page.** `router` serves `GET /<slug>`: one `resolve`, then an Askama render. A lookup that
+- **The public page.** `router` serves `GET /<slug>`: one `resolve`, then an Askama render. Its colors come
+  from `GET /<slug>/theme.css`, a small sheet of the tenant's tokens, kept for 5 minutes. A lookup that
   takes over 5 seconds, or fails, gets an unavailable page without the detail.
   It sets no fallback: the site sets the one axum allows. Names Tetsu's own pages need, such as `assets` and
   `login`, are reserved, so no slug can be one. `reserved_addresses_in_use` finds stored addresses a later

@@ -17,6 +17,7 @@ scan's inputs.
 
 import argparse
 import codecs
+import json
 import os
 import re
 import subprocess
@@ -41,6 +42,8 @@ PROTECTED = LINT_CONFIG | {
     "scripts/check.sh",
     "scripts/check_coverage.py",
     "scripts/check_dated_entries.py",
+    "scripts/check_npm.py",
+    "scripts/check_templates.py",
     "scripts/check_doc_sizes.py",
     "scripts/check-adrs.sh",
     "scripts/check_secrets.py",
@@ -60,6 +63,10 @@ SCAN_INPUT = re.compile(
 # cargo-deny's config, and the other files it would read: an ignore entry, renewal, license, or source change
 # needs the maintainer's approval, added or removed (ADR-0028).
 DEPENDENCY_CONFIG = re.compile(r"(^|/)(\.?deny\.toml|\.cargo/deny\.toml|\.?deny\.exceptions\.toml)$")
+# npm's configuration, its exceptions and licenses, and the TypeScript and Biome configuration (ADR-0034).
+NPM_CONFIG = re.compile(r"(^|/)(\.npmrc|npm-checks\.toml|biome\.jsonc?|tsconfig[^/]*\.json)$")
+# What package.json runs, overrides, or pins: any change needs a reason, while a version bump does not.
+PACKAGE_FIELDS = ("overrides", "allowScripts", "scripts", "packageManager", "engines")
 # The scan itself and the hooks that run it: one added line, such as an early exit, could switch it off.
 SCAN_FILES = {"scripts/scan_secrets.sh", ".githooks/pre-commit", ".githooks/pre-push"}
 # A line added to a check script that names the scanner could bypass or replace it.
@@ -284,6 +291,23 @@ def scan_dependency_config(added, removed, created):
             yield "dependency-config-changed", path, "new file cargo-deny reads"
 
 
+def scan_npm_config(added, removed, created, merge_base):
+    """Changes to npm's or TypeScript's configuration, line by line, and to what package.json runs."""
+    for path, text in [*added, *removed]:
+        if NPM_CONFIG.search(path):
+            yield "npm-config-changed", path, text
+    for path in sorted(created):
+        if NPM_CONFIG.search(path):
+            yield "npm-config-changed", path, "new npm or TypeScript config"
+    if not Path("package.json").exists():
+        return
+    before = json.loads(git("show", f"{merge_base}:package.json", allowed=(0, 128)) or "{}")
+    after = json.loads(Path("package.json").read_text())
+    for field in PACKAGE_FIELDS:
+        if before.get(field) != after.get(field):
+            yield "npm-config-changed", "package.json", f"{field} changed"
+
+
 def exception_rows():
     """Returns the table rows in the Exceptions section of CONSTRAINTS.md today."""
     path = Path("CONSTRAINTS.md")
@@ -342,6 +366,7 @@ def main():
             *scan_secret_guards(added, removed),
             *scan_secret_files(created, diff),
             *scan_dependency_config(added, removed, created),
+            *scan_npm_config(added, removed, created, merge_base),
             *scan_constraints(added, removed),
         ]
         if not findings:

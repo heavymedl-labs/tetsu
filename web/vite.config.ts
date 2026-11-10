@@ -1,0 +1,24 @@
+// Builds the assets of Tetsu's own pages (ADR-0034). The output is committed and embedded by the tetsu crate.
+import { resolve } from "node:path";
+import tailwindcss from "@tailwindcss/vite";
+import { defineConfig } from "vite";
+
+const here = import.meta.dirname;
+
+export default defineConfig({
+  root: here,
+  base: "/",
+  publicDir: false,
+  plugins: [tailwindcss()],
+  build: {
+    outDir: resolve(here, "../crates/tetsu/assets/build"),
+    // Nothing else writes there, so each build empties it and no old file is left behind.
+    emptyOutDir: true,
+    manifest: true,
+    // Every asset stays a file: the policy blocks the data: URIs Vite otherwise makes of small ones.
+    assetsInlineLimit: 0,
+    rolldownOptions: {
+      input: { tetsu: resolve(here, "src/tetsu.css") },
+    },
+  },
+});

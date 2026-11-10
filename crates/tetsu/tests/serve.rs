@@ -141,6 +141,19 @@ async fn a_visitor_sees_a_tenants_page_tetsus_page_and_not_found_elsewhere() {
     assert!(missing.starts_with("HTTP/1.1 404"), "{missing}");
     assert!(!missing.contains("Sample Studio"), "{missing}");
 
+    // The tenant's colors come as a stylesheet of their own, never sniffed as anything else.
+    let theme = get(&server, "/sample-studio/theme.css");
+    assert!(theme.starts_with("HTTP/1.1 200"), "{theme}");
+    let theme_head = theme.to_ascii_lowercase();
+    assert!(
+        theme_head.contains("content-type: text/css; charset=utf-8"),
+        "{theme}"
+    );
+    assert!(
+        theme_head.contains("x-content-type-options: nosniff"),
+        "{theme}"
+    );
+
     // A deeper path reaches the site's own fallback, and its not found page.
     let deeper = get(&server, "/sample-studio/extra");
     assert!(deeper.starts_with("HTTP/1.1 404"), "{deeper}");

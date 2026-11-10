@@ -23,48 +23,75 @@ const RESOLVE_TIMEOUT: Duration = Duration::from_secs(5);
 #[template(path = "tenant.html")]
 struct TenantPage<'a> {
     demo: bool,
+    stylesheet: &'static str,
+    theme: String,
     name: &'a str,
+    locations: Vec<&'a str>,
+}
+
+/// A tenant's colors, loaded after the shared stylesheet so they win (ADR-0032).
+#[derive(Template)]
+#[template(path = "theme.css", escape = "none")]
+struct ThemeSheet<'a> {
     primary: &'a str,
     accent: &'a str,
-    locations: Vec<&'a str>,
 }
 
 #[derive(Template)]
 #[template(path = "not_found.html")]
 struct NotFoundPage {
     demo: bool,
+    stylesheet: &'static str,
 }
 
 #[derive(Template)]
 #[template(path = "unavailable.html")]
 struct UnavailablePage {
     demo: bool,
+    stylesheet: &'static str,
 }
+
+/// A theme is data that can change, so it is kept only briefly.
+const THEME_CACHE: &str = "public, max-age=300";
 
 /// Serves each tenant's public page at its address, `/<slug>`. An address no tenant holds gets the not found
 /// page, never another tenant's. It sets no fallback, since axum allows one per site and the composition root
 /// sets it (#90). With `demo`, every page says it shows
 /// demo businesses and asks search engines not to index it (ADR-0018). A page that could not be loaded is shown
 /// as unavailable, and `report` gets a line for the operator, since where such lines go is the composition
-/// root's choice (#27).
-pub fn router<S>(tenants: Tenants<S>, demo: bool, report: fn(&str)) -> Router
+/// root's choice (#27). Each page links `stylesheet`, the shared sheet's URL, which the composition root knows,
+/// and a tenant's page links its own theme sheet, `/<slug>/theme.css`, after it.
+pub fn router<S>(
+    tenants: Tenants<S>,
+    demo: bool,
+    stylesheet: &'static str,
+    report: fn(&str),
+) -> Router
 where
     S: TenantStore + Send + Sync + 'static,
 {
-    routes(tenants, demo, RESOLVE_TIMEOUT, report)
+    routes(tenants, demo, stylesheet, RESOLVE_TIMEOUT, report)
 }
 
 /// The router, with the time a lookup may take and where failures are reported as parameters, so tests need not
 /// wait out the real timeout and can read what the operator would see.
-fn routes<S>(tenants: Tenants<S>, demo: bool, timeout: Duration, report: fn(&str)) -> Router
+fn routes<S>(
+    tenants: Tenants<S>,
+    demo: bool,
+    stylesheet: &'static str,
+    timeout: Duration,
+    report: fn(&str),
+) -> Router
 where
     S: TenantStore + Send + Sync + 'static,
 {
     Router::new()
         .route("/{address}", get(page::<S>))
+        .route("/{address}/theme.css", get(theme::<S>))
         .with_state(Arc::new(Served {
             tenants,
             demo,
+            stylesheet,
             timeout,
             report,
         }))
@@ -73,6 +100,7 @@ where
 struct Served<S> {
     tenants: Tenants<S>,
     demo: bool,
+    stylesheet: &'static str,
     timeout: Duration,
     report: fn(&str),
 }
@@ -81,25 +109,70 @@ async fn page<S: TenantStore>(
     State(served): State<Arc<Served<S>>>,
     segment: Result<Path<String>, PathRejection>,
 ) -> Response {
+    match lookup(&served, segment).await {
+        Ok(tenant) => show(&tenant, &served),
+        Err(response) => *response,
+    }
+}
+
+async fn theme<S: TenantStore>(
+    State(served): State<Arc<Served<S>>>,
+    segment: Result<Path<String>, PathRejection>,
+) -> Response {
+    let tenant = match lookup(&served, segment).await {
+        Ok(tenant) => tenant,
+        Err(response) => return *response,
+    };
+    theme_sheet(&tenant)
+}
+
+/// A tenant's theme sheet. Rendering a compiled template fails only if writing fails, as for pages.
+fn theme_sheet(tenant: &Tenant) -> Response {
+    let theme = tenant.theme();
+    let sheet = ThemeSheet {
+        primary: theme.primary.as_str(),
+        accent: theme.accent.as_str(),
+    };
+    sheet.render().map_or_else(
+        |_| StatusCode::SERVICE_UNAVAILABLE.into_response(),
+        |body| {
+            let headers = [
+                (header::CONTENT_TYPE, "text/css; charset=utf-8"),
+                (header::CACHE_CONTROL, THEME_CACHE),
+            ];
+            (headers, body).into_response()
+        },
+    )
+}
+
+/// The tenant at a path segment, or the page to show instead: not found for an address no tenant holds, and
+/// unavailable when the lookup fails or takes too long.
+async fn lookup<S: TenantStore>(
+    served: &Served<S>,
+    segment: Result<Path<String>, PathRejection>,
+) -> Result<Tenant, Box<Response>> {
     // A path that does not decode, such as one that is not UTF-8, is no tenant's address.
     let Ok(Path(segment)) = segment else {
-        return not_found(served.demo);
+        return Err(Box::new(not_found(served)));
     };
     let address = format!("/{segment}");
     let failure = match tokio::time::timeout(served.timeout, served.tenants.resolve(&address)).await
     {
-        Ok(Ok(tenant)) => return show(&tenant, served.demo),
-        Ok(Err(Error::NotFound)) => return not_found(served.demo),
+        Ok(Ok(tenant)) => return Ok(tenant),
+        Ok(Err(Error::NotFound)) => return Err(Box::new(not_found(served))),
         Ok(Err(error)) => error.to_string(),
         Err(_) => format!("no answer within {} seconds", served.timeout.as_secs_f32()),
     };
     // The page says only that it is unavailable, since the detail could name the database. The operator gets
     // the detail on stderr; where logs go is #27's decision.
     (served.report)(&failure_line(&address, &failure));
-    html(
+    Err(Box::new(html(
         StatusCode::SERVICE_UNAVAILABLE,
-        &UnavailablePage { demo: served.demo },
-    )
+        &UnavailablePage {
+            demo: served.demo,
+            stylesheet: served.stylesheet,
+        },
+    )))
 }
 
 /// What the operator sees when a page could not be loaded. Both parts are escaped, so an address or a server
@@ -112,13 +185,12 @@ fn failure_line(address: &str, failure: &str) -> String {
     )
 }
 
-fn show(tenant: &Tenant, demo: bool) -> Response {
-    let theme = tenant.theme();
+fn show<S>(tenant: &Tenant, served: &Served<S>) -> Response {
     let page = TenantPage {
-        demo,
+        demo: served.demo,
+        stylesheet: served.stylesheet,
+        theme: format!("{}/theme.css", tenant.slug().address()),
         name: tenant.name(),
-        primary: theme.primary.as_str(),
-        accent: theme.accent.as_str(),
         locations: tenant
             .locations()
             .iter()
@@ -128,8 +200,14 @@ fn show(tenant: &Tenant, demo: bool) -> Response {
     html(StatusCode::OK, &page)
 }
 
-fn not_found(demo: bool) -> Response {
-    html(StatusCode::NOT_FOUND, &NotFoundPage { demo })
+fn not_found<S>(served: &Served<S>) -> Response {
+    html(
+        StatusCode::NOT_FOUND,
+        &NotFoundPage {
+            demo: served.demo,
+            stylesheet: served.stylesheet,
+        },
+    )
 }
 
 /// Renders a page as HTML. A template that fails to render, which a compiled template does only if writing
@@ -157,6 +235,9 @@ mod tests {
     use tokio::net::{TcpListener, TcpStream};
 
     use super::*;
+
+    /// Stands in for the shared stylesheet's hashed URL, which the composition root passes.
+    const STYLESHEET: &str = "/assets/tetsu-test.css";
     use crate::domain::{Color, Location, NewTenant, Slug, TenantId, Theme};
 
     /// Tenants kept in memory, keyed by address, with a switch that makes every lookup fail or stall.
@@ -221,7 +302,13 @@ mod tests {
         for (slug, name) in names {
             tenants.create(&tenant(slug, name)).await.unwrap();
         }
-        routes(tenants, true, Duration::from_millis(100), record)
+        routes(
+            tenants,
+            true,
+            STYLESHEET,
+            Duration::from_millis(100),
+            record,
+        )
     }
 
     static REPORTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -232,6 +319,20 @@ mod tests {
 
     /// Serves the app on a port of its own and sends it one HTTP/1.1 request, as a browser would.
     async fn get(app: Router, path: &str) -> (StatusCode, Option<String>, String) {
+        let (status, head, body) = fetch(app, path).await;
+        (status, header_in(&head, "content-type"), body)
+    }
+
+    /// One header's value from a raw response head.
+    fn header_in(head: &str, name: &str) -> Option<String> {
+        head.lines()
+            .filter_map(|line| line.split_once(": "))
+            .find(|(found, _)| found.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.to_string())
+    }
+
+    /// Sends one request over a real socket, and returns the status, the raw head, and the body.
+    async fn fetch(app: Router, path: &str) -> (StatusCode, String, String) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -241,20 +342,42 @@ mod tests {
         let mut raw = String::new();
         stream.read_to_string(&mut raw).await.unwrap();
         let (head, body) = raw.split_once("\r\n\r\n").unwrap();
-        let mut lines = head.lines();
-        let code = lines
-            .next()
-            .unwrap()
-            .split(' ')
-            .nth(1)
-            .unwrap()
-            .parse()
-            .unwrap();
-        let kind = lines
-            .filter_map(|line| line.split_once(": "))
-            .find(|(name, _)| name.eq_ignore_ascii_case("content-type"))
-            .map(|(_, value)| value.to_string());
-        (StatusCode::from_u16(code).unwrap(), kind, body.to_string())
+        let code = head.split(' ').nth(1).unwrap().parse().unwrap();
+        (
+            StatusCode::from_u16(code).unwrap(),
+            head.to_string(),
+            body.to_string(),
+        )
+    }
+
+    /// The theme is data: its own small sheet, after the shared one, kept only briefly (ADR-0032).
+    #[tokio::test]
+    async fn a_tenants_theme_sheet_sets_its_colors_and_is_kept_briefly() {
+        let app = serving(None, &[("anvil-row", "Anvil Row Strength")]).await;
+        let (status, head, sheet) = fetch(app, "/anvil-row/theme.css").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            header_in(&head, "content-type").as_deref(),
+            Some("text/css; charset=utf-8")
+        );
+        assert_eq!(
+            header_in(&head, "cache-control").as_deref(),
+            Some("public, max-age=300")
+        );
+        assert!(sheet.contains("--tetsu-color-primary: #3A4250;"), "{sheet}");
+        assert!(sheet.contains("--tetsu-color-accent: #E5622B;"), "{sheet}");
+    }
+
+    #[tokio::test]
+    async fn an_unknown_tenants_theme_sheet_is_not_found() {
+        let (status, _, _) = get(serving(None, &[]).await, "/nobody/theme.css").await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let (status, _, _) = get(
+            serving(Some(Failure::Storage), &[]).await,
+            "/anvil-row/theme.css",
+        )
+        .await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     }
 
     #[tokio::test]
@@ -266,8 +389,8 @@ mod tests {
         assert!(body.contains("<h1>Anvil Row Strength</h1>"), "{body}");
         assert!(body.contains("<li>Downtown</li>"), "{body}");
         assert!(body.contains("<li>Northside</li>"), "{body}");
-        assert!(body.contains("--primary: #3A4250"), "{body}");
-        assert!(body.contains("--accent: #E5622B"), "{body}");
+        assert!(body.contains(r#"href="/assets/tetsu-test.css""#), "{body}");
+        assert!(body.contains(r#"href="/anvil-row/theme.css""#), "{body}");
         assert!(body.contains("Demo business."), "{body}");
         assert!(
             body.contains(r#"<meta name="robots" content="noindex">"#),
@@ -282,7 +405,13 @@ mod tests {
             .create(&tenant("anvil-row", "Anvil Row Strength"))
             .await
             .unwrap();
-        let app = routes(tenants, false, Duration::from_millis(100), record);
+        let app = routes(
+            tenants,
+            false,
+            STYLESHEET,
+            Duration::from_millis(100),
+            record,
+        );
         let (status, _, body) = get(app, "/anvil-row").await;
         assert_eq!(status, StatusCode::OK);
         assert!(body.contains("<h1>Anvil Row Strength</h1>"), "{body}");
@@ -290,7 +419,13 @@ mod tests {
         assert!(!body.contains("noindex"), "{body}");
         let tenants = Tenants::new(Memory::default());
         let (status, _, body) = get(
-            routes(tenants, false, Duration::from_millis(100), record),
+            routes(
+                tenants,
+                false,
+                STYLESHEET,
+                Duration::from_millis(100),
+                record,
+            ),
             "/nobody",
         )
         .await;
@@ -344,7 +479,7 @@ mod tests {
             .create(&tenant("anvil-row", "Anvil Row Strength"))
             .await
             .unwrap();
-        let (status, _, body) = get(router(tenants, true, record), "/anvil-row").await;
+        let (status, _, body) = get(router(tenants, true, STYLESHEET, record), "/anvil-row").await;
         assert_eq!(status, StatusCode::OK);
         assert!(body.contains("<h1>Anvil Row Strength</h1>"), "{body}");
     }

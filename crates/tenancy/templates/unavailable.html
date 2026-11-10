@@ -1,8 +1,4 @@
-{% extends "base.html" %}
+{% extends "../../../web/templates/page.html" %}
+{% import "../../../web/templates/message.html" as page %}
 {% block title %}Unavailable{% endblock %}
-{% block body %}
-<main>
-<h1>Unavailable</h1>
-<p>This page could not be loaded just now. Try again in a minute.</p>
-</main>
-{% endblock %}
+{% block body %}{% call page::message("503", "Unavailable", "This page could not be loaded just now. Try again in a minute.") %}{% endcall %}{% endblock %}

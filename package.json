@@ -1,0 +1,32 @@
+{
+  "name": "tetsu-tools",
+  "private": true,
+  "description": "Every Node tool Tetsu uses, at exact versions (ADR-0034). Nothing here ships to production.",
+  "type": "module",
+  "packageManager": "npm@11.20.0",
+  "engines": {
+    "node": "26.13.0",
+    "npm": "11.20.0"
+  },
+  "scripts": {
+    "build": "vite build --config web/vite.config.ts",
+    "watch": "vite build --watch --config web/vite.config.ts"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.6",
+    "@tailwindcss/vite": "4.3.5",
+    "@types/node": "26.6.6",
+    "jscpd": "5.4.2",
+    "markdownlint-cli2": "0.24.0",
+    "tailwindcss": "4.3.5",
+    "typescript": "7.0.2",
+    "vite": "8.3.7"
+  },
+  "overrides": {
+    "katex": "0.18.2",
+    "re2js": "2.8.7"
+  },
+  "allowScripts": {
+    "fsevents": false
+  }
+}

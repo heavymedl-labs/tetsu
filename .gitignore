@@ -2,3 +2,4 @@
 __pycache__/
 /.tools
 /mutants.out*
+/node_modules

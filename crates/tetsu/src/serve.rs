@@ -4,8 +4,11 @@ use std::future::{Future, IntoFuture};
 use std::time::Duration;
 
 use askama::Template;
+
+use crate::assets;
 use axum::Router;
-use axum::extract::State;
+use axum::extract::rejection::PathRejection;
+use axum::extract::{Path, State};
 use axum::http::{HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{MethodRouter, get};
@@ -15,6 +18,7 @@ use axum::routing::{MethodRouter, get};
 #[template(path = "home.html")]
 struct HomePage {
     demo: bool,
+    stylesheet: &'static str,
 }
 
 /// The site's page for a path nothing answers.
@@ -22,14 +26,15 @@ struct HomePage {
 #[template(path = "not_found.html")]
 struct NotFoundPage {
     demo: bool,
+    stylesheet: &'static str,
 }
 
 /// How long requests in progress may take to finish once the server is asked to stop. A client that never
 /// finishes its request cannot hold the server open past it.
 pub const GRACE: Duration = Duration::from_secs(10);
 
-/// Sent with every response (ADR-0029). The pages run no scripts and load nothing from elsewhere, so the policy
-/// allows only their own inline styles, and no site may frame them (ADR-0030). HSTS lasts a year, the least ASVS
+/// Sent with every response (ADR-0029). The pages run no scripts and load only Tetsu's own stylesheets, so the
+/// policy allows nothing else, not even an inline style, and no site may frame them (ADR-0030). HSTS lasts a year, the least ASVS
 /// 3.4.1 allows.
 const HEADERS: [(HeaderName, &str); 5] = [
     (
@@ -39,11 +44,14 @@ const HEADERS: [(HeaderName, &str); 5] = [
     (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
     (
         header::CONTENT_SECURITY_POLICY,
-        "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+        "default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
     ),
     (header::REFERRER_POLICY, "no-referrer"),
     (header::X_FRAME_OPTIONS, "DENY"),
 ];
+
+/// A hashed file changes name whenever it changes, so it may be kept for a year (ADR-0034).
+const IMMUTABLE: &str = "public, max-age=31536000, immutable";
 
 /// The whole site: its own routes, then the modules' routers, then `not_found` at any path none of them
 /// answers, which is [`not_found`] outside tests. Modules set no fallback, since axum panics when two merged
@@ -61,7 +69,28 @@ pub fn app(modules: Router, demo: bool, not_found: fn(bool) -> Response) -> Rout
 /// The site's page for a path nothing answers. It is the site's own, since a module's page would speak for
 /// every other module's paths too.
 pub fn not_found(demo: bool) -> Response {
-    html(StatusCode::NOT_FOUND, &NotFoundPage { demo })
+    html(
+        StatusCode::NOT_FOUND,
+        &NotFoundPage {
+            demo,
+            stylesheet: assets::STYLESHEET,
+        },
+    )
+}
+
+/// A built file at the exact path the manifest names; any other path under `/assets/` is not found.
+fn asset(file: &str, demo: bool) -> Response {
+    let Some(found) = assets::find(&format!("/assets/{file}")) else {
+        return not_found(demo);
+    };
+    (
+        [
+            (header::CONTENT_TYPE, found.content_type),
+            (header::CACHE_CONTROL, IMMUTABLE),
+        ],
+        found.bytes,
+    )
+        .into_response()
 }
 
 /// Renders one of the site's pages. A compiled template fails only if writing fails, so a failure gets a bare
@@ -83,10 +112,27 @@ fn html(status: StatusCode, page: &impl Template) -> Response {
 /// name no tenant may hold, which a test checks, so none hides a tenant. Routes in the modules' routers are not
 /// checked yet; #20, the first module to add top-level routes, adds that check.
 fn site_routes(demo: bool) -> Vec<(&'static str, MethodRouter)> {
-    vec![(
-        "/",
-        get(move || std::future::ready(html(StatusCode::OK, &HomePage { demo }))),
-    )]
+    vec![
+        (
+            "/",
+            get(move || {
+                let page = HomePage {
+                    demo,
+                    stylesheet: assets::STYLESHEET,
+                };
+                std::future::ready(html(StatusCode::OK, &page))
+            }),
+        ),
+        (
+            "/assets/{file}",
+            get(move |file: Result<Path<String>, PathRejection>| {
+                // A path that does not decode, such as one that is not UTF-8, names no built file.
+                std::future::ready(
+                    file.map_or_else(|_| not_found(demo), |Path(file)| asset(&file, demo)),
+                )
+            }),
+        ),
+    ]
 }
 
 async fn secure(State(demo): State<bool>, mut response: Response) -> Response {
@@ -184,7 +230,7 @@ mod tests {
         ("x-content-type-options", "nosniff"),
         (
             "content-security-policy",
-            "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+            "default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
         ),
         ("referrer-policy", "no-referrer"),
         ("x-frame-options", "DENY"),
@@ -290,6 +336,33 @@ mod tests {
             let body = String::from_utf8(body.to_vec()).unwrap();
             assert!(body.contains("Nothing is at this address."), "{body}");
             assert_eq!(body.contains("Demo."), demo, "{body}");
+        }
+    }
+
+    /// Built files are served at the exact paths Vite's manifest names, kept for a year (ADR-0034).
+    #[tokio::test]
+    async fn the_built_stylesheet_is_served_as_css_and_kept_for_a_year() {
+        let raw = get_path(assets::STYLESHEET).await;
+        assert!(raw.starts_with("HTTP/1.1 200"), "{raw}");
+        assert_eq!(
+            header_of(&raw, "content-type"),
+            Some("text/css; charset=utf-8")
+        );
+        assert_eq!(
+            header_of(&raw, "cache-control"),
+            Some("public, max-age=31536000, immutable")
+        );
+        assert!(raw.contains("--tetsu-color-primary"), "{raw}");
+        assert_eq!(header_of(&raw, "x-content-type-options"), Some("nosniff"));
+        for path in [
+            "/assets/tetsu.css",
+            "/assets/missing-AbC123.css",
+            "/assets/",
+            "/assets/%FF.css",
+        ] {
+            let raw = get_path(path).await;
+            assert!(raw.starts_with("HTTP/1.1 404"), "{path}: {raw}");
+            assert_eq!(header_of(&raw, "cache-control"), None, "{path}");
         }
     }
 

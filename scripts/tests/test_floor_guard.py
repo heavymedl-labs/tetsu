@@ -2,6 +2,7 @@
 
 import contextlib
 import io
+import json
 import os
 import sys
 import tempfile
@@ -401,6 +402,52 @@ class DependencyChecks(GuardCase):
     def test_a_file_that_only_mentions_deny_is_not_flagged(self):
         write(self.repo / "docs" / "deny.md", "one\n")
         self.assertEqual(self.guard().returncode, 0)
+
+
+class NpmChecks(GuardCase):
+    """ADR-0034: npm's configuration, its exceptions and licenses, and the TypeScript and Biome configuration
+    change only with the maintainer's approval, in either direction."""
+
+    def test_any_changed_line_in_the_npm_config_is_flagged(self):
+        for path in (".npmrc", "npm-checks.toml", "biome.json", "tsconfig.json"):
+            for change in ("add", "remove"):
+                with self.subTest(path=path, change=change):
+                    write(self.repo / path, f"one {change}\ntwo\n")
+                    self.commit(f"add {path} for {change}\n\nFloor-reason: test setup")
+                    self.git("tag", "-f", "base")
+                    text = f"one {change}\n" if change == "remove" else f"one {change}\ntwo\nthree\n"
+                    write(self.repo / path, text)
+                    self.assertFlags("npm-config-changed")
+
+    def test_creating_npm_or_typescript_config_anywhere_is_flagged(self):
+        for path in ("web/.npmrc", "web/biome.jsonc", "web/tsconfig.app.json", "npm-checks.toml"):
+            with self.subTest(path=path):
+                write(self.repo / path, "one\n")
+                self.assertFlags("npm-config-changed")
+                (self.repo / path).unlink()
+
+    def test_a_change_to_what_package_json_runs_or_overrides_is_flagged(self):
+        base = {"devDependencies": {"a": "1.0.0"}, "overrides": {"b": "2.0.0"}, "allowScripts": {"c": False}}
+        write(self.repo / "package.json", json.dumps(base, indent=2) + "\n")
+        self.commit("add package.json\n\nFloor-reason: test setup")
+        self.git("tag", "-f", "base")
+        for field, value in (
+            ("overrides", {"b": "2.0.1"}),
+            ("allowScripts", {"c": True}),
+            ("scripts", {"postinstall": "curl x"}),
+            ("packageManager", "npm@11.0.0"),
+            ("engines", {"node": "20"}),
+        ):
+            with self.subTest(field=field):
+                write(self.repo / "package.json", json.dumps({**base, field: value}) + "\n")
+                self.assertFlags("npm-config-changed")
+
+    def test_a_version_bump_in_package_json_is_not_flagged(self):
+        write(self.repo / "package.json", '{"devDependencies": {"a": "1.0.0"}}\n')
+        self.commit("add package.json\n\nFloor-reason: test setup")
+        self.git("tag", "-f", "base")
+        write(self.repo / "package.json", '{"devDependencies": {"a": "1.0.1"}}\n')
+        self.assertEqual(self.guard().returncode, 0, self.guard().stderr)
 
 
 class SecretScan(GuardCase):
