@@ -623,7 +623,6 @@ async fn a_role_with_rights_on_every_new_table_may_only_read_the_record() {
     let checked = async {
         migrate(&settings, &[&Fake(&[FIRST])]).await?;
         let after_create = rights(&admin, &role, "fake.migrations").await?;
-        let own_table = rights(&admin, &role, "fake.a").await?;
         admin
             .batch_execute(&format!(
                 "GRANT USAGE ON SCHEMA fake TO {role};
@@ -635,6 +634,8 @@ async fn a_role_with_rights_on_every_new_table_may_only_read_the_record() {
         migrate(&settings, &[&Fake(&[FIRST])]).await?;
         let after_rerun = rights(&admin, &role, "fake.migrations").await?;
         let public = rights(&admin, "public", "fake.migrations").await?;
+        // The runner only takes rights away, so its own table checked after both runs covers each.
+        let own_table = rights(&admin, &role, "fake.a").await?;
         Ok::<_, tetsu_postgres::Error>((after_create, own_table, after_rerun, public))
     }
     .await;
@@ -650,4 +651,192 @@ async fn a_role_with_rights_on_every_new_table_may_only_read_the_record() {
     );
     assert_eq!(after_rerun, ["SELECT"]);
     assert!(public.is_empty(), "{public:?}");
+}
+
+/// As on Neon: the runner owns what it creates but is no superuser, so it needs its own rights on the record, and the
+/// app role gets rights on every table it creates. A file that grants on every table in its schema covers the
+/// record too, and loses all but reading before the run ends.
+#[tokio::test]
+async fn a_runner_that_is_no_superuser_keeps_writing_its_record() {
+    const GRANT_ALL: Migration = Migration {
+        version: 2,
+        sql: "GRANT ALL ON ALL TABLES IN SCHEMA fake TO PUBLIC",
+    };
+    let database = fresh_database().await.expect("a test database");
+    let (runner, app) = (
+        format!("t_runner_{}", std::process::id()),
+        format!("t_runner_app_{}", std::process::id()),
+    );
+    let admin = connect(&database).await.expect("connects");
+    admin
+        .batch_execute(&format!(
+            "CREATE ROLE {runner} LOGIN; CREATE ROLE {app};
+             GRANT CREATE ON DATABASE {} TO {runner};
+             ALTER DEFAULT PRIVILEGES FOR ROLE {runner} GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {app}",
+            database.name()
+        ))
+        .await
+        .expect("creates the roles");
+    // Assumes the test server trusts local roles without a password, as CI's and check.sh's do.
+    let runner_url = database
+        .url()
+        .replacen("postgres@", &format!("{runner}@"), 1);
+    let as_runner = tetsu_postgres::Settings::from_values(&runner_url, Some("disable"));
+    let checked = async {
+        migrate(&as_runner, &[&Fake(&[FIRST, GRANT_ALL])]).await?;
+        let record = rights(&admin, &app, "fake.migrations").await?;
+        let public = rights(&admin, "public", "fake.migrations").await?;
+        migrate(&as_runner, &[&Fake(&[FIRST, GRANT_ALL, THIRD])]).await?;
+        Ok::<_, tetsu_postgres::Error>((record, public))
+    }
+    .await;
+    admin
+        .batch_execute(&format!(
+            "DROP OWNED BY {app}; DROP OWNED BY {runner}; DROP ROLE {app}; DROP ROLE {runner}"
+        ))
+        .await
+        .expect("drops the roles");
+    assert!(
+        runner_url.contains(&format!("//{runner}@")),
+        "TEST_DATABASE_URL must name user postgres with no password, so this test can run as another role"
+    );
+    let (record, public) = checked.expect("migrates twice and checks");
+    assert_eq!(record, ["SELECT"]);
+    assert_eq!(public, ["SELECT"]);
+}
+
+const GRANT_ALL_TO_PUBLIC: Migration = Migration {
+    version: 2,
+    sql: "GRANT ALL ON ALL TABLES IN SCHEMA fake TO PUBLIC",
+};
+
+/// The rights every role holds on `table` through `PUBLIC`.
+async fn public_rights(
+    settings: &tetsu_postgres::Settings,
+    table: &str,
+) -> Result<Vec<String>, tetsu_postgres::Error> {
+    rights(&connect(settings).await?, "public", table).await
+}
+
+/// The record is locked down in the transaction that creates it, before any file runs.
+#[tokio::test]
+async fn a_new_record_is_read_only_with_no_files_to_run() {
+    let settings = fresh_database().await.expect("a test database");
+    connect(&settings)
+        .await
+        .expect("connects")
+        .batch_execute("ALTER DEFAULT PRIVILEGES GRANT ALL ON TABLES TO PUBLIC")
+        .await
+        .expect("grants on new tables");
+    migrate(&settings, &[&Fake(&[])]).await.expect("migrates");
+    assert_eq!(
+        public_rights(&settings, "fake.migrations")
+            .await
+            .expect("checks"),
+        ["SELECT"]
+    );
+}
+
+/// A file's grant on the record is taken back before that file commits, so the next file never sees it.
+#[tokio::test]
+async fn a_file_that_grants_on_the_record_loses_it_before_the_next_file() {
+    const SEEN: Migration = Migration {
+        version: 3,
+        sql: "CREATE TABLE fake.seen AS SELECT has_table_privilege('public', 'fake.migrations', 'INSERT') AS insert",
+    };
+    let settings = fresh_database().await.expect("a test database");
+    migrate(&settings, &[&Fake(&[FIRST, GRANT_ALL_TO_PUBLIC, SEEN])])
+        .await
+        .expect("migrates");
+    let row = connect(&settings)
+        .await
+        .expect("connects")
+        .query_one("SELECT insert FROM fake.seen", &[])
+        .await
+        .expect("reads");
+    assert!(!row.try_get::<_, bool>("insert").expect("maps"));
+}
+
+/// A failed file rolls back its grant along with everything else.
+#[tokio::test]
+async fn a_failed_run_leaves_the_record_read_only() {
+    const FAILS: Migration = Migration {
+        version: 3,
+        sql: "SELECT nope",
+    };
+    let settings = fresh_database().await.expect("a test database");
+    migrate(&settings, &[&Fake(&[FIRST, GRANT_ALL_TO_PUBLIC, FAILS])])
+        .await
+        .expect_err("must fail");
+    assert_eq!(
+        public_rights(&settings, "fake.migrations")
+            .await
+            .expect("checks"),
+        ["SELECT"]
+    );
+}
+
+/// A later module's file that grants on an earlier module's tables does not open its record.
+#[tokio::test]
+async fn a_later_module_cannot_open_an_earlier_record() {
+    const GRANTS_ON_AA: &[Migration] = &[Migration {
+        version: 1,
+        sql: "GRANT ALL ON ALL TABLES IN SCHEMA aa TO PUBLIC",
+    }];
+    let settings = fresh_database().await.expect("a test database");
+    migrate(
+        &settings,
+        &[&Named("aa", "aa", &[]), &Named("bb", "bb", GRANTS_ON_AA)],
+    )
+    .await
+    .expect("migrates");
+    assert_eq!(
+        public_rights(&settings, "aa.migrations")
+            .await
+            .expect("checks"),
+        ["SELECT"]
+    );
+}
+
+/// A file outside a transaction that grants on the record loses it before its record is written.
+#[tokio::test]
+async fn a_file_outside_a_transaction_cannot_open_the_record() {
+    const GRANTS_OUTSIDE: Migration = Migration {
+        version: 2,
+        sql: "-- tetsu:no-transaction\nGRANT ALL ON ALL TABLES IN SCHEMA fake TO PUBLIC",
+    };
+    let settings = fresh_database().await.expect("a test database");
+    migrate(&settings, &[&Fake(&[FIRST, GRANTS_OUTSIDE])])
+        .await
+        .expect("migrates");
+    assert_eq!(
+        public_rights(&settings, "fake.migrations")
+            .await
+            .expect("checks"),
+        ["SELECT"]
+    );
+}
+
+/// Write rights on the record's columns go too, which a table-level check does not see.
+#[tokio::test]
+async fn a_column_grant_on_the_record_is_taken_back() {
+    const GRANTS_COLUMNS: Migration = Migration {
+        version: 2,
+        sql: "GRANT SELECT ON fake.migrations TO PUBLIC; \
+              GRANT INSERT (version, sql), UPDATE (sql) ON fake.migrations TO PUBLIC",
+    };
+    let settings = fresh_database().await.expect("a test database");
+    migrate(&settings, &[&Fake(&[FIRST, GRANTS_COLUMNS])])
+        .await
+        .expect("migrates");
+    let row = connect(&settings)
+        .await
+        .expect("connects")
+        .query_one(
+            "SELECT has_any_column_privilege('public', 'fake.migrations', 'INSERT, UPDATE') AS writes",
+            &[],
+        )
+        .await
+        .expect("checks");
+    assert!(!row.try_get::<_, bool>("writes").expect("maps"));
 }

@@ -46,9 +46,16 @@ pub async fn migrate_with_wait(
     for storage in modules.iter().filter_map(|module| module.storage()) {
         plan.push((storage.schema, pending(&client, storage).await?));
     }
+    // Each file ends by taking back rights on every module's record, since one may grant on every table in a
+    // schema, its own or another's.
+    let lock_down = plan
+        .iter()
+        .map(|(schema, _)| read_only_record(schema))
+        .collect::<Vec<_>>()
+        .join(";\n");
     for (schema, migrations) in plan {
         for migration in migrations {
-            apply(&client, schema, migration).await?;
+            apply(&client, schema, migration, &lock_down).await?;
         }
     }
     // Closing the connection releases the lock, even after a failure above.
@@ -143,6 +150,7 @@ async fn take_lock(client: &Client, wait: Duration) -> Result<(), Error> {
 /// Creates the module's schema and tracking table if needed, then returns its new files.
 async fn pending(client: &Client, storage: Storage) -> Result<Vec<&'static Migration>, Error> {
     let Storage { schema, migrations } = storage;
+    // One batch is one transaction, so no other role can write to a new table before its rights are taken back.
     client
         .batch_execute(&format!(
             r#"CREATE SCHEMA IF NOT EXISTS "{schema}";
@@ -150,10 +158,11 @@ async fn pending(client: &Client, storage: Storage) -> Result<Vec<&'static Migra
                  version int PRIMARY KEY,
                  sql text NOT NULL,
                  applied_at timestamptz NOT NULL DEFAULT now()
-             )"#
+             );
+             {}"#,
+            read_only_record(schema)
         ))
         .await?;
-    client.batch_execute(&read_only_record(schema)).await?;
     let applied = client
         .query(
             &format!(r#"SELECT version, sql FROM "{schema}".migrations"#),
@@ -167,25 +176,30 @@ async fn pending(client: &Client, storage: Storage) -> Result<Vec<&'static Migra
 }
 
 /// Only the runner writes a module's record of applied files. A role given rights on every new table, as the app's
-/// role is through default privileges, keeps reading it but loses every other right, on each run, so a later grant
-/// goes too. It names no role: `PUBLIC` and every role but the owner and the runner lose what the owner granted on
-/// the table, with anything granted on from it. Column grants and grants from other roles are left alone.
+/// role is through default privileges, keeps reading it but loses every other right, in the transaction that creates
+/// it and after each file, inside its transaction when it has one, so a grant from a file or from outside goes too.
+/// It names no role: `PUBLIC` and every role but the owner lose what the owner granted on the table and its columns,
+/// with anything granted on from it. So the runner must own the table, which it does when it created it. Grants
+/// from other roles, rights through roles such as `pg_write_all_data`, and views over the table are left alone.
 fn read_only_record(schema: &str) -> String {
     let table = format!(r#""{schema}".migrations"#);
     let rights = "INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN";
+    // Every name is qualified, so nothing a role creates on the search path stands in for it.
     format!(
-        r"REVOKE {rights} ON {table} FROM PUBLIC CASCADE;
-        DO $$
-        DECLARE grantee regrole;
+        r"DO $$
+        DECLARE grantee text;
         BEGIN
           FOR grantee IN
-            SELECT DISTINCT a.grantee::regrole
-            FROM pg_catalog.pg_class c, pg_catalog.aclexplode(c.relacl) a
-            WHERE c.oid = '{table}'::regclass AND a.privilege_type <> 'SELECT'
-              AND a.grantee NOT IN (0, c.relowner)
-              AND a.grantee <> (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = current_user)
+            SELECT DISTINCT CASE g.grantee WHEN 0 THEN 'PUBLIC' ELSE g.grantee::pg_catalog.regrole::text END
+            FROM pg_catalog.pg_class c,
+              LATERAL (SELECT a.grantee, a.privilege_type FROM pg_catalog.aclexplode(c.relacl) a
+                       UNION ALL
+                       SELECT a.grantee, a.privilege_type FROM pg_catalog.pg_attribute t,
+                         pg_catalog.aclexplode(t.attacl) a WHERE t.attrelid = c.oid) g
+            WHERE c.oid = '{table}'::pg_catalog.regclass AND g.privilege_type <> 'SELECT'
+              AND g.grantee <> c.relowner
           LOOP
-            EXECUTE format('REVOKE {rights} ON {table} FROM %s CASCADE', grantee);
+            EXECUTE pg_catalog.format('REVOKE {rights} ON {table} FROM %s CASCADE', grantee);
           END LOOP;
         END $$"
     )
@@ -229,32 +243,45 @@ fn new_files<'a>(
     Ok(new)
 }
 
-/// Runs one file with its schema first on the search path, so an unqualified name lands there.
-async fn apply(client: &Client, schema: &str, migration: &Migration) -> Result<(), Error> {
+/// Runs one file with its schema first on the search path, so an unqualified name lands there, then `lock_down`.
+async fn apply(
+    client: &Client,
+    schema: &str,
+    migration: &Migration,
+    lock_down: &str,
+) -> Result<(), Error> {
     client
         .batch_execute(&format!(r#"SET search_path TO "{schema}""#))
         .await?;
-    apply_in_schema(client, schema, migration).await
+    apply_in_schema(client, schema, migration, lock_down).await
+}
+
+fn record(schema: &str, migration: &Migration) -> String {
+    format!(
+        r#"INSERT INTO "{schema}".migrations (version, sql) VALUES ({}, $1)"#,
+        migration.version
+    )
 }
 
 async fn apply_in_schema(
     client: &Client,
     schema: &str,
     migration: &Migration,
+    lock_down: &str,
 ) -> Result<(), Error> {
-    let record = format!(
-        r#"INSERT INTO "{schema}".migrations (version, sql) VALUES ({}, $1)"#,
-        migration.version
-    );
-    if let Some(statement) = migration.sql.strip_prefix(NO_TRANSACTION) {
-        return apply_outside_transaction(client, schema, migration, statement, &record).await;
+    if migration.sql.starts_with(NO_TRANSACTION) {
+        return apply_outside_transaction(client, schema, migration, lock_down).await;
     }
-    // The change and its record commit together, so a crash cannot leave one without the other.
+    // The change, its record, and taking back what it granted commit together, so a crash cannot leave one without
+    // the others.
     client.batch_execute("BEGIN").await?;
     let applied = async {
         client.batch_execute(migration.sql).await?;
         client.batch_execute(RESET_SESSION).await?;
-        client.execute(&record, &[&migration.sql]).await
+        client.batch_execute(lock_down).await?;
+        client
+            .execute(&record(schema, migration), &[&migration.sql])
+            .await
     };
     if let Err(error) = applied.await {
         client.batch_execute("ROLLBACK").await?;
@@ -269,9 +296,9 @@ async fn apply_outside_transaction(
     client: &Client,
     schema: &str,
     migration: &Migration,
-    statement: &str,
-    record: &str,
+    lock_down: &str,
 ) -> Result<(), Error> {
+    let statement = &migration.sql[NO_TRANSACTION.len()..];
     if statement.trim().trim_end_matches(';').contains(';') {
         return Err(format!(
             "{schema} version {}: a file outside a transaction holds one statement",
@@ -281,8 +308,11 @@ async fn apply_outside_transaction(
     }
     client.batch_execute(migration.sql).await?;
     client.batch_execute(RESET_SESSION).await?;
+    client.batch_execute(lock_down).await?;
     refuse_invalid_indexes(client, schema).await?;
-    client.execute(record, &[&migration.sql]).await?;
+    client
+        .execute(&record(schema, migration), &[&migration.sql])
+        .await?;
     Ok(())
 }
 
