@@ -41,6 +41,7 @@ number, and add a row below. Never renumber.
 | [0033](0033-deploys-on-demand.md) | Deploys on demand | Deploying, rolling back, or publishing the image | Accepted |
 | [0034](0034-front-end-build.md) | Front-end build | Building or serving front-end assets, or adding a Node tool | Accepted |
 | [0035](0035-component-sources-and-look.md) | Component sources and look | Building a page or component, or choosing colors or type | Accepted |
+| [0036](0036-build-assets-where-used.md) | Build front-end assets where they are used | Building or deploying the site, or changing how assets are built | Accepted |
 
 ## Open decisions
 

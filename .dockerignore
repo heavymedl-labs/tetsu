@@ -5,3 +5,4 @@ mutants.out*
 .tools
 docs
 node_modules
+crates/tetsu/assets/build

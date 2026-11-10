@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-10
 - Supersedes the standalone CLI and its build script in [ADR-0032](0032-styling-engine.md)
+- Committing the build superseded by [ADR-0036](0036-build-assets-where-used.md)
 
 ## Context
 

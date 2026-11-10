@@ -44,6 +44,12 @@ if [[ "$(cat node_modules/.tetsu-lock 2>/dev/null)" != "$lock_sum" ]]; then
   fi
   echo "$lock_sum" >node_modules/.tetsu-lock
 fi
+# The front-end build the tetsu crate embeds is not in git, so it is made before anything compiles (ADR-0036). It is
+# remade only when an input is newer, since rewriting it would make Cargo rebuild the crate on every run.
+manifest=crates/tetsu/assets/build/.vite/manifest.json
+if [[ ! -f "$manifest" ]] || [[ -n "$(find web crates/*/templates package-lock.json -type f -newer "$manifest" -print -quit)" ]]; then
+  npx --no-install vite build --config web/vite.config.ts --logLevel error
+fi
 
 fast=false
 if [[ "${1:-}" == "--fast" ]]; then
@@ -92,7 +98,7 @@ lint() {
   npx --no-install markdownlint-cli2 "**/*.md"
   npx --no-install biome check --error-on-warnings
   npx --no-install tsc -p .
-  # Templates use only classes the committed build defines, and no inline styles (ADR-0032).
+  # Templates use only classes the build defines, and no inline styles (ADR-0032).
   local templates=()
   while IFS= read -r file; do templates+=("$file"); done < <(find crates web -path '*/templates/*.html' | sort)
   python3 scripts/check_templates.py crates/tetsu/assets/build/assets/tetsu-*.css ${templates[@]+"${templates[@]}"}
@@ -183,12 +189,6 @@ elif ((npm_status == 3)); then
   python3 scripts/check_npm.py .
 else
   exit "$npm_status"
-fi
-# The committed build matches a clean one, including files added or removed (ADR-0034).
-npx --no-install vite build --config web/vite.config.ts --outDir "$work/build" --emptyOutDir --logLevel error
-if ! diff -r "$work/build" crates/tetsu/assets/build >/dev/null; then
-  echo "error: crates/tetsu/assets/build differs from a clean build. Run npm run build and commit it" >&2
-  exit 1
 fi
 cargo llvm-cov --json --summary-only --output-path "$work/coverage.json"
 # Coverage runs no doc tests, and some prove what must not compile, such as a module's port being out of reach

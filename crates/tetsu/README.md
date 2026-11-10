@@ -24,15 +24,16 @@ Exit codes are 0 for success, 1 for a failure, and 2 for a command or arguments 
 
 Pages are Askama templates: the site's in `templates/`, each module's in its own crate, and the shell and shared
 parts every page extends in `web/templates/`. Vite builds `web/src/tetsu.css` with Tailwind into
-`assets/build/`, which is committed and compiled into the binary, and `serve` gives each built file at the path
-Vite's manifest names, under `/assets/`, kept for a year ([ADR-0034](../../docs/adr/0034-front-end-build.md)).
+`assets/build/`, which is not in git but compiled into the binary, and `serve` gives each built file at the path
+Vite's manifest names, under `/assets/`, kept for a year ([ADR-0034](../../docs/adr/0034-front-end-build.md),
+[ADR-0036](../../docs/adr/0036-build-assets-where-used.md)). A fresh clone builds it before Cargo can compile the
+crate; `scripts/check.sh` and the image build make it themselves.
 
 ```bash
-npm run build   # what check.sh compares, and what is committed
-npm run watch   # rebuilds as templates change; restart it after adding one, then rebuild and restart tetsu
+npm ci --ignore-scripts --include=dev   # once, and after the lockfile changes
+npm run build                           # before cargo build or cargo run
+npm run watch                           # rebuilds as templates change; restart it after adding one
 ```
-
-The watcher keeps classes a template no longer uses, so run `npm run build` before committing.
 
 ## Settings
 

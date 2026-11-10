@@ -35,7 +35,6 @@ class CheckScript(unittest.TestCase):
             self.stub(tool, f'echo "{tool} $*" >> "{self.log}"')
         write(self.root / "package.json", '{\n  "packageManager": "npm@11.20.0"\n}\n')
         write(self.root / "package-lock.json", "{}\n")
-        write(self.root / "crates" / "tetsu" / "assets" / "build" / "a.css", "built\n")
         # npm reports its version and an audit, and its install makes node_modules.
         self.stub(
             "npm",
@@ -44,12 +43,14 @@ class CheckScript(unittest.TestCase):
             f'ci) [ -n "${{NPM_CI_FAILS-}}" ] && exit 1; mkdir -p node_modules; '
             f'echo "npm $*" >> "{self.root / "installs"}";; esac',
         )
-        # A build copies the committed one, unless the test says it differs.
+        # A build writes the stylesheet the tetsu crate embeds, which is not in git.
         self.stub(
             "npx",
-            'if [ "$2" = vite ]; then out=""; prev=""; for a in "$@"; do [ "$prev" = --outDir ] && out="$a"; '
-            'prev="$a"; done; mkdir -p "$out"; cp -R crates/tetsu/assets/build/. "$out"; '
-            '[ -n "${BUILD_DIFFERS-}" ] && echo x > "$out/b.css"; fi\n'
+            'if [ "$2" = vite ]; then mkdir -p crates/tetsu/assets/build/assets; '
+            "echo built > crates/tetsu/assets/build/assets/tetsu-x.css; "
+            "mkdir -p crates/tetsu/assets/build/.vite; "
+            "echo {} > crates/tetsu/assets/build/.vite/manifest.json; "
+            f'echo "npx $*" >> "{self.root / "builds"}"; exit 0; fi\n'
             f'echo "npx $*" >> "{self.log}"',
         )
         # Cargo also logs its build folder, which the nightly pass keeps apart.
@@ -112,7 +113,6 @@ class CheckScript(unittest.TestCase):
             "check_npm.py . --audit",
             "check_templates.py",
             "npm audit --json --include=dev",
-            "vite build",
             "biome check --error-on-warnings",
             "tsc -p .",
             "lizard -l typescript",
@@ -202,10 +202,23 @@ class CheckScript(unittest.TestCase):
     def test_a_failing_npm_check_fails(self):
         self.assertEqual(self.check(NPM_CHECK="1").returncode, 1)
 
-    def test_a_committed_build_that_differs_from_a_clean_one_fails(self):
-        result = self.check(BUILD_DIFFERS="1")
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("differs from a clean build", result.stderr)
+    def test_the_front_end_is_built_before_anything_compiles(self):
+        built = "crates/tetsu/assets/build/assets/tetsu-x.css"
+        self.stub("cargo", f'[ -f {built} ] || exit 9\necho "cargo $*" >> "{self.log}"')
+        result = self.check("--fast")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("vite build --config web/vite.config.ts", (self.root / "builds").read_text())
+
+    def test_the_front_end_is_rebuilt_only_when_an_input_changed(self):
+        builds = self.root / "builds"
+        write(self.root / "web" / "src" / "tetsu.css", "@import 'tailwindcss';\n")
+        self.assertEqual(self.check("--fast").returncode, 0)
+        self.check("--fast")
+        self.assertEqual(len(builds.read_text().splitlines()), 1)
+        manifest = self.root / "crates" / "tetsu" / "assets" / "build" / ".vite" / "manifest.json"
+        os.utime(manifest, (1, 1))
+        self.check("--fast")
+        self.assertEqual(len(builds.read_text().splitlines()), 2)
 
     def test_fast_mode_runs_only_formatters_and_linters(self):
         result = self.check("--fast")

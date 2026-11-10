@@ -3,3 +3,4 @@ __pycache__/
 /.tools
 /mutants.out*
 /node_modules
+/crates/tetsu/assets/build

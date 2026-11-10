@@ -1,4 +1,4 @@
-// Builds the assets of Tetsu's own pages (ADR-0034). The output is committed and embedded by the tetsu crate.
+// Builds the assets of Tetsu's pages (ADR-0034). The tetsu crate embeds the output, which is not in git (ADR-0036).
 import { resolve } from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
