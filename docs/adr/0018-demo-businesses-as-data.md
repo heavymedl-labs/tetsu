@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-07
 - Versioning rule superseded by [ADR-0019](0019-seed-format-versions.md)
+- Naming rule narrowed by [ADR-0037](0037-fictional-customers-on-tetsus-page.md)
 
 ## Context
 

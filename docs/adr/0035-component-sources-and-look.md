@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-10
+- Color-scheme rule superseded by [ADR-0038](0038-color-scheme-control.md)
 - Supersedes Tailwind Plus as a source, and the `dark` variant being off, in [ADR-0032](0032-styling-engine.md)
 
 ## Context

@@ -42,6 +42,9 @@ number, and add a row below. Never renumber.
 | [0034](0034-front-end-build.md) | Front-end build | Building or serving front-end assets, or adding a Node tool | Accepted |
 | [0035](0035-component-sources-and-look.md) | Component sources and look | Building a page or component, or choosing colors or type | Accepted |
 | [0036](0036-build-assets-where-used.md) | Build front-end assets where they are used | Building or deploying the site, or changing how assets are built | Accepted |
+| [0037](0037-fictional-customers-on-tetsus-page.md) | Fictional customers on Tetsu's page | Writing content for Tetsu's own pages | Accepted |
+| [0038](0038-color-scheme-control.md) | A color-scheme control without script | Changing colors, the color schemes, or the header's control | Accepted |
+| [0039](0039-response-compression-and-page-budget.md) | Response compression and a page budget | Changing how responses are sent, adding page weight, or a page that holds a secret | Accepted |
 
 ## Open decisions
 
