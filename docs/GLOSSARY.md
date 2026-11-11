@@ -24,7 +24,7 @@ test or a lint. Contrast with a duty. See
 [ADR-0014](adr/0014-checks-and-duties.md).
 
 **Client profile.** A person a tenant serves, with their bookings, waivers, and history. An account acts for its
-own profile, and for others only through a relink, unless the profile is new; a walk-in or a guest is a
+own profile, and for others only through a relink, unless it created them itself; a walk-in or a guest is a
 profile with no account ([ADR-0040](adr/0040-identity-and-sign-in.md), [ADR-0041](adr/0041-account-recovery.md)).
 
 **Composition root.** The `tetsu` binary, which wires modules together. The
@@ -93,8 +93,8 @@ Outbound adapters implement it.
 **Realm.** One of the three kinds of account, each with its own passkey domain: operator accounts, staff
 members' identities, and customer accounts ([ADR-0040](adr/0040-identity-and-sign-in.md)).
 
-**Recovery code.** A one-time secret a person saves, required for staff and offered to customers, which with an
-email code lets them enroll a new passkey on their account ([ADR-0041](adr/0041-account-recovery.md)).
+**Recovery code.** A one-time secret a person saves, required for staff and owners and offered to customers,
+which with an email code lets them enroll a new passkey on their account ([ADR-0041](adr/0041-account-recovery.md)).
 
 **Reference business.** A fictional business that adopts Tetsu, used to check
 decisions, milestones, and tests from a customer's side. There is one for each
@@ -102,8 +102,10 @@ industry in ADR-0002, described in
 [reference-businesses](reference-businesses/README.md).
 
 **Relink.** Giving an account the right to act for a client profile that has history or another account, after a
-wait and notices
-([ADR-0041](adr/0041-account-recovery.md)).
+wait and notices ([ADR-0041](adr/0041-account-recovery.md)).
+
+**Retired account.** An account disabled for good, its sessions ended, passkeys removed, and email freed, as
+when a hijacked account is replaced ([ADR-0041](adr/0041-account-recovery.md)).
 
 **Rigor tier.** The testing and review bar for an area, from 1 (highest) to 3,
 set by [ADR-0005](adr/0005-testing-and-performance.md).
