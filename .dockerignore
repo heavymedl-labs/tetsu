@@ -4,5 +4,7 @@
 mutants.out*
 .tools
 docs
+# The brand files Vite builds into the assets (web/vite.config.ts).
+!docs/brand
 node_modules
 crates/tetsu/assets/build

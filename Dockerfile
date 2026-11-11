@@ -8,6 +8,7 @@ COPY package.json package-lock.json .npmrc ./
 RUN npm ci --ignore-scripts --include=dev --no-audit --no-fund
 COPY web web
 COPY crates crates
+COPY docs/brand docs/brand
 RUN npm run build
 
 FROM rust:1.99.1-slim-bookworm AS build
