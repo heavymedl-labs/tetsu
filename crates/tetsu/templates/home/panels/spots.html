@@ -1,7 +1,7 @@
 {% import "art/app.html" as app %}
 {% import "art/spots.html" as sp %}
 {% call app::panel("Two spot maps. In a cycling studio, a member takes their usual bike, 14, picks bike 15 for a guest, and another bike is taken. At a campground filtered for a 32 foot RV, an RV site is held while someone pays, with its details shown.") %}
-<div class="grid lg:grid-cols-2">
+<div class="grid grid-cols-1 lg:grid-cols-2">
 <div>
 {% call app::bar("Ride45", "· Sun, Nov 15 · 10:30 am · Studio 1") %}<p class="font-mono text-xs text-muted">Your usual: bike 14</p>{% endcall %}
 <div class="p-4 sm:p-6"><svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 260" class="w-full">

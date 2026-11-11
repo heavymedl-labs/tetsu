@@ -11,7 +11,7 @@
 <div class="{% if k == 0 %}rounded-lg border border-forge/50 bg-forge/10 px-3 py-2{% else if k == 4 %}rounded-lg bg-fill px-3 py-2 hidden sm:block{% else %}rounded-lg bg-fill px-3 py-2{% endif %}"><p class="font-mono text-muted">{{ time }}</p><p class="font-medium text-ink">{{ name }}</p><p class="mt-1 font-mono text-[11px] text-muted">{{ booked }}</p></div>
 {%- endfor %}
 </div>
-<div class="grid lg:grid-cols-[1.3fr_1fr]">
+<div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
 <div class="p-4 sm:p-6">
 {% call app::label("Roster") %}{% endcall %}
 <ul class="mt-2 divide-y divide-line">
