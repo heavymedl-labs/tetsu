@@ -68,6 +68,13 @@ class CheckScript(unittest.TestCase):
             + str(self.log)
             + '"; echo changed; fi',
         )
+        # Docker answers info as the environment says, and a build fails when asked to, with Vite's error.
+        self.stub(
+            "docker",
+            f'echo "docker $*" >> "{self.log}"\n'
+            'if [ "$1" = info ]; then exit "${DOCKER_INFO-0}"; fi\n'
+            'if [ -n "${DOCKER_BUILD_FAILS-}" ]; then echo "Cannot resolve entry module"; exit 1; fi',
+        )
         for tool in ("lizard", "ruff", "shellcheck", "shfmt", "squawk", "sqlfluff"):
             write(
                 self.root / ".tools" / "bin" / tool,
@@ -87,6 +94,8 @@ class CheckScript(unittest.TestCase):
         write(self.bin / name, f"#!/bin/sh\n{prefix}{body}\n", EXECUTABLE)
 
     def check(self, *args, nvm_dir=None, **env):
+        # CI is unset unless a test sets it, even when the tests themselves run in CI.
+        env = {"CI": "", **env}
         return run(
             [self.root / "scripts" / "check.sh", *args],
             self.root,
@@ -136,6 +145,27 @@ class CheckScript(unittest.TestCase):
             "cargo mutants",
         ):
             self.assertIn(stage, log)
+
+    def test_builds_the_images_front_end_stage(self):
+        result = self.check()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("docker build --progress=plain --target web", self.log.read_text())
+
+    def test_a_failing_front_end_stage_fails_and_shows_why(self):
+        result = self.check(DOCKER_BUILD_FAILS="1")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Cannot resolve entry module", result.stderr)
+
+    def test_ci_leaves_the_front_end_stage_to_its_image_job(self):
+        result = self.check(CI="true")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("docker", self.log.read_text())
+
+    def test_without_a_running_docker_the_stage_is_skipped_with_a_warning(self):
+        result = self.check(DOCKER_INFO="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Docker is not running", result.stderr)
+        self.assertNotIn("docker build", self.log.read_text())
 
     def test_cargo_deny_must_be_the_pinned_version(self):
         for version in ("0.20.1", ""):

@@ -206,6 +206,19 @@ python3 scripts/check_coverage.py --branches "$work/metadata.json" "$work/branch
 .tools/bin/lizard -l rust -C 10 -L 50 -a 5 -w crates
 .tools/bin/lizard -l typescript -C 10 -L 50 -a 5 -w web
 npx --no-install jscpd crates web --threshold 0 --ignore "**/tests/**,**/assets/build/**" --reporters console
+# The image's front-end stage, from the image's own build context, so a file Vite reads that the Dockerfile or
+# .dockerignore leaves out fails here rather than in CI. CI builds the whole image in another job (ADR-0023), so it
+# skips this, and so does a machine without a running Docker, with a warning.
+if [[ -n "${CI:-}" ]]; then
+  :
+elif docker info >/dev/null 2>&1; then
+  if ! docker build --progress=plain --target web --tag tetsu:web-check . >"$work/web-stage.log" 2>&1; then
+    tail -n 60 "$work/web-stage.log" >&2
+    exit 1
+  fi
+else
+  echo "warning: Docker is not running, so the image's front-end stage was not built. CI still builds it." >&2
+fi
 
 base="origin/main"
 if [[ "${1:-}" == "--base" ]]; then
