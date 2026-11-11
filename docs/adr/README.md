@@ -47,6 +47,7 @@ number, and add a row below. Never renumber.
 | [0039](0039-response-compression-and-page-budget.md) | Response compression and a page budget | Changing how responses are sent, adding page weight, or a page that holds a secret | Accepted |
 | [0040](0040-identity-and-sign-in.md) | Identity and sign-in | Building sign-in, sign-up, accounts, sessions, or anything operators use | Accepted |
 | [0041](0041-account-recovery.md) | Account recovery | Building recovery, recovery codes, anything that replaces a credential, or any link between an account and a client profile | Accepted |
+| [0042](0042-tenant-isolation.md) | Tenant isolation | Storing tenant data, adding a table or module schema, writing a query, or adding a database role | Proposed |
 
 ## Open decisions
 
@@ -56,7 +57,7 @@ that depends on one waits for it. The
 option for most of them.
 
 - [How verticals extend platform behavior](https://github.com/heavymedl-labs/tetsu/issues/7)
-- [Tenant isolation in Postgres](https://github.com/heavymedl-labs/tetsu/issues/8)
+- [Tenant isolation in Postgres](https://github.com/heavymedl-labs/tetsu/issues/8), proposed as ADR-0042
 - [Payment processors and adapters](https://github.com/heavymedl-labs/tetsu/issues/10)
 - [Domain event delivery](https://github.com/heavymedl-labs/tetsu/issues/11)
 - [Public API design](https://github.com/heavymedl-labs/tetsu/issues/12)
