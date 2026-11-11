@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-08
 - Supersedes [ADR-0026](0026-security-target.md)
+- Rule that #9 decides recovery and its relaxation superseded by [ADR-0040](0040-identity-and-sign-in.md)
 
 ## Context
 
