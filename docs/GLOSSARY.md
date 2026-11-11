@@ -23,6 +23,9 @@ cells is [undecided](https://github.com/heavymedl-labs/tetsu/issues/8).
 test or a lint. Contrast with a duty. See
 [ADR-0014](adr/0014-checks-and-duties.md).
 
+**Client profile.** A person a tenant serves, with their bookings, waivers, and history. An account signs in
+and may act for profiles; a walk-in is a profile with no account ([ADR-0040](adr/0040-identity-and-sign-in.md)).
+
 **Composition root.** The `tetsu` binary, which wires modules together. The
 only place that knows every module.
 
@@ -32,6 +35,9 @@ confused with adapters, which sit at the edge of every module.
 
 **Control plane.** The platform modules that run Tetsu itself, such as
 tenancy, identity and access, and audit.
+
+**Customer account.** An account a tenant owns, for one of its customers to sign in. Email is unique within the
+tenant, so one person at two tenants has two accounts ([ADR-0040](adr/0040-identity-and-sign-in.md)).
 
 **Demo business.** A fictional tenant, kept as a data file in the `tetsu-demos`
 repository and shown only in the demo environment, which never holds a real
@@ -59,6 +65,8 @@ rendering markup of its own ([ADR-0031](adr/0031-front-end-model-revised.md)).
 **Kernel.** The small core that defines the module contract: traits and types,
 with no domain knowledge and no runtime plug-in loading.
 
+**Membership.** A staff member's link to one tenant, with their role there ([ADR-0040](adr/0040-identity-and-sign-in.md)).
+
 **Minimum sellable product.** The least a reference business needs before it
 switches to Tetsu. Each reference business's page defines its own, and going
 live with it is a milestone.
@@ -66,11 +74,18 @@ live with it is a milestone.
 **Module.** A Cargo crate that plugs into the kernel and owns at most one
 Postgres schema. Platform capabilities and verticals are both modules.
 
+**Operator.** One of Tetsu's own staff, signed in on a separate domain with hardware security keys ([ADR-0040](adr/0040-identity-and-sign-in.md)).
+
 **Platform.** Everything that is not a vertical: the kernel, the control plane,
 shared capabilities, and connectors.
 
+**Passkey.** A credential under the W3C WebAuthn standard, kept by a person's device or password manager and
+bound to one domain. It counts as multi-factor when it verifies the user ([ADR-0040](adr/0040-identity-and-sign-in.md)).
+
 **Port.** A Rust trait a module calls out through, also called a driven port.
 Outbound adapters implement it.
+
+**Realm.** One of the three kinds of account: operator, staff member, or customer account ([ADR-0040](adr/0040-identity-and-sign-in.md)).
 
 **Reference business.** A fictional business that adopts Tetsu, used to check
 decisions, milestones, and tests from a customer's side. There is one for each
@@ -82,6 +97,8 @@ set by [ADR-0005](adr/0005-testing-and-performance.md).
 
 **Shared capability.** Industry-neutral behavior the platform builds up front
 for more than one vertical, such as scheduling, booking, or the ledger.
+
+**Staff member.** A person who works for one or more tenants, with one identity and a membership in each ([ADR-0040](adr/0040-identity-and-sign-in.md)).
 
 **Surface.** A way people reach Tetsu: booking pages in a browser, hosted or embedded,
 the staff app, native apps, or the public API. Every surface uses the same use cases.
