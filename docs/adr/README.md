@@ -48,6 +48,10 @@ number, and add a row below. Never renumber.
 | [0040](0040-identity-and-sign-in.md) | Identity and sign-in | Building sign-in, sign-up, accounts, sessions, or anything operators use | Accepted |
 | [0041](0041-account-recovery.md) | Account recovery | Building recovery, recovery codes, anything that replaces a credential, or any link between an account and a client profile | Accepted |
 | [0042](0042-tenant-isolation.md) | Tenant isolation | Storing tenant data, adding a table or module schema, writing a query, or adding a database role | Proposed |
+| [0043](0043-domain-event-delivery.md) | Domain event delivery | Recording or consuming a domain event, or sending a webhook | Proposed |
+| [0044](0044-email-delivery.md) | Email delivery | Sending email, or choosing an email provider | Proposed |
+| [0045](0045-operations-baseline.md) | Operations baseline | Logging, auditing, backups, alerts, or recovery targets | Proposed |
+| [0046](0046-property-testing.md) | Property testing | Writing property tests for Tier 1 code | Proposed |
 
 ## Open decisions
 
@@ -59,7 +63,7 @@ option for most of them.
 - [How verticals extend platform behavior](https://github.com/heavymedl-labs/tetsu/issues/7)
 - [Tenant isolation in Postgres](https://github.com/heavymedl-labs/tetsu/issues/8), proposed as ADR-0042
 - [Payment processors and adapters](https://github.com/heavymedl-labs/tetsu/issues/10)
-- [Domain event delivery](https://github.com/heavymedl-labs/tetsu/issues/11)
+- [Domain event delivery](https://github.com/heavymedl-labs/tetsu/issues/11), proposed as ADR-0043
 - [Public API design](https://github.com/heavymedl-labs/tetsu/issues/12)
 - [Data import from competitors](https://github.com/heavymedl-labs/tetsu/issues/13)
 - [Front ends: the staff app and native apps](https://github.com/heavymedl-labs/tetsu/issues/14); ADR-0031 decided customers on the web
@@ -69,7 +73,7 @@ option for most of them.
 - [How businesses sign up and pay for Tetsu](https://github.com/heavymedl-labs/tetsu/issues/23)
 - [Support access to tenant accounts](https://github.com/heavymedl-labs/tetsu/issues/24)
 - [Money: currencies, rounding, and tax](https://github.com/heavymedl-labs/tetsu/issues/26)
-- [Operations: observability, backups, and recovery](https://github.com/heavymedl-labs/tetsu/issues/27)
+- [Operations: observability, backups, and recovery](https://github.com/heavymedl-labs/tetsu/issues/27), proposed as ADR-0045
 - [Load test tools, latency budgets, and memory measurement](https://github.com/heavymedl-labs/tetsu/issues/37)
 - [The benchmark image tag rule, proposed as ADR-0022](https://github.com/heavymedl-labs/tetsu/issues/75)
 - [Whether the benchmark harness keeps monoio](https://github.com/heavymedl-labs/tetsu/issues/94)
