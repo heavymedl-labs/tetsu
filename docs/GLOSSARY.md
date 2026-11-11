@@ -23,8 +23,9 @@ cells is [undecided](https://github.com/heavymedl-labs/tetsu/issues/8).
 test or a lint. Contrast with a duty. See
 [ADR-0014](adr/0014-checks-and-duties.md).
 
-**Client profile.** A person a tenant serves, with their bookings, waivers, and history. An account signs in
-and may act for profiles; a walk-in is a profile with no account ([ADR-0040](adr/0040-identity-and-sign-in.md)).
+**Client profile.** A person a tenant serves, with their bookings, waivers, and history. An account acts for its
+own profile, and for others only when the tenant's staff grant it; a walk-in or a guest is a profile with no
+account ([ADR-0040](adr/0040-identity-and-sign-in.md)).
 
 **Composition root.** The `tetsu` binary, which wires modules together. The
 only place that knows every module.
@@ -59,13 +60,14 @@ browsing only: nothing signed in is ever framed ([ADR-0031](adr/0031-front-end-m
 **Fresh review.** A review by an agent that did not write the change, seeing only
 the issue and the diff. See [docs/review.md](review.md).
 
+**Guest.** A person who books with a tenant without an account, with a client profile of their own. A guest's
+link can view or cancel that one booking ([ADR-0040](adr/0040-identity-and-sign-in.md)).
+
 **Island.** A small Web Component that adds behavior to server-rendered HTML on a Tetsu page, without
 rendering markup of its own ([ADR-0031](adr/0031-front-end-model-revised.md)).
 
 **Kernel.** The small core that defines the module contract: traits and types,
 with no domain knowledge and no runtime plug-in loading.
-
-**Membership.** A staff member's link to one tenant, with their role there ([ADR-0040](adr/0040-identity-and-sign-in.md)).
 
 **Minimum sellable product.** The least a reference business needs before it
 switches to Tetsu. Each reference business's page defines its own, and going
@@ -74,18 +76,19 @@ live with it is a milestone.
 **Module.** A Cargo crate that plugs into the kernel and owns at most one
 Postgres schema. Platform capabilities and verticals are both modules.
 
-**Operator.** One of Tetsu's own staff, signed in on a separate domain with hardware security keys ([ADR-0040](adr/0040-identity-and-sign-in.md)).
-
-**Platform.** Everything that is not a vertical: the kernel, the control plane,
-shared capabilities, and connectors.
+**Operator.** A person who works for Tetsu itself, not for a tenant, and signs in to Tetsu's own tools ([ADR-0040](adr/0040-identity-and-sign-in.md)).
 
 **Passkey.** A credential under the W3C WebAuthn standard, kept by a person's device or password manager and
 bound to one domain. It counts as multi-factor when it verifies the user ([ADR-0040](adr/0040-identity-and-sign-in.md)).
 
+**Platform.** Everything that is not a vertical: the kernel, the control plane,
+shared capabilities, and connectors.
+
 **Port.** A Rust trait a module calls out through, also called a driven port.
 Outbound adapters implement it.
 
-**Realm.** One of the three kinds of account: operator, staff member, or customer account ([ADR-0040](adr/0040-identity-and-sign-in.md)).
+**Realm.** One of the three kinds of account, each with its own passkey domain: operator accounts, staff
+members' identities, and customer accounts ([ADR-0040](adr/0040-identity-and-sign-in.md)).
 
 **Reference business.** A fictional business that adopts Tetsu, used to check
 decisions, milestones, and tests from a customer's side. There is one for each
@@ -98,7 +101,9 @@ set by [ADR-0005](adr/0005-testing-and-performance.md).
 **Shared capability.** Industry-neutral behavior the platform builds up front
 for more than one vertical, such as scheduling, booking, or the ledger.
 
-**Staff member.** A person who works for one or more tenants, with one identity and a membership in each ([ADR-0040](adr/0040-identity-and-sign-in.md)).
+**Staff member.** A person who works for one or more tenants, with one identity and a staff role at each ([ADR-0040](adr/0040-identity-and-sign-in.md)).
+
+**Staff role.** A staff member's role at one tenant, such as front desk or owner ([ADR-0040](adr/0040-identity-and-sign-in.md)).
 
 **Surface.** A way people reach Tetsu: booking pages in a browser, hosted or embedded,
 the staff app, native apps, or the public API. Every surface uses the same use cases.

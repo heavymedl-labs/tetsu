@@ -57,6 +57,7 @@ option for most of them.
 - [How verticals extend platform behavior](https://github.com/heavymedl-labs/tetsu/issues/7)
 - [Tenant isolation in Postgres](https://github.com/heavymedl-labs/tetsu/issues/8)
 - [Identity and customer accounts](https://github.com/heavymedl-labs/tetsu/issues/9), proposed as ADR-0040
+- [Account recovery](https://github.com/heavymedl-labs/tetsu/issues/105)
 - [Payment processors and adapters](https://github.com/heavymedl-labs/tetsu/issues/10)
 - [Domain event delivery](https://github.com/heavymedl-labs/tetsu/issues/11)
 - [Public API design](https://github.com/heavymedl-labs/tetsu/issues/12)

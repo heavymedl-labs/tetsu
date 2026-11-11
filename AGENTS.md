@@ -19,10 +19,11 @@ one as current intent. The [ADR index](docs/adr/README.md) says when to read eac
 
 ## Current phase
 
-The walking skeleton is in progress. The demo is deployed, and identity is being decided in
-[#9](https://github.com/heavymedl-labs/tetsu/issues/9) (ADR-0040, proposed), ahead of sign-in in
-[#20](https://github.com/heavymedl-labs/tetsu/issues/20). The [README](README.md) describes what is
-implemented.
+The walking skeleton is in progress. The demo is deployed, identity is being decided in
+[#9](https://github.com/heavymedl-labs/tetsu/issues/9) ahead of sign-in in
+[#20](https://github.com/heavymedl-labs/tetsu/issues/20), and business profiles
+([#101](https://github.com/heavymedl-labs/tetsu/issues/101)) are the next build task. The [README](README.md)
+describes what is implemented.
 
 ## Rules
 
