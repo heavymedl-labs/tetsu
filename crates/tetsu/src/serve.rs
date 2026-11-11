@@ -12,6 +12,9 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{MethodRouter, get};
+use tower_http::CompressionLevel;
+use tower_http::compression::CompressionLayer;
+use tower_http::compression::predicate::{DefaultPredicate, NotForContentType, Predicate};
 
 /// Tetsu's own page at the root.
 #[derive(Template)]
@@ -64,6 +67,16 @@ pub fn app(modules: Router, demo: bool, not_found: fn(bool) -> Response) -> Rout
         .merge(modules)
         .fallback(move || std::future::ready(not_found(demo)))
         .layer(axum::middleware::map_response_with_state(demo, secure))
+        .layer(compression())
+}
+
+/// Brotli or gzip, as the browser asks (ADR-0039). Fonts are already compressed, so they go as they are. Quality 4
+/// keeps the cost of each response small, set here so no upgrade changes it unseen. No test checks it, since a
+/// response shows its quality only as time, and timing tests are unreliable.
+fn compression() -> CompressionLayer<impl Predicate> {
+    CompressionLayer::new()
+        .quality(CompressionLevel::Precise(4))
+        .compress_when(DefaultPredicate::new().and(NotForContentType::const_new("font/")))
 }
 
 /// The site's page for a path nothing answers. It is the site's own, since a module's page would speak for
@@ -271,6 +284,31 @@ mod tests {
 
     async fn send(request: &str) -> String {
         send_to(true, request).await
+    }
+
+    /// Asks the demo site for a path as a browser that accepts brotli and gzip does, and returns the response's
+    /// head and how many bytes its body took to send.
+    async fn as_sent(path: &str) -> (String, usize) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(run(
+            listener,
+            app(module(), true, not_found),
+            std::future::pending(),
+            GRACE,
+        ));
+        let mut stream = TcpStream::connect(address).await.unwrap();
+        let request = format!(
+            "GET {path} HTTP/1.1\r\nHost: test\r\nAccept-Encoding: br, gzip\r\nConnection: close\r\n\r\n"
+        );
+        stream.write_all(request.as_bytes()).await.unwrap();
+        let mut raw = Vec::new();
+        stream.read_to_end(&mut raw).await.unwrap();
+        let head = raw.windows(4).position(|four| four == b"\r\n\r\n").unwrap();
+        (
+            String::from_utf8(raw[..head].to_vec()).unwrap(),
+            raw.len() - head - 4,
+        )
     }
 
     fn get_request(path: &str) -> String {
@@ -623,6 +661,28 @@ mod tests {
             "the page's classes were read"
         );
         assert!(missing.is_empty(), "{missing:?}");
+    }
+
+    #[tokio::test]
+    async fn the_root_page_and_its_stylesheet_fit_their_budget_as_sent() {
+        // ADR-0039: at most 40 KB of HTML and 20 KB of stylesheet, as sent to a browser that accepts brotli.
+        let (head, page) = as_sent("/").await;
+        assert!(head.contains("content-encoding: br"), "{head}");
+        assert!(page <= 40 * 1024, "the root page took {page} bytes");
+        let (head, sheet) = as_sent(assets::STYLESHEET).await;
+        assert!(head.contains("content-encoding: br"), "{head}");
+        assert!(sheet <= 20 * 1024, "the stylesheet took {sheet} bytes");
+    }
+
+    #[tokio::test]
+    async fn a_font_is_sent_as_it_is_since_it_is_already_compressed() {
+        let font = assets::ASSETS
+            .iter()
+            .find(|asset| asset.content_type == "font/woff2")
+            .unwrap();
+        let (head, size) = as_sent(font.path).await;
+        assert!(!head.contains("content-encoding"), "{head}");
+        assert_eq!(size, font.bytes.len());
     }
 
     #[test]

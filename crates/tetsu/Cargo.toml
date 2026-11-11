@@ -16,6 +16,7 @@ serde_json.workspace = true
 tetsu-kernel.workspace = true
 tetsu-postgres.workspace = true
 tetsu-tenancy.workspace = true
+tower-http.workspace = true
 # Signals to stop serving, and a channel to bound the drain once stopping.
 tokio = { workspace = true, features = ["signal", "sync"] }
 toml.workspace = true
