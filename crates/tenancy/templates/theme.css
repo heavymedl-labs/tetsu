@@ -1,6 +1,9 @@
 {#- A tenant's colors as the tokens the shared stylesheet reads (ADR-0032). Color::parse allows only #RRGGBB,
-    so a value cannot leave its declaration. -#}
+    so a value cannot leave its declaration. Brand colors stay the same in both color schemes, and so does the
+    text on them: white, until #96 chooses it for contrast. -#}
 :root {
   --tetsu-color-primary: {{ primary }};
+  --tetsu-color-on-primary: #ffffff;
   --tetsu-color-accent: {{ accent }};
+  --tetsu-color-on-accent: #ffffff;
 }

@@ -1,0 +1,79 @@
+{#- Tetsu's shared components (ADR-0035), on the --tetsu-* tokens, in light and dark. Each adapted one names its
+    source; their licenses are in THIRD-PARTY-NOTICES.md. -#}
+
+{#- An outline icon from Heroicons (MIT), drawn in the current text color. -#}
+{% macro icon(name) %}
+<svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-5">
+{%- if name == "system" %}
+<path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 12V5.25"/>
+{%- else if name == "sun" %}
+<path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z"/>
+{%- else if name == "moon" %}
+<path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z"/>
+{%- else if name == "menu" %}
+<path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/>
+{%- else %}
+<path stroke-linecap="round" stroke-linejoin="round" d="M15.182 16.318A4.486 4.486 0 0 0 12.016 15a4.486 4.486 0 0 0-3.198 1.318M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM9.75 9.75c0 .414-.168.75-.375.75S9 10.164 9 9.75 9.168 9 9.375 9s.375.336.375.75Zm-.375 0h.008v.015h-.008V9.75Zm5.625 0c0 .414-.168.75-.375.75s-.375-.336-.375-.75.168-.75.375-.75.375.336.375.75Zm-.375 0h.008v.015h-.008V9.75Z"/>
+{%- endif %}
+</svg>
+{% endmacro %}
+
+{#- A link drawn as a button, around what the caller writes: solid, or outlined when `secondary`, and tighter when
+    `small`. It sets no margin or display beyond inline-block, so a wrapper places it. -#}
+{% macro button(href, secondary = false, small = false) %}
+<a href="{{ href }}" class="inline-block rounded-lg font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent {% if secondary %}border border-line text-ink transition-colors hover:bg-surface{% else %}bg-ink text-canvas transition-opacity hover:opacity-85{% endif %} {% if small %}px-3 py-1.5 whitespace-nowrap{% else %}px-4 py-2.5 text-sm{% endif %}">{{ caller() }}</a>
+{% endmacro %}
+
+{#- A page that says why there is nothing to show, after HyperUI's empty content 1 (MIT). -#}
+{% macro empty(code, title, text) %}
+<main class="flex flex-1 items-center justify-center p-6">
+<div class="max-w-md text-center">
+<div class="mx-auto inline-flex rounded-full border border-line bg-surface p-3 text-muted">{% call icon("frown") %}{% endcall %}</div>
+<p class="mt-6 font-mono text-xs tracking-widest text-accent uppercase">{{ code }}</p>
+<div class="mt-2 text-3xl font-semibold tracking-tight text-balance text-ink sm:text-4xl"><h1>{{ title }}</h1></div>
+<div class="mt-4 text-pretty text-muted"><p>{{ text }}</p></div>
+<div class="mt-8">{% call button("/") %}Go to Tetsu{% endcall %}</div>
+</div>
+</main>
+{% endmacro %}
+
+{#- A section of a page, at the page's width. A `group` section holds tabs (groups.css) and stories
+    (stories.css). A band or other backdrop the caller draws absolutely sits behind it, across the full width. -#}
+{% macro section(id, labelledby, group = false) %}
+<section{% if !id.is_empty() %} id="{{ id }}"{% endif %} aria-labelledby="{{ labelledby }}" class="relative py-22 sm:py-32 lg:py-44{% if group %} tetsu-clock tetsu-tabs{% endif %}">
+<div class="mx-auto max-w-page px-6 lg:px-10">
+{{ caller() }}
+</div>
+</section>
+{% endmacro %}
+
+{#- A section's heading beside its line. The title may hold a line break. -#}
+{% macro head(id, title, text) %}
+<div class="tetsu-reveal grid gap-6 lg:grid-cols-2 lg:gap-16">
+<h2 id="{{ id }}" class="text-4xl font-semibold tracking-[-0.035em] text-ink sm:text-5xl">{{ title|safe }}</h2>
+<p class="max-w-lg text-lg/8 text-pretty text-muted lg:pt-2">{{ text }}</p>
+</div>
+{% endmacro %}
+
+{#- A group's tabs, from tablets up: radios that choose a slide without script (groups.css). Each tab is
+    (slide id, title, line). -#}
+{% macro tabs(group, legend, tabs) %}
+<fieldset class="mt-12 hidden gap-6 sm:mt-16 md:grid lg:mt-20 lg:gap-8 {% if tabs.len() == 3 %}md:grid-cols-3{% else %}md:grid-cols-2{% endif %}">
+<legend class="sr-only">{{ legend }}: show</legend>
+{%- for (k, tab) in tabs.iter().enumerate() %}
+<label class="block cursor-pointer border-t-2 border-line pt-4 text-left transition-colors hover:border-muted has-checked:border-ink has-focus-visible:outline-2 has-focus-visible:outline-offset-4 has-focus-visible:outline-accent"><input type="radio" name="{{ group }}" class="{% if k == 0 %}tetsu-tab-1{% else if k == 1 %}tetsu-tab-2{% else %}tetsu-tab-3{% endif %} sr-only"{% if k == 0 %} checked{% endif %}><span class="block font-medium text-ink">{{ tab.1 }}</span><span class="mt-1 block text-sm text-muted">{{ tab.2 }}</span></label>
+{%- endfor %}
+</fieldset>
+{% endmacro %}
+
+{#- A column of the footer: its heading and items, each (link, text), a link only if it has one. -#}
+{% macro footer_column(heading, items) %}
+<div>
+<h2 class="font-medium text-ink">{{ heading }}</h2>
+<ul class="mt-4 space-y-3 text-muted">
+{%- for (href, text) in items %}
+<li>{% if href.is_empty() %}{{ text }}{% else %}<a href="{{ href }}" class="hover:text-ink">{{ text }}</a>{% endif %}</li>
+{%- endfor %}
+</ul>
+</div>
+{% endmacro %}

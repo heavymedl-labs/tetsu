@@ -366,6 +366,11 @@ mod tests {
         );
         assert!(sheet.contains("--tetsu-color-primary: #3A4250;"), "{sheet}");
         assert!(sheet.contains("--tetsu-color-accent: #E5622B;"), "{sheet}");
+        // The text on brand colors stays white in both schemes, until #96 chooses it for contrast.
+        assert!(
+            sheet.contains("--tetsu-color-on-primary: #ffffff;"),
+            "{sheet}"
+        );
     }
 
     #[tokio::test]

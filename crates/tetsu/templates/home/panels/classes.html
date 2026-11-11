@@ -1,0 +1,37 @@
+{% import "art/app.html" as app %}
+{#- The day's classes (time, name, booked), its roster (initials, name, plan, status), and the waitlist after
+    its first (place, initials, name, joined). -#}
+{%- let classes = [("6 am", "Hot flow", "23 of 24"), ("9:30 am", "Barre", "15 of 18"), ("12 pm", "Express", "14 of 20"), ("5:30 pm", "Vinyasa", "21 of 24"), ("7 pm", "Sculpt", "13 of 18")] %}
+{%- let roster = [("JP", "Jordan Pike", "Unlimited · spot 4", "Checked in"), ("SO", "Sam Okoye", "10-class pack · spot 9", "Checked in"), ("LH", "Lena Hart", "Unlimited · spot 11", "Booked"), ("RK", "Rosa Kim", "Intro week · spot 15", "First visit"), ("IM", "Ines Moreau", "Unlimited · spot 18", "Booked"), ("WE", "Wren Ellis", "10-class pack · spot 20", "Checked in")] %}
+{%- let waitlist = [("2", "TB", "Theo Brandt", "joined 5:20 am"), ("3", "NH", "Noor Haddad", "joined 5:31 am"), ("4", "ET", "Eli Turner", "joined 5:44 am")] %}
+{% call app::panel("A 6 am class at 23 of 24: the first person on its waitlist takes the open spot, gets a text, and the class is full") %}
+{% call app::bar("Hot flow", "· Thu, Nov 12 · 6:00 to 7:00 am · Studio A · with Bea Lawson") %}<p class="grid font-mono text-xs *:col-start-1 *:row-start-1"><span class="tetsu-out text-muted [--at:0.36]">23 of 24</span><span class="tetsu-in text-ink [--at:0.36]">Full · 24 of 24</span></p>{% endcall %}
+<div class="grid grid-cols-2 gap-2 border-b border-line p-4 text-xs sm:grid-cols-5 sm:px-6">
+{%- for (k, (time, name, booked)) in classes.iter().enumerate() %}
+<div class="{% if k == 0 %}rounded-lg border border-forge/50 bg-forge/10 px-3 py-2{% else if k == 4 %}rounded-lg bg-fill px-3 py-2 hidden sm:block{% else %}rounded-lg bg-fill px-3 py-2{% endif %}"><p class="font-mono text-muted">{{ time }}</p><p class="font-medium text-ink">{{ name }}</p><p class="mt-1 font-mono text-[11px] text-muted">{{ booked }}</p></div>
+{%- endfor %}
+</div>
+<div class="grid lg:grid-cols-[1.3fr_1fr]">
+<div class="p-4 sm:p-6">
+{% call app::label("Roster") %}{% endcall %}
+<ul class="mt-2 divide-y divide-line">
+{%- for (initials, name, plan, status) in roster %}
+{%- let first_visit = status.eq(&"First visit") %}
+<li class="flex items-center gap-3 py-2.5">{% call app::avatar(initials) %}{% endcall %}<span class="min-w-0 flex-1"><span class="block truncate text-ink">{{ name }}</span><span class="block font-mono text-[11px] text-muted">{{ plan }}</span></span><span class="rounded-full bg-fill px-2 py-0.5 font-mono text-[11px] text-muted{% if first_visit %} border border-forge/40 bg-transparent text-ink{% endif %}">{{ status }}</span></li>
+{%- endfor %}
+<li class="flex items-center gap-3 py-2.5 text-muted"><span class="w-7"></span>and 17 more</li>
+<li class="grid py-2.5 *:col-start-1 *:row-start-1"><span class="tetsu-out flex items-center gap-3 rounded-md border border-dashed border-line px-2 py-1.5 text-muted [--at:0.3]"><span class="w-7"></span>Spot 12 open</span><span class="tetsu-in flex items-center gap-3 rounded-md border border-forge/50 bg-forge/10 px-2 py-1.5 [--at:0.32] [--len:0.06]">{% call app::avatar("MR", raised = true) %}{% endcall %}<span class="min-w-0 flex-1 text-ink">Maya Ruiz<span class="block font-mono text-[11px] text-muted">Unlimited · spot 12</span></span><span class="font-mono text-[11px] text-ink">from waitlist</span></span></li>
+</ul>
+</div>
+<div class="flex flex-col border-t border-line bg-fill/40 p-4 sm:p-6 lg:border-t-0 lg:border-l">
+{% call app::label("Waitlist · 4") %}{% endcall %}
+<ol class="mt-2 divide-y divide-line"><li class="flex items-center gap-3 py-2.5"><span class="w-4 font-mono text-[11px] text-muted">1</span>{% call app::avatar("MR") %}{% endcall %}<span class="grid min-w-0 flex-1 *:col-start-1 *:row-start-1"><span class="tetsu-out truncate text-ink [--at:0.3]">Maya Ruiz</span><span class="tetsu-in truncate text-muted line-through [--at:0.3]">Maya Ruiz</span></span><span class="grid justify-items-end font-mono text-[11px] *:col-start-1 *:row-start-1"><span class="tetsu-out text-muted [--at:0.3]">joined 5:12 am</span><span class="tetsu-in text-ink [--at:0.3]">moved in, spot 12</span></span></li>
+{%- for (n, initials, name, joined) in waitlist %}
+<li class="flex items-center gap-3 py-2.5"><span class="w-4 font-mono text-[11px] text-muted">{{ n }}</span>{% call app::avatar(initials) %}{% endcall %}<span class="min-w-0 flex-1 truncate text-ink">{{ name }}</span><span class="font-mono text-[11px] text-muted">{{ joined }}</span></li>
+{%- endfor %}
+</ol>
+<p class="tetsu-in mt-auto flex items-start gap-2 rounded-lg bg-surface p-3 text-xs text-ink [--at:0.5]"><span aria-hidden="true" class="mt-1 size-1.5 shrink-0 rounded-full bg-forge"></span>Texted Maya Ruiz: You're in for Hot flow at 6 am. Spot 12. Reply STOP to opt out.</p>
+<p class="mt-3 text-xs text-muted">Spots go to the next in line until 2 hours before class.</p>
+</div>
+</div>
+{% endcall %}

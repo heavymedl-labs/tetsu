@@ -1,0 +1,13 @@
+{#- One slide of the root page's product tour: its tab's title and line, shown on phones where there are no tabs, the panel the caller
+    gives, and what it includes. -#}
+{% macro slide(tab, includes) %}
+<div id="{{ tab.0 }}" class="tetsu-slide scroll-mt-24">
+<h3 class="font-medium text-ink md:sr-only">{{ tab.1 }}</h3>
+<p class="mt-1 text-sm text-muted md:sr-only">{{ tab.2 }}</p>
+{{ caller() }}
+<div class="mt-12 grid gap-6 text-sm lg:grid-cols-2 lg:gap-16">
+<p class="font-mono text-xs tracking-widest text-muted uppercase">Includes</p>
+<ul class="grid grid-cols-2 gap-x-6 gap-y-3 text-ink *:flex *:before:mr-2 *:before:text-muted *:before:content-['+']">{% for item in includes %}<li>{{ item }}</li>{% endfor %}</ul>
+</div>
+</div>
+{% endmacro %}

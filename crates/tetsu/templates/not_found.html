@@ -1,4 +1,4 @@
-{% extends "../../../web/templates/page.html" %}
-{% import "../../../web/templates/message.html" as page %}
+{% extends "site.html" %}
+{% import "../../../web/templates/components.html" as ui %}
 {% block title %}Not found{% endblock %}
-{% block body %}{% call page::message("404", "Not found", "Nothing is at this address.") %}{% endcall %}{% endblock %}
+{% block page %}{% call ui::empty("404", "Not found", "Nothing is at this address.") %}{% endcall %}{% endblock %}

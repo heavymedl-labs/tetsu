@@ -1,0 +1,140 @@
+/* Stories (home.html): a .tetsu-clock panel turns --tetsu-on to 1 when it comes into view, and each step inside it
+   plays once, as a timed transition that waits its own --at of the story's --story length and lasts its --len.
+   Nothing runs until the panel arrives, and the story replays only after the panel leaves and returns. Without
+   motion or scroll timelines, every step shows its finished state. */
+@property --tetsu-on {
+  syntax: "<integer>";
+  inherits: true;
+  initial-value: 0;
+}
+
+/* A story inside a tab that is not shown waits, so it plays when its tab is chosen. */
+@property --tetsu-shown {
+  syntax: "<integer>";
+  inherits: true;
+  initial-value: 1;
+}
+
+@property --tetsu-n {
+  syntax: "<integer>";
+  inherits: false;
+  initial-value: 0;
+}
+
+@keyframes tetsu-on {
+  to {
+    --tetsu-on: 1;
+  }
+}
+
+@layer components {
+  .tetsu-out {
+    opacity: 0;
+  }
+
+  /* A bar that grows from --from of its width, or its height. */
+  .tetsu-grow {
+    transform-origin: left;
+  }
+
+  .tetsu-grow-y {
+    transform-origin: bottom;
+  }
+
+  /* A path with pathLength="1" that draws itself. */
+  .tetsu-draw {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 0;
+  }
+
+  /* A number that counts from --from to --to. */
+  .tetsu-count {
+    --tetsu-n: var(--to);
+    counter-reset: tetsu-count var(--tetsu-n);
+  }
+
+  .tetsu-count::after {
+    content: counter(tetsu-count);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    @supports (animation-timeline: view()) {
+      .tetsu-clock {
+        animation: tetsu-on linear both;
+        animation-timeline: view();
+        animation-range: cover 18% cover 28%;
+      }
+
+      .tetsu-rise.tetsu-clock {
+        animation:
+          tetsu-rise 900ms var(--ease-tetsu) 1000ms both,
+          tetsu-on linear both;
+        animation-timeline: auto, view();
+        animation-range:
+          normal,
+          entry 30% entry 60%;
+      }
+
+      .tetsu-in,
+      .tetsu-out,
+      .tetsu-grow,
+      .tetsu-grow-y,
+      .tetsu-draw,
+      .tetsu-count {
+        transition-property: opacity, translate, scale, stroke-dashoffset, --tetsu-n;
+        transition-timing-function: ease-out;
+        transition-duration: calc(var(--len, 0.05) * var(--story, 6s) + 200ms);
+        transition-delay: calc(var(--at, 0) * var(--story, 6s));
+      }
+
+      .tetsu-in {
+        opacity: 0;
+        translate: 0 6px;
+      }
+
+      .tetsu-out {
+        opacity: 1;
+      }
+
+      .tetsu-grow {
+        scale: var(--from) 1;
+      }
+
+      .tetsu-grow-y {
+        scale: 1 var(--from);
+      }
+
+      .tetsu-draw {
+        stroke-dashoffset: 1;
+      }
+
+      .tetsu-count {
+        --tetsu-n: var(--from);
+      }
+
+      @container style(--tetsu-on: 1) and style(--tetsu-shown: 1) {
+        .tetsu-in {
+          opacity: 1;
+          translate: none;
+        }
+
+        .tetsu-out {
+          opacity: 0;
+        }
+
+        .tetsu-grow,
+        .tetsu-grow-y {
+          scale: 1;
+        }
+
+        .tetsu-draw {
+          stroke-dashoffset: 0;
+        }
+
+        .tetsu-count {
+          --tetsu-n: var(--to);
+        }
+      }
+    }
+  }
+}

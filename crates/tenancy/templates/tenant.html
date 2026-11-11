@@ -4,17 +4,22 @@
 {% block demo %}<strong>Demo business.</strong> {{ name }} is fictional, made up to show what Tetsu does. Nothing
 here can be booked or bought.{% endblock %}
 {% block body %}
+{#- The business's own colors lead; Tetsu appears only in the footer (ADR-0035). After HyperUI's banner 2 (MIT),
+    aligned with the page's sections below. #}
 <header class="bg-primary">
-<div class="mx-auto max-w-7xl px-6 py-24 sm:py-32 lg:px-8">
-<div class="max-w-2xl text-5xl font-semibold tracking-tight text-balance text-on-primary sm:text-7xl"><h1>{{ name }}</h1></div>
+<div class="mx-auto max-w-6xl px-6 py-16 sm:py-24 lg:py-32">
+<div class="max-w-prose text-5xl font-semibold tracking-[-0.035em] text-balance text-on-primary sm:text-7xl"><h1>{{ name }}</h1></div>
 </div>
 </header>
-<main class="flex-1 bg-white py-24 sm:py-32">
-<div class="mx-auto max-w-7xl px-6 lg:px-8">
-<div class="max-w-2xl text-4xl font-semibold tracking-tight text-pretty text-gray-900 sm:text-5xl"><h2>Locations</h2></div>
-<ul class="mt-16 grid max-w-2xl grid-cols-1 gap-8 text-base/7 font-semibold text-gray-900 sm:grid-cols-2 sm:gap-y-16 lg:max-w-none lg:grid-cols-4 *:border-l-2 *:border-accent *:py-1 *:pl-6">
+<main class="flex-1 py-20 sm:py-24">
+<section aria-labelledby="locations" class="mx-auto max-w-6xl px-6">
+{#- Neutral text: a tenant's accent is not yet chosen for contrast as text (#96), so it marks only the cards. #}
+<p class="font-mono text-xs tracking-widest text-muted uppercase">Visit us</p>
+<div id="locations" class="mt-2 text-3xl font-semibold tracking-tight text-ink sm:text-4xl"><h2>Locations</h2></div>
+{#- After HyperUI's feature grid 1 (MIT): one card per location. #}
+<ul class="mt-10 grid grid-cols-1 gap-4 text-base font-medium text-ink sm:grid-cols-2 lg:grid-cols-4 *:rounded-xl *:border *:border-line *:border-l-2 *:border-l-accent *:bg-surface *:px-6 *:py-5">
 {% for location in locations %}<li>{{ location }}</li>
 {% endfor %}</ul>
-</div>
+</section>
 </main>
 {% endblock %}

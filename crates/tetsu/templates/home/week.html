@@ -1,0 +1,55 @@
+{% import "art/app.html" as app %}
+{#- The product: a live week at a yoga studio, which plays once it is in view (stories.css). #}
+<section id="product" aria-label="A week in Tetsu" class="mx-auto mt-20 max-w-page px-6 sm:mt-28 lg:px-10">
+<div role="img" aria-label="Tetsu's week at a yoga studio: bookings come in, a 6 am class fills and starts a waitlist, and the week's numbers rise" class="tetsu-clock tetsu-rise [animation-delay:1000ms]">
+<div class="overflow-hidden rounded-2xl border border-line bg-surface text-left shadow-[0_30px_80px_-20px_rgb(0_0_0/0.3)]">
+<div class="flex items-center justify-between border-b border-line px-4 py-3">
+<div class="flex items-center gap-2"><span class="size-2.5 rounded-full bg-line"></span><span class="size-2.5 rounded-full bg-line"></span><span class="size-2.5 rounded-full bg-line"></span></div>
+<p class="hidden font-mono text-xs text-muted sm:block">Northbound Yoga · Eastside · Week of November 9</p>
+<p class="flex rounded-md border border-line p-0.5 font-mono text-xs text-muted"><span class="px-2 py-0.5">Day</span><span class="rounded bg-fill px-2 py-0.5 text-ink">Week</span><span class="px-2 py-0.5">Month</span></p>
+</div>
+<div class="grid xl:grid-cols-[11rem_1fr_19rem]">
+<div class="hidden border-r border-line p-4 text-sm text-muted xl:block">
+<p class="mb-3 font-mono text-xs tracking-widest uppercase">Studio</p>
+<ul class="space-y-1"><li class="rounded-md bg-fill px-2 py-1 text-ink">Schedule</li><li class="px-2 py-1">Bookings</li><li class="px-2 py-1">Members</li><li class="px-2 py-1">Payments</li><li class="px-2 py-1">Staff</li><li class="px-2 py-1">Reports</li></ul>
+<p class="mt-8 mb-3 font-mono text-xs tracking-widest uppercase">Locations</p>
+<ul class="space-y-1"><li class="flex items-center gap-2 px-2 py-1 text-ink"><span class="size-1.5 rounded-full bg-forge"></span>Eastside</li><li class="flex items-center gap-2 px-2 py-1"><span class="size-1.5 rounded-full bg-line"></span>Riverside</li><li class="flex items-center gap-2 px-2 py-1"><span class="size-1.5 rounded-full bg-line"></span>Old Town</li></ul>
+</div>
+<div>
+<div class="grid grid-cols-3 gap-2 border-b border-line p-4 text-left"><div><p class="text-xs text-muted">Booked this week</p><p class="mt-1 text-xl font-semibold tracking-tight text-ink sm:text-2xl"><span class="tetsu-count [--from:412] [--to:486] [--at:0.04] [--len:0.67]"></span></p></div><div><p class="text-xs text-muted">On waitlists</p><p class="mt-1 text-xl font-semibold tracking-tight text-ink sm:text-2xl"><span class="tetsu-count [--from:18] [--to:23] [--at:0.22] [--len:0.38]"></span></p></div><div><p class="text-xs text-muted">Fill rate</p><p class="mt-1 text-xl font-semibold tracking-tight text-ink sm:text-2xl"><span class="tetsu-count [--from:91] [--to:96] [--at:0.04] [--len:0.67]"></span>%</p></div></div>
+<div class="p-4">
+<div class="grid grid-cols-3 gap-2 sm:grid-cols-5">
+<p class="font-mono text-xs text-muted hidden sm:block">Mon 9</p>
+<p class="font-mono text-xs text-muted">Tue 10</p>
+<p class="font-mono text-xs text-muted">Wed 11</p>
+<p class="font-mono text-xs text-ink">Thu 12 <span class="ml-1 rounded bg-forge/15 px-1 text-[10px] text-ink">Today</span></p>
+<p class="font-mono text-xs text-muted hidden sm:block">Fri 13</p>
+{#- The classes, a row a time and a column a day, each with how many are booked of how many; Monday and Friday
+    hide on phones. Thursday's 6 am and noon classes play the story, so they are written out. -#}
+{%- for (time, days) in [
+  ("6 am", [("Vinyasa", 22, 24), ("Yin", 14, 20), ("Vinyasa", 1, 1), ("Hot flow", 0, 0), ("Vinyasa", 19, 24)]),
+  ("9:30 am", [("Prenatal", 9, 12), ("Express", 16, 20), ("Prenatal", 1, 1), ("Barre", 15, 18), ("Mobility", 10, 16)]),
+  ("12 pm", [("Express", 18, 20), ("Restore", 11, 16), ("Express", 17, 20), ("Express", 0, 0), ("Restore", 8, 16)]),
+  ("5:30 pm", [("Power", 23, 24), ("Hot flow", 20, 22), ("Power", 1, 1), ("Vinyasa", 21, 24), ("Hot flow", 1, 1)]),
+  ("7 pm", [("Yin", 12, 20), ("Sculpt", 16, 18), ("Yin", 15, 20), ("Sculpt", 13, 18), ("Candlelit flow", 18, 20)]),
+] %}{% for (d, (name, booked, capacity)) in days.iter().enumerate() %}
+{%- if *capacity == 0 && name == &"Hot flow" %}<div class="relative overflow-hidden rounded-md border-l-2 px-2 py-2 text-[11px]/4 sm:text-xs border-forge bg-fill"><span aria-hidden="true" class="tetsu-in absolute inset-0 bg-forge/12 [--at:0.22] [--len:0.11]"></span><span class="relative block text-ink"><span class="font-mono text-muted">6 am</span> Hot flow</span><span class="relative mt-0.5 grid text-muted *:col-start-1 *:row-start-1"><span class="tetsu-out [--at:0.20] [--len:0.07]">21 of 24</span><span class="tetsu-in text-ink [--at:0.27] [--len:0.07]">Full · 4 waiting</span></span><span class="relative mt-2 block h-1 rounded-full bg-line"><span class="tetsu-grow block h-full w-full rounded-full bg-forge [--from:0.875] [--at:0.04] [--len:0.22]"></span></span></div>
+{%- else if *capacity == 0 %}<div class="relative overflow-hidden rounded-md border-l-2 px-2 py-2 text-[11px]/4 sm:text-xs border-ink/25 bg-fill"><span class="relative block text-ink"><span class="font-mono text-muted">12 pm</span> Express</span><span class="relative mt-0.5 grid text-muted *:col-start-1 *:row-start-1"><span class="tetsu-out [--at:0.44] [--len:0.07]">14 of 20</span><span class="tetsu-in [--at:0.51] [--len:0.07]">17 of 20</span></span><span class="relative mt-2 block h-1 rounded-full bg-line"><span class="tetsu-grow block h-full w-[85%] rounded-full bg-ink/50 [--from:0.82] [--at:0.44] [--len:0.13]"></span></span></div>
+{%- else %}{% call app::cell(time, name, *booked, *capacity, d == 0 || d == 4) %}{% endcall %}{% endif %}
+{%- endfor %}{% endfor %}
+</div>
+</div>
+</div>
+<div class="border-t border-line p-4 xl:border-t-0 xl:border-l">
+<div class="flex items-center justify-between"><p class="text-sm font-medium text-ink">Activity</p><p class="flex items-center gap-1.5 font-mono text-xs text-muted"><span class="size-1.5 rounded-full bg-forge"></span>Live</p></div>
+<ol class="mt-4 space-y-3 text-xs/5">
+<li class="tetsu-in flex gap-3 rounded-lg bg-fill p-3 [--at:0.60] [--len:0.11]"><span class="mt-1.5 size-1.5 shrink-0 rounded-full bg-ink/40"></span><span class="flex-1 text-ink">Lena Hart froze her membership until Dec 1</span><span class="font-mono text-muted">6:04</span></li>
+<li class="tetsu-in flex gap-3 rounded-lg bg-fill p-3 [--at:0.44] [--len:0.11]"><span class="mt-1.5 size-1.5 shrink-0 rounded-full bg-ink/45"></span><span class="flex-1 text-ink">Jordan Pike booked 12:00 pm Express</span><span class="font-mono text-muted">6:03</span></li>
+<li class="tetsu-in flex gap-3 rounded-lg bg-fill p-3 [--at:0.31] [--len:0.11]"><span class="mt-1.5 size-1.5 shrink-0 rounded-full bg-forge"></span><span class="flex-1 text-ink">Theo Brandt joined the Hot flow waitlist</span><span class="font-mono text-muted">6:02</span></li>
+<li class="tetsu-in flex gap-3 rounded-lg bg-fill p-3 [--at:0.16] [--len:0.11]"><span class="mt-1.5 size-1.5 shrink-0 rounded-full bg-ink/45"></span><span class="flex-1 text-ink">Payment received · $28.00 drop-in</span><span class="font-mono text-muted">6:01</span></li>
+<li class="tetsu-in flex gap-3 rounded-lg bg-fill p-3 [--at:0.04] [--len:0.11]"><span class="mt-1.5 size-1.5 shrink-0 rounded-full bg-ink/45"></span><span class="flex-1 text-ink">Maya Ruiz booked 6:00 am Hot flow</span><span class="font-mono text-muted">6:01</span></li>
+</ol></div>
+</div>
+</div>
+</div>
+</section>

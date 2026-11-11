@@ -1,0 +1,37 @@
+{#- Parts of Tetsu's app as the root page shows it in its product pictures (home/week.html, home/panels). -#}
+
+{#- A class in the week: its time and name, how many are booked of how many, and a bar. `edge` hides it on phones,
+    which show only the middle days. -#}
+{% macro cell(time, name, booked, capacity, edge) %}
+<div class="{% if edge %}hidden sm:block {% endif %}relative overflow-hidden rounded-md border-l-2 px-2 py-2 text-[11px]/4 sm:text-xs border-ink/25 bg-fill"><span class="relative block text-ink"><span class="font-mono text-muted">{{ time }}</span> {{ name }}</span><span class="relative mt-0.5 block text-muted">{% if booked == capacity %}Full{% else %}{{ booked }} of {{ capacity }}{% endif %}</span><meter class="tetsu-meter{% if booked == capacity %} tetsu-meter-full{% endif %} relative mt-2" value="{{ booked }}" max="{{ capacity }}"></meter></div>
+{% endmacro %}
+
+{#- A product picture's frame: one image to assistive technology, described by `label`, that rises into view.
+    `small` sets its text a size down, for a dense panel. -#}
+{% macro panel(label, small = false) %}
+<div role="img" aria-label="{{ label }}" class="tetsu-reveal mt-4 overflow-hidden rounded-2xl border border-line bg-surface lg:mt-0 {% if small %}text-xs{% else %}text-sm{% endif %}">
+{{ caller() }}
+</div>
+{% endmacro %}
+
+{#- A panel's title bar: what it shows and where, with whatever the caller sets at its right. -#}
+{% macro bar(title, meta) %}
+<div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-line px-4 py-3 text-sm sm:px-6"><p class="font-medium text-ink">{{ title }} <span class="font-normal text-muted">{{ meta }}</span></p>{{ caller() }}</div>
+{% endmacro %}
+
+{#- A person's initials in a circle. `raised` sets it on a surface, for a row that stands out. -#}
+{% macro avatar(initials, raised = false) %}
+<span aria-hidden="true" class="grid size-7 shrink-0 place-items-center rounded-full font-mono text-[10px] text-muted {% if raised %}bg-surface{% else %}bg-fill{% endif %}">{{ initials }}</span>
+{% endmacro %}
+
+{#- A small label over a list. -#}
+{% macro label(text) %}
+<p class="font-mono text-[11px] tracking-widest text-muted uppercase">{{ text }}</p>
+{% endmacro %}
+
+{#- Where a part sits in a panel's grid: its column, 1 to 5, and row, 1 to 10. A value outside those sets nothing
+    for its axis, and the grid places the part itself. Class names are written whole, so Tailwind finds them. -#}
+{% macro at(col, row) -%}
+{% if col.eq(&1) %}col-start-1{% else if col.eq(&2) %}col-start-2{% else if col.eq(&3) %}col-start-3{% else if col.eq(&4) %}col-start-4{% else if col.eq(&5) %}col-start-5{% endif %}
+{%- if row.eq(&1) %} row-start-1{% else if row.eq(&2) %} row-start-2{% else if row.eq(&3) %} row-start-3{% else if row.eq(&4) %} row-start-4{% else if row.eq(&5) %} row-start-5{% else if row.eq(&6) %} row-start-6{% else if row.eq(&7) %} row-start-7{% else if row.eq(&8) %} row-start-8{% else if row.eq(&9) %} row-start-9{% else if row.eq(&10) %} row-start-10{% endif %}
+{%- endmacro %}

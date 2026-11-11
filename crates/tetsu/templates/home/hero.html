@@ -1,0 +1,15 @@
+{#- Outside a demo the page is only the hero, since everything after it is fictional (ADR-0037). #}
+{% import "../../../web/templates/components.html" as ui %}
+<section class="text-center">
+<div class="sr-only"><h1>Tetsu</h1></div>
+{#- Tetsu's wordmark, booked into an open week. #}
+<div class="mx-auto h-52 max-w-[1600px] text-ink sm:h-72 lg:h-88">{% include "art/board.html" %}</div>
+<div class="relative mx-auto -mt-8 max-w-5xl px-6 sm:-mt-12 lg:-mt-16">
+<p class="tetsu-rise text-5xl/[1.05] font-semibold tracking-[-0.045em] text-balance text-ink [animation-delay:700ms] sm:text-7xl/[1.02]">Booking software,<br class="hidden sm:block"> built like iron.</p>
+<p class="tetsu-rise mx-auto mt-6 max-w-xl text-lg/8 text-pretty text-muted [animation-delay:850ms]">Built to carry every booking, membership, and payment, and built so you're never locked in.</p>
+{% if demo %}<div class="tetsu-rise mt-10 flex flex-wrap items-center justify-center gap-3 [animation-delay:950ms]">
+{% call ui::button("#pricing") %}See plans{% endcall %}
+{% call ui::button("#product", secondary = true) %}See it in action <span aria-hidden="true">→</span>{% endcall %}
+</div>{% endif %}
+</div>
+</section>

@@ -1,0 +1,23 @@
+{% import "../../../web/templates/components.html" as ui %}
+{% import "art/figures.html" as fig %}
+{% import "home/tour.html" as tour %}
+{#- Each capability: a title and a line, a wide picture that moves on hover, and what it includes. #}
+{%- let tabs = [("classes", "Classes and waitlists", "Waitlists that fill open spots on their own."), ("spots", "Pick your spot, anywhere", "Customers pick their own bike, mat, or site."), ("layouts", "Build your layout", "Draw rooms, rows, and sites, and publish when ready.")] %}
+{% call ui::section("fill", "fill-title", group = true) %}
+{% call fig::separator(false) %}{% endcall %}
+{% call ui::head("fill-title", "Fill every class", "Classes, waitlists, and spot maps keep every session full, with no one working the desk.") %}{% endcall %}
+{% call ui::tabs("fill", "Fill every class", tabs) %}{% endcall %}
+<div class="tetsu-film mt-10">
+<div class="tetsu-strip">
+{% call tour::slide(tabs[0], ["Waitlists", "Late-cancel rules", "Recurring classes", "Rooms and capacity", "Check-in", "Class packs"]) %}
+{% include "panels/classes.html" %}
+{% endcall %}
+{% call tour::slide(tabs[1], ["Spot types and prices", "Usual spots", "Guest spots", "Filters by fit", "Accessible spots", "Holds while paying"]) %}
+{% include "panels/spots.html" %}
+{% endcall %}
+{% call tour::slide(tabs[2], ["Rows and fixtures", "Automatic numbering", "Spot types and prices", "Accessible spots", "Snap to the grid", "Drafts and publishing"]) %}
+{% include "panels/layouts.html" %}
+{% endcall %}
+</div>
+</div>
+{% endcall %}

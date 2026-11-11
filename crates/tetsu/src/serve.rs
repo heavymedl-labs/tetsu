@@ -33,8 +33,8 @@ struct NotFoundPage {
 /// finishes its request cannot hold the server open past it.
 pub const GRACE: Duration = Duration::from_secs(10);
 
-/// Sent with every response (ADR-0029). The pages run no scripts and load only Tetsu's own stylesheets, so the
-/// policy allows nothing else, not even an inline style, and no site may frame them (ADR-0030). HSTS lasts a year, the least ASVS
+/// Sent with every response (ADR-0029). The pages run no scripts and load only Tetsu's own stylesheets and fonts, so
+/// the policy allows nothing else, not even an inline style, and no site may frame them (ADR-0030). HSTS lasts a year, the least ASVS
 /// 3.4.1 allows.
 const HEADERS: [(HeaderName, &str); 5] = [
     (
@@ -44,7 +44,7 @@ const HEADERS: [(HeaderName, &str); 5] = [
     (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
     (
         header::CONTENT_SECURITY_POLICY,
-        "default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+        "default-src 'none'; object-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
     ),
     (header::REFERRER_POLICY, "no-referrer"),
     (header::X_FRAME_OPTIONS, "DENY"),
@@ -230,7 +230,7 @@ mod tests {
         ("x-content-type-options", "nosniff"),
         (
             "content-security-policy",
-            "default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+            "default-src 'none'; object-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
         ),
         ("referrer-policy", "no-referrer"),
         ("x-frame-options", "DENY"),
@@ -466,6 +466,327 @@ mod tests {
     async fn the_root_page_says_when_the_site_shows_demos() {
         assert!(get_path("/").await.contains("<strong>Demo.</strong>"));
         assert!(!send_to(false, &get_request("/")).await.contains("Demo"));
+    }
+
+    #[tokio::test]
+    async fn the_root_page_describes_itself_and_names_its_icons() {
+        for demo in [true, false] {
+            let raw = send_to(demo, &get_request("/")).await;
+            assert!(
+                raw.contains("<title>Tetsu: booking software, built like iron</title>"),
+                "{raw}"
+            );
+            assert!(
+                raw.contains(r#"<meta name="description" content=""#),
+                "{raw}"
+            );
+            assert!(
+                raw.contains(r#"<meta property="og:title" content=""#),
+                "{raw}"
+            );
+            for path in [crate::assets::ICON, crate::assets::TOUCH_ICON] {
+                assert!(
+                    raw.contains(&format!(r#"href="{path}""#)),
+                    "{path} in {raw}"
+                );
+                assert!(crate::assets::find(path).is_some(), "{path}");
+            }
+        }
+    }
+
+    /// The root page as it renders, in a demo or not.
+    fn home_page(demo: bool) -> String {
+        HomePage {
+            demo,
+            stylesheet: "",
+        }
+        .render()
+        .unwrap()
+    }
+
+    /// The first SVG after `marker` in `page`, without its closing tag.
+    fn svg_after<'a>(page: &'a str, marker: &str) -> &'a str {
+        let from = page.find(marker).unwrap();
+        let svg = &page[from..][page[from..].find("<svg").unwrap()..];
+        &svg[..svg.find("</svg>").unwrap()]
+    }
+
+    /// A wordmark's booked cells, and the ones that run hot.
+    type Cells = (std::collections::BTreeSet<(i64, i64)>, Vec<(i64, i64)>);
+
+    /// The brand's slots booked in the first SVG after `marker`, as cells on its 30 pixel pitch counted from the
+    /// top left one, with the cell that runs hot. A slot is booked if it is filled in the brand's colors, and hot
+    /// if in forge orange; the hero board's other bookings, in other fills, are not counted.
+    fn booked_cells(page: &str, marker: &str) -> Cells {
+        let svg = svg_after(page, marker);
+        let attr = |tag: &str, name: &str| {
+            tag.split(&format!(" {name}=\""))
+                .nth(1)
+                .map(|rest| rest[..rest.find('"').unwrap()].to_string())
+        };
+        let mut cells = Vec::new();
+        for tag in svg
+            .split("<rect")
+            .skip(1)
+            .map(|t| &t[..t.find('>').unwrap()])
+        {
+            let class = attr(tag, "class").unwrap_or_default();
+            let fill = attr(tag, "fill").unwrap_or_default();
+            let hot = class.contains("tetsu-hot") || fill == "#E5622B";
+            if hot || class.contains("fill-current") || fill == "#3A4250" {
+                // Booked slots sit on whole pixels, so a coordinate's whole part places its cell.
+                let at = |name| {
+                    let value = attr(tag, name).unwrap();
+                    value.split('.').next().unwrap().parse::<i64>().unwrap() / 30
+                };
+                cells.push(((at("x"), at("y")), hot));
+            }
+        }
+        let left = cells.iter().map(|((x, _), _)| *x).min().unwrap();
+        let top = cells.iter().map(|((_, y), _)| *y).min().unwrap();
+        let shift = |(x, y): (i64, i64)| (x - left, y - top);
+        let hot = cells
+            .iter()
+            .filter(|(_, hot)| *hot)
+            .map(|(cell, _)| shift(*cell))
+            .collect();
+        (
+            cells.into_iter().map(|(cell, _)| shift(cell)).collect(),
+            hot,
+        )
+    }
+
+    #[test]
+    fn the_wordmark_fills_each_cell_of_its_grid_once() {
+        // Its open slots come from rows of dots and its booked ones from brand.html, so they must not overlap.
+        let page = home_page(false);
+        let svg = svg_after(&page, r#"aria-label="Tetsu home""#);
+        // A coordinate's whole part, over the 30 pixel pitch, places a rect's cell.
+        let cell = |tag: &str, name: &str| {
+            let value = tag.split(&format!(" {name}=\"")).nth(1).unwrap();
+            value[..value.find(['.', '"']).unwrap()]
+                .parse::<i64>()
+                .unwrap()
+                / 30
+        };
+        let cells: Vec<_> = svg
+            .split("<rect")
+            .skip(1)
+            .map(|tag| (cell(tag, "x"), cell(tag, "y")))
+            .collect();
+        let grid: std::collections::BTreeSet<_> =
+            (0..19).flat_map(|x| (0..5).map(move |y| (x, y))).collect();
+        assert_eq!(cells.len(), grid.len(), "one rect a cell");
+        assert_eq!(
+            cells.into_iter().collect::<std::collections::BTreeSet<_>>(),
+            grid
+        );
+    }
+
+    #[test]
+    fn every_class_on_the_root_page_is_in_the_stylesheet() {
+        // scripts/check_templates.py checks only names written inside a class attribute, so a mistyped name in a
+        // macro's body, such as art/app.html's grid placement, would pass it. Tailwind drops an unknown name without a
+        // word. Marker classes such as group and peer style nothing themselves, as in that check.
+        let css = std::str::from_utf8(assets::find(assets::STYLESHEET).unwrap().bytes).unwrap();
+        // Each class selector, with Tailwind's backslash escapes removed.
+        let mut defined = std::collections::BTreeSet::new();
+        let mut chars = css.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c != '.' {
+                continue;
+            }
+            let mut name = String::new();
+            while let Some(&next) = chars.peek() {
+                if next == '\\' {
+                    chars.next();
+                    name.extend(chars.next());
+                } else if next.is_ascii_alphanumeric() || next == '-' || next == '_' {
+                    name.push(next);
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            defined.insert(name);
+        }
+        let page = home_page(true);
+        let missing: Vec<_> = page
+            .split(" class=\"")
+            .skip(1)
+            .flat_map(|rest| rest[..rest.find('"').unwrap()].split_whitespace())
+            .filter(|name| !defined.contains(*name))
+            .filter(|name| !["group", "peer"].contains(&name.split('/').next().unwrap()))
+            .collect();
+        assert!(
+            page.matches(" class=\"").count() > 1000,
+            "the page's classes were read"
+        );
+        assert!(missing.is_empty(), "{missing:?}");
+    }
+
+    #[test]
+    fn the_phone_menu_is_a_popover_that_its_button_opens() {
+        // A popover, so Escape and a tap outside close it without script (site.html).
+        let page = home_page(true);
+        assert!(
+            page.contains("<button type=\"button\" popovertarget=\"tetsu-menu\""),
+            "{page}"
+        );
+        assert!(page.contains("<div id=\"tetsu-menu\" popover "), "{page}");
+    }
+
+    /// Whether a declaration moves something: any animation but tetsu-play, or a transition of a transform or of
+    /// every property. Fades of color and opacity are not movement.
+    fn moves(declaration: &str) -> bool {
+        let (property, value) = declaration.split_once(':').unwrap_or_default();
+        match property.trim() {
+            "animation" | "animation-name" => {
+                value.split(',').any(|one| !one.contains("tetsu-play"))
+            }
+            "transition" | "transition-property" => {
+                ["all", "transform", "translate", "scale", "rotate"]
+                    .iter()
+                    .any(|word| value.contains(word))
+            }
+            _ => false,
+        }
+    }
+
+    /// Each declaration in a stylesheet that moves something, and whether a reduced-motion guard wraps it.
+    fn movements(css: &str) -> Vec<(&str, bool)> {
+        let mut blocks: Vec<&str> = Vec::new();
+        let (mut start, mut found) = (0, Vec::new());
+        for (at, c) in css.char_indices().filter(|(_, c)| "{;}".contains(*c)) {
+            let text = css[start..at].trim();
+            start = at + 1;
+            if c == '{' {
+                blocks.push(text);
+                continue;
+            }
+            if moves(text) {
+                let guarded = blocks
+                    .iter()
+                    .any(|block| block.contains("prefers-reduced-motion:no-preference"));
+                found.push((text, guarded));
+            }
+            if c == '}' {
+                blocks.pop();
+            }
+        }
+        found
+    }
+
+    #[test]
+    fn nothing_loops_and_nothing_moves_when_the_visitor_asks_for_less() {
+        // motion.css's promises (WCAG 2.2.2 and 2.3.3). tetsu-play animates only a custom property that tells a
+        // figure to show itself on touch screens, so it moves nothing itself.
+        let css = std::str::from_utf8(assets::find(assets::STYLESHEET).unwrap().bytes).unwrap();
+        assert!(!css.contains("infinite"), "something loops");
+        let play = &css[css.find("@keyframes tetsu-play{").unwrap()..];
+        assert_eq!(
+            &play[..play.find('}').unwrap()],
+            "@keyframes tetsu-play{to{--tetsu-play:1"
+        );
+        let found = movements(css);
+        let unguarded: Vec<_> = found.iter().filter(|(_, guarded)| !guarded).collect();
+        assert!(found.len() > 5, "only {} movements were read", found.len());
+        assert!(unguarded.is_empty(), "{unguarded:?}");
+    }
+
+    #[test]
+    fn the_dark_tokens_follow_the_system_unless_the_header_control_picks() {
+        // Tailwind's dark variant sets the dark tokens (tetsu.css): in a dark system scheme unless the control picks
+        // Light, and whenever it picks Dark. Each rule that sets one, with whatever wraps it.
+        let css = std::str::from_utf8(assets::find(assets::STYLESHEET).unwrap().bytes).unwrap();
+        let rules: Vec<(&str, &str)> = css
+            .match_indices("--tetsu-color-canvas:#111110")
+            .map(|(at, _)| {
+                let open = css[..at].rfind('{').unwrap();
+                let start = css[..open].rfind(['{', '}']).unwrap() + 1;
+                (&css[..start], &css[start..open])
+            })
+            .collect();
+        let page = home_page(true);
+        for id in [
+            "tetsu-scheme-system",
+            "tetsu-scheme-light",
+            "tetsu-scheme-dark",
+        ] {
+            assert!(page.contains(&format!("id=\"{id}\"")), "{id}");
+        }
+        assert_eq!(rules.len(), 2, "{rules:?}");
+        let (before, system) = rules[0];
+        assert!(
+            before.ends_with("@media (prefers-color-scheme:dark){"),
+            "{system}"
+        );
+        assert!(
+            system.contains(":root:not(:has(#tetsu-scheme-light:checked))"),
+            "{system}"
+        );
+        assert!(
+            rules[1].1.contains(":root:has(#tetsu-scheme-dark:checked)"),
+            "{rules:?}"
+        );
+    }
+
+    #[test]
+    fn no_text_on_the_root_page_is_escaped_twice() {
+        // A macro escapes its arguments, `&` as `&#38;`, so an argument written as an entity, such as `&amp;`,
+        // would show the entity's code.
+        let page = home_page(true);
+        for entity in ["amp;", "lt;", "gt;", "quot;", "#"] {
+            assert!(
+                !page.contains(&format!("&#38;{entity}")),
+                "&{entity} escaped twice"
+            );
+        }
+    }
+
+    #[test]
+    fn the_wordmark_and_the_hero_board_book_the_brand_files_slots() {
+        let brand = booked_cells(
+            include_str!("../../../docs/brand/tetsu-wordmark-light.svg"),
+            "<svg",
+        );
+        assert_eq!(brand.0.len(), 50);
+        assert_eq!(brand.1.len(), 1);
+        assert_eq!(
+            booked_cells(&home_page(true), r#"aria-label="Tetsu home""#),
+            brand,
+            "the header's wordmark"
+        );
+        assert_eq!(
+            booked_cells(&home_page(true), "<h1>Tetsu</h1>"),
+            brand,
+            "the hero board"
+        );
+    }
+
+    #[tokio::test]
+    async fn only_a_demo_root_page_shows_fictional_customers_and_figures() {
+        let demo = get_path("/").await;
+        assert!(
+            demo.contains("Ironbark") && demo.contains("1,200"),
+            "{demo}"
+        );
+        // Outside a demo, the page's main holds the hero and an empty spacer, and nothing else (ADR-0037).
+        let outside = send_to(false, &get_request("/")).await;
+        let main = &outside[outside.find("<main").unwrap()..outside.find("</main>").unwrap()];
+        let hero =
+            main.find("<section").unwrap()..main.find("</section>").unwrap() + "</section>".len();
+        assert!(main[hero.clone()].contains("<h1>Tetsu</h1>"), "{main}");
+        let rest = format!(
+            "{}{}",
+            &main[main.find('>').unwrap() + 1..hero.start],
+            &main[hero.end..]
+        );
+        assert_eq!(
+            rest.split_whitespace().collect::<String>(),
+            "<divclass=\"pb-32\"></div>",
+            "{main}"
+        );
     }
 
     #[tokio::test]

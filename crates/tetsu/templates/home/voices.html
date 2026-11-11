@@ -1,0 +1,23 @@
+{% import "../../../web/templates/components.html" as ui %}
+{% import "art/figures.html" as fig %}
+{% call ui::section("", "voices") %}
+{% call fig::separator(true) %}{% endcall %}
+<h2 id="voices" class="sr-only">What owners say</h2>
+{#- Quote cards keep their own colors in both schemes. #}
+<div class="tetsu-reveal grid gap-4 lg:grid-cols-5">
+<figure class="relative isolate flex min-h-96 flex-col justify-between overflow-hidden rounded-2xl bg-linear-to-br from-[#fdeadf] via-[#f8d2bb] to-[#f0b18c] p-8 text-[#1b1410] sm:p-10 lg:col-span-3">
+<svg aria-hidden="true" viewBox="0 0 84 84" class="absolute -right-10 -bottom-10 -z-10 size-80 fill-white/35"><rect x="30" y="0" width="24" height="24" rx="3"/><rect x="0" y="30" width="24" height="24" rx="3"/><rect x="30" y="30" width="24" height="24" rx="3"/><rect x="60" y="30" width="24" height="24" rx="3"/><rect x="30" y="60" width="24" height="24" rx="3"/></svg>
+<blockquote class="max-w-xl text-2xl/snug font-medium tracking-tight text-balance sm:text-3xl/snug"><p>“Our 6 a.m. classes sell out in minutes. With Tetsu the waitlist just works, at all three gyms, and nobody opens a spreadsheet.”</p></blockquote>
+<figcaption class="mt-10 text-sm"><p class="font-medium">Dana Okafor</p><p class="text-[#1b1410]/75">Owner, Ironbark Barbell</p></figcaption>
+</figure>
+<figure class="flex min-h-96 flex-col justify-between rounded-2xl bg-linear-to-br from-[#3a4250] to-[#16181c] p-8 text-[#f4f2ee] sm:p-10 lg:col-span-2">
+<blockquote class="text-2xl/snug font-medium tracking-tight text-balance sm:text-3xl/snug"><p>“Color used to get crammed into gaps. Now Saturdays run on time.”</p></blockquote>
+<figcaption class="mt-10 text-sm"><p class="font-medium">Priya Raman</p><p class="text-[#f4f2ee]/75">Founder, Willow &amp; Ash Spa</p></figcaption>
+</figure>
+</div>
+<dl class="tetsu-reveal mt-10 grid gap-6 text-sm sm:grid-cols-3">
+{%- for (term, figure, line) in [("Bookings a year", "38M", "bookings a year"), ("Businesses", "1,200+", "businesses that sell time"), ("Uptime", "99.98%", "uptime over the past year")] %}
+<div class="flex items-baseline gap-3"><dt class="sr-only">{{ term }}</dt><dd class="text-2xl font-semibold tracking-tight text-ink">{{ figure }}</dd><dd aria-hidden="true" class="text-muted">{{ line }}</dd></div>
+{%- endfor %}
+</dl>
+{% endcall %}

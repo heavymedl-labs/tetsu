@@ -1,0 +1,71 @@
+@layer components {
+  /* A group of features (home.html). On phones, its slides stack at full width, each under its own title, since
+     the panels are too dense to share the screen. */
+  .tetsu-strip {
+    display: flex;
+    flex-direction: column;
+    gap: 4rem;
+  }
+
+  .tetsu-slide {
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* From tablets, the slides sit in a row, tabs choose one, the strip slides to it, and the others dim and wait. */
+  @media (width >= 48rem) {
+    .tetsu-film {
+      overflow-x: clip;
+      overflow-y: visible;
+    }
+
+    .tetsu-strip {
+      flex-direction: row;
+      gap: 1.5rem;
+    }
+
+    .tetsu-slide {
+      flex: none;
+      width: 92%;
+    }
+
+    .tetsu-tabs:has(.tetsu-tab-2:checked) .tetsu-strip {
+      translate: calc(-92% - 1.5rem) 0;
+    }
+
+    .tetsu-tabs:has(.tetsu-tab-3:checked) .tetsu-strip {
+      translate: calc(-184% - 3rem) 0;
+    }
+
+    .tetsu-tabs:has(.tetsu-tab-1:checked) .tetsu-slide:not(:nth-child(1)) > *,
+    .tetsu-tabs:has(.tetsu-tab-2:checked) .tetsu-slide:not(:nth-child(2)) > *,
+    .tetsu-tabs:has(.tetsu-tab-3:checked) .tetsu-slide:not(:nth-child(3)) > * {
+      --tetsu-shown: 0;
+      opacity: 0.35;
+    }
+  }
+
+  /* Side by side, a group's panels grow to the tallest, and the part of each marked .tetsu-fill takes the spare
+     height. Stacked on smaller screens, each keeps its own height. */
+  @media (width >= 64rem) {
+    .tetsu-slide > [role="img"] {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .tetsu-fill {
+      flex: 1;
+    }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .tetsu-strip {
+      transition: translate 600ms var(--ease-tetsu);
+    }
+
+    .tetsu-slide > * {
+      transition: opacity 400ms ease;
+    }
+  }
+}

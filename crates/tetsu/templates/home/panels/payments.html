@@ -1,0 +1,28 @@
+{% import "art/app.html" as app %}
+{#- Earlier payments today (time, name, line, amount), a refund shown negative. -#}
+{%- let payments = [("7:01", "Owen Price", "Gift card · Apple Pay", "$100.00"), ("6:58", "Rosa Kim", "Intro week · Visa ·· 1881", "$49.00"), ("6:41", "Grace Lin", "Private session, tip · Apple Pay", "$92.00"), ("6:12", "Eli Turner", "Late cancel fee · Card on file", "$15.00"), ("5:55", "Sam Okoye", "Refund, 10-class pack · Mastercard ·· 3321", "−$22.00")] %}
+{% call app::panel("Today's payments arriving, with a new one charged to a card on file, and this week's payout rising past the last seven") %}
+{% call app::bar("Payments", "· Today, Thursday, November 12") %}<p class="font-mono text-xs text-muted">Your processor</p>{% endcall %}
+<div class="grid lg:grid-cols-[1.2fr_1fr]">
+<div class="p-4 sm:p-6">
+<ul class="divide-y divide-line">
+<li class="tetsu-in flex items-center gap-3 py-2.5 [--at:0.22]"><span class="w-9 font-mono text-[11px] text-muted">7:04</span><span class="min-w-0 flex-1"><span class="block truncate text-ink">Maya Ruiz</span><span class="block truncate font-mono text-[11px] text-muted">Hot flow, drop-in · Card on file</span></span><span class="font-mono text-xs text-ink">$30.24</span><span class="grid font-mono text-[11px] *:col-start-1 *:row-start-1"><span class="tetsu-out text-muted [--at:0.3]">Charging</span><span class="tetsu-in flex items-center gap-1 text-ink [--at:0.3]"><span aria-hidden="true" class="size-1.5 rounded-full bg-forge"></span>Paid</span></span></li>
+
+{%- for (time, name, line, amount) in payments %}
+{%- let refund = amount.starts_with("−") %}
+<li class="flex items-center gap-3 py-2.5"><span class="w-9 font-mono text-[11px] text-muted">{{ time }}</span><span class="min-w-0 flex-1"><span class="block truncate text-ink">{{ name }}</span><span class="block truncate font-mono text-[11px] text-muted">{{ line }}</span></span><span class="font-mono text-xs {% if refund %}text-muted{% else %}text-ink{% endif %}">{{ amount }}</span></li>
+{%- endfor %}
+</ul>
+</div>
+<div class="flex flex-col border-t border-line bg-fill/40 p-4 sm:p-6 lg:border-t-0 lg:border-l">
+{% call app::label("Next payout") %}{% endcall %}
+<p class="mt-1 text-2xl font-semibold tracking-tight text-ink">$18,420.55</p>
+<p class="text-xs text-muted">Arrives Monday, November 16 · Checking ·· 6045</p>
+<div class="relative mt-6 flex h-28 items-end gap-1.5 *:flex-1">
+<div class="h-[55%] rounded-t-sm bg-ink/25"></div><div class="h-[62%] rounded-t-sm bg-ink/25"></div><div class="h-[58%] rounded-t-sm bg-ink/25"></div><div class="h-[71%] rounded-t-sm bg-ink/25"></div><div class="h-[68%] rounded-t-sm bg-ink/25"></div><div class="h-[80%] rounded-t-sm bg-ink/25"></div><div class="h-[77%] rounded-t-sm bg-ink/25"></div>
+<div class="tetsu-grow-y h-[92%] rounded-t-sm bg-forge [--from:0.7] [--at:0.3] [--len:0.16]"></div>
+</div>
+<div class="mt-1.5 hidden gap-1.5 font-mono text-[10px] text-muted *:flex-1 *:text-center sm:flex"><p>Sep 21</p><p>Sep 28</p><p>Oct 5</p><p>Oct 12</p><p>Oct 19</p><p>Oct 26</p><p>Nov 2</p><p class="text-ink">Nov 9</p></div>
+</div>
+</div>
+{% endcall %}

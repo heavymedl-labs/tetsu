@@ -1,0 +1,81 @@
+/* Motion (ADR-0035): CSS only, since pages run no scripts, and nothing moves when the visitor asks for less; only
+   fades of color and opacity on hover stay. Nothing loops, so nothing needs a pause control (WCAG 2.2.2). A test in
+   serve.rs checks both against the built stylesheet. The brand's slots book in, sections rise as they arrive,
+   and pages cross-fade. In the components layer, so a delay utility on an element still wins. */
+@media (prefers-reduced-motion: no-preference) {
+  @view-transition {
+    navigation: auto;
+  }
+}
+
+@keyframes tetsu-book {
+  from {
+    opacity: 0;
+    transform: scale(0.35);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes tetsu-glow {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 0 transparent);
+  }
+  50% {
+    filter: drop-shadow(0 0 8px var(--tetsu-color-forge));
+  }
+}
+
+@keyframes tetsu-rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+
+@layer components {
+  .tetsu-ghost {
+    stroke-opacity: 0.22;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .tetsu-slot {
+      transform-box: fill-box;
+      transform-origin: center;
+      animation: tetsu-book 700ms var(--ease-tetsu) both;
+    }
+
+    .tetsu-hot {
+      animation:
+        tetsu-book 700ms var(--ease-tetsu) both,
+        tetsu-glow 3s ease-in-out 1s;
+    }
+
+    .tetsu-rise {
+      animation: tetsu-rise 900ms var(--ease-tetsu) both;
+    }
+
+    @supports (animation-timeline: view()) {
+      .tetsu-reveal {
+        animation: tetsu-rise linear both;
+        animation-timeline: view();
+        /* A fixed distance, so content taller than the screen is clear before it is read. */
+        animation-range: entry 0% entry 12rem;
+      }
+    }
+
+    ::view-transition-old(root),
+    ::view-transition-new(root) {
+      animation-duration: 280ms;
+    }
+  }
+}

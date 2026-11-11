@@ -1,0 +1,16 @@
+{% import "../../../web/templates/components.html" as ui %}
+{% import "art/figures.html" as fig %}
+{% call ui::section("", "changes") %}
+{% call fig::separator(false) %}{% endcall %}
+<h2 id="changes" class="tetsu-reveal text-4xl font-semibold tracking-[-0.035em] text-ink sm:text-5xl">Changelog</h2>
+<ol class="tetsu-reveal relative mt-12 grid sm:mt-16 gap-10 sm:grid-cols-2 lg:grid-cols-4 lg:before:absolute lg:before:inset-x-0 lg:before:top-1 lg:before:h-px lg:before:bg-line">
+{%- for (k, (title, datetime, date, text)) in [
+  ("Waitlists that fill themselves", "2026-11-04", "Nov 4, 2026", "Open spots go to the next person in line, with a text, before anyone at the desk notices."),
+  ("Shared memberships", "2026-10-21", "Oct 21, 2026", "One plan works at every location, with visits counted across all of them."),
+  ("Deposits for long services", "2026-10-07", "Oct 7, 2026", "Ask for a deposit on color, extensions, and anything over two hours."),
+  ("An API sandbox", "2026-09-23", "Sep 23, 2026", "Build against a sandbox business with its own keys before you touch a real booking."),
+].iter().enumerate() %}
+<li class="relative"><span aria-hidden="true" class="block size-2.5 rounded-full {% if k == 0 %}bg-forge{% else %}bg-muted{% endif %} ring-4 ring-canvas"></span><h3 class="mt-6 font-medium text-ink">{{ title }}</h3><p class="mt-1 font-mono text-xs text-muted"><time datetime="{{ datetime }}">{{ date }}</time></p><p class="mt-3 text-sm/6 text-pretty text-muted">{{ text }}</p></li>
+{%- endfor %}
+</ol>
+{% endcall %}

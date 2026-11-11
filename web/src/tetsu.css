@@ -1,22 +1,96 @@
-/* Tetsu's shared stylesheet (ADR-0032). Tailwind reads only templates, each crate's and the shared ones, and a
-   tenant's colors come from the --tetsu-* properties its theme sheet sets after this one. */
+/* Tetsu's shared stylesheet (ADR-0032, ADR-0035). Tailwind reads only templates, each crate's and the shared
+   ones. A tenant's brand colors come from the --tetsu-* properties its theme sheet sets after this one. */
 @import "tailwindcss" source(none);
+@import "@fontsource-variable/inter/wght.css";
+/* Tetsu's own parts, one file each, with any motion beside its part: the brand's motion, the figures, the product
+   pictures' parts and stories, and the tabbed groups. */
+@import "./motion.css";
+@import "./figures.css";
+@import "./app.css";
+@import "./stories.css";
+@import "./groups.css";
+
 @source "../../crates/*/templates/**/*.html";
 @source "../templates/**/*.html";
 
-/* No dark set exists in the tokens yet, so dark: classes from a snippet match nothing. */
-@custom-variant dark (&:where([data-tetsu-dark-is-off]));
+@theme {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  /* The brand's motion: fast out of the gate, settling softly. */
+  --ease-tetsu: cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* The widest Tetsu's own pages run, as max-w-page. */
+  --container-page: 84rem;
+}
 
 @theme inline {
+  /* Surfaces and text, which change with the color scheme. */
+  --color-canvas: var(--tetsu-color-canvas);
+  --color-surface: var(--tetsu-color-surface);
+  --color-fill: var(--tetsu-color-fill);
+  --color-line: var(--tetsu-color-line);
+  --color-ink: var(--tetsu-color-ink);
+  --color-muted: var(--tetsu-color-muted);
+  /* Brand colors, which a tenant's theme sheet sets. */
   --color-primary: var(--tetsu-color-primary);
   --color-on-primary: var(--tetsu-color-on-primary);
   --color-accent: var(--tetsu-color-accent);
   --color-on-accent: var(--tetsu-color-on-accent);
+  /* The brand's forge orange (docs/brand), for marks and fills rather than text. */
+  --color-forge: var(--tetsu-color-forge);
+}
+
+/* Tailwind's dark variant, for the tokens below and any dark: utility: the system's scheme, unless the theme control
+   in Tetsu's header (site.html) sets one. The control is radios, without script, so its choice lasts one page view. */
+@custom-variant dark {
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not(:has(#tetsu-scheme-light:checked)), :root:not(:has(#tetsu-scheme-light:checked)) *) {
+      @slot;
+    }
+  }
+  &:where(:root:has(#tetsu-scheme-dark:checked), :root:has(#tetsu-scheme-dark:checked) *) {
+    @slot;
+  }
 }
 
 :root {
-  --tetsu-color-primary: #1f2937;
+  /* Light is Tailwind CSS's taupe palette (MIT): a tinted page under lighter panels, after Tailwind Plus's Oatmeal
+     kit. Dark is Radix Colors' sand scale (MIT). By role: the page, a panel, a component inside one, a border,
+     secondary text, and text. */
+  --tetsu-color-canvas: #f3f1f1;
+  --tetsu-color-surface: #fbfaf9;
+  --tetsu-color-fill: #e8e4e3;
+  --tetsu-color-line: #d8d2d0;
+  --tetsu-color-ink: #0c0a09;
+  --tetsu-color-muted: #5b4f4b;
+  --tetsu-color-primary: #0c0a09;
   --tetsu-color-on-primary: #ffffff;
-  --tetsu-color-accent: #2563eb;
+  /* Dark enough for small text on the page and on panels: 4.8:1 or more in light, past WCAG AA's 4.5:1, until
+     #96 checks it. Not for text on a fill. */
+  --tetsu-color-accent: #b5481a;
   --tetsu-color-on-accent: #ffffff;
+  --tetsu-color-forge: #e5622b;
+
+  @variant dark {
+    --tetsu-color-canvas: #111110;
+    --tetsu-color-surface: #191918;
+    --tetsu-color-fill: #222221;
+    --tetsu-color-line: #3b3a37;
+    --tetsu-color-ink: #eeeeec;
+    --tetsu-color-muted: #b5b3ad;
+    --tetsu-color-primary: #eeeeec;
+    --tetsu-color-on-primary: #111110;
+    --tetsu-color-accent: #f2783f;
+    --tetsu-color-on-accent: #111110;
+    --tetsu-color-forge: #f07a45;
+  }
+}
+
+@layer base {
+  html {
+    color-scheme: light;
+
+    @variant dark {
+      color-scheme: dark;
+    }
+  }
 }

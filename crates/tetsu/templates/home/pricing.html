@@ -1,0 +1,15 @@
+{% import "../../../web/templates/components.html" as ui %}
+{% import "art/figures.html" as fig %}
+{% call ui::section("pricing", "plans") %}
+{% call fig::separator(false) %}{% endcall %}
+{% call ui::head("plans", "Simple pricing,<br>per location", "One flat price per location, published here. Unlimited staff and customers, no fee on new clients, and no contract.") %}{% endcall %}
+<div class="tetsu-reveal mt-12 grid gap-4 sm:mt-16 md:grid-cols-3">
+{%- for (name, price, per, line, items, popular) in [
+  ("Starter", "$79", "/ month", "For a single location getting started.", ["Classes, appointments, and rentals", "Online booking page", "Card payments"], false),
+  ("Growth", "$149", "/ month", "For busy businesses with members.", ["Everything in Starter", "Memberships and class packs", "Waitlists and reminders"], true),
+  ("Multi-location", "$129", "/ location", "For brands with two locations or more.", ["Everything in Growth", "Shared memberships", "Reports across locations"], false),
+] %}
+<div class="{% if *popular %}relative rounded-2xl border border-forge/60 bg-surface p-6 shadow-[0_0_40px_-12px_var(--tetsu-color-forge)] lg:p-8{% else %}rounded-2xl border border-line bg-surface p-6 lg:p-8{% endif %}">{% if *popular %}<p class="absolute -top-3 left-8 rounded-full bg-accent px-2 py-0.5 font-mono text-xs text-on-accent">Most popular</p>{% endif %}<h3 class="text-sm font-medium text-ink">{{ name }}</h3><p class="mt-4 text-4xl font-semibold tracking-tight text-ink">{{ price }}<span class="text-base font-normal text-muted"> {{ per }}</span></p><p class="mt-2 text-sm text-muted">{{ line }}</p><ul class="mt-6 space-y-2 text-sm text-muted">{% for item in items %}<li>{{ item }}</li>{% endfor %}</ul></div>
+{%- endfor %}
+</div>
+{% endcall %}

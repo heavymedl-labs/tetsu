@@ -5,7 +5,8 @@
 [licenses]
 # ADR-0028's list, and four more. MPL-2.0 is Lightning CSS, which Vite and Tailwind use to write our CSS; it asks
 # only that changes to its own files be shared, and we change none. 0BSD is tslib, and Python-2.0 and PSF-2.0
-# are argparse, which markdownlint-cli2 uses.
+# are argparse, which markdownlint-cli2 uses. OFL-1.1 is Inter, the typeface Tetsu serves (ADR-0035), whose
+# notice is in THIRD-PARTY-NOTICES.md.
 allow = [
     "MIT",
     "Apache-2.0",
@@ -19,6 +20,7 @@ allow = [
     "MPL-2.0",
     "Python-2.0",
     "PSF-2.0",
+    "OFL-1.1",
 ]
 
 [advisories]

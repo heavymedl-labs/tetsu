@@ -37,8 +37,15 @@ pub fn files(json: &str) -> Result<Vec<(String, String)>, String> {
         .collect()
 }
 
+/// The brand files (docs/brand) a page links to, by source and by the constant that names each one's URL.
+const BRAND: [(&str, &str); 2] = [
+    ("../docs/brand/tetsu-avatar.svg", "ICON"),
+    ("../docs/brand/tetsu-avatar.png", "TOUCH_ICON"),
+];
+
 /// The Rust source of the asset table: each built file's URL, content type, and bytes, read from `root` with
-/// `include_bytes!`, and the shared stylesheet's URL as `STYLESHEET`.
+/// `include_bytes!`, a constant for each brand file the build has, and the shared stylesheet's URL as
+/// `STYLESHEET`.
 ///
 /// # Errors
 /// Fails if the build has no `src/tetsu.css`.
@@ -61,8 +68,18 @@ pub fn table(root: &str, files: &[(String, String)]) -> Result<String, String> {
             Ok::<_, std::fmt::Error>(entries)
         })
         .map_err(|error| error.to_string())?;
+    let brand: String = BRAND
+        .iter()
+        .filter_map(|(source, name)| {
+            let file = files.iter().find(|(found, _)| found == source)?;
+            Some(format!(
+                "pub const {name}: &str = {:?};\n",
+                format!("/{}", file.1)
+            ))
+        })
+        .collect();
     Ok(format!(
-        "pub const ASSETS: &[Asset] = &[\n{entries}];\npub const STYLESHEET: &str = {stylesheet:?};\n"
+        "pub const ASSETS: &[Asset] = &[\n{entries}];\n{brand}pub const STYLESHEET: &str = {stylesheet:?};\n"
     ))
 }
 
@@ -144,6 +161,38 @@ mod tests {
         assert!(
             table.ends_with("];\npub const STYLESHEET: &str = \"/assets/tetsu-Ab1.css\";\n"),
             "{table}"
+        );
+    }
+
+    #[test]
+    fn the_table_names_the_brand_files_it_finds() {
+        let files = [
+            (
+                "src/tetsu.css".to_string(),
+                "assets/tetsu-Ab1.css".to_string(),
+            ),
+            (
+                "../docs/brand/tetsu-avatar.svg".to_string(),
+                "assets/tetsu-avatar-Ef3.svg".to_string(),
+            ),
+            (
+                "../docs/brand/tetsu-avatar.png".to_string(),
+                "assets/tetsu-avatar-Gh4.png".to_string(),
+            ),
+        ];
+        let table = table("/build", &files).unwrap();
+        assert!(
+            table.contains("pub const ICON: &str = \"/assets/tetsu-avatar-Ef3.svg\";\n"),
+            "{table}"
+        );
+        assert!(
+            table.contains("pub const TOUCH_ICON: &str = \"/assets/tetsu-avatar-Gh4.png\";\n"),
+            "{table}"
+        );
+        assert!(
+            !super::table("/build", &files[..1])
+                .unwrap()
+                .contains("ICON")
         );
     }
 

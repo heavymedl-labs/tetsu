@@ -1,0 +1,129 @@
+/* A figure plays when its .group is hovered, or, on a screen without hover, as it scrolls into view: .tetsu-play
+   turns --tetsu-play to 1 on a scroll timeline. The group-on variant matches either (art/figures.html). */
+@custom-variant group-on {
+  @media (hover: hover) {
+    &:is(:where(.group):hover *) {
+      @slot;
+    }
+  }
+
+  @media (hover: none) {
+    @container style(--tetsu-play: 1) {
+      @slot;
+    }
+  }
+}
+
+@property --tetsu-play {
+  syntax: "<integer>";
+  inherits: true;
+  initial-value: 0;
+}
+
+@keyframes tetsu-play {
+  to {
+    --tetsu-play: 1;
+  }
+}
+
+@layer components {
+  /* A slot in a figure that books when the figure plays (art/figures.html): it fills and pops. In a .tetsu-sweep,
+     each column is a group, and books a beat after the one before, behind the playhead. */
+  .tetsu-booking {
+    fill: transparent;
+    stroke: color-mix(in oklab, var(--color-ink) 25%, transparent);
+    transform-box: fill-box;
+    transform-origin: center;
+
+    @variant group-on {
+      scale: 1.1;
+      fill: color-mix(in oklab, var(--color-ink) 80%, transparent);
+      stroke: color-mix(in oklab, var(--color-ink) 80%, transparent);
+    }
+  }
+
+  .tetsu-booking-hot {
+    @variant group-on {
+      fill: var(--color-forge);
+      stroke: var(--color-forge);
+    }
+  }
+
+  @media (hover: none) {
+    @supports (animation-timeline: view()) {
+      .tetsu-play {
+        animation: tetsu-play linear both;
+        animation-timeline: view();
+        animation-range: entry 50% entry 100%;
+      }
+    }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .tetsu-booking {
+      transition:
+        fill 300ms var(--ease-tetsu),
+        stroke 300ms var(--ease-tetsu),
+        scale 300ms var(--ease-tetsu);
+    }
+
+    .tetsu-sweep > :nth-child(2) > .tetsu-booking {
+      transition-delay: 80ms;
+    }
+
+    .tetsu-sweep > :nth-child(3) > .tetsu-booking {
+      transition-delay: 160ms;
+    }
+
+    .tetsu-sweep > :nth-child(4) > .tetsu-booking {
+      transition-delay: 240ms;
+    }
+
+    .tetsu-sweep > :nth-child(5) > .tetsu-booking {
+      transition-delay: 320ms;
+    }
+
+    .tetsu-sweep > :nth-child(6) > .tetsu-booking {
+      transition-delay: 400ms;
+    }
+
+    .tetsu-sweep > :nth-child(7) > .tetsu-booking {
+      transition-delay: 480ms;
+    }
+
+    .tetsu-sweep > :nth-child(8) > .tetsu-booking {
+      transition-delay: 560ms;
+    }
+
+    .tetsu-sweep > :nth-child(9) > .tetsu-booking {
+      transition-delay: 640ms;
+    }
+
+    .tetsu-sweep > :nth-child(10) > .tetsu-booking {
+      transition-delay: 720ms;
+    }
+
+    .tetsu-sweep > :nth-child(11) > .tetsu-booking {
+      transition-delay: 800ms;
+    }
+
+    .tetsu-sweep > :nth-child(12) > .tetsu-booking {
+      transition-delay: 880ms;
+    }
+
+    /* A group that both reveals and plays runs both on its own view timeline. */
+    @media (hover: none) {
+      @supports (animation-timeline: view()) {
+        .tetsu-reveal.tetsu-play {
+          animation:
+            tetsu-rise linear both,
+            tetsu-play linear both;
+          animation-timeline: view(), view();
+          animation-range:
+            entry 0% entry 12rem,
+            entry 50% entry 100%;
+        }
+      }
+    }
+  }
+}
