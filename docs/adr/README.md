@@ -68,7 +68,6 @@ option for most of them.
 - [Support access to tenant accounts](https://github.com/heavymedl-labs/tetsu/issues/24)
 - [Money: currencies, rounding, and tax](https://github.com/heavymedl-labs/tetsu/issues/26)
 - [Operations: observability, backups, and recovery](https://github.com/heavymedl-labs/tetsu/issues/27)
-- [Landing page framework and host](https://github.com/heavymedl-labs/tetsu/issues/32)
 - [Load test tools, latency budgets, and memory measurement](https://github.com/heavymedl-labs/tetsu/issues/37)
 - [The benchmark image tag rule, proposed as ADR-0022](https://github.com/heavymedl-labs/tetsu/issues/75)
 - [Whether the benchmark harness keeps monoio](https://github.com/heavymedl-labs/tetsu/issues/94)
