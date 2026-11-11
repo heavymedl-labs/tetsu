@@ -29,7 +29,7 @@ components every page uses in `web/templates/`, adapted from MIT sources and com
 [THIRD-PARTY-NOTICES.md](../../THIRD-PARTY-NOTICES.md)). Light and dark follow the visitor's system setting, or the header's control for one page view
 ([ADR-0038](../../docs/adr/0038-color-scheme-control.md)). Vite builds `web/src/tetsu.css` with Tailwind into
 `assets/build/`, which is not in git but compiled into the binary, and `serve` gives each built file at the path
-Vite's manifest names, under `/assets/`, kept for a year ([ADR-0034](../../docs/adr/0034-front-end-build.md),
+Vite's manifest names, under `/assets/`, kept for a year, and the touch icon at `/favicon.ico` too, kept a day ([ADR-0034](../../docs/adr/0034-front-end-build.md),
 [ADR-0036](../../docs/adr/0036-build-assets-where-used.md)). A fresh clone builds it before Cargo can compile the
 crate; `scripts/check.sh` and the image build make it themselves.
 

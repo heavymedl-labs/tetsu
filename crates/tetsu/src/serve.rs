@@ -57,6 +57,9 @@ const HEADERS: [(HeaderName, &str); 5] = [
 /// A hashed file changes name whenever it changes, so it may be kept for a year (ADR-0034).
 const IMMUTABLE: &str = "public, max-age=31536000, immutable";
 
+/// A fixed address keeps its name when its file changes, so a client keeps it a day.
+const DAILY: &str = "public, max-age=86400";
+
 /// The whole site: its own routes, then the modules' routers, then `not_found` at any path none of them
 /// answers, which is [`not_found`] outside tests. Modules set no fallback, since axum panics when two merged
 /// routers both have one (#90). In a demo environment every response also asks search engines not to index it
@@ -93,6 +96,16 @@ pub fn not_found(demo: bool) -> Response {
 }
 
 /// A built file at the exact path the manifest names; any other path under `/assets/` is not found.
+/// The touch icon at `/favicon.ico`, for clients that ask there without reading a page's links. Every client that
+/// does accepts a PNG.
+fn favicon(demo: bool) -> Response {
+    let mut response = asset(assets::TOUCH_ICON.trim_start_matches("/assets/"), demo);
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static(DAILY));
+    response
+}
+
 fn asset(file: &str, demo: bool) -> Response {
     let Some(found) = assets::find(&format!("/assets/{file}")) else {
         return not_found(demo);
@@ -144,6 +157,10 @@ fn site_routes(demo: bool) -> Vec<(&'static str, MethodRouter)> {
         (
             "/",
             get(move || std::future::ready(html_body(StatusCode::OK, home.clone()))),
+        ),
+        (
+            "/favicon.ico",
+            get(move || std::future::ready(favicon(demo))),
         ),
         (
             "/assets/{file}",
@@ -411,6 +428,20 @@ mod tests {
             assert!(raw.starts_with("HTTP/1.1 404"), "{path}: {raw}");
             assert_eq!(header_of(&raw, "cache-control"), None, "{path}");
         }
+    }
+
+    #[tokio::test]
+    async fn the_conventional_favicon_address_serves_the_icon() {
+        // Clients that ask for /favicon.ico without reading the page's links get the touch icon, a PNG.
+        let (head, size) = as_sent("/favicon.ico").await;
+        assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+        assert!(head.contains("content-type: image/png"), "{head}");
+        assert!(
+            head.contains("cache-control: public, max-age=86400"),
+            "{head}"
+        );
+        let icon = assets::find(crate::assets::TOUCH_ICON).unwrap();
+        assert_eq!(size, icon.bytes.len());
     }
 
     /// A route at a name a tenant could hold would hide that tenant (#90), so each of the site's own routes
