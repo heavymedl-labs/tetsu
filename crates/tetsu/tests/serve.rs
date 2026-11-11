@@ -135,7 +135,10 @@ async fn a_visitor_sees_a_tenants_page_tetsus_page_and_not_found_elsewhere() {
 
     let home = get(&server, "/");
     assert!(home.starts_with("HTTP/1.1 200"), "{home}");
-    assert!(home.contains("<h1>Tetsu</h1>"), "{home}");
+    assert!(
+        home.contains("<span class=\"sr-only\">Tetsu: </span>Booking software,"),
+        "{home}"
+    );
 
     let missing = get(&server, "/another-studio");
     assert!(missing.starts_with("HTTP/1.1 404"), "{missing}");

@@ -344,7 +344,7 @@ mod tests {
             header_of(&raw, "content-type"),
             Some("text/html; charset=utf-8")
         );
-        assert!(raw.contains("<h1>Tetsu</h1>"), "{raw}");
+        assert!(raw.contains("Booking software,"), "{raw}");
     }
 
     #[tokio::test]
@@ -566,6 +566,54 @@ mod tests {
         }
     }
 
+    /// A heading's text as a search engine or a screen reader reads it: tags dropped, a line break adding nothing.
+    fn heading_texts(page: &str, level: &str) -> Vec<String> {
+        page.split(&format!("<{level}"))
+            .skip(1)
+            .map(|rest| {
+                let inner =
+                    &rest[rest.find('>').unwrap() + 1..rest.find(&format!("</{level}>")).unwrap()];
+                let mut text = String::new();
+                let mut in_tag = false;
+                for c in inner.chars() {
+                    match c {
+                        '<' => in_tag = true,
+                        '>' => in_tag = false,
+                        _ if !in_tag => text.push(c),
+                        _ => {}
+                    }
+                }
+                text
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_visible_headline_is_the_pages_one_h1() {
+        for demo in [true, false] {
+            assert_eq!(
+                heading_texts(&home_page(demo), "h1"),
+                ["Tetsu: Booking software, built like iron."],
+                "demo {demo}"
+            );
+        }
+    }
+
+    #[test]
+    fn no_heading_runs_two_words_together_across_a_line_break() {
+        let page = home_page(true);
+        let run_together: Vec<String> = ["h1", "h2", "h3"]
+            .iter()
+            .flat_map(|level| heading_texts(&page, level))
+            .filter(|text| {
+                text.as_bytes()
+                    .windows(2)
+                    .any(|pair| b",.".contains(&pair[0]) && pair[1].is_ascii_alphabetic())
+            })
+            .collect();
+        assert!(run_together.is_empty(), "{run_together:?}");
+    }
+
     /// The first SVG after `marker` in `page`, without its closing tag.
     fn svg_after<'a>(page: &'a str, marker: &str) -> &'a str {
         let from = page.find(marker).unwrap();
@@ -713,7 +761,7 @@ mod tests {
     fn the_headline_is_on_screen_from_the_first_frame() {
         // The largest text on the page, so it should paint at once: its rise moves it, and never hides it.
         let page = home_page(true);
-        assert!(page.contains(r#"<p class="tetsu-lift "#), "{page}");
+        assert!(page.contains(r#"<h1 class="tetsu-lift "#), "{page}");
         let css = std::str::from_utf8(assets::find(assets::STYLESHEET).unwrap().bytes).unwrap();
         // The rule ends at its first double brace, built here so the braces in this test's strings stay paired.
         let lift = &css[css.find("@keyframes tetsu-lift{").unwrap()..];
@@ -855,7 +903,7 @@ mod tests {
             "the header's wordmark"
         );
         assert_eq!(
-            booked_cells(&home_page(true), "<h1>Tetsu</h1>"),
+            booked_cells(&home_page(true), r#"<section class="text-center">"#),
             brand,
             "the hero board"
         );
@@ -873,7 +921,7 @@ mod tests {
         let main = &outside[outside.find("<main").unwrap()..outside.find("</main>").unwrap()];
         let hero =
             main.find("<section").unwrap()..main.find("</section>").unwrap() + "</section>".len();
-        assert!(main[hero.clone()].contains("<h1>Tetsu</h1>"), "{main}");
+        assert!(main[hero.clone()].contains("Booking software,"), "{main}");
         let rest = format!(
             "{}{}",
             &main[main.find('>').unwrap() + 1..hero.start],
