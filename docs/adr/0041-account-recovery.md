@@ -1,6 +1,6 @@
 # 0041. Account recovery
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-11
 - Supersedes rules in [ADR-0040](0040-identity-and-sign-in.md): that an account acts for another client profile
   when staff grant it, and that staff merge a walk-in's profile, both of which now follow the relink below; that
