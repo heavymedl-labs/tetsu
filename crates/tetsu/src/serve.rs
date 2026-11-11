@@ -686,6 +686,19 @@ mod tests {
     }
 
     #[test]
+    fn the_headline_is_on_screen_from_the_first_frame() {
+        // The largest text on the page, so it should paint at once: its rise moves it, and never hides it.
+        let page = home_page(true);
+        assert!(page.contains(r#"<p class="tetsu-lift "#), "{page}");
+        let css = std::str::from_utf8(assets::find(assets::STYLESHEET).unwrap().bytes).unwrap();
+        // The rule ends at its first double brace, built here so the braces in this test's strings stay paired.
+        let lift = &css[css.find("@keyframes tetsu-lift{").unwrap()..];
+        let lift = &lift[..lift.find(&"}".repeat(2)).unwrap()];
+        assert!(!lift.contains("opacity"), "{lift}");
+        assert!(!lift.contains("filter"), "{lift}");
+    }
+
+    #[test]
     fn the_phone_menu_is_a_popover_that_its_button_opens() {
         // A popover, so Escape and a tap outside close it without script (site.html).
         let page = home_page(true);
