@@ -7,6 +7,7 @@ use askama::Template;
 
 use crate::assets;
 use axum::Router;
+use axum::body::Bytes;
 use axum::extract::rejection::PathRejection;
 use axum::extract::{Path, State};
 use axum::http::{HeaderName, HeaderValue, StatusCode, header};
@@ -110,7 +111,12 @@ fn asset(file: &str, demo: bool) -> Response {
 /// unavailable status rather than half a page. Tenancy renders its own pages the same way; ADR-0021 keeps such a
 /// helper out of its public surface, so each crate has its own.
 fn html(status: StatusCode, page: &impl Template) -> Response {
-    let Ok(body) = page.render() else {
+    html_body(status, page.render().ok().map(Bytes::from))
+}
+
+/// A page already rendered, or `None` when it could not be, which answers that the site is unavailable.
+fn html_body(status: StatusCode, body: Option<Bytes>) -> Response {
+    let Some(body) = body else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
     let mut response = (status, body).into_response();
@@ -125,16 +131,19 @@ fn html(status: StatusCode, page: &impl Template) -> Response {
 /// name no tenant may hold, which a test checks, so none hides a tenant. Routes in the modules' routers are not
 /// checked yet; #20, the first module to add top-level routes, adds that check.
 fn site_routes(demo: bool) -> Vec<(&'static str, MethodRouter)> {
+    // The root page depends only on `demo` and the stylesheet's name, which hold while the process runs, so it is
+    // rendered once here rather than on every request. Each response shares its bytes.
+    let home = HomePage {
+        demo,
+        stylesheet: assets::STYLESHEET,
+    }
+    .render()
+    .ok()
+    .map(Bytes::from);
     vec![
         (
             "/",
-            get(move || {
-                let page = HomePage {
-                    demo,
-                    stylesheet: assets::STYLESHEET,
-                };
-                std::future::ready(html(StatusCode::OK, &page))
-            }),
+            get(move || std::future::ready(html_body(StatusCode::OK, home.clone()))),
         ),
         (
             "/assets/{file}",
@@ -540,6 +549,21 @@ mod tests {
         }
         .render()
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn the_root_page_served_is_the_page_as_it_renders() {
+        // The page is rendered once per process (site_routes), so what goes out must match a fresh render.
+        for demo in [true, false] {
+            let raw = send_to(demo, &get_request("/")).await;
+            let fresh = HomePage {
+                demo,
+                stylesheet: assets::STYLESHEET,
+            }
+            .render()
+            .unwrap();
+            assert_eq!(raw.split_once("\r\n\r\n").unwrap().1, fresh, "demo {demo}");
+        }
     }
 
     /// The first SVG after `marker` in `page`, without its closing tag.
