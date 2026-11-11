@@ -184,7 +184,7 @@ as a guest. Tetsu owns the most security-critical code, kept by one maintainer, 
 [ADR-0005](0005-testing-and-performance.md)'s full Tier 1 bar, including a benchmark of the session check, which
 runs on every request.
 
-Before #20, alongside #102:
+Before #20:
 
 - **Account recovery,** in #105, whose ADR also records any relaxation of `v5.0.0-6.3.3` it needs. This
   supersedes ADR-0029's rule that #9's ADR decides both, so the relaxation sits where the recovery it serves is
@@ -192,6 +192,9 @@ Before #20, alongside #102:
   passkey the rules are `v5.0.0-6.4.4` and `v5.0.0-6.3.3`, whose relaxation ADR-0029 allows with a documented
   rationale and controls. That leaves room for the maintainer's forgiving path for customers.
 - **An email provider** for codes, with a `Proposed` ADR.
+
+Tetsu's domains (#102) come before the Level 2 review, since no real person enrolls before them. Until then, sign-in
+runs with demo accounts on the free demo host, whose passkeys are disposable.
 
 Also decided elsewhere: hosts in #8, operator access to businesses in #24, and the API and app tokens in #12
 and #14. The demo seed format gains the maintainer's owner role in a new format version
