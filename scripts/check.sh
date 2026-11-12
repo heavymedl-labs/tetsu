@@ -131,7 +131,8 @@ fi
 
 python3 scripts/floor_guard.py "$@"
 scripts/scan_secrets.sh --history
-python3 -m unittest discover -b -s scripts/tests -t .
+# Each script test in its own process, one per core, so the slowest one sets the time.
+python3 scripts/parallel_unittest.py scripts/tests .
 scripts/check-adrs.sh
 python3 scripts/check_doc_sizes.py
 python3 scripts/check_secrets.py
@@ -237,7 +238,12 @@ if [[ -s "$work/rust.diff" ]]; then
   most=$(($(getconf _NPROCESSORS_ONLN) / 4))
   jobs=1
   while ((jobs < most && count >= 2 * (2 * jobs + 1) ** 2)); do jobs=$((jobs + 1)); done
-  cargo mutants --in-diff "$work/rust.diff" --jobs "${CARGO_MUTANTS_JOBS:-$jobs}"
+  # The coverage runs above just passed these tests, so cargo-mutants skips its own unmutated run, which also
+  # sized its timeout, so that is set here: about six times the test suite's time. Its copies of the workspace go
+  # under target/, on disk, since a memory-backed /tmp may hold too few of them.
+  mkdir -p target/mutants-tmp
+  TMPDIR="$PWD/target/mutants-tmp" cargo mutants --in-diff "$work/rust.diff" --baseline skip --timeout 60 \
+    --jobs "${CARGO_MUTANTS_JOBS:-$jobs}"
 elif ! git diff --quiet "${plain[@]}" "$merge" HEAD -- crates; then
   echo "error: commits since $base change crates/, but the files on disk undo that, so there is nothing to" >&2
   echo "mutate. Commit or restore those files first." >&2
