@@ -52,6 +52,8 @@ number, and add a row below. Never renumber.
 | [0044](0044-email-delivery.md) | Email delivery | Sending email, or choosing an email provider | Proposed |
 | [0045](0045-operations-baseline.md) | Operations baseline | Logging, auditing, backups, alerts, or recovery targets | Proposed |
 | [0046](0046-property-testing.md) | Property testing | Writing property tests for Tier 1 code | Proposed |
+| [0047](0047-sign-in-libraries.md) | Sign-in libraries | Adding or upgrading a sign-in crate, or hashing tokens and codes | Proposed |
+| [0048](0048-sign-in-design.md) | Sign-in design | Building sign-in, sessions, staff roles, rate limits, or recovery | Proposed |
 
 ## Open decisions
 
