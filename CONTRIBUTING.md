@@ -84,10 +84,12 @@ sets its status to Todo, and to Done when it closes. Keep the rest true:
 - Every issue needs a type, a milestone, a tier, and a priority, and belongs to a
   feature. The types are **Feature**, a bucket of work whose sub-issues may sit in
   different milestones; **Task**, work for one change; **Decision**, a choice an ADR
-  settles; and **Bug**. A Task, Decision, or Bug is a sub-issue of one Feature.
-  `scripts/file_issue.py` files one with all of these in one step, its feature
-  given with `--parent`; set them by hand on an issue filed any other way, such as
-  from a form. Every issue also lists the
+  settles; and **Bug**. A Task, Decision, or Bug is a sub-issue of one Feature, and
+  carries an `area:` label for each place its work happens: `web`, `server`,
+  `database`, `security`, `infra`, or `tooling`. `scripts/file_issue.py` files one
+  with all of these in one step, its feature given with `--parent` and each area
+  with `--area`; set them by hand on an issue filed any other way, such as from a
+  form. Every issue also lists the
   ASVS chapters and requirements its change must meet, which its commits repeat in
   an `ASVS:` footer ([ADR-0029](docs/adr/0029-security-target-revised.md)).
 - The views: **Board** is the current milestone by status; **By feature** groups

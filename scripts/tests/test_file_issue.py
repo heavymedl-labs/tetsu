@@ -78,9 +78,9 @@ class FileIssue(unittest.TestCase):
         self.body = self.dir / "body.md"
         self.body.write_text("### Goal\n\nSomething.\n")
 
-    def file(self, *args, fail="", already="", lag=0, wait="0"):
+    def file(self, *args, fail="", already="", lag=0, wait="0", area=("--area", "server")):
         return run(
-            ["python3", SCRIPT, *args],
+            ["python3", SCRIPT, *args, *area],
             self.dir,
             PATH=f"{self.dir / 'bin'}:/usr/bin:/bin",
             GH_LOG=str(self.log),
@@ -224,3 +224,25 @@ if __name__ == "__main__":
         self.assertEqual(result.returncode, 1)
         self.assertIn("filed https://github.com/o/r/issues/7", result.stderr)
         self.assertIn("and its parent if one was named", result.stderr)
+
+    def test_each_area_becomes_a_label(self):
+        result = self.file(
+            "task",
+            "T",
+            str(self.body),
+            "--tier",
+            "2",
+            "--priority",
+            "now",
+            area=("--area", "web", "--area", "security"),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        create = next(c for c in self.calls() if c[:2] == ["issue", "create"])
+        labels = [create[i + 1] for i, a in enumerate(create) if a == "--label"]
+        self.assertEqual(labels, ["task", "area: web", "area: security"])
+
+    def test_an_area_is_required_and_must_be_known(self):
+        for area in ((), ("--area", "sql")):
+            result = self.file("task", "T", str(self.body), "--tier", "2", "--priority", "now", area=area)
+            self.assertEqual(result.returncode, 2, area)
+            self.assertFalse(any(c[:2] == ["issue", "create"] for c in self.calls()), area)

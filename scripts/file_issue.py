@@ -2,9 +2,11 @@
 """Files an issue onto the Tetsu board with its type, milestone, tier, priority, and feature, in one step.
 
 usage: scripts/file_issue.py <task|adr> <title> <body file> --tier <1|2|3|none>
-           --priority <now|next|later|anytime> [--milestone <title>] [--parent <feature issue number>]
+           --priority <now|next|later|anytime> --area <area> [--area <area> ...] [--milestone <title>]
+           [--parent <feature issue number>]
 
-A task is typed Task and an adr Decision. --parent makes the new issue a sub-issue of that feature.
+A task is typed Task and an adr Decision. Each --area adds an `area: ` label for where the work happens.
+--parent makes the new issue a sub-issue of that feature.
 
 Everything the board needs is looked up before the issue exists, so a bad value or a changed board fails with
 nothing filed. If the board refuses an edit after that, the error names the filed issue and what is still
@@ -28,6 +30,7 @@ TIERS = {"1": "1", "2": "2", "3": "3", "none": "None"}
 LOOKS = 5
 PRIORITIES = {"now": "Now", "next": "Next", "later": "Later", "anytime": "Anytime"}
 TYPES = {"task": "Task", "adr": "Decision"}
+AREAS = ["database", "infra", "security", "server", "tooling", "web"]
 
 
 class FileIssueError(Exception):
@@ -102,6 +105,7 @@ def file_issue(args):
         args.title,
         "--label",
         args.label,
+        *(flag for area in args.area for flag in ("--label", f"area: {area}")),
         "--type",
         TYPES[args.label],
         "--milestone",
@@ -150,6 +154,7 @@ def main():
     parser.add_argument("body", type=Path)
     parser.add_argument("--tier", required=True, choices=sorted(TIERS))
     parser.add_argument("--priority", required=True, choices=sorted(PRIORITIES))
+    parser.add_argument("--area", required=True, action="append", choices=AREAS)
     parser.add_argument("--milestone")
     parser.add_argument("--parent", type=int)
     args = parser.parse_args()
