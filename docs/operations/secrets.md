@@ -14,7 +14,7 @@ tool that made it into its store, never shown.
 | Secret | Store | Scope | Use | Last rotated |
 | --- | --- | --- | --- | --- |
 | `GITHUB_TOKEN` | GitHub, issued per workflow run | That run, with the permissions below | Each workflow's own API calls | automatic |
-| `MIGRATION_DATABASE_URL` | GitHub Actions, repository secret | Role `tetsu_owner` on Neon project `tetsu-demo`, direct endpoint, once [moved](demo-environment.md#moving-onto-tetsus-own-roles); until then `tetsu_migrate` | `deploy.yml`'s Migrate step | 2026-11-09 |
+| `MIGRATION_DATABASE_URL` | GitHub Actions, repository secret | Role `tetsu_owner` on Neon project `tetsu-demo`, direct endpoint, which owns Tetsu's schemas and creates its roles; set from a password no one kept ([runbook](demo-environment.md#moving-onto-tetsus-own-roles)) | `deploy.yml`'s Migrate step | 2026-11-12 |
 | `RENDER_API_KEY` | GitHub Actions, repository secret | The maintainer's Render account; Render offers no narrower key | `deploy.yml`'s Deploy step | 2026-11-09 |
 | `DATABASE_URL` | Render, environment of service `tetsu-demo` | Role `tetsu_app`, which acts only as module roles, one transaction at a time | `tetsu serve` | 2026-11-09 |
 | `ghcr-tetsu` | Render, registry credential | A GitHub classic token with only `read:packages`, expiring 2027-11-09 | Render pulling the private image | 2026-11-09 |
