@@ -381,7 +381,10 @@ The free setup went live on 2026-11-09 ([demo environment](../operations/demo-en
   `/usr/local/bin/tetsu serve` runs.
 - **Test 8, connection details:** `tetsu migrate` from a laptop and from Actions reached Neon's direct
   endpoint over TLS with the public roots and `channel_binding=require`, and took the migration lock. The
-  application role under row-level security moved to [#8](https://github.com/heavymedl-labs/tetsu/issues/8).
+  application role under row-level security moved to [#8](https://github.com/heavymedl-labs/tetsu/issues/8), and
+  passed on 2026-11-12 ([#106](https://github.com/heavymedl-labs/tetsu/issues/106)): after the demo moved onto
+  `tetsu_owner`, the `check_isolation` example found no isolation problem on Neon's PostgreSQL 18.6, so no
+  host-made object fell outside ADR-0042's allowlist.
 - **A deploy** bills 33 seconds of job time: finding the CI run's digest, pulling, migrating, and waiting on
   Render, whose own deploy took about 20 seconds.
 - **Test 9, waking from idle,** ran 50 times from 2026-11-10 00:16 to 14:23 UTC: a request to `/anvil-row` after
