@@ -2,6 +2,8 @@
 [sqlfluff]
 dialect = postgres
 templater = raw
+# The isolation checks are one query of about 32 KB, which the default 20 KB limit would skip unlinted.
+large_file_skip_byte_limit = 65536
 
 [sqlfluff:rules:capitalisation.keywords]
 capitalisation_policy = upper

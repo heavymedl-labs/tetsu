@@ -109,13 +109,13 @@ async fn every_module_follows_the_isolation_rules() {
     let settings = fresh_database().await.expect("a test database");
     let migrated = migrate(settings.url());
     assert!(migrated.status.success(), "{migrated:?}");
-    let client = tetsu_postgres::connect(&settings).await.expect("connects");
+    let mut client = tetsu_postgres::connect(&settings).await.expect("connects");
     let schemas = tetsu_postgres::module_schemas(&client)
         .await
         .expect("finds the modules");
     assert!(schemas.contains(&"tenancy".to_string()), "{schemas:?}");
     let schemas: Vec<&str> = schemas.iter().map(String::as_str).collect();
-    let problems = tetsu_postgres::isolation_violations(&client, &schemas)
+    let problems = tetsu_postgres::isolation_violations(&mut client, &schemas)
         .await
         .expect("checks");
     assert_eq!(problems, Vec::<String>::new());

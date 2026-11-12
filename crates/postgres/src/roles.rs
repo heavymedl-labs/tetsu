@@ -121,12 +121,18 @@ pub(crate) async fn require_bound_runner(client: &Client) -> Result<(), Error> {
         .await?;
     let (name, superuser, bypasses): (String, bool, bool) =
         (row.try_get(0)?, row.try_get(1)?, row.try_get(2)?);
-    // A role it can switch to counts too, since a migration file could switch to it.
+    // A role it can become counts too, through SET or by granting itself a role it may administer, however many
+    // grants away, since a migration file could do either.
     let reaches = client
         .query_one(
-            "SELECT EXISTS (SELECT FROM pg_catalog.pg_roles r
-               WHERE r.rolname <> current_user AND (r.rolbypassrls OR r.rolsuper)
-                 AND pg_catalog.pg_has_role(current_user, r.oid, 'SET')) AS reaches",
+            "WITH RECURSIVE reach (oid) AS (
+               SELECT oid FROM pg_catalog.pg_roles WHERE rolname = current_user
+               UNION
+               SELECT m.roleid FROM reach r JOIN pg_catalog.pg_auth_members m ON m.member = r.oid
+               WHERE m.set_option OR m.admin_option
+             )
+             SELECT EXISTS (SELECT FROM reach JOIN pg_catalog.pg_roles r ON r.oid = reach.oid
+               WHERE r.rolname <> current_user AND (r.rolbypassrls OR r.rolsuper)) AS reaches",
             &[],
         )
         .await?

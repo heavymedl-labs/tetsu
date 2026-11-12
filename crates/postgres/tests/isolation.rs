@@ -58,8 +58,8 @@ mod support {
         )
         .await
         .expect("migrates");
-        let client = connect(&database).await.expect("connects");
-        isolation_violations(&client, &["checked", "checked_other"])
+        let mut client = connect(&database).await.expect("connects");
+        isolation_violations(&mut client, &["checked", "checked_other"])
             .await
             .expect("checks")
     }
@@ -155,10 +155,12 @@ async fn keys_that_do_not_lead_with_the_tenant_are_caught() {
     .await;
     caught(
         format!(
-            "CREATE TABLE registry (id uuid PRIMARY KEY); COMMENT ON TABLE registry IS 'tetsu:global: test';
+            // A key to a tenant-owned table checks the referenced row whatever its tenant.
+            "{} ALTER TABLE registry ADD CONSTRAINT one_id UNIQUE (id);
              {}
              ALTER TABLE child ADD COLUMN parent uuid,
                ADD CONSTRAINT to_parent FOREIGN KEY (parent) REFERENCES registry (id);",
+            tenant_owned("registry"),
             tenant_owned("child")
         ),
         "checked.child's foreign key to_parent leaves out tenant_id",
@@ -322,7 +324,7 @@ async fn rights_reached_through_other_roles_or_ownership_are_caught() {
     let id = std::process::id();
     let (app, chained) = (format!("t_iso_app_{id}"), format!("t_iso_chained_{id}"));
     let schema: &'static str = format!("iso_{id}").leak();
-    let client = connect(&database).await.expect("connects");
+    let mut client = connect(&database).await.expect("connects");
     client
         .batch_execute(&format!(
             "CREATE ROLE {app}; CREATE ROLE {chained} BYPASSRLS;
@@ -342,7 +344,7 @@ async fn rights_reached_through_other_roles_or_ownership_are_caught() {
                  CREATE TABLE {schema}.mine (id int); ALTER TABLE {schema}.mine OWNER TO {app}"
             ))
             .await?;
-        tetsu_postgres::isolation_violations_for(&client, &[schema], &app).await
+        tetsu_postgres::isolation_violations_for(&mut client, &[schema], &app).await
     }
     .await;
     client
@@ -478,7 +480,7 @@ async fn built_in_roles_grants_and_attributes_the_app_role_holds_are_caught() {
     let database = fresh_database().await.expect("a test database");
     let id = std::process::id();
     let (app, owner) = (format!("t_iso2_app_{id}"), format!("t_iso2_owner_{id}"));
-    let client = connect(&database).await.expect("connects");
+    let mut client = connect(&database).await.expect("connects");
     let checked = async {
         client
             .batch_execute(&format!(
@@ -489,7 +491,7 @@ async fn built_in_roles_grants_and_attributes_the_app_role_holds_are_caught() {
                  CREATE TABLE owned.migrations (version int); ALTER TABLE owned.migrations OWNER TO {owner}"
             ))
             .await?;
-        tetsu_postgres::isolation_violations_for(&client, &["owned"], &app).await
+        tetsu_postgres::isolation_violations_for(&mut client, &["owned"], &app).await
     }
     .await;
     client
@@ -597,7 +599,7 @@ async fn roles_a_module_role_belongs_to_and_policies_for_the_owner_s_groups_are_
     );
     let schema = format!("iso3_{id}");
     let module = format!("tetsu_{schema}");
-    let client = connect(&database).await.expect("connects");
+    let mut client = connect(&database).await.expect("connects");
     let checked = async {
         client
             .batch_execute(&format!(
@@ -614,7 +616,7 @@ async fn roles_a_module_role_belongs_to_and_policies_for_the_owner_s_groups_are_
                  CREATE TYPE {schema}.mood AS ENUM ('calm'); ALTER TYPE {schema}.mood OWNER TO {app}"
             ))
             .await?;
-        tetsu_postgres::isolation_violations_for(&client, &[&schema], &app).await
+        tetsu_postgres::isolation_violations_for(&mut client, &[&schema], &app).await
     }
     .await;
     client
@@ -629,6 +631,308 @@ async fn roles_a_module_role_belongs_to_and_policies_for_the_owner_s_groups_are_
         format!("{module} belongs to {hidden}, but module and lookup roles belong to nothing"),
         format!("{schema}.good has policy wide for its owner, {owner}"),
         format!("{app} owns type {schema}.mood"),
+    ] {
+        assert!(found.contains(&expected), "{expected} among {found:?}");
+    }
+}
+
+/// Each case is one migration into schema `checked`, with `checked_other` beside it, and the problem it must show.
+async fn each_caught(cases: &[(&str, &str, &str)]) {
+    for (sql, other, expected) in cases {
+        let found = problems((*sql).to_string(), other.to_string().leak()).await;
+        assert!(
+            found.iter().any(|problem| problem.contains(expected)),
+            "expected {expected:?} among {found:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn foreign_keys_must_match_tenant_to_tenant() {
+    let parent = tenant_owned("parent");
+    let child = tenant_owned("child");
+    each_caught(&[
+        (
+            &format!(
+                "{parent} ALTER TABLE parent ADD COLUMN seq bigint NOT NULL DEFAULT 0, ADD UNIQUE (tenant_id, seq);
+                 {child} ALTER TABLE child ADD COLUMN other bigint,
+                   ADD CONSTRAINT crossed FOREIGN KEY (other, tenant_id) REFERENCES parent (tenant_id, seq);"
+            ),
+            "",
+            "checked.child's foreign key crossed pairs tenant_id with another column",
+        ),
+        (
+            &format!(
+                "{parent} CREATE TABLE note (parent uuid, tenant_id bigint, id int PRIMARY KEY);
+                 COMMENT ON TABLE note IS 'tetsu:global: test';
+                 ALTER TABLE note ADD CONSTRAINT to_parent FOREIGN KEY (tenant_id, parent)
+                   REFERENCES parent (tenant_id, id);"
+            ),
+            "",
+            "checked.note's foreign key to_parent leaves out tenant_id",
+        ),
+    ])
+    .await;
+}
+
+#[tokio::test]
+async fn functions_that_run_early_or_pick_a_tenant_are_caught() {
+    let good = tenant_owned("good");
+    each_caught(&[
+        (
+            "CREATE FUNCTION peek(text) RETURNS boolean LANGUAGE sql LEAKPROOF AS 'SELECT true'",
+            "",
+            "function checked.peek(text) is leakproof, so it runs before row-level security",
+        ),
+        (
+            &format!(
+                "{good} CREATE FUNCTION count_two() RETURNS bigint LANGUAGE sql SET app.tenant_id = '2'
+                   AS 'SELECT count(*) FROM checked.good'"
+            ),
+            "",
+            "function checked.count_two() sets app.tenant_id",
+        ),
+        (
+            &format!(
+                "{good} CREATE TRIGGER crossing AFTER INSERT ON good FOR EACH ROW
+                   EXECUTE FUNCTION checked_other.hook()"
+            ),
+            "CREATE FUNCTION hook() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NULL; END'",
+            "checked.good uses function checked_other.hook() from another schema",
+        ),
+        (
+            &format!(
+                "{good} CREATE FUNCTION mine() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
+                   SET search_path = pg_catalog, pg_temp AS 'BEGIN RETURN NULL; END';
+                 ALTER FUNCTION mine() OWNER TO tetsu_checked_lookup;
+                 CREATE TRIGGER as_owner AFTER INSERT ON good FOR EACH ROW EXECUTE FUNCTION mine()"
+            ),
+            "",
+            "trigger as_owner on checked.good runs a function as its owner",
+        ),
+    ])
+    .await;
+}
+
+#[tokio::test]
+async fn grant_options_defaults_and_odd_declarations_are_caught() {
+    let good = tenant_owned("good");
+    each_caught(&[
+        (
+            &format!("{good} GRANT SELECT ON good TO tetsu_checked WITH GRANT OPTION;"),
+            "",
+            "tetsu_checked holds SELECT on checked.good, with the right to grant it",
+        ),
+        (
+            "ALTER DEFAULT PRIVILEGES IN SCHEMA checked GRANT SELECT ON TABLES TO PUBLIC",
+            "",
+            "PUBLIC is named in default privileges of postgres",
+        ),
+        (
+            "ALTER DEFAULT PRIVILEGES GRANT SELECT ON TABLES TO tetsu_checked_other",
+            "",
+            "tetsu_checked_other is named in default privileges of postgres",
+        ),
+        (
+            &good.replace("tenant_id bigint", "tenant_id smallint"),
+            "",
+            "checked.good's tenant_id is not a bigint",
+        ),
+        (
+            "CREATE TABLE parts (tenant_id bigint NOT NULL, id uuid NOT NULL, PRIMARY KEY (tenant_id, id))
+               PARTITION BY HASH (tenant_id);
+             COMMENT ON TABLE parts IS 'tetsu:tenant-owned';
+             CREATE TABLE parts_0 PARTITION OF parts FOR VALUES WITH (MODULUS 1, REMAINDER 0);
+             COMMENT ON TABLE parts_0 IS 'tetsu:global: test'",
+            "",
+            "checked.parts_0 inherits from tenant-owned checked.parts but is not declared tenant-owned",
+        ),
+        (
+            "CREATE TABLE vague (id int); COMMENT ON TABLE vague IS 'tetsu:global:   '",
+            "",
+            "checked.vague is declared neither tenant-owned nor global",
+        ),
+        (
+            &format!(
+                "{good} CREATE POLICY loose ON good TO tetsu_checked USING (true);"
+            ),
+            "",
+            "checked.good has policy loose that is not the tenant rule for tetsu_checked alone",
+        ),
+    ])
+    .await;
+}
+
+#[tokio::test]
+async fn ownership_of_every_kind_of_object_is_checked() {
+    let good = tenant_owned("good");
+    each_caught(&[
+        (
+            "CREATE FUNCTION plain() RETURNS int LANGUAGE sql AS 'SELECT 1';
+             ALTER FUNCTION plain() OWNER TO tetsu_checked",
+            "",
+            "function checked.plain() is owned by tetsu_checked",
+        ),
+        (
+            "CREATE TYPE mood AS ENUM ('calm'); ALTER TYPE mood OWNER TO tetsu_checked",
+            "",
+            "type checked.mood is owned by tetsu_checked",
+        ),
+        (
+            &format!(
+                "{good} CREATE STATISTICS spread ON tenant_id, id FROM good;
+                 ALTER STATISTICS spread OWNER TO tetsu_checked"
+            ),
+            "",
+            "statistics spread is owned by tetsu_checked",
+        ),
+        (
+            "CREATE COLLATION plainly (provider = icu, locale = 'und');
+             ALTER COLLATION plainly OWNER TO tetsu_checked",
+            "",
+            "collation plainly is owned by tetsu_checked",
+        ),
+        (
+            "CREATE OPERATOR === (LEFTARG = int, RIGHTARG = int, FUNCTION = int4eq);
+             ALTER OPERATOR === (int, int) OWNER TO tetsu_checked",
+            "",
+            "is owned by tetsu_checked",
+        ),
+    ])
+    .await;
+}
+
+#[tokio::test]
+async fn database_wide_objects_tetsu_never_uses_are_caught() {
+    each_caught(&[
+        (
+            "CREATE EXTENSION btree_gist SCHEMA public",
+            "",
+            "extension btree_gist is installed, and no rule covers it",
+        ),
+        (
+            "CREATE FUNCTION pg_catalog.zz_sneak() RETURNS int LANGUAGE sql AS 'SELECT 1'",
+            "",
+            "zz_sneak() lies outside every module's schema",
+        ),
+        (
+            "CREATE TABLE public.dump (id int)",
+            "",
+            "public.dump lies outside every module's schema",
+        ),
+        (
+            "SELECT lo_create(0)",
+            "",
+            "exists, which row-level security does not reach",
+        ),
+        (
+            "DO $$ BEGIN EXECUTE format('GRANT CREATE ON DATABASE %I TO tetsu_app', current_database()); END $$",
+            "",
+            "tetsu_app holds CREATE on database",
+        ),
+    ])
+    .await;
+}
+
+#[tokio::test]
+async fn features_that_reach_past_row_level_security_are_caught() {
+    each_caught(&[
+        (
+            "CREATE FUNCTION checked.on_ddl() RETURNS event_trigger LANGUAGE plpgsql AS 'BEGIN END';
+             CREATE EVENT TRIGGER watcher ON ddl_command_start EXECUTE FUNCTION checked.on_ddl()",
+            "",
+            "event trigger watcher runs on every statement",
+        ),
+        (
+            "CREATE PUBLICATION everything FOR ALL TABLES",
+            "",
+            "publication everything copies rows out of the database",
+        ),
+        (
+            "CREATE FOREIGN DATA WRAPPER nowhere; CREATE SERVER far FOREIGN DATA WRAPPER nowhere;
+             CREATE FOREIGN TABLE elsewhere (id int) SERVER far",
+            "",
+            "checked.elsewhere is a kind of relation a module schema does not hold",
+        ),
+        (
+            "CREATE TRUSTED LANGUAGE extra HANDLER plpgsql_call_handler",
+            "",
+            "language extra was added",
+        ),
+        (
+            "DO $$ BEGIN EXECUTE format('ALTER DATABASE %I SET search_path = checked, pg_catalog', current_database()); END $$",
+            "",
+            "database settings for every role set search_path",
+        ),
+    ])
+    .await;
+}
+
+#[tokio::test]
+async fn a_composite_type_or_the_checker_s_temp_table_is_no_problem() {
+    assert_eq!(
+        problems("CREATE TYPE pair AS (a int, b int)".into(), "").await,
+        Vec::<String>::new()
+    );
+    let database = fresh_database().await.expect("a test database");
+    migrate(&database, &[&support::Checked("checked", &[])])
+        .await
+        .expect("migrates");
+    let mut client = connect(&database).await.expect("connects");
+    client
+        .batch_execute("CREATE TEMP TABLE scratch (id int)")
+        .await
+        .expect("makes a temp table");
+    assert_eq!(
+        isolation_violations(&mut client, &["checked", "missing"])
+            .await
+            .expect("checks"),
+        ["schema missing does not exist"]
+    );
+}
+
+/// Server-wide grants, checked against roles and a module of the test's own, so no shared role is touched.
+#[tokio::test]
+async fn reach_logins_parameters_and_owners_that_can_skip_rls_are_caught() {
+    let database = fresh_database().await.expect("a test database");
+    let id = std::process::id();
+    let (app, owner, bypass) = (
+        format!("t_iso4_app_{id}"),
+        format!("t_iso4_owner_{id}"),
+        format!("t_iso4_bypass_{id}"),
+    );
+    let schema = format!("iso4_{id}");
+    let (module, lookup) = (format!("tetsu_{schema}"), format!("tetsu_{schema}_lookup"));
+    let mut client = connect(&database).await.expect("connects");
+    let checked = async {
+        client
+            .batch_execute(&format!(
+                "CREATE ROLE {app}; CREATE ROLE {owner}; CREATE ROLE {bypass} BYPASSRLS;
+                 CREATE ROLE {module} LOGIN; CREATE ROLE {lookup};
+                 GRANT {module}, {lookup}, {owner} TO {app} WITH INHERIT FALSE, SET TRUE;
+                 GRANT {bypass} TO {owner} WITH ADMIN TRUE, INHERIT FALSE, SET FALSE;
+                 GRANT SET ON PARAMETER session_replication_role TO {app};
+                 CREATE SCHEMA {schema} AUTHORIZATION {owner}"
+            ))
+            .await?;
+        tetsu_postgres::isolation_violations_for(&mut client, &[&schema], &app).await
+    }
+    .await;
+    client
+        .batch_execute(&format!(
+            "REVOKE SET ON PARAMETER session_replication_role FROM {app};
+             DROP SCHEMA IF EXISTS {schema} CASCADE;
+             DROP ROLE IF EXISTS {app}, {owner}, {bypass}, {module}, {lookup}"
+        ))
+        .await
+        .expect("drops the roles");
+    let found = checked.expect("checks");
+    for expected in [
+        format!("{app} can act as {lookup}, which is no module's role"),
+        format!("{app} can act as {owner}, which is no module's role"),
+        format!("{module} can log in, but a module or lookup role never does"),
+        format!("{app} may set parameter session_replication_role"),
+        format!("the owner {owner} can become {bypass}, which skips row-level security"),
     ] {
         assert!(found.contains(&expected), "{expected} among {found:?}");
     }

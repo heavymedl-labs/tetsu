@@ -238,15 +238,15 @@ async fn nothing_a_transaction_sets_reaches_the_next_request() {
 async fn the_hosted_probe_finds_no_rows_without_a_tenant() {
     let (pool, database) = app_pool().await;
     add(&pool, 1, "lee.park@example.com").await.expect("adds");
-    let client = tetsu_postgres::connect(&database).await.expect("connects");
+    let mut client = tetsu_postgres::connect(&database).await.expect("connects");
     assert_eq!(
-        tetsu_postgres::rows_seen_without_a_tenant(&client, &["people"])
+        tetsu_postgres::rows_seen_without_a_tenant(&mut client, &["people"])
             .await
             .expect("probes"),
         Vec::<String>::new()
     );
     assert_eq!(
-        tetsu_postgres::isolation_violations(&client, &["people"])
+        tetsu_postgres::isolation_violations(&mut client, &["people"])
             .await
             .expect("checks"),
         Vec::<String>::new()
@@ -262,9 +262,9 @@ async fn the_hosted_probe_finds_no_rows_without_a_tenant() {
         )
         .await
         .expect("sets a tenant for the checker");
-    let client = tetsu_postgres::connect(&database).await.expect("connects");
+    let mut client = tetsu_postgres::connect(&database).await.expect("connects");
     assert_eq!(
-        tetsu_postgres::rows_seen_without_a_tenant(&client, &["people"])
+        tetsu_postgres::rows_seen_without_a_tenant(&mut client, &["people"])
             .await
             .expect("probes despite the checker's tenant"),
         Vec::<String>::new()
@@ -276,7 +276,7 @@ async fn the_hosted_probe_finds_no_rows_without_a_tenant() {
         .await
         .expect("breaks the table");
     assert_eq!(
-        tetsu_postgres::rows_seen_without_a_tenant(&client, &["people"])
+        tetsu_postgres::rows_seen_without_a_tenant(&mut client, &["people"])
             .await
             .expect("probes"),
         ["people.people shows 1 rows with no tenant set"]
@@ -310,6 +310,11 @@ async fn a_module_transaction_keeps_what_it_commits() {
 async fn module_schemas_are_found_by_their_records() {
     let (_pool, database) = app_pool().await;
     let client = tetsu_postgres::connect(&database).await.expect("connects");
+    // Another tool's table of the same name is no module's record.
+    client
+        .batch_execute("CREATE TABLE public.migrations (id int)")
+        .await
+        .expect("makes a look-alike");
     assert_eq!(
         tetsu_postgres::module_schemas(&client)
             .await

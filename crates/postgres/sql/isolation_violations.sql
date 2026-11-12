@@ -10,7 +10,7 @@
 -- belongs only to module roles, which it may act as but not inherit. Anything
 -- granted to PUBLIC counts as the application role's own. A module's record of
 -- applied files is the runner's own, so it is left out of the table rules.
-WITH modules AS (
+WITH RECURSIVE modules AS (
     SELECT
         n.oid,
         n.nspname AS schema_name,
@@ -68,12 +68,28 @@ owners AS (
     FROM modules AS m
 ),
 
+-- Every role an owner can become, through SET or by granting itself a role it
+-- may administer, however many grants away.
+owner_reach (owner_oid, oid) AS (
+    SELECT
+        o.oid AS owner_oid,
+        o.oid
+    FROM owners AS o
+    UNION
+    SELECT
+        r.owner_oid,
+        m.roleid AS oid
+    FROM owner_reach AS r
+    INNER JOIN pg_catalog.pg_auth_members AS m ON r.oid = m.member
+    WHERE m.set_option OR m.admin_option
+),
+
 -- Every object in a module schema, with its owner.
 owned AS (
     SELECT
         m.nspowner,
         c.relowner AS owner_oid,
-        FALSE AS definer,
+        FALSE AS is_definer,
         pg_catalog.format('%I.%I', m.schema_name, c.relname) AS shown
     FROM pg_catalog.pg_class AS c
     INNER JOIN modules AS m ON c.relnamespace = m.oid
@@ -81,7 +97,7 @@ owned AS (
     SELECT
         m.nspowner,
         p.proowner AS owner_oid,
-        p.prosecdef AS definer,
+        p.prosecdef AS is_definer,
         'function ' || p.oid::pg_catalog.regprocedure::text AS shown
     FROM pg_catalog.pg_proc AS p
     INNER JOIN modules AS m ON p.pronamespace = m.oid
@@ -89,7 +105,7 @@ owned AS (
     SELECT
         m.nspowner,
         t.typowner AS owner_oid,
-        FALSE AS definer,
+        FALSE AS is_definer,
         'type ' || t.oid::pg_catalog.regtype::text AS shown
     FROM pg_catalog.pg_type AS t
     INNER JOIN modules AS m ON t.typnamespace = m.oid
@@ -97,7 +113,7 @@ owned AS (
     SELECT
         m.nspowner,
         o.oprowner AS owner_oid,
-        FALSE AS definer,
+        FALSE AS is_definer,
         'operator ' || o.oid::pg_catalog.regoperator::text AS shown
     FROM pg_catalog.pg_operator AS o
     INNER JOIN modules AS m ON o.oprnamespace = m.oid
@@ -105,10 +121,58 @@ owned AS (
     SELECT
         m.nspowner,
         x.stxowner AS owner_oid,
-        FALSE AS definer,
+        FALSE AS is_definer,
         'statistics ' || x.stxname AS shown
     FROM pg_catalog.pg_statistic_ext AS x
     INNER JOIN modules AS m ON x.stxnamespace = m.oid
+    UNION ALL
+    SELECT
+        m.nspowner,
+        co.collowner AS owner_oid,
+        FALSE AS is_definer,
+        'collation ' || co.collname AS shown
+    FROM pg_catalog.pg_collation AS co
+    INNER JOIN modules AS m ON co.collnamespace = m.oid
+    UNION ALL
+    SELECT
+        m.nspowner,
+        cv.conowner AS owner_oid,
+        FALSE AS is_definer,
+        'conversion ' || cv.conname AS shown
+    FROM pg_catalog.pg_conversion AS cv
+    INNER JOIN modules AS m ON cv.connamespace = m.oid
+    UNION ALL
+    SELECT
+        m.nspowner,
+        oc.opcowner AS owner_oid,
+        FALSE AS is_definer,
+        'operator class ' || oc.opcname AS shown
+    FROM pg_catalog.pg_opclass AS oc
+    INNER JOIN modules AS m ON oc.opcnamespace = m.oid
+    UNION ALL
+    SELECT
+        m.nspowner,
+        f.opfowner AS owner_oid,
+        FALSE AS is_definer,
+        'operator family ' || f.opfname AS shown
+    FROM pg_catalog.pg_opfamily AS f
+    INNER JOIN modules AS m ON f.opfnamespace = m.oid
+    UNION ALL
+    SELECT
+        m.nspowner,
+        tc.cfgowner AS owner_oid,
+        FALSE AS is_definer,
+        'text search configuration ' || tc.cfgname AS shown
+    FROM pg_catalog.pg_ts_config AS tc
+    INNER JOIN modules AS m ON tc.cfgnamespace = m.oid
+    UNION ALL
+    SELECT
+        m.nspowner,
+        td.dictowner AS owner_oid,
+        FALSE AS is_definer,
+        'text search dictionary ' || td.dictname AS shown
+    FROM pg_catalog.pg_ts_dict AS td
+    INNER JOIN modules AS m ON td.dictnamespace = m.oid
 ),
 
 relations AS (
@@ -142,6 +206,7 @@ tenant_owned AS (
     SELECT
         t.*,
         a.attnum AS tenant_column,
+        a.atttypid AS tenant_type,
         ARRAY[(
             SELECT r.oid FROM pg_catalog.pg_roles AS r
             WHERE r.rolname = t.module_role
@@ -174,9 +239,10 @@ grants AS (
             WHEN r.relispartition THEN 'partition ' || r.shown
             ELSE r.shown
         END AS shown,
-        FALSE AS definer,
+        FALSE AS is_definer,
         g.grantee,
-        g.privilege_type
+        g.privilege_type,
+        g.is_grantable
     FROM relations AS r
     CROSS JOIN LATERAL pg_catalog.aclexplode(r.relacl) AS g
     UNION ALL
@@ -184,9 +250,10 @@ grants AS (
         r.schema_name,
         CASE WHEN r.relispartition THEN 'partition' ELSE 'table' END AS kind,
         r.shown || ' (column ' || a.attname || ')' AS shown,
-        FALSE AS definer,
+        FALSE AS is_definer,
         g.grantee,
-        g.privilege_type
+        g.privilege_type,
+        g.is_grantable
     FROM relations AS r
     INNER JOIN pg_catalog.pg_attribute AS a ON r.oid = a.attrelid
     CROSS JOIN LATERAL pg_catalog.aclexplode(a.attacl) AS g
@@ -196,9 +263,10 @@ grants AS (
         m.schema_name,
         'schema' AS kind,
         'schema ' || m.schema_name AS shown,
-        FALSE AS definer,
+        FALSE AS is_definer,
         g.grantee,
-        g.privilege_type
+        g.privilege_type,
+        g.is_grantable
     FROM modules AS m
     INNER JOIN pg_catalog.pg_namespace AS n ON m.oid = n.oid
     CROSS JOIN
@@ -210,9 +278,10 @@ grants AS (
         m.schema_name,
         'function' AS kind,
         'function ' || p.oid::pg_catalog.regprocedure::text AS shown,
-        p.prosecdef AS definer,
+        p.prosecdef AS is_definer,
         g.grantee,
-        g.privilege_type
+        g.privilege_type,
+        g.is_grantable
     FROM modules AS m
     INNER JOIN pg_catalog.pg_proc AS p ON m.oid = p.pronamespace
     CROSS JOIN
@@ -224,9 +293,10 @@ grants AS (
         m.schema_name,
         'type' AS kind,
         'type ' || t.oid::pg_catalog.regtype::text AS shown,
-        FALSE AS definer,
+        FALSE AS is_definer,
         g.grantee,
-        g.privilege_type
+        g.privilege_type,
+        g.is_grantable
     FROM modules AS m
     INNER JOIN pg_catalog.pg_type AS t ON m.oid = t.typnamespace
     CROSS JOIN
@@ -249,6 +319,7 @@ judged AS (
                     pg_catalog.format('tetsu_%s', g.schema_name),
                     pg_catalog.format('tetsu_%s_lookup', g.schema_name)
                 )
+                AND NOT g.is_grantable
                 AND (
                     (
                         g.kind = 'table'
@@ -265,7 +336,10 @@ judged AS (
                 )
             )
             OR (
-                g.grantee = 0 AND g.kind = 'type' AND g.privilege_type = 'USAGE'
+                g.grantee = 0
+                AND g.kind = 'type'
+                AND g.privilege_type = 'USAGE'
+                AND NOT g.is_grantable
             )
         ), FALSE) AS allowed,
         gr.rolname IS NOT NULL
@@ -280,7 +354,7 @@ judged AS (
 
 SELECT t.shown || ' is declared neither tenant-owned nor global' AS problem
 FROM tables AS t
-WHERE t.declared <> 'tetsu:tenant-owned' AND t.declared !~ '^tetsu:global: .+'
+WHERE t.declared <> 'tetsu:tenant-owned' AND t.declared !~ '^tetsu:global: \S'
 
 UNION ALL
 SELECT t.shown || ' lacks row-level security, enabled and forced'
@@ -291,6 +365,31 @@ UNION ALL
 SELECT t.shown || ' has no tenant_id column'
 FROM tenant_owned AS t
 WHERE t.tenant_column IS NULL
+
+UNION ALL
+SELECT t.shown || '''s tenant_id is not a bigint'
+FROM tenant_owned AS t
+WHERE
+    t.tenant_column IS NOT NULL
+    AND t.tenant_type <> 'pg_catalog.int8'::pg_catalog.regtype
+
+-- A partition or inheritance child holds its parent's rows, so it is declared
+-- tenant-owned too, and every rule for one applies to it.
+UNION ALL
+SELECT
+    child.shown
+    || ' inherits from tenant-owned '
+    || t.shown
+    || ' but is not declared tenant-owned'
+FROM pg_catalog.pg_inherits AS i
+INNER JOIN tenant_owned AS t ON i.inhparent = t.oid
+INNER JOIN relations AS child ON i.inhrelid = child.oid
+WHERE child.declared <> 'tetsu:tenant-owned'
+
+UNION ALL
+SELECT 'schema ' || wanted.name || ' does not exist'
+FROM unnest($1::text[]) AS wanted (name)
+WHERE wanted.name NOT IN (SELECT m.schema_name FROM modules AS m)
 
 UNION ALL
 SELECT
@@ -377,13 +476,43 @@ WHERE
             AND k.conkey[1] = t.tenant_column
     )
 
+-- A foreign key to a tenant-owned table checks the referenced row whatever
+-- its tenant, so it must match tenant_id to tenant_id, from a tenant-owned
+-- table.
 UNION ALL
-SELECT t.shown || '''s foreign key ' || k.conname || ' leaves out tenant_id'
-FROM tenant_owned AS t
-INNER JOIN
-    pg_catalog.pg_constraint AS k
-    ON t.oid = k.conrelid AND k.contype = 'f'
-WHERE NOT (t.tenant_column = any(k.conkey))
+SELECT
+    pg_catalog.format('%I.%I', cn.nspname, c.relname)
+    || '''s foreign key '
+    || k.conname
+    || ' leaves out tenant_id'
+FROM pg_catalog.pg_constraint AS k
+INNER JOIN tenant_owned AS referenced ON k.confrelid = referenced.oid
+INNER JOIN pg_catalog.pg_class AS c ON k.conrelid = c.oid
+INNER JOIN pg_catalog.pg_namespace AS cn ON c.relnamespace = cn.oid
+LEFT JOIN tenant_owned AS t ON k.conrelid = t.oid
+WHERE
+    k.contype = 'f'
+    AND (
+        t.tenant_column IS NULL
+        OR pg_catalog.array_position(k.conkey, t.tenant_column) IS NULL
+    )
+
+UNION ALL
+SELECT
+    t.shown
+    || '''s foreign key '
+    || k.conname
+    || ' pairs tenant_id with another column'
+FROM pg_catalog.pg_constraint AS k
+INNER JOIN tenant_owned AS referenced ON k.confrelid = referenced.oid
+INNER JOIN tenant_owned AS t ON k.conrelid = t.oid
+WHERE
+    k.contype = 'f'
+    AND pg_catalog.array_position(k.conkey, t.tenant_column) IS NOT NULL
+    AND pg_catalog.array_position(k.conkey, t.tenant_column)
+    IS DISTINCT FROM pg_catalog.array_position(
+        k.confkey, referenced.tenant_column
+    )
 
 UNION ALL
 SELECT
@@ -419,7 +548,7 @@ SELECT
     || o.owner_oid::pg_catalog.regrole::text
     || ', not its schema''s owner'
 FROM owned AS o
-WHERE o.owner_oid <> o.nspowner AND NOT o.definer
+WHERE o.owner_oid <> o.nspowner AND NOT o.is_definer
 
 UNION ALL
 SELECT r.shown || ' is a view that runs with its owner''s rights'
@@ -443,7 +572,7 @@ WHERE r.relkind = 'm'
 UNION ALL
 SELECT r.shown || ' is a kind of relation a module schema does not hold'
 FROM relations AS r
-WHERE r.relkind NOT IN ('r', 'p', 'i', 'I', 'S', 'v', 'm')
+WHERE r.relkind NOT IN ('r', 'p', 'i', 'I', 'S', 'v', 'm', 'c')
 
 UNION ALL
 SELECT
@@ -469,8 +598,9 @@ SELECT
         WHEN j.foreign_module THEN ', in another module''s schema'
         ELSE ''
     END
+    || CASE WHEN j.is_grantable THEN ', with the right to grant it' ELSE '' END
 FROM judged AS j
-WHERE NOT j.allowed AND NOT (j.definer AND j.grantee = 0)
+WHERE NOT j.allowed AND NOT (j.is_definer AND j.grantee = 0)
 
 -- Default privileges: within a module schema only the module's own roles,
 -- and the owner's global defaults reach no one else, apart from PUBLIC's use
@@ -491,7 +621,9 @@ WHERE
         d.defaclrole IN (SELECT o.oid FROM owners AS o)
         AND g.grantee <> d.defaclrole
         AND NOT (g.grantee = 0 AND d.defaclobjtype = 'T')
-        AND NOT (m.oid IS NOT NULL AND gr.rolname = m.module_role)
+        AND NOT coalesce(
+            m.oid IS NOT NULL AND gr.rolname = m.module_role, FALSE
+        )
     )
 
 UNION ALL
@@ -545,6 +677,71 @@ FROM (
         t.typowner AS owner_oid,
         'type ' || t.oid::pg_catalog.regtype::text AS described
     FROM pg_catalog.pg_type AS t
+    UNION ALL
+    SELECT
+        o.oprowner AS owner_oid,
+        'operator ' || o.oid::pg_catalog.regoperator::text AS described
+    FROM pg_catalog.pg_operator AS o
+    UNION ALL
+    SELECT
+        co.collowner AS owner_oid,
+        'collation ' || co.collname AS described
+    FROM pg_catalog.pg_collation AS co
+    UNION ALL
+    SELECT
+        cv.conowner AS owner_oid,
+        'conversion ' || cv.conname AS described
+    FROM pg_catalog.pg_conversion AS cv
+    UNION ALL
+    SELECT
+        oc.opcowner AS owner_oid,
+        'operator class ' || oc.opcname AS described
+    FROM pg_catalog.pg_opclass AS oc
+    UNION ALL
+    SELECT
+        f.opfowner AS owner_oid,
+        'operator family ' || f.opfname AS described
+    FROM pg_catalog.pg_opfamily AS f
+    UNION ALL
+    SELECT
+        tc.cfgowner AS owner_oid,
+        'text search configuration ' || tc.cfgname AS described
+    FROM pg_catalog.pg_ts_config AS tc
+    UNION ALL
+    SELECT
+        td.dictowner AS owner_oid,
+        'text search dictionary ' || td.dictname AS described
+    FROM pg_catalog.pg_ts_dict AS td
+    UNION ALL
+    SELECT
+        x.stxowner AS owner_oid,
+        'statistics ' || x.stxname AS described
+    FROM pg_catalog.pg_statistic_ext AS x
+    UNION ALL
+    SELECT
+        e.extowner AS owner_oid,
+        'extension ' || e.extname AS described
+    FROM pg_catalog.pg_extension AS e
+    UNION ALL
+    SELECT
+        l.lanowner AS owner_oid,
+        'language ' || l.lanname AS described
+    FROM pg_catalog.pg_language AS l
+    UNION ALL
+    SELECT
+        lo.lomowner AS owner_oid,
+        'large object ' || lo.oid::text AS described
+    FROM pg_catalog.pg_largeobject_metadata AS lo
+    UNION ALL
+    SELECT
+        ts.spcowner AS owner_oid,
+        'tablespace ' || ts.spcname AS described
+    FROM pg_catalog.pg_tablespace AS ts
+    UNION ALL
+    SELECT
+        db.datdba AS owner_oid,
+        'database ' || db.datname AS described
+    FROM pg_catalog.pg_database AS db
 ) AS held
 INNER JOIN app AS ap ON held.owner_oid = ap.oid
 
@@ -581,6 +778,21 @@ WHERE
     AND r.rolbypassrls
     AND NOT r.rolsuper
 
+UNION ALL
+SELECT
+    'the owner '
+    || owner_role.rolname
+    || ' can become '
+    || reached_role.rolname
+    || ', which skips row-level security'
+FROM owner_reach AS reach
+INNER JOIN pg_catalog.pg_roles AS owner_role ON reach.owner_oid = owner_role.oid
+INNER JOIN pg_catalog.pg_roles AS reached_role ON reach.oid = reached_role.oid
+WHERE
+    reach.oid <> reach.owner_oid
+    AND NOT owner_role.rolsuper
+    AND (reached_role.rolbypassrls OR reached_role.rolsuper)
+
 -- Nothing of Tetsu's lies outside the module schemas, where no rule reaches.
 UNION ALL
 SELECT outside.described || ' lies outside every module''s schema'
@@ -588,7 +800,6 @@ FROM (
     SELECT
         c.oid,
         c.relnamespace AS namespace,
-        'pg_catalog.pg_class'::pg_catalog.regclass AS catalog,
         c.oid::pg_catalog.regclass::text AS described
     FROM pg_catalog.pg_class AS c
     WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f', 'S')
@@ -596,23 +807,17 @@ FROM (
     SELECT
         p.oid,
         p.pronamespace AS namespace,
-        'pg_catalog.pg_proc'::pg_catalog.regclass AS catalog,
         'function ' || p.oid::pg_catalog.regprocedure::text AS described
     FROM pg_catalog.pg_proc AS p
 ) AS outside
 INNER JOIN pg_catalog.pg_namespace AS n ON outside.namespace = n.oid
+-- Postgres's own objects are those made before its first normal object id,
+-- 16384, so a schema's name never hides one made since.
 WHERE
-    n.nspname NOT IN (SELECT m.schema_name FROM modules AS m)
-    AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+    outside.oid >= 16384
+    AND n.nspname NOT IN (SELECT m.schema_name FROM modules AS m)
     AND n.nspname NOT LIKE 'pg\_temp\_%'
     AND n.nspname NOT LIKE 'pg\_toast\_temp\_%'
-    AND NOT EXISTS (
-        SELECT FROM pg_catalog.pg_depend AS d
-        WHERE
-            d.classid = outside.catalog
-            AND d.objid = outside.oid
-            AND d.deptype = 'e'
-    )
 
 UNION ALL
 SELECT
@@ -670,8 +875,182 @@ SELECT 'function ' || g.shown || ' runs as its owner but anyone may run it'
 FROM grants AS g
 WHERE
     g.kind = 'function'
-    AND g.definer
+    AND g.is_definer
     AND g.grantee = 0
     AND g.privilege_type = 'EXECUTE'
+
+-- A leakproof function may run before the tenant rule and see other tenants'
+-- rows, so no module's function is marked one.
+UNION ALL
+SELECT
+    'function '
+    || p.oid::pg_catalog.regprocedure::text
+    || ' is leakproof, so it runs before row-level security'
+FROM pg_catalog.pg_proc AS p
+INNER JOIN modules AS m ON p.pronamespace = m.oid
+WHERE p.proleakproof
+
+-- A function may fix its search path and timeouts, and nothing else, so none
+-- can pick a tenant or a role for whoever calls it.
+UNION ALL
+SELECT
+    'function '
+    || p.oid::pg_catalog.regprocedure::text
+    || ' sets '
+    || pg_catalog.split_part(setting.value, '=', 1)
+FROM pg_catalog.pg_proc AS p
+INNER JOIN modules AS m ON p.pronamespace = m.oid
+CROSS JOIN LATERAL unnest(p.proconfig) AS setting (value)
+WHERE
+    pg_catalog.lower(pg_catalog.split_part(setting.value, '=', 1))
+    NOT IN ('search_path', 'lock_timeout', 'statement_timeout')
+
+-- Triggers, defaults, checks, indexes, policies, and views call functions
+-- with no check of the caller's rights, so each uses only its own schema's
+-- functions or Postgres's own.
+UNION ALL
+SELECT
+    used.shown
+    || ' uses function '
+    || p.oid::pg_catalog.regprocedure::text
+    || ' from another schema'
+FROM (
+    SELECT
+        'pg_catalog.pg_class'::pg_catalog.regclass AS catalog_id,
+        r.oid,
+        r.schema_name,
+        r.shown
+    FROM relations AS r
+    UNION ALL
+    SELECT
+        'pg_catalog.pg_trigger'::pg_catalog.regclass AS catalog_id,
+        tg.oid,
+        r.schema_name,
+        r.shown
+    FROM pg_catalog.pg_trigger AS tg
+    INNER JOIN relations AS r ON tg.tgrelid = r.oid
+    UNION ALL
+    SELECT
+        'pg_catalog.pg_attrdef'::pg_catalog.regclass AS catalog_id,
+        ad.oid,
+        r.schema_name,
+        r.shown
+    FROM pg_catalog.pg_attrdef AS ad
+    INNER JOIN relations AS r ON ad.adrelid = r.oid
+    UNION ALL
+    SELECT
+        'pg_catalog.pg_constraint'::pg_catalog.regclass AS catalog_id,
+        k.oid,
+        r.schema_name,
+        r.shown
+    FROM pg_catalog.pg_constraint AS k
+    INNER JOIN relations AS r ON k.conrelid = r.oid
+    UNION ALL
+    SELECT
+        'pg_catalog.pg_policy'::pg_catalog.regclass AS catalog_id,
+        po.oid,
+        r.schema_name,
+        r.shown
+    FROM pg_catalog.pg_policy AS po
+    INNER JOIN relations AS r ON po.polrelid = r.oid
+    UNION ALL
+    SELECT
+        'pg_catalog.pg_rewrite'::pg_catalog.regclass AS catalog_id,
+        w.oid,
+        r.schema_name,
+        r.shown
+    FROM pg_catalog.pg_rewrite AS w
+    INNER JOIN relations AS r ON w.ev_class = r.oid
+) AS used
+INNER JOIN pg_catalog.pg_depend AS d
+    ON used.catalog_id = d.classid AND used.oid = d.objid
+INNER JOIN pg_catalog.pg_proc AS p
+    ON
+        d.refclassid = 'pg_catalog.pg_proc'::pg_catalog.regclass
+        AND d.refobjid = p.oid
+INNER JOIN pg_catalog.pg_namespace AS fn ON p.pronamespace = fn.oid
+WHERE p.oid >= 16384 AND fn.nspname <> used.schema_name
+
+UNION ALL
+SELECT
+    'trigger '
+    || tg.tgname
+    || ' on '
+    || r.shown
+    || ' runs a function as its owner'
+FROM pg_catalog.pg_trigger AS tg
+INNER JOIN relations AS r ON tg.tgrelid = r.oid
+INNER JOIN pg_catalog.pg_proc AS p ON tg.tgfoid = p.oid
+WHERE NOT tg.tgisinternal AND p.prosecdef
+
+-- Each of these reaches data or sessions that no rule above covers, and Tetsu
+-- uses none of them.
+UNION ALL
+SELECT 'extension ' || e.extname || ' is installed, and no rule covers it'
+FROM pg_catalog.pg_extension AS e
+WHERE e.extname <> 'plpgsql'
+
+UNION ALL
+SELECT 'event trigger ' || et.evtname || ' runs on every statement'
+FROM pg_catalog.pg_event_trigger AS et
+
+UNION ALL
+SELECT 'publication ' || pb.pubname || ' copies rows out of the database'
+FROM pg_catalog.pg_publication AS pb
+
+UNION ALL
+SELECT 'foreign data wrapper ' || w.fdwname || ' reaches another source'
+FROM pg_catalog.pg_foreign_data_wrapper AS w
+
+UNION ALL
+SELECT 'language ' || l.lanname || ' was added'
+FROM pg_catalog.pg_language AS l
+WHERE l.oid >= 16384
+
+UNION ALL
+SELECT
+    'large object '
+    || lo.oid::text
+    || ' exists, which row-level security does not reach'
+FROM pg_catalog.pg_largeobject_metadata AS lo
+
+UNION ALL
+SELECT
+    coalesce(gr.rolname, 'PUBLIC')
+    || ' may set parameter '
+    || pa.parname
+FROM pg_catalog.pg_parameter_acl AS pa
+CROSS JOIN LATERAL pg_catalog.aclexplode(pa.paracl) AS g
+LEFT JOIN pg_catalog.pg_roles AS gr ON g.grantee = gr.oid
+WHERE
+    g.grantee = 0
+    OR g.grantee IN (SELECT ap.oid FROM app AS ap)
+    OR g.grantee IN (SELECT br.oid FROM bound_roles AS br)
+
+-- The application role may connect; PUBLIC keeps Postgres's default rights to
+-- connect and make temporary tables; no one else here holds a right.
+UNION ALL
+SELECT
+    coalesce(gr.rolname, 'PUBLIC')
+    || ' holds '
+    || g.privilege_type
+    || ' on database '
+    || db.datname
+FROM pg_catalog.pg_database AS db
+CROSS JOIN
+    LATERAL pg_catalog.aclexplode(
+        coalesce(db.datacl, pg_catalog.acldefault('d', db.datdba))
+    ) AS g
+LEFT JOIN pg_catalog.pg_roles AS gr ON g.grantee = gr.oid
+WHERE
+    db.datname = current_database()
+    AND (
+        (g.grantee = 0 AND g.privilege_type NOT IN ('CONNECT', 'TEMPORARY'))
+        OR (
+            g.grantee IN (SELECT ap.oid FROM app AS ap)
+            AND g.privilege_type <> 'CONNECT'
+        )
+        OR g.grantee IN (SELECT br.oid FROM bound_roles AS br)
+    )
 
 ORDER BY 1;

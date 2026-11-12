@@ -12,7 +12,10 @@ const VIOLATIONS: &str = include_str!("../sql/isolation_violations.sql");
 ///
 /// # Errors
 /// Fails if the query fails.
-pub async fn isolation_violations(client: &Client, schemas: &[&str]) -> Result<Vec<String>, Error> {
+pub async fn isolation_violations(
+    client: &mut Client,
+    schemas: &[&str],
+) -> Result<Vec<String>, Error> {
     isolation_violations_for(client, schemas, APP_ROLE).await
 }
 
@@ -23,35 +26,31 @@ pub async fn isolation_violations(client: &Client, schemas: &[&str]) -> Result<V
 /// Fails if the query fails.
 #[doc(hidden)]
 pub async fn isolation_violations_for(
-    client: &Client,
+    client: &mut Client,
     schemas: &[&str],
     app: &str,
 ) -> Result<Vec<String>, Error> {
     let schemas: Vec<String> = schemas.iter().map(ToString::to_string).collect();
-    // In a transaction whose search path is the catalog alone, so no object a module made can stand in for a
-    // function the checks call or print.
-    client.batch_execute("BEGIN").await?;
-    let rows = async {
-        client
-            .query_one(
-                "SELECT pg_catalog.set_config('search_path', 'pg_catalog', true)",
-                &[],
-            )
-            .await?;
-        client.query(VIOLATIONS, &[&schemas, &app]).await
-    }
-    .await;
-    // Rolled back whatever happened, and the query's own error, if any, is the one reported.
-    let rolled_back = client.batch_execute("ROLLBACK").await;
-    let rows = rows?;
-    rolled_back?;
+    // In a transaction of its own, whose search path is the catalog alone, so no object a module made can stand in
+    // for a function the checks call or print. Taking the client mutably means no caller's transaction is open, and
+    // dropping it rolls back.
+    let transaction = client.transaction().await?;
+    transaction
+        .query_one(
+            "SELECT pg_catalog.set_config('search_path', 'pg_catalog', true)",
+            &[],
+        )
+        .await?;
+    let rows = transaction.query(VIOLATIONS, &[&schemas, &app]).await?;
+    transaction.rollback().await?;
     Ok(rows
         .iter()
         .map(|row| row.try_get("problem"))
         .collect::<Result<_, _>>()?)
 }
 
-/// Every module's schema in the database, found by the record each keeps of its applied files.
+/// Every module's schema in the database, found by the record of applied files the runner keeps in each, with the
+/// runner's own columns, so another tool's table of the same name is not taken for one.
 ///
 /// # Errors
 /// Fails if the query fails.
@@ -60,7 +59,11 @@ pub async fn module_schemas(client: &Client) -> Result<Vec<String>, Error> {
         .query(
             "SELECT n.nspname FROM pg_catalog.pg_class c
              JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-             WHERE c.relname = 'migrations' AND c.relkind = 'r' ORDER BY 1",
+             WHERE c.relname = 'migrations' AND c.relkind = 'r' AND n.nspname <> 'public'
+               AND (SELECT pg_catalog.array_agg(a.attname::text ORDER BY a.attnum) FROM pg_catalog.pg_attribute a
+                    WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped)
+                   = ARRAY['version', 'sql', 'applied_at']
+             ORDER BY 1",
             &[],
         )
         .await?;
@@ -71,12 +74,13 @@ pub async fn module_schemas(client: &Client) -> Result<Vec<String>, Error> {
 }
 
 /// Each tenant-owned table in these schemas that shows its module's role any row while no tenant is set, which
-/// row-level security forbids (ADR-0042). Every count runs in a transaction that is rolled back.
+/// row-level security forbids (ADR-0042). Every count runs in a transaction that is rolled back. A partition is
+/// counted through its parent, since the module role holds no rights on it.
 ///
 /// # Errors
 /// Fails if a query fails, such as when the connection's role may not act as a module's.
 pub async fn rows_seen_without_a_tenant(
-    client: &Client,
+    client: &mut Client,
     schemas: &[&str],
 ) -> Result<Vec<String>, Error> {
     let schemas: Vec<String> = schemas.iter().map(ToString::to_string).collect();
@@ -84,7 +88,7 @@ pub async fn rows_seen_without_a_tenant(
         .query(
             "SELECT n.nspname, c.relname FROM pg_catalog.pg_class c
              JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-             WHERE n.nspname = any($1) AND c.relkind IN ('r', 'p')
+             WHERE n.nspname = any($1) AND c.relkind IN ('r', 'p') AND NOT c.relispartition
                AND pg_catalog.obj_description(c.oid, 'pg_class') = 'tetsu:tenant-owned'
              ORDER BY 1, 2",
             &[&schemas],
@@ -104,31 +108,26 @@ pub async fn rows_seen_without_a_tenant(
 }
 
 /// The rows a table shows its module's role, in a transaction that is always rolled back.
-async fn count_as_module(client: &Client, schema: &str, name: &str) -> Result<i64, Error> {
-    client.batch_execute("BEGIN").await?;
-    let counted = async {
-        client
-            .query_one(
-                "SELECT pg_catalog.set_config('role', $1, true),
-                        pg_catalog.set_config('app.tenant_id', '', true)",
-                &[&crate::roles::module_role(schema)],
-            )
-            .await?;
-        client
-            .query_one(
-                &format!(
-                    "SELECT count(*) FROM {}.{}",
-                    crate::roles::quoted(schema),
-                    crate::roles::quoted(name)
-                ),
-                &[],
-            )
-            .await?
-            .try_get::<_, i64>(0)
-    }
-    .await;
-    let rolled_back = client.batch_execute("ROLLBACK").await;
-    let counted = counted?;
-    rolled_back?;
+async fn count_as_module(client: &mut Client, schema: &str, name: &str) -> Result<i64, Error> {
+    let transaction = client.transaction().await?;
+    transaction
+        .query_one(
+            "SELECT pg_catalog.set_config('role', $1, true),
+                    pg_catalog.set_config('app.tenant_id', '', true)",
+            &[&crate::roles::module_role(schema)],
+        )
+        .await?;
+    let counted = transaction
+        .query_one(
+            &format!(
+                "SELECT count(*) FROM {}.{}",
+                crate::roles::quoted(schema),
+                crate::roles::quoted(name)
+            ),
+            &[],
+        )
+        .await?
+        .try_get::<_, i64>(0)?;
+    transaction.rollback().await?;
     Ok(counted)
 }
