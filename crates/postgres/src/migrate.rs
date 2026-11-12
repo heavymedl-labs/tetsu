@@ -7,6 +7,7 @@ use tetsu_kernel::{Migration, Module, Storage};
 use tokio_postgres::Client;
 
 use crate::connection::{Error, Settings, connect};
+use crate::roles::{MAX_SCHEMA, prepare_module, require_app_role};
 
 /// Taken by polling, never by blocking, which can deadlock with
 /// `CREATE INDEX CONCURRENTLY` (ADR-0011).
@@ -22,8 +23,8 @@ const RESET_SESSION: &str = "RESET SESSION AUTHORIZATION; RESET ROLE; RESET ALL;
 /// Applies each module's new migrations.
 ///
 /// # Errors
-/// Fails if the modules break the kernel contract, the database is not UTF8, the lock stays held, a file fails,
-/// or an applied file has changed.
+/// Fails if the modules break the kernel contract, the server is older than PostgreSQL 18.6 or the database is not
+/// UTF8, the application role is missing, the lock stays held, a file fails, or an applied file has changed.
 pub async fn migrate(settings: &Settings, modules: &[&dyn Module]) -> Result<(), Error> {
     migrate_with_wait(settings, modules, LOCK_WAIT).await
 }
@@ -39,12 +40,17 @@ pub async fn migrate_with_wait(
 ) -> Result<(), Error> {
     check_contract(modules)?;
     let client = connect(settings).await?;
-    check_utf8(&client).await?;
+    check_server(&client).await?;
+    require_app_role(&client).await?;
     take_lock(&client, wait).await?;
     // Every module is checked before any file is applied.
     let mut plan = Vec::new();
     for storage in modules.iter().filter_map(|module| module.storage()) {
         plan.push((storage.schema, pending(&client, storage).await?));
+    }
+    // Before any file, so a file can grant to its module's roles and hand functions to its lookup role.
+    for (schema, _) in &plan {
+        prepare_module(&client, schema).await?;
     }
     // Each file ends by taking back rights on every module's record, since one may grant on every table in a
     // schema, its own or another's.
@@ -75,7 +81,7 @@ fn check_contract(modules: &[&dyn Module]) -> Result<(), Error> {
         };
         if !plain_schema(schema) {
             return Err(format!(
-                "schema {schema:?} must be a lowercase identifier of at most 63 bytes, and not a system schema"
+                "schema {schema:?} must be a lowercase identifier of at most {MAX_SCHEMA} bytes, and not a system schema"
             )
             .into());
         }
@@ -93,7 +99,7 @@ fn check_contract(modules: &[&dyn Module]) -> Result<(), Error> {
 }
 
 /// Lowercase letters, digits, and underscores, not starting with a digit, so a module's own SQL can name it unquoted
-/// and the runner can quote it safely. `public`, `information_schema`, and the reserved `pg_` prefix are never a
+/// and the runner can quote it safely. It leaves room for the module's role names (ADR-0042). `public`, `information_schema`, and the reserved `pg_` prefix are never a
 /// module's own.
 fn plain_schema(schema: &str) -> bool {
     let mut chars = schema.chars();
@@ -101,19 +107,49 @@ fn plain_schema(schema: &str) -> bool {
         .next()
         .is_some_and(|c| c.is_ascii_lowercase() || c == '_')
         && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-        && schema.len() <= 63
+        && schema.len() <= MAX_SCHEMA
         && schema != "public"
         && schema != "information_schema"
         && !schema.starts_with("pg_")
 }
 
-/// Fails unless the database stores text as UTF8. Modules check text before storing it, and those checks
-/// assume the database can hold any Unicode text, so anything that writes checked text calls this first.
+/// The oldest server Tetsu runs on: 18.6 fixes CVE-2026-14666 in row security (ADR-0042).
+pub const MIN_SERVER_VERSION: i32 = 180_006;
+
+/// Fails unless the server is PostgreSQL 18.6 or later and the database stores text as UTF8. Modules check text
+/// before storing it, and those checks assume the database can hold any Unicode text, so anything that writes
+/// checked text calls this first, and so does anything that serves.
 ///
 /// # Errors
-/// Fails if the database is unreachable or uses another encoding.
-pub async fn require_utf8(settings: &Settings) -> Result<(), Error> {
-    check_utf8(&connect(settings).await?).await
+/// Fails if the database is unreachable, the server is older, or the database uses another encoding.
+pub async fn require_supported_server(settings: &Settings) -> Result<(), Error> {
+    check_server(&connect(settings).await?).await
+}
+
+/// The test server runs 18.6, so no test reaches the refusal itself; `supported` is tested alone.
+async fn check_server(client: &Client) -> Result<(), Error> {
+    let row = client
+        .query_one(
+            "SELECT current_setting('server_version_num')::int AS version",
+            &[],
+        )
+        .await?;
+    supported(row.try_get("version")?)?;
+    check_utf8(client).await
+}
+
+/// Whether a `server_version_num` is new enough.
+fn supported(version: i32) -> Result<(), Error> {
+    if version >= MIN_SERVER_VERSION {
+        Ok(())
+    } else {
+        Err(format!(
+            "PostgreSQL {}.{} is too old; Tetsu needs 18.6 or later",
+            version / 10_000,
+            version % 10_000
+        )
+        .into())
+    }
 }
 
 async fn check_utf8(client: &Client) -> Result<(), Error> {
@@ -334,5 +370,25 @@ async fn refuse_invalid_indexes(client: &Client, schema: &str) -> Result<(), Err
         )
         .into()),
         None => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_server_must_be_18_6_or_later() {
+        for old in [170_009, 180_000, 180_005] {
+            let error = supported(old).unwrap_err().to_string();
+            assert!(error.contains("needs 18.6 or later"), "{error}");
+        }
+        assert_eq!(
+            supported(180_005).unwrap_err().to_string(),
+            "PostgreSQL 18.5 is too old; Tetsu needs 18.6 or later"
+        );
+        for new in [180_006, 180_010, 190_000] {
+            supported(new).unwrap();
+        }
     }
 }

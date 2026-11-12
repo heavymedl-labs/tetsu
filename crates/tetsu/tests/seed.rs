@@ -250,7 +250,7 @@ async fn seed_before_migrate_fails_and_says_why() {
     let output = seed(&settings, &sample());
     assert_eq!(output.status.code(), Some(1));
     assert!(
-        text(&output.stderr).contains("tenancy.tenants"),
+        text(&output.stderr).contains("schema \"tenancy\" does not exist"),
         "{output:?}"
     );
 }

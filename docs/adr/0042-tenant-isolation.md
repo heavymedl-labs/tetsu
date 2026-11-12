@@ -98,8 +98,11 @@ the application's own filters as a second layer.
 
 - **Lookups that run before a tenant is known go through one narrow `SECURITY DEFINER` function each,** such as
   web address to tenant, or session token to session. Each answers one input at a time, so no caller can list the
-  table. Each is owned by its own `NOLOGIN` role, sets a fixed `search_path`, has `EXECUTE` revoked from `PUBLIC`
-  in the migration that creates it, and runs in its own short transaction.
+  table. Each is owned by its module's `NOLOGIN` lookup role, `tetsu_<schema>_lookup`, which holds only what those
+  functions read or write. Each function sets a fixed `search_path`, has `EXECUTE` revoked from `PUBLIC` in the
+  migration that creates it, and runs in its own short transaction. (Clarified 2026-11-11, with the maintainer's
+  approval: one lookup role per module, since roles belong to the whole server and one per function would
+  multiply them.)
 - **Staff identities and their passkeys are global,** as ADR-0040's realms require, while staff roles are
   tenant-owned. "Which businesses can I work at" is one such function, keyed on the signed-in identity.
   Customer accounts belong to one business, so they are ordinary tenant-owned rows.

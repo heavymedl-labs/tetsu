@@ -2,7 +2,9 @@
 
 use tetsu_kernel::{Migration, Module, Storage};
 use tetsu_postgres::test_support::{fresh_database, fresh_database_encoded};
-use tetsu_postgres::{MIGRATION_LOCK, connect, migrate, migrate_with_wait, require_utf8};
+use tetsu_postgres::{
+    MAX_SCHEMA, MIGRATION_LOCK, connect, migrate, migrate_with_wait, require_supported_server,
+};
 
 struct Fake(&'static [Migration]);
 
@@ -286,7 +288,7 @@ async fn refuses_a_database_that_is_not_utf8() {
         error.to_string().contains("must use UTF8, not LATIN1"),
         "{error}"
     );
-    let seeding = require_utf8(&settings).await.unwrap_err();
+    let seeding = require_supported_server(&settings).await.unwrap_err();
     assert_eq!(
         seeding.to_string(),
         "the database must use UTF8, not LATIN1"
@@ -381,7 +383,7 @@ async fn refusal(modules: &[&dyn Module]) -> Result<String, tetsu_postgres::Erro
 
 #[tokio::test]
 async fn refuses_a_schema_that_is_not_a_lowercase_identifier() {
-    let long: &'static str = "a".repeat(64).leak();
+    let long: &'static str = "a".repeat(MAX_SCHEMA + 1).leak();
     for schema in [
         "Billing", "", "1st", "a-b", "a b", "a;b", "pg_x", "public", long,
     ] {
@@ -393,7 +395,7 @@ async fn refuses_a_schema_that_is_not_a_lowercase_identifier() {
 #[tokio::test]
 async fn accepts_any_lowercase_identifier_up_to_the_limit() {
     let settings = fresh_database().await.expect("a test database");
-    let longest: &'static str = "a".repeat(63).leak();
+    let longest: &'static str = "a".repeat(MAX_SCHEMA).leak();
     for schema in ["_a", "a1_b", "user", longest] {
         migrate(&settings, &[&Named("fake", schema, &[])])
             .await
@@ -653,8 +655,21 @@ async fn a_role_with_rights_on_every_new_table_may_only_read_the_record() {
     assert!(public.is_empty(), "{public:?}");
 }
 
-/// As on Neon: the runner owns what it creates but is no superuser, so it needs its own rights on the record, and the
-/// app role gets rights on every table it creates. A file that grants on every table in its schema covers the
+/// Makes the fake module's roles if no test has yet, since roles belong to the whole server.
+async fn make_fake_roles(admin: &tokio_postgres::Client) -> Result<(), tetsu_postgres::Error> {
+    for role in ["tetsu_fake", "tetsu_fake_lookup"] {
+        admin
+            .batch_execute(&format!(
+                "DO $$ BEGIN CREATE ROLE {role} NOLOGIN;
+                 EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL; END $$"
+            ))
+            .await?;
+    }
+    Ok(())
+}
+
+/// As on Neon: the runner owns what it creates and can create roles but is no superuser, so it needs its own rights
+/// on the record, and the app role gets rights on every table it creates. A file that grants on every table in its schema covers the
 /// record too, and loses all but reading before the run ends.
 #[tokio::test]
 async fn a_runner_that_is_no_superuser_keeps_writing_its_record() {
@@ -668,10 +683,16 @@ async fn a_runner_that_is_no_superuser_keeps_writing_its_record() {
         format!("t_runner_app_{}", std::process::id()),
     );
     let admin = connect(&database).await.expect("connects");
+    // Other tests share the module's roles across the server and made them first, so the runner is given what
+    // making them itself would have given it.
+    make_fake_roles(&admin)
+        .await
+        .expect("makes the module's roles");
     admin
         .batch_execute(&format!(
-            "CREATE ROLE {runner} LOGIN; CREATE ROLE {app};
+            "CREATE ROLE {runner} LOGIN CREATEROLE; CREATE ROLE {app};
              GRANT CREATE ON DATABASE {} TO {runner};
+             GRANT tetsu_fake, tetsu_fake_lookup TO {runner} WITH ADMIN OPTION;
              ALTER DEFAULT PRIVILEGES FOR ROLE {runner} GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {app}",
             database.name()
         ))

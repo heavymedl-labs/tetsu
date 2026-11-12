@@ -1,0 +1,154 @@
+//! Tetsu's own roles (ADR-0042). Roles belong to the whole server, not one database, so every step here can find
+//! its work already done, or being done by another connection at the same moment.
+
+use std::time::Duration;
+
+use tokio_postgres::Client;
+use tokio_postgres::error::SqlState;
+
+use crate::connection::Error;
+
+/// The role `tetsu serve` signs in as. It holds no rights of its own and acts through module roles.
+pub const APP_ROLE: &str = "tetsu_app";
+/// Module roles are `tetsu_<schema>` and `tetsu_<schema>_lookup`, so a schema leaves room for both in Postgres's
+/// 63-byte names.
+pub const MAX_SCHEMA: usize = 63 - "tetsu_".len() - "_lookup".len();
+const RETRIES: u32 = 5;
+const RETRY_PAUSE: Duration = Duration::from_millis(50);
+
+/// The role a module's code acts as, holding its rights on its own schema alone.
+#[must_use]
+pub fn module_role(schema: &str) -> String {
+    format!("tetsu_{schema}")
+}
+
+/// The role that owns a module's lookup functions, which run before a tenant is known.
+#[must_use]
+pub fn lookup_role(schema: &str) -> String {
+    format!("tetsu_{schema}_lookup")
+}
+
+/// Runs `create`, which makes `role`, unless the role exists, so a runner that cannot create roles still migrates
+/// once an administrator has made them. Two connections creating one role at once may collide in the catalog, so a
+/// collision is retried.
+///
+/// # Errors
+/// Fails if the statement fails for any other reason, or keeps colliding.
+pub async fn ensure_role(client: &Client, role: &str, create: &str) -> Result<(), Error> {
+    if exists(client, role).await? {
+        return Ok(());
+    }
+    let statement = format!(
+        "DO $$ BEGIN {create}; EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL; END $$"
+    );
+    retried(client, &statement).await
+}
+
+async fn exists(client: &Client, role: &str) -> Result<bool, Error> {
+    let row = client
+        .query_one(
+            "SELECT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = $1) AS found",
+            &[&role],
+        )
+        .await?;
+    Ok(row.try_get("found")?)
+}
+
+/// Grants `role` to `member` to act as, never to inherit, unless that grant already stands.
+async fn ensure_member(client: &Client, role: &str, member: &str) -> Result<(), Error> {
+    let row = client
+        .query_one(
+            "SELECT EXISTS (SELECT FROM pg_catalog.pg_auth_members m
+               JOIN pg_catalog.pg_roles r ON r.oid = m.roleid JOIN pg_catalog.pg_roles u ON u.oid = m.member
+               WHERE r.rolname = $1 AND u.rolname = $2 AND m.set_option AND NOT m.inherit_option) AS found",
+            &[&role, &member],
+        )
+        .await?;
+    if row.try_get("found")? {
+        return Ok(());
+    }
+    retried(
+        client,
+        &format!("GRANT {role} TO \"{member}\" WITH INHERIT FALSE, SET TRUE"),
+    )
+    .await
+}
+
+/// Makes a module's roles, lets the application role and the runner act as its module role one transaction at a
+/// time, and lets the runner hand functions to its lookup role. A grant that already exists is kept.
+pub(crate) async fn prepare_module(client: &Client, schema: &str) -> Result<(), Error> {
+    let (module, lookup) = (module_role(schema), lookup_role(schema));
+    for role in [&module, &lookup] {
+        ensure_role(client, role, &format!("CREATE ROLE {role} NOLOGIN")).await?;
+    }
+    let runner: String = client
+        .query_one("SELECT current_user::text AS runner", &[])
+        .await?
+        .try_get("runner")?;
+    ensure_member(client, &module, APP_ROLE).await?;
+    ensure_member(client, &module, &runner).await?;
+    ensure_member(client, &lookup, &runner).await?;
+    // These belong to this database alone, so nothing else races them. Functions are revoked from `PUBLIC` in the
+    // global form, since a schema's own defaults cannot take back a global grant.
+    client
+        .batch_execute(&format!(
+            r#"GRANT USAGE ON SCHEMA "{schema}" TO {module}, {lookup};
+             ALTER DEFAULT PRIVILEGES IN SCHEMA "{schema}" GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {module};
+             ALTER DEFAULT PRIVILEGES IN SCHEMA "{schema}" GRANT USAGE, SELECT ON SEQUENCES TO {module};
+             ALTER DEFAULT PRIVILEGES REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC"#
+        ))
+        .await?;
+    Ok(())
+}
+
+/// Fails unless the application role exists, since the runner grants it each module's role.
+pub(crate) async fn require_app_role(client: &Client) -> Result<(), Error> {
+    if exists(client, APP_ROLE).await? {
+        Ok(())
+    } else {
+        Err(format!(
+            "role {APP_ROLE} must exist before migrating; create it as docs/operations/demo-environment.md shows"
+        )
+        .into())
+    }
+}
+
+async fn retried(client: &Client, statement: &str) -> Result<(), Error> {
+    let mut attempt = 0;
+    loop {
+        match client.batch_execute(statement).await {
+            Ok(()) => return Ok(()),
+            Err(error) if attempt < RETRIES && collided(&error) => {
+                attempt += 1;
+                tokio::time::sleep(RETRY_PAUSE * attempt).await;
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+}
+
+/// Another connection changed the same catalog row first: "tuple concurrently updated" is an internal error, and a
+/// role or grant made at the same moment can break a unique index.
+fn collided(error: &tokio_postgres::Error) -> bool {
+    error.code().is_some_and(|code| {
+        [
+            SqlState::INTERNAL_ERROR,
+            SqlState::UNIQUE_VIOLATION,
+            SqlState::T_R_SERIALIZATION_FAILURE,
+        ]
+        .contains(code)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_module_s_roles_fit_postgres_names() {
+        let schema = "a".repeat(MAX_SCHEMA);
+        assert_eq!(module_role("tenancy"), "tetsu_tenancy");
+        assert_eq!(lookup_role("tenancy"), "tetsu_tenancy_lookup");
+        assert_eq!(lookup_role(&schema).len(), 63);
+    }
+}

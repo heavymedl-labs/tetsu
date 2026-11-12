@@ -162,10 +162,10 @@ async fn run_seed(path: &std::path::Path, check_only: bool) -> Result<(), String
     seed::apply(&tetsu_tenancy::postgres_store(pool), &seeds, say).await
 }
 
-/// Reads the database settings, checks the database stores text as UTF-8, and opens a pool to it.
+/// Reads the database settings, checks the server is new enough and stores text as UTF-8, and opens a pool to it.
 async fn connect() -> Result<tetsu_postgres::Pool, String> {
     let settings = settings::database(|name| std::env::var(name))?;
-    tetsu_postgres::require_utf8(&settings)
+    tetsu_postgres::require_supported_server(&settings)
         .await
         .map_err(|error| explain(&*error))?;
     tetsu_postgres::pool(&settings).map_err(|error| explain(&*error))

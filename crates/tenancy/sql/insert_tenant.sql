@@ -1,3 +1,1 @@
-INSERT INTO tenancy.tenants (slug, name, primary_color, accent_color)
-VALUES ($1, $2, $3, $4)
-RETURNING id;
+SELECT tenancy.register_tenant($1, $2, $3, $4, $5) AS id;

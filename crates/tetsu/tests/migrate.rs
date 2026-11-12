@@ -37,11 +37,11 @@ async fn migrate_applies_each_module_and_a_rerun_changes_nothing() {
 
     let first = migrate(settings.url());
     assert!(first.status.success(), "{first:?}");
-    assert_eq!(applied_tenancy_migrations(&settings).await, 1);
+    assert_eq!(applied_tenancy_migrations(&settings).await, 2);
 
     let second = migrate(settings.url());
     assert!(second.status.success(), "{second:?}");
-    assert_eq!(applied_tenancy_migrations(&settings).await, 1);
+    assert_eq!(applied_tenancy_migrations(&settings).await, 2);
 }
 
 #[test]
@@ -101,4 +101,22 @@ async fn spaces_around_the_database_url_are_ignored() {
     let settings = fresh_database().await.expect("a test database");
     let output = migrate(&format!("  {}\n", settings.url()));
     assert!(output.status.success(), "{output:?}");
+}
+
+/// ADR-0042's catalog checks over every module the binary runs.
+#[tokio::test]
+async fn every_module_follows_the_isolation_rules() {
+    let settings = fresh_database().await.expect("a test database");
+    let migrated = migrate(settings.url());
+    assert!(migrated.status.success(), "{migrated:?}");
+    let client = tetsu_postgres::connect(&settings).await.expect("connects");
+    let schemas = tetsu_postgres::module_schemas(&client)
+        .await
+        .expect("finds the modules");
+    assert!(schemas.contains(&"tenancy".to_string()), "{schemas:?}");
+    let schemas: Vec<&str> = schemas.iter().map(String::as_str).collect();
+    let problems = tetsu_postgres::isolation_violations(&client, &schemas)
+        .await
+        .expect("checks");
+    assert_eq!(problems, Vec::<String>::new());
 }

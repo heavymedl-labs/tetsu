@@ -1,4 +1,2 @@
 SELECT address
-FROM tenancy.addresses
-WHERE address = any($1)
-ORDER BY address;
+FROM tenancy.addresses_in_use($1) AS address;

@@ -1,8 +1,8 @@
 //! Tenancy's Postgres adapter. Driver types stay in this file (ADR-0007).
 
-use deadpool_postgres::{Object, Transaction};
+use deadpool_postgres::Object;
 use tetsu_kernel::Migration;
-use tetsu_postgres::Pool;
+use tetsu_postgres::{ModuleTransaction, Pool, TenantTransaction};
 use tokio_postgres::Row;
 use tokio_postgres::error::SqlState;
 use tokio_postgres::types::ToSql;
@@ -11,13 +11,20 @@ use crate::domain::{Color, Error, Location, NewTenant, Slug, Tenant, TenantId, T
 use crate::ports::TenantStore;
 use crate::use_cases::Tenants;
 
-pub const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    sql: include_str!("../../migrations/0001_tenants.sql"),
-}];
+pub const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        sql: include_str!("../../migrations/0001_tenants.sql"),
+    },
+    Migration {
+        version: 2,
+        sql: include_str!("../../migrations/0002_isolation.sql"),
+    },
+];
+/// Tenancy's schema, which names the role its transactions act as (ADR-0042).
+const SCHEMA: &str = "tenancy";
 
 const INSERT_TENANT: &str = include_str!("../../sql/insert_tenant.sql");
-const INSERT_ADDRESS: &str = include_str!("../../sql/insert_address.sql");
 const INSERT_LOCATION: &str = include_str!("../../sql/insert_location.sql");
 const FIND_TENANT: &str = include_str!("../../sql/find_tenant_by_address.sql");
 const FIND_LOCATIONS: &str = include_str!("../../sql/find_locations.sql");
@@ -73,11 +80,17 @@ struct PostgresTenants {
 }
 
 /// Sorts driver errors as ADR-0011 asks. Only a dropped connection or a stale cached statement is worth
-/// retrying, and every error keeps the driver's message.
+/// retrying, and every error keeps the driver's message. A taken slug and a taken address are told apart by the
+/// constraint each breaks.
 fn database(error: &tokio_postgres::Error) -> Error {
     let message = message(error);
-    if error.code() == Some(&SqlState::UNIQUE_VIOLATION) {
+    let constraint = error.as_db_error().and_then(|db| db.constraint());
+    if error.code() == Some(&SqlState::UNIQUE_VIOLATION) && constraint == Some("tenants_slug_key") {
         Error::SlugTaken
+    } else if error.code() == Some(&SqlState::UNIQUE_VIOLATION)
+        && constraint == Some("addresses_pkey")
+    {
+        Error::AddressTaken
     } else if is_stale(error) {
         Error::Unavailable(format!("{STALE}{message}"))
     } else if error.is_closed() || is_io(error) || is_server_unavailable(error) {
@@ -167,73 +180,75 @@ impl TenantStore for PostgresTenants {
     }
 
     async fn find_by_address(&self, address: &str) -> Result<Option<Tenant>, Error> {
-        let client = self.pool.get().await.map_err(pool_error)?;
-        let result = find(&client, address).await;
+        let mut client = self.pool.get().await.map_err(pool_error)?;
+        let result = find(&mut client, address).await;
         clear_if_stale(&self.pool, result)
     }
 
     async fn find_addresses_in_use(&self, addresses: &[String]) -> Result<Vec<String>, Error> {
-        let client = self.pool.get().await.map_err(pool_error)?;
-        let result = addresses_in_use(&client, addresses).await;
+        let mut client = self.pool.get().await.map_err(pool_error)?;
+        let result = addresses_in_use(&mut client, addresses).await;
         clear_if_stale(&self.pool, result)
     }
 }
 
-async fn addresses_in_use(client: &Object, addresses: &[String]) -> Result<Vec<String>, Error> {
-    let statement = client
+async fn addresses_in_use(client: &mut Object, addresses: &[String]) -> Result<Vec<String>, Error> {
+    let transaction = ModuleTransaction::begin(client, SCHEMA)
+        .await
+        .map_err(|e| database(&e))?;
+    let statement = transaction
         .prepare_cached(FIND_ADDRESSES_IN_USE)
         .await
         .map_err(|e| database(&e))?;
-    client
+    let held = transaction
         .query(&statement, &[&addresses])
         .await
         .map_err(|e| database(&e))?
         .iter()
         .map(|row| row.try_get("address").map_err(|e| database(&e)))
-        .collect()
+        .collect::<Result<_, _>>()?;
+    transaction.commit().await.map_err(|e| commit_error(&e))?;
+    Ok(held)
 }
 
-/// One transaction, so a failure at any step leaves no tenant, address, or location behind.
+/// One transaction, so a failure at any step leaves no tenant, address, or location behind. The locations are
+/// written once the transaction is narrowed to the new tenant, as their policy requires.
 async fn insert_in_transaction(client: &mut Object, tenant: &NewTenant) -> Result<i64, Error> {
-    let transaction = client.transaction().await.map_err(|e| database(&e))?;
+    let transaction = ModuleTransaction::begin(client, SCHEMA)
+        .await
+        .map_err(|e| database(&e))?;
     let id = insert_tenant_and_address(&transaction, tenant).await?;
+    let transaction = transaction.for_tenant(id).await.map_err(|e| database(&e))?;
     insert_locations(&transaction, id, tenant.locations()).await?;
     transaction.commit().await.map_err(|e| commit_error(&e))?;
     Ok(id)
 }
 
+/// Registers the tenant and its address through Tenancy's function, the only way its role reaches either table.
 async fn insert_tenant_and_address(
-    transaction: &Transaction<'_>,
+    transaction: &ModuleTransaction<'_>,
     tenant: &NewTenant,
 ) -> Result<i64, Error> {
-    let insert_tenant = transaction
+    let register = transaction
         .prepare_cached(INSERT_TENANT)
         .await
         .map_err(|e| database(&e))?;
-    let parameters: [&(dyn ToSql + Sync); 4] = [
+    let parameters: [&(dyn ToSql + Sync); 5] = [
         &tenant.slug().as_str(),
         &tenant.name(),
         &tenant.theme().primary.as_str(),
         &tenant.theme().accent.as_str(),
+        &tenant.slug().address(),
     ];
     let row = transaction
-        .query_one(&insert_tenant, &parameters)
+        .query_one(&register, &parameters)
         .await
         .map_err(|e| database(&e))?;
-    let id: i64 = row.try_get("id").map_err(|e| database(&e))?;
-    let insert_address = transaction
-        .prepare_cached(INSERT_ADDRESS)
-        .await
-        .map_err(|e| database(&e))?;
-    transaction
-        .execute(&insert_address, &[&tenant.slug().address(), &id])
-        .await
-        .map_err(|e| database(&e))?;
-    Ok(id)
+    row.try_get("id").map_err(|e| database(&e))
 }
 
 async fn insert_locations(
-    transaction: &Transaction<'_>,
+    transaction: &TenantTransaction<'_>,
     id: i64,
     locations: &[Location],
 ) -> Result<(), Error> {
@@ -252,28 +267,42 @@ async fn insert_locations(
     Ok(())
 }
 
-async fn find(client: &Object, address: &str) -> Result<Option<Tenant>, Error> {
-    let find_tenant = client
-        .prepare_cached(FIND_TENANT)
-        .await
-        .map_err(|e| database(&e))?;
-    let Some(row) = client
-        .query_opt(&find_tenant, &[&address])
-        .await
-        .map_err(|e| database(&e))?
-    else {
+/// The lookup runs in its own short transaction, before the tenant is known, then the locations in one that
+/// belongs to that tenant (ADR-0042).
+async fn find(client: &mut Object, address: &str) -> Result<Option<Tenant>, Error> {
+    let Some(row) = look_up(client, address).await? else {
         return Ok(None);
     };
     let id: i64 = row.try_get("id").map_err(|e| database(&e))?;
-    let find_locations = client
+    let transaction = TenantTransaction::begin(client, SCHEMA, id)
+        .await
+        .map_err(|e| database(&e))?;
+    let find_locations = transaction
         .prepare_cached(FIND_LOCATIONS)
         .await
         .map_err(|e| database(&e))?;
-    let locations = client
+    let locations = transaction
         .query(&find_locations, &[&id])
         .await
         .map_err(|e| database(&e))?;
+    transaction.commit().await.map_err(|e| commit_error(&e))?;
     Ok(Some(tenant_from(&row, &locations)?))
+}
+
+async fn look_up(client: &mut Object, address: &str) -> Result<Option<Row>, Error> {
+    let transaction = ModuleTransaction::begin(client, SCHEMA)
+        .await
+        .map_err(|e| database(&e))?;
+    let find_tenant = transaction
+        .prepare_cached(FIND_TENANT)
+        .await
+        .map_err(|e| database(&e))?;
+    let row = transaction
+        .query_opt(&find_tenant, &[&address])
+        .await
+        .map_err(|e| database(&e))?;
+    transaction.commit().await.map_err(|e| commit_error(&e))?;
+    Ok(row)
 }
 
 /// Stored values pass the same checks as new ones, so a bad row is an error rather than a bad page.

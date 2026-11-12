@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::connection::{Error, Settings, connect};
+use crate::roles::{APP_ROLE, ensure_role};
 
 static NEXT: AtomicU32 = AtomicU32::new(0);
 /// Held while sweeping, so test binaries running at once do not each repeat the same drops.
@@ -27,6 +28,17 @@ impl TestDatabase {
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// The same database, signed in as the application role, as `tetsu serve` is (ADR-0042). Assumes the test server
+    /// trusts local roles without a password, as CI's and check.sh's do.
+    #[must_use]
+    pub fn as_app(&self) -> Settings {
+        let url = self
+            .settings
+            .url()
+            .replacen("postgres@", &format!("{APP_ROLE}@"), 1);
+        Settings::from_values(&url, Some("disable"))
     }
 }
 
@@ -190,6 +202,8 @@ async fn create(options: &str) -> Result<TestDatabase, Error> {
     // Worked out first, so a URL the helper cannot use fails before a database exists to leak.
     let settings = Settings::from_values(&database_url(&admin_url, &name)?, Some("disable"));
     let admin = connect(&Settings::from_values(&admin_url, Some("disable"))).await?;
+    // Roles belong to the whole server, so every test database shares this one, made by whichever test is first.
+    ensure_role(&admin, APP_ROLE, &format!("CREATE ROLE {APP_ROLE} LOGIN")).await?;
     admin
         .batch_execute(&format!("CREATE DATABASE {}{options}", quoted(&name)))
         .await?;

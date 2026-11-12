@@ -57,6 +57,8 @@ const MAX_NAME: usize = 100;
 pub enum Error {
     Invalid(String),
     SlugTaken,
+    /// Another tenant already holds the address, though the slug itself is free.
+    AddressTaken,
     NotFound,
     /// Worth retrying: the connection dropped, or a cached statement went stale (ADR-0011).
     Unavailable(String),
@@ -68,6 +70,7 @@ impl std::fmt::Display for Error {
         match self {
             Self::Invalid(why) => write!(f, "invalid: {why}"),
             Self::SlugTaken => f.write_str("that slug is taken"),
+            Self::AddressTaken => f.write_str("that address is taken"),
             Self::NotFound => f.write_str("no tenant at that address"),
             Self::Unavailable(why) => write!(f, "temporarily unavailable: {why}"),
             Self::Storage(why) => write!(f, "storage failed: {why}"),
@@ -603,6 +606,7 @@ mod tests {
             "invalid: bad slug"
         );
         assert_eq!(Error::SlugTaken.to_string(), "that slug is taken");
+        assert_eq!(Error::AddressTaken.to_string(), "that address is taken");
         assert_eq!(Error::NotFound.to_string(), "no tenant at that address");
         assert_eq!(
             Error::Unavailable("closed".into()).to_string(),

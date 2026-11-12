@@ -227,10 +227,14 @@ async fn a_stale_cached_query_is_temporary_and_clears_every_connection() {
     let pool = pool(&settings).expect("pool");
     let store = postgres_store(pool.clone());
     store
-        .create(&tenant("sample-studio", &[]))
+        .create(&tenant(
+            "sample-studio",
+            &[("Main Street", "America/Denver")],
+        ))
         .await
         .expect("creates");
-    let find = include_str!("../sql/find_tenant_by_address.sql");
+    // Tenants are found through a function, whose callers no column change reaches, so locations stand in.
+    let find = include_str!("../sql/find_locations.sql");
     let (first, second) = (
         pool.get().await.expect("a connection"),
         pool.get().await.expect("another"),
@@ -244,7 +248,7 @@ async fn a_stale_cached_query_is_temporary_and_clears_every_connection() {
     drop((first, second));
     let client = tetsu_postgres::connect(&settings).await.expect("connects");
     client
-        .batch_execute("ALTER TABLE tenancy.tenants ALTER COLUMN name TYPE varchar(200)")
+        .batch_execute("ALTER TABLE tenancy.locations ALTER COLUMN name TYPE varchar(200)")
         .await
         .expect("alters");
     assert!(matches!(
@@ -267,7 +271,8 @@ async fn a_stale_cached_query_is_temporary_and_clears_every_connection() {
     );
 }
 
-/// The insert returns the tenant's id, so changing that column's type makes its cached statement stale.
+/// Registering returns the tenant's id, so a migration that replaces the function with another return type makes
+/// its cached statement stale.
 #[tokio::test]
 async fn a_stale_cached_insert_is_temporary_and_clears_the_cache() {
     let settings = fresh_database().await.expect("a test database");
@@ -280,9 +285,13 @@ async fn a_stale_cached_insert_is_temporary_and_clears_the_cache() {
         .expect("caches the insert");
     let client = tetsu_postgres::connect(&settings).await.expect("connects");
     client
-        .batch_execute("ALTER TABLE tenancy.tenants ALTER COLUMN id TYPE int")
+        .batch_execute(
+            "DROP FUNCTION tenancy.register_tenant(text, text, text, text, text);
+             CREATE FUNCTION tenancy.register_tenant(text, text, text, text, text) RETURNS int
+               LANGUAGE sql AS 'SELECT 1'",
+        )
         .await
-        .expect("alters");
+        .expect("replaces the function");
     assert!(matches!(
         store.create(&tenant("another-studio", &[])).await,
         Err(Error::Unavailable(_))
@@ -453,5 +462,108 @@ async fn every_query_file_prepares() {
             .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
         prepared += 1;
     }
-    assert_eq!(prepared, 6);
+    assert_eq!(prepared, 5);
+}
+
+/// Signed in as the application role, as `tetsu serve` is, so row-level security applies (ADR-0042).
+#[cfg(test)]
+async fn app_store_and_settings() -> (Tenants<impl TenantStore>, TestDatabase) {
+    let settings = fresh_database().await.expect("a test database");
+    migrate(&settings, &[&Tenancy]).await.expect("migrates");
+    (
+        postgres_store(pool(&settings.as_app()).expect("pool")),
+        settings,
+    )
+}
+
+#[tokio::test]
+async fn the_app_role_creates_and_resolves_tenants() {
+    let (store, _database) = app_store_and_settings().await;
+    let created = store
+        .create(&tenant(
+            "sample-studio",
+            &[("Main Street", "America/Denver")],
+        ))
+        .await
+        .expect("creates");
+    assert_eq!(store.resolve("/sample-studio").await, Ok(created));
+    assert_eq!(
+        store.reserved_addresses_in_use().await,
+        Ok(Vec::<String>::new())
+    );
+}
+
+#[tokio::test]
+async fn one_tenant_s_address_never_reaches_another_s_locations() {
+    let (store, _database) = app_store_and_settings().await;
+    store
+        .create(&tenant("anvil-row", &[("Downtown", "America/Denver")]))
+        .await
+        .expect("creates");
+    store
+        .create(&tenant("juniper-lane", &[("Old Town", "America/Phoenix")]))
+        .await
+        .expect("creates");
+    for (address, expected) in [("/anvil-row", "Downtown"), ("/juniper-lane", "Old Town")] {
+        let found = store.resolve(address).await.expect("resolves");
+        let names: Vec<_> = found.locations().iter().map(Location::name).collect();
+        assert_eq!(names, [expected], "{address}");
+    }
+}
+
+/// Once addresses come from more than slugs, a taken address must not read as a taken slug (#8).
+#[tokio::test]
+async fn a_taken_address_is_not_reported_as_a_taken_slug() {
+    let (store, database) = app_store_and_settings().await;
+    let held = store
+        .create(&tenant("anvil-row", &[]))
+        .await
+        .expect("creates");
+    tetsu_postgres::connect(&database)
+        .await
+        .expect("connects")
+        .execute(
+            "INSERT INTO tenancy.addresses (address, tenant_id) VALUES ('/free-slug', $1)",
+            &[&held.id().get()],
+        )
+        .await
+        .expect("holds a second address");
+    assert_eq!(
+        store.create(&tenant("free-slug", &[])).await,
+        Err(Error::AddressTaken)
+    );
+}
+
+/// Tenancy's own role reads tenants and addresses only through the lookups, and never rewrites them, so no
+/// business can list the others or take over another's address (ADR-0042).
+#[tokio::test]
+async fn the_module_role_cannot_list_or_rewrite_tenants_and_addresses() {
+    let (store, database) = app_store_and_settings().await;
+    store
+        .create(&tenant("anvil-row", &[]))
+        .await
+        .expect("creates");
+    let app = tetsu_postgres::pool(&database.as_app()).expect("pool");
+    for statement in [
+        "SELECT count(*) FROM tenancy.addresses",
+        "SELECT count(*) FROM tenancy.tenants",
+        "UPDATE tenancy.addresses SET tenant_id = 0",
+        "UPDATE tenancy.tenants SET name = 'Taken'",
+        "DELETE FROM tenancy.addresses",
+        "DELETE FROM tenancy.tenants",
+    ] {
+        let mut client = app.get().await.expect("a connection");
+        let transaction = tetsu_postgres::ModuleTransaction::begin(&mut client, "tenancy")
+            .await
+            .expect("begins");
+        let refused = transaction
+            .execute(statement, &[])
+            .await
+            .expect_err(statement);
+        assert_eq!(
+            refused.code(),
+            Some(&tokio_postgres::error::SqlState::INSUFFICIENT_PRIVILEGE),
+            "{statement}"
+        );
+    }
 }
