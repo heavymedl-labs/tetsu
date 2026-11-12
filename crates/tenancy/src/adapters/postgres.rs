@@ -24,7 +24,7 @@ pub const MIGRATIONS: &[Migration] = &[
 /// Tenancy's schema, which names the role its transactions act as (ADR-0042).
 const SCHEMA: &str = "tenancy";
 
-const INSERT_TENANT: &str = include_str!("../../sql/insert_tenant.sql");
+const REGISTER_TENANT: &str = include_str!("../../sql/register_tenant.sql");
 const INSERT_LOCATION: &str = include_str!("../../sql/insert_location.sql");
 const FIND_TENANT: &str = include_str!("../../sql/find_tenant_by_address.sql");
 const FIND_LOCATIONS: &str = include_str!("../../sql/find_locations.sql");
@@ -84,13 +84,12 @@ struct PostgresTenants {
 /// constraint each breaks.
 fn database(error: &tokio_postgres::Error) -> Error {
     let message = message(error);
-    let constraint = error.as_db_error().and_then(|db| db.constraint());
-    if error.code() == Some(&SqlState::UNIQUE_VIOLATION) && constraint == Some("tenants_slug_key") {
-        Error::SlugTaken
-    } else if error.code() == Some(&SqlState::UNIQUE_VIOLATION)
-        && constraint == Some("addresses_pkey")
-    {
-        Error::AddressTaken
+    if error.code() == Some(&SqlState::UNIQUE_VIOLATION) {
+        match error.as_db_error().and_then(|db| db.constraint()) {
+            Some("tenants_slug_key") => Error::SlugTaken,
+            Some("addresses_pkey") => Error::AddressTaken,
+            _ => Error::Storage(message),
+        }
     } else if is_stale(error) {
         Error::Unavailable(format!("{STALE}{message}"))
     } else if error.is_closed() || is_io(error) || is_server_unavailable(error) {
@@ -217,7 +216,7 @@ async fn insert_in_transaction(client: &mut Object, tenant: &NewTenant) -> Resul
     let transaction = ModuleTransaction::begin(client, SCHEMA)
         .await
         .map_err(|e| database(&e))?;
-    let id = insert_tenant_and_address(&transaction, tenant).await?;
+    let id = register_tenant(&transaction, tenant).await?;
     let transaction = transaction.for_tenant(id).await.map_err(|e| database(&e))?;
     insert_locations(&transaction, id, tenant.locations()).await?;
     transaction.commit().await.map_err(|e| commit_error(&e))?;
@@ -225,12 +224,12 @@ async fn insert_in_transaction(client: &mut Object, tenant: &NewTenant) -> Resul
 }
 
 /// Registers the tenant and its address through Tenancy's function, the only way its role reaches either table.
-async fn insert_tenant_and_address(
+async fn register_tenant(
     transaction: &ModuleTransaction<'_>,
     tenant: &NewTenant,
 ) -> Result<i64, Error> {
     let register = transaction
-        .prepare_cached(INSERT_TENANT)
+        .prepare_cached(REGISTER_TENANT)
         .await
         .map_err(|e| database(&e))?;
     let parameters: [&(dyn ToSql + Sync); 5] = [

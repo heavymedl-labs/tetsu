@@ -38,14 +38,12 @@ impl<'a> ModuleTransaction<'a> {
         client: &'a mut Object,
         schema: &str,
     ) -> Result<Self, tokio_postgres::Error> {
-        let transaction = client.transaction().await?;
-        let statement = transaction.prepare_cached(SET_MODULE).await?;
-        transaction
-            .query_one(
-                &statement,
-                &[&module_role(schema), &STATEMENT_TIMEOUT, &LOCK_TIMEOUT],
-            )
-            .await?;
+        let transaction = open(
+            client,
+            SET_MODULE,
+            &[&module_role(schema), &STATEMENT_TIMEOUT, &LOCK_TIMEOUT],
+        )
+        .await?;
         Ok(Self { transaction })
     }
 
@@ -81,19 +79,17 @@ impl<'a> TenantTransaction<'a> {
         schema: &str,
         tenant: i64,
     ) -> Result<Self, tokio_postgres::Error> {
-        let transaction = client.transaction().await?;
-        let statement = transaction.prepare_cached(SET_TENANT_TOO).await?;
-        transaction
-            .query_one(
-                &statement,
-                &[
-                    &module_role(schema),
-                    &STATEMENT_TIMEOUT,
-                    &LOCK_TIMEOUT,
-                    &tenant.to_string(),
-                ],
-            )
-            .await?;
+        let transaction = open(
+            client,
+            SET_TENANT_TOO,
+            &[
+                &module_role(schema),
+                &STATEMENT_TIMEOUT,
+                &LOCK_TIMEOUT,
+                &tenant.to_string(),
+            ],
+        )
+        .await?;
         Ok(Self { transaction })
     }
 
@@ -102,6 +98,18 @@ impl<'a> TenantTransaction<'a> {
     pub async fn commit(self) -> Result<(), tokio_postgres::Error> {
         self.transaction.commit().await
     }
+}
+
+/// Starts a transaction and makes its settings in one round trip.
+async fn open<'a>(
+    client: &'a mut Object,
+    settings: &str,
+    values: &[&(dyn tokio_postgres::types::ToSql + Sync)],
+) -> Result<Transaction<'a>, tokio_postgres::Error> {
+    let transaction = client.transaction().await?;
+    let statement = transaction.prepare_cached(settings).await?;
+    transaction.query_one(&statement, values).await?;
+    Ok(transaction)
 }
 
 impl<'a> std::ops::Deref for ModuleTransaction<'a> {
