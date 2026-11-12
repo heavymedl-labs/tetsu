@@ -81,12 +81,20 @@ The [Tetsu project](https://github.com/orgs/heavymedl-labs/projects/1) README
 explains its fields. GitHub adds each new issue and pull request to the board,
 sets its status to Todo, and to Done when it closes. Keep the rest true:
 
-- Every issue needs a milestone, a tier, and a priority. `scripts/file_issue.py`
-  files one with all three in one step; set them by hand on an issue filed any
-  other way, such as from a form or as a sub-issue. Every issue also lists the
+- Every issue needs a type, a milestone, a tier, and a priority, and belongs to a
+  feature. The types are **Feature**, a bucket of work whose sub-issues may sit in
+  different milestones; **Task**, work for one change; **Decision**, a choice an ADR
+  settles; and **Bug**. A Task, Decision, or Bug is a sub-issue of one Feature.
+  `scripts/file_issue.py` files one with all of these in one step, its feature
+  given with `--parent`; set them by hand on an issue filed any other way, such as
+  from a form. Every issue also lists the
   ASVS chapters and requirements its change must meet, which its commits repeat in
   an `ASVS:` footer ([ADR-0029](docs/adr/0029-security-target-revised.md)).
-- The **Roadmap** view groups work by status and sorts it by priority. Within a
+- The views: **Board** is the current milestone by status; **By feature** groups
+  open work under its feature; **Decisions** lists the open choices; **Roadmap**
+  shows each feature against its start and target dates, where set; and
+  **Backlog** holds everything.
+- The **Backlog** view groups work by status and sorts it by priority. Within a
   priority, items keep their board position, so the Todo group reads top to
   bottom in the order the work happens: each blocker above what it blocks, and a
   parent issue below its sub-issues. Place a new item where it belongs.
@@ -94,7 +102,7 @@ sets its status to Todo, and to Done when it closes. Keep the rest true:
   Keep Now to the few items actually next, and move the rest to Next.
 - Set an issue's status to In Progress when work on it starts, since no
   workflow does. Closing it sets Done.
-- When an issue waits on another, including a decision an `adr` issue makes,
+- When an issue waits on another, including a choice a Decision settles,
   link it with GitHub's "blocked by" relationship, so the wait shows on both
   issues and clears when the blocker closes.
 - File what a review finds as an issue with its own priority. Work on it at once

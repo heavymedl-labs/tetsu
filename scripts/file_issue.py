@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Files an issue onto the Tetsu board with its milestone, tier, and priority, in one step.
+"""Files an issue onto the Tetsu board with its type, milestone, tier, priority, and feature, in one step.
 
 usage: scripts/file_issue.py <task|adr> <title> <body file> --tier <1|2|3|none>
-           --priority <now|next|later|anytime> [--milestone <title>]
+           --priority <now|next|later|anytime> [--milestone <title>] [--parent <feature issue number>]
+
+A task is typed Task and an adr Decision. --parent makes the new issue a sub-issue of that feature.
 
 Everything the board needs is looked up before the issue exists, so a bad value or a changed board fails with
 nothing filed. If the board refuses an edit after that, the error names the filed issue and what is still
@@ -25,6 +27,7 @@ TIERS = {"1": "1", "2": "2", "3": "3", "none": "None"}
 # How many times to look for an item auto-add made before giving up.
 LOOKS = 5
 PRIORITIES = {"now": "Now", "next": "Next", "later": "Later", "anytime": "Anytime"}
+TYPES = {"task": "Task", "adr": "Decision"}
 
 
 class FileIssueError(Exception):
@@ -99,12 +102,24 @@ def file_issue(args):
         args.title,
         "--label",
         args.label,
+        "--type",
+        TYPES[args.label],
         "--milestone",
         milestone,
         "--body-file",
         str(args.body),
     )
     try:
+        if args.parent is not None:
+            child = gh("api", f"repos/{REPOSITORY}/issues/{url.rsplit('/', 1)[1]}", "--jq", ".id")
+            gh(
+                "api",
+                "-X",
+                "POST",
+                f"repos/{REPOSITORY}/issues/{args.parent}/sub_issues",
+                "-F",
+                f"sub_issue_id={child}",
+            )
         item = board_item(url)
         for field, option in edits:
             gh(
@@ -122,7 +137,8 @@ def file_issue(args):
     except FileIssueError as error:
         raise FileIssueError(
             f"filed {url}, but {error}. Set its tier ({TIERS[args.tier]}) and priority "
-            f"({PRIORITIES[args.priority]}) on the board by hand rather than filing it again"
+            f"({PRIORITIES[args.priority]}), and its parent if one was named, by hand "
+            "rather than filing it again"
         ) from error
     return url
 
@@ -135,6 +151,7 @@ def main():
     parser.add_argument("--tier", required=True, choices=sorted(TIERS))
     parser.add_argument("--priority", required=True, choices=sorted(PRIORITIES))
     parser.add_argument("--milestone")
+    parser.add_argument("--parent", type=int)
     args = parser.parse_args()
     try:
         url = file_issue(args)

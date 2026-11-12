@@ -59,6 +59,10 @@ elif args[:2] == ["project", "view"]:
     print(json.dumps({{"id": "PROJECT"}}))
 elif args[:2] == ["project", "field-list"]:
     print(json.dumps({json.dumps(FIELDS)}))
+elif args[0] == "api" and any("sub_issues" in a for a in args):
+    print("{{}}")
+elif args[0] == "api" and any("/issues/" in a for a in args):
+    print("4242")
 elif args[0] == "api":
     print(json.dumps({json.dumps(MILESTONES)}))
 """
@@ -192,3 +196,31 @@ class FileIssue(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_a_task_is_typed_task_and_an_adr_decision(self):
+        for label, kind in (("task", "Task"), ("adr", "Decision")):
+            self.log.unlink(missing_ok=True)
+            result = self.file(label, "T", str(self.body), "--tier", "2", "--priority", "now")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            create = next(c for c in self.calls() if c[:2] == ["issue", "create"])
+            self.assertEqual(create[create.index("--type") + 1], kind)
+
+    def test_a_parent_makes_the_issue_one_of_its_sub_issues(self):
+        result = self.file("task", "T", str(self.body), "--tier", "2", "--priority", "now", "--parent", "20")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        linked = next(c for c in self.calls() if any("sub_issues" in a for a in c))
+        self.assertIn("repos/heavymedl-labs/tetsu/issues/20/sub_issues", linked)
+        self.assertIn("sub_issue_id=4242", linked)
+
+    def test_without_a_parent_no_sub_issue_is_linked(self):
+        result = self.file("task", "T", str(self.body), "--tier", "2", "--priority", "now")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(any(any("sub_issues" in a for a in c) for c in self.calls()))
+
+    def test_a_parent_that_refuses_names_the_filed_issue(self):
+        result = self.file(
+            "task", "T", str(self.body), "--tier", "2", "--priority", "now", "--parent", "20", fail="api -X"
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("filed https://github.com/o/r/issues/7", result.stderr)
+        self.assertIn("and its parent if one was named", result.stderr)
