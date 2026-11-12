@@ -508,3 +508,128 @@ async fn built_in_roles_grants_and_attributes_the_app_role_holds_are_caught() {
         assert!(found.contains(&expected), "{expected} among {found:?}");
     }
 }
+
+#[tokio::test]
+async fn rights_of_lookup_roles_and_the_app_role_on_lookups_are_caught() {
+    let found = problems(
+        "CREATE FUNCTION look() RETURNS int LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog, pg_temp
+           AS 'SELECT 1';
+         REVOKE EXECUTE ON FUNCTION look() FROM PUBLIC;
+         GRANT EXECUTE ON FUNCTION look() TO tetsu_app;
+         ALTER FUNCTION look() OWNER TO tetsu_checked_lookup;
+         GRANT SELECT ON checked_other.theirs TO tetsu_checked_lookup;
+         GRANT CREATE ON SCHEMA checked TO tetsu_checked_lookup"
+            .into(),
+        "CREATE TABLE theirs (id int); COMMENT ON TABLE theirs IS 'tetsu:global: test'",
+    )
+    .await;
+    for expected in [
+        "tetsu_app holds EXECUTE on function checked.look() of its own",
+        "tetsu_checked_lookup holds SELECT on checked_other.theirs, in another module's schema",
+        "tetsu_checked_lookup holds CREATE on schema checked",
+    ] {
+        assert!(
+            found.contains(&expected.to_string()),
+            "{expected} among {found:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn an_exclusion_must_compare_tenants_for_equality() {
+    caught(
+        format!(
+            "CREATE EXTENSION btree_gist SCHEMA public;
+             {} ALTER TABLE good ADD COLUMN room int,
+               ADD CONSTRAINT one_room EXCLUDE USING gist (tenant_id WITH <>, room WITH =);",
+            tenant_owned("good")
+        ),
+        "checked.good's exclusion constraint one_room does not start with tenant_id",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn objects_outside_the_module_schemas_and_rules_are_caught() {
+    caught(
+        "CREATE FUNCTION public.peek() RETURNS int LANGUAGE sql AS 'SELECT 1'".into(),
+        "function public.peek() lies outside every module's schema",
+    )
+    .await;
+    caught(
+        format!(
+            "{} CREATE RULE echo AS ON INSERT TO good DO ALSO NOTIFY good;",
+            tenant_owned("good")
+        ),
+        "checked.good has rule echo, which runs with its owner's rights",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn settings_and_view_options_are_read_whatever_their_spelling() {
+    caught(
+        "DO $$ BEGIN
+           EXECUTE format('ALTER ROLE tetsu_app IN DATABASE %I SET \"App.Tenant_Id\" = %L', current_database(), '1');
+         END $$"
+            .into(),
+        "database settings for tetsu_app set App.Tenant_Id",
+    )
+    .await;
+    let invoker = format!(
+        "{} CREATE VIEW seen WITH (security_invoker = on) AS SELECT * FROM good;",
+        tenant_owned("good")
+    );
+    assert_eq!(problems(invoker, "").await, Vec::<String>::new());
+}
+
+/// Module roles belong to nothing, and a policy cannot reach the owner through a group. Run with roles and a
+/// module of its own, so no shared role is touched.
+#[tokio::test]
+async fn roles_a_module_role_belongs_to_and_policies_for_the_owner_s_groups_are_caught() {
+    let database = fresh_database().await.expect("a test database");
+    let id = std::process::id();
+    let (app, owner, hidden, group) = (
+        format!("t_iso3_app_{id}"),
+        format!("t_iso3_owner_{id}"),
+        format!("t_iso3_hidden_{id}"),
+        format!("t_iso3_group_{id}"),
+    );
+    let schema = format!("iso3_{id}");
+    let module = format!("tetsu_{schema}");
+    let client = connect(&database).await.expect("connects");
+    let checked = async {
+        client
+            .batch_execute(&format!(
+                "CREATE ROLE {app}; CREATE ROLE {owner}; CREATE ROLE {hidden}; CREATE ROLE {group};
+                 CREATE ROLE {module} NOLOGIN;
+                 GRANT {module} TO {app} WITH INHERIT FALSE, SET TRUE;
+                 GRANT {hidden} TO {module} WITH INHERIT TRUE, SET FALSE;
+                 GRANT {group} TO {owner};
+                 CREATE SCHEMA {schema} AUTHORIZATION {owner};
+                 CREATE TABLE {schema}.good (tenant_id bigint NOT NULL, id uuid NOT NULL, PRIMARY KEY (tenant_id, id));
+                 ALTER TABLE {schema}.good OWNER TO {owner};
+                 COMMENT ON TABLE {schema}.good IS 'tetsu:global: test';
+                 CREATE POLICY wide ON {schema}.good TO {group} USING (true);
+                 CREATE TYPE {schema}.mood AS ENUM ('calm'); ALTER TYPE {schema}.mood OWNER TO {app}"
+            ))
+            .await?;
+        tetsu_postgres::isolation_violations_for(&client, &[&schema], &app).await
+    }
+    .await;
+    client
+        .batch_execute(&format!(
+            "DROP SCHEMA IF EXISTS {schema} CASCADE;
+             DROP ROLE IF EXISTS {app}, {owner}, {hidden}, {group}, {module}"
+        ))
+        .await
+        .expect("drops the roles");
+    let found = checked.expect("checks");
+    for expected in [
+        format!("{module} belongs to {hidden}, but module and lookup roles belong to nothing"),
+        format!("{schema}.good has policy wide for its owner, {owner}"),
+        format!("{app} owns type {schema}.mood"),
+    ] {
+        assert!(found.contains(&expected), "{expected} among {found:?}");
+    }
+}

@@ -212,3 +212,36 @@ async fn a_runner_that_skips_row_level_security_is_refused() {
         "{error}"
     );
 }
+
+/// A runner that could switch to a role that skips row-level security is refused too, since a file could switch.
+#[tokio::test]
+async fn a_runner_that_can_become_a_role_skipping_row_level_security_is_refused() {
+    let database = fresh_database().await.expect("a test database");
+    let (runner, bypass) = (unique("t_reach"), unique("t_reach_bypass"));
+    let admin = connect(&database).await.expect("connects");
+    admin
+        .batch_execute(&format!(
+            "CREATE ROLE {runner} LOGIN CREATEROLE; CREATE ROLE {bypass} BYPASSRLS;
+             GRANT {bypass} TO {runner} WITH INHERIT FALSE, SET TRUE;
+             GRANT CREATE ON DATABASE {} TO {runner}",
+            database.name()
+        ))
+        .await
+        .expect("creates the runner");
+    let url = database
+        .url()
+        .replacen("postgres@", &format!("{runner}@"), 1);
+    let refused = migrate(
+        &Settings::from_values(&url, Some("disable")),
+        &[&Named(unique("reached"), &[TABLE])],
+    )
+    .await;
+    admin
+        .batch_execute(&format!(
+            "DROP OWNED BY {runner}; DROP ROLE {runner}, {bypass}"
+        ))
+        .await
+        .expect("drops the roles");
+    let error = refused.expect_err("refuses").to_string();
+    assert!(error.contains("or can become a role that does"), "{error}");
+}

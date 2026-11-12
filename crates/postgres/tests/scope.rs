@@ -251,6 +251,24 @@ async fn the_hosted_probe_finds_no_rows_without_a_tenant() {
             .expect("checks"),
         Vec::<String>::new()
     );
+    // A tenant set for the checker's own sessions must not narrow what it counts.
+    tetsu_postgres::connect(&database)
+        .await
+        .expect("connects")
+        .batch_execute(
+            "DO $$ BEGIN
+               EXECUTE format('ALTER ROLE postgres IN DATABASE %I SET app.tenant_id = %L', current_database(), '1');
+             END $$",
+        )
+        .await
+        .expect("sets a tenant for the checker");
+    let client = tetsu_postgres::connect(&database).await.expect("connects");
+    assert_eq!(
+        tetsu_postgres::rows_seen_without_a_tenant(&client, &["people"])
+            .await
+            .expect("probes despite the checker's tenant"),
+        Vec::<String>::new()
+    );
     client
         .batch_execute(
             "ALTER TABLE people.people NO FORCE ROW LEVEL SECURITY, DISABLE ROW LEVEL SECURITY",

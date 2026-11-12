@@ -121,9 +121,20 @@ pub(crate) async fn require_bound_runner(client: &Client) -> Result<(), Error> {
         .await?;
     let (name, superuser, bypasses): (String, bool, bool) =
         (row.try_get(0)?, row.try_get(1)?, row.try_get(2)?);
-    if bypasses && !superuser {
+    // A role it can switch to counts too, since a migration file could switch to it.
+    let reaches = client
+        .query_one(
+            "SELECT EXISTS (SELECT FROM pg_catalog.pg_roles r
+               WHERE r.rolname <> current_user AND (r.rolbypassrls OR r.rolsuper)
+                 AND pg_catalog.pg_has_role(current_user, r.oid, 'SET')) AS reaches",
+            &[],
+        )
+        .await?
+        .try_get::<_, bool>("reaches")?;
+    if !superuser && (bypasses || reaches) {
         return Err(format!(
-            "role {name} skips row-level security, so it must not run migrations; migrate as Tetsu's own owner role"
+            "role {name} skips row-level security, or can become a role that does, so it must not run migrations; \
+             migrate as Tetsu's own owner role"
         )
         .into());
     }

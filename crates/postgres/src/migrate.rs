@@ -124,9 +124,9 @@ fn plain_schema(schema: &str) -> bool {
         && !schema.ends_with("_lookup")
 }
 
-/// Schemas whose module role would be one of Tetsu's other roles, `tetsu_app` or `tetsu_owner`. A schema ending
-/// in `_lookup` would be another module's lookup role.
-const RESERVED_SCHEMAS: &[&str] = &["app", "owner"];
+/// Schemas whose module role would be another of Tetsu's roles, or the demo's migration role, or one the catalog
+/// checks read as a lookup role. A schema ending in `_lookup` would be another module's lookup role.
+const RESERVED_SCHEMAS: &[&str] = &["app", "owner", "migrate", "lookup"];
 
 /// The oldest server Tetsu runs on: 18.6 fixes CVE-2026-14666 in row security (ADR-0042).
 pub const MIN_SERVER_VERSION: i32 = 180_006;

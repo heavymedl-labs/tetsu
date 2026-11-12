@@ -41,8 +41,10 @@ pub async fn isolation_violations_for(
         client.query(VIOLATIONS, &[&schemas, &app]).await
     }
     .await;
-    client.batch_execute("ROLLBACK").await?;
+    // Rolled back whatever happened, and the query's own error, if any, is the one reported.
+    let rolled_back = client.batch_execute("ROLLBACK").await;
     let rows = rows?;
+    rolled_back?;
     Ok(rows
         .iter()
         .map(|row| row.try_get("problem"))
@@ -107,7 +109,8 @@ async fn count_as_module(client: &Client, schema: &str, name: &str) -> Result<i6
     let counted = async {
         client
             .query_one(
-                "SELECT pg_catalog.set_config('role', $1, true)",
+                "SELECT pg_catalog.set_config('role', $1, true),
+                        pg_catalog.set_config('app.tenant_id', '', true)",
                 &[&crate::roles::module_role(schema)],
             )
             .await?;
@@ -124,6 +127,8 @@ async fn count_as_module(client: &Client, schema: &str, name: &str) -> Result<i6
             .try_get::<_, i64>(0)
     }
     .await;
-    client.batch_execute("ROLLBACK").await?;
-    Ok(counted?)
+    let rolled_back = client.batch_execute("ROLLBACK").await;
+    let counted = counted?;
+    rolled_back?;
+    Ok(counted)
 }

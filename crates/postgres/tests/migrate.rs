@@ -397,6 +397,8 @@ async fn refuses_a_schema_that_is_not_a_lowercase_identifier() {
         "app",
         "owner",
         "tenancy_lookup",
+        "migrate",
+        "lookup",
     ] {
         let error = refusal(&[&Named("fake", schema, &[])]).await.expect(schema);
         assert!(error.contains("schema"), "{error}");
