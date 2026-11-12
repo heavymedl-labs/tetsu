@@ -70,6 +70,7 @@ option for most of them.
 - [Payroll: build or integrate](https://github.com/heavymedl-labs/tetsu/issues/15)
 - [Time zones and recurring schedules](https://github.com/heavymedl-labs/tetsu/issues/21)
 - [Data export, retention, and deletion](https://github.com/heavymedl-labs/tetsu/issues/22)
+- [An optional personal profile across businesses](https://github.com/heavymedl-labs/tetsu/issues/117)
 - [How businesses sign up and pay for Tetsu](https://github.com/heavymedl-labs/tetsu/issues/23)
 - [Support access to tenant accounts](https://github.com/heavymedl-labs/tetsu/issues/24)
 - [Money: currencies, rounding, and tax](https://github.com/heavymedl-labs/tetsu/issues/26)
