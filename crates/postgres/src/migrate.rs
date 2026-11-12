@@ -40,9 +40,7 @@ pub async fn migrate_with_wait(
 ) -> Result<(), Error> {
     check_contract(modules)?;
     let client = connect(settings).await?;
-    check_server(&client).await?;
-    require_bound_runner(&client).await?;
-    require_role(&client, APP_ROLE).await?;
+    check_before_migrating(&client).await?;
     take_lock(&client, wait).await?;
     let plan = plan(&client, modules).await?;
     // Each file ends by taking back rights on every module's record, since one may grant on every table in a
@@ -75,6 +73,13 @@ async fn plan(
         prepare_module(client, schema).await?;
     }
     Ok(plan)
+}
+
+/// The server, the runner, and the application role are fit to migrate, before the lock is taken.
+async fn check_before_migrating(client: &Client) -> Result<(), Error> {
+    check_server(client).await?;
+    require_bound_runner(client).await?;
+    require_role(client, APP_ROLE).await
 }
 
 /// Refuses, before touching the database, modules that break the kernel contract: names and schemas are unique,
