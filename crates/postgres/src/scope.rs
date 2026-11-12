@@ -11,9 +11,12 @@ pub const STATEMENT_TIMEOUT: &str = "5s";
 /// How long a statement waits for a lock before failing, so one slow transaction cannot queue every request.
 pub const LOCK_TIMEOUT: &str = "2s";
 
+/// Clears the tenant too, so a setting left on the session, however it got there, never narrows a module
+/// transaction to a tenant it did not choose.
 const SET_MODULE: &str = "SELECT pg_catalog.set_config('role', $1, true),
        pg_catalog.set_config('statement_timeout', $2, true),
-       pg_catalog.set_config('lock_timeout', $3, true)";
+       pg_catalog.set_config('lock_timeout', $3, true),
+       pg_catalog.set_config('app.tenant_id', '', true)";
 const SET_TENANT_TOO: &str = "SELECT pg_catalog.set_config('role', $1, true),
        pg_catalog.set_config('statement_timeout', $2, true),
        pg_catalog.set_config('lock_timeout', $3, true),

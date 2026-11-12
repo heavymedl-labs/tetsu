@@ -76,20 +76,20 @@ AS $$
     WHERE a.address = wanted
 $$;
 
--- Which of the given addresses some tenant holds, for the reserved-name
--- check at start (#90).
-CREATE FUNCTION addresses_in_use(wanted text[])
-RETURNS SETOF text
+-- Whether some tenant holds one address, for the reserved-name check at
+-- start (#90). One address a call, so no caller can test many at once.
+CREATE FUNCTION address_in_use(wanted text)
+RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
 AS $$
-    SELECT a.address FROM tenancy.addresses AS a WHERE a.address = any(wanted) ORDER BY a.address
+    SELECT EXISTS (SELECT FROM tenancy.addresses AS a WHERE a.address = wanted)
 $$;
 
 REVOKE EXECUTE ON FUNCTION register_tenant(text, text, text, text, text),
-tenant_at(text), addresses_in_use(text[]) FROM public;
+tenant_at(text), address_in_use(text) FROM public;
 GRANT EXECUTE ON FUNCTION register_tenant(text, text, text, text, text),
-tenant_at(text), addresses_in_use(text[]) TO tetsu_tenancy;
+tenant_at(text), address_in_use(text) TO tetsu_tenancy;
 
 -- A new owner needs CREATE on the schema at the moment it takes a function,
 -- and no longer after.
@@ -97,5 +97,5 @@ GRANT CREATE ON SCHEMA tenancy TO tetsu_tenancy_lookup;
 ALTER FUNCTION register_tenant(text, text, text, text, text)
 OWNER TO tetsu_tenancy_lookup;
 ALTER FUNCTION tenant_at(text) OWNER TO tetsu_tenancy_lookup;
-ALTER FUNCTION addresses_in_use(text[]) OWNER TO tetsu_tenancy_lookup;
+ALTER FUNCTION address_in_use(text) OWNER TO tetsu_tenancy_lookup;
 REVOKE CREATE ON SCHEMA tenancy FROM tetsu_tenancy_lookup;

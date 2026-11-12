@@ -69,7 +69,10 @@ async fn ensure_member(client: &Client, role: &str, member: &str) -> Result<(), 
     }
     retried(
         client,
-        &format!("GRANT {role} TO \"{member}\" WITH INHERIT FALSE, SET TRUE"),
+        &format!(
+            "GRANT {role} TO {} WITH INHERIT FALSE, SET TRUE",
+            quoted(member)
+        ),
     )
     .await
 }
@@ -98,6 +101,32 @@ pub(crate) async fn prepare_module(client: &Client, schema: &str) -> Result<(), 
              ALTER DEFAULT PRIVILEGES REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC"#
         ))
         .await?;
+    Ok(())
+}
+
+/// A name as a quoted identifier, so no name can end the statement or change its case.
+pub(crate) fn quoted(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
+}
+
+/// Fails unless the runner, whose role owns everything a migration makes, is bound by row-level security. A
+/// superuser is allowed, as on a local test server, since managed hosts never hand one out; a role that skips
+/// row-level security without being one, as a host's administrative roles do, is refused (ADR-0042).
+pub(crate) async fn require_bound_runner(client: &Client) -> Result<(), Error> {
+    let row = client
+        .query_one(
+            "SELECT rolname, rolsuper, rolbypassrls FROM pg_catalog.pg_roles WHERE rolname = current_user",
+            &[],
+        )
+        .await?;
+    let (name, superuser, bypasses): (String, bool, bool) =
+        (row.try_get(0)?, row.try_get(1)?, row.try_get(2)?);
+    if bypasses && !superuser {
+        return Err(format!(
+            "role {name} skips row-level security, so it must not run migrations; migrate as Tetsu's own owner role"
+        )
+        .into());
+    }
     Ok(())
 }
 

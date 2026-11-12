@@ -361,3 +361,150 @@ async fn rights_reached_through_other_roles_or_ownership_are_caught() {
         assert!(found.contains(&expected), "{expected} among {found:?}");
     }
 }
+
+#[tokio::test]
+async fn rights_through_public_or_on_single_columns_are_caught() {
+    for (sql, expected) in [
+        (
+            format!("{} GRANT SELECT ON good TO PUBLIC;", tenant_owned("good")),
+            "PUBLIC holds SELECT on checked.good of its own",
+        ),
+        (
+            "GRANT USAGE ON SCHEMA checked TO PUBLIC".to_string(),
+            "PUBLIC holds USAGE on schema checked of its own",
+        ),
+        (
+            format!(
+                "{} GRANT SELECT (id) ON good TO tetsu_app;",
+                tenant_owned("good")
+            ),
+            "tetsu_app holds SELECT on checked.good (column id) of its own",
+        ),
+    ] {
+        caught(sql, expected).await;
+    }
+}
+
+#[tokio::test]
+async fn views_must_run_as_their_caller_and_materialized_views_are_refused() {
+    caught(
+        format!(
+            "{} CREATE VIEW seen AS SELECT * FROM good;",
+            tenant_owned("good")
+        ),
+        "checked.seen is a view that runs with its owner's rights",
+    )
+    .await;
+    caught(
+        "CREATE MATERIALIZED VIEW kept AS SELECT 1 AS one".into(),
+        "checked.kept is a materialized view, which row-level security does not reach",
+    )
+    .await;
+    let invoker = format!(
+        "{} CREATE VIEW seen WITH (security_invoker = true) AS SELECT * FROM good;",
+        tenant_owned("good")
+    );
+    assert_eq!(problems(invoker, "").await, Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn policies_for_the_owner_and_wide_exclusions_are_caught() {
+    caught(
+        format!(
+            "{} CREATE POLICY own ON good TO postgres USING (true);",
+            tenant_owned("good")
+        ),
+        "checked.good has policy own for its owner, postgres",
+    )
+    .await;
+    caught(
+        format!(
+            "{} ALTER TABLE good ADD CONSTRAINT one_id EXCLUDE USING btree (id WITH =);",
+            tenant_owned("good")
+        ),
+        "checked.good's exclusion constraint one_id does not start with tenant_id",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_lookup_must_search_only_the_catalog_then_its_own_temp_schema() {
+    caught(
+        "CREATE FUNCTION loose() RETURNS int LANGUAGE sql SECURITY DEFINER SET search_path = pg_temp, pg_catalog
+           AS 'SELECT 1';
+         REVOKE EXECUTE ON FUNCTION loose() FROM PUBLIC;
+         ALTER FUNCTION loose() OWNER TO tetsu_checked_lookup"
+            .into(),
+        "function checked.loose() runs as its owner but sets no search_path of pg_catalog, pg_temp",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn database_settings_that_pick_a_tenant_or_role_are_caught() {
+    caught(
+        "DO $$ BEGIN
+           EXECUTE format('ALTER ROLE tetsu_app IN DATABASE %I SET app.tenant_id = %L', current_database(), '1');
+         END $$"
+            .into(),
+        "database settings for tetsu_app set app.tenant_id",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_module_role_reaching_another_module_s_schema_or_functions_is_caught() {
+    let found = problems(
+        "GRANT USAGE ON SCHEMA checked_other TO tetsu_checked;
+         GRANT EXECUTE ON FUNCTION checked_other.theirs() TO tetsu_checked"
+            .into(),
+        "CREATE FUNCTION theirs() RETURNS int LANGUAGE sql AS 'SELECT 1'",
+    )
+    .await;
+    for expected in [
+        "tetsu_checked holds USAGE on schema checked_other, another module's",
+        "tetsu_checked holds EXECUTE on function checked_other.theirs(), in another module's schema",
+    ] {
+        assert!(
+            found.contains(&expected.to_string()),
+            "{expected} among {found:?}"
+        );
+    }
+}
+
+/// Built-in roles and attributes, checked against an application role of its own, never the shared one.
+#[tokio::test]
+async fn built_in_roles_grants_and_attributes_the_app_role_holds_are_caught() {
+    let database = fresh_database().await.expect("a test database");
+    let id = std::process::id();
+    let (app, owner) = (format!("t_iso2_app_{id}"), format!("t_iso2_owner_{id}"));
+    let client = connect(&database).await.expect("connects");
+    let checked = async {
+        client
+            .batch_execute(&format!(
+                "CREATE ROLE {app} CREATEROLE; CREATE ROLE {owner} BYPASSRLS;
+                 GRANT pg_read_all_data TO {app} WITH INHERIT FALSE, SET TRUE;
+                 GRANT pg_write_all_data TO {app} WITH INHERIT FALSE, SET FALSE, ADMIN TRUE;
+                 CREATE SCHEMA owned AUTHORIZATION {owner};
+                 CREATE TABLE owned.migrations (version int); ALTER TABLE owned.migrations OWNER TO {owner}"
+            ))
+            .await?;
+        tetsu_postgres::isolation_violations_for(&client, &["owned"], &app).await
+    }
+    .await;
+    client
+        .batch_execute(&format!(
+            "DROP SCHEMA IF EXISTS owned CASCADE; DROP OWNED BY {owner}; DROP ROLE IF EXISTS {app}, {owner}"
+        ))
+        .await
+        .expect("drops the roles");
+    let found = checked.expect("checks");
+    for expected in [
+        format!("{app} can act as pg_read_all_data, which is no module's role"),
+        format!("{app} may grant pg_write_all_data"),
+        format!("{app} can create roles or databases, or replicate"),
+        format!("the owner {owner} skips row-level security"),
+    ] {
+        assert!(found.contains(&expected), "{expected} among {found:?}");
+    }
+}

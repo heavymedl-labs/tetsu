@@ -180,3 +180,35 @@ async fn databases_migrating_one_new_module_at_once_all_finish() {
         .expect("drops the roles");
     assert!(failures.is_empty(), "{failures:?}");
 }
+
+/// As Neon's own roles do: a runner that skips row-level security without being a superuser is refused.
+#[tokio::test]
+async fn a_runner_that_skips_row_level_security_is_refused() {
+    let database = fresh_database().await.expect("a test database");
+    let runner = unique("t_bypass");
+    let admin = connect(&database).await.expect("connects");
+    admin
+        .batch_execute(&format!(
+            "CREATE ROLE {runner} LOGIN CREATEROLE BYPASSRLS; GRANT CREATE ON DATABASE {} TO {runner}",
+            database.name()
+        ))
+        .await
+        .expect("creates the runner");
+    let url = database
+        .url()
+        .replacen("postgres@", &format!("{runner}@"), 1);
+    let refused = migrate(
+        &Settings::from_values(&url, Some("disable")),
+        &[&Named(unique("bypassed"), &[TABLE])],
+    )
+    .await;
+    admin
+        .batch_execute(&format!("DROP OWNED BY {runner}; DROP ROLE {runner}"))
+        .await
+        .expect("drops the runner");
+    let error = refused.expect_err("refuses").to_string();
+    assert!(
+        error.contains(&format!("role {runner} skips row-level security")),
+        "{error}"
+    );
+}

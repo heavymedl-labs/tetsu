@@ -7,7 +7,7 @@ use tetsu_kernel::{Migration, Module, Storage};
 use tokio_postgres::Client;
 
 use crate::connection::{Error, Settings, connect};
-use crate::roles::{APP_ROLE, MAX_SCHEMA, prepare_module, require_role};
+use crate::roles::{APP_ROLE, MAX_SCHEMA, prepare_module, require_bound_runner, require_role};
 
 /// Taken by polling, never by blocking, which can deadlock with
 /// `CREATE INDEX CONCURRENTLY` (ADR-0011).
@@ -41,6 +41,7 @@ pub async fn migrate_with_wait(
     check_contract(modules)?;
     let client = connect(settings).await?;
     check_server(&client).await?;
+    require_bound_runner(&client).await?;
     require_role(&client, APP_ROLE).await?;
     take_lock(&client, wait).await?;
     let plan = plan(&client, modules).await?;
@@ -89,7 +90,7 @@ fn check_contract(modules: &[&dyn Module]) -> Result<(), Error> {
         };
         if !plain_schema(schema) {
             return Err(format!(
-                "schema {schema:?} must be a lowercase identifier of at most {MAX_SCHEMA} bytes, and not a system schema"
+                "schema {schema:?} must be a lowercase identifier of at most {MAX_SCHEMA} bytes, not a system or reserved name, and not end in _lookup"
             )
             .into());
         }
@@ -119,7 +120,13 @@ fn plain_schema(schema: &str) -> bool {
         && schema != "public"
         && schema != "information_schema"
         && !schema.starts_with("pg_")
+        && !RESERVED_SCHEMAS.contains(&schema)
+        && !schema.ends_with("_lookup")
 }
+
+/// Schemas whose module role would be one of Tetsu's other roles, `tetsu_app` or `tetsu_owner`. A schema ending
+/// in `_lookup` would be another module's lookup role.
+const RESERVED_SCHEMAS: &[&str] = &["app", "owner"];
 
 /// The oldest server Tetsu runs on: 18.6 fixes CVE-2026-14666 in row security (ADR-0042).
 pub const MIN_SERVER_VERSION: i32 = 180_006;

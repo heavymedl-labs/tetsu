@@ -28,7 +28,21 @@ pub async fn isolation_violations_for(
     app: &str,
 ) -> Result<Vec<String>, Error> {
     let schemas: Vec<String> = schemas.iter().map(ToString::to_string).collect();
-    let rows = client.query(VIOLATIONS, &[&schemas, &app]).await?;
+    // In a transaction whose search path is the catalog alone, so no object a module made can stand in for a
+    // function the checks call or print.
+    client.batch_execute("BEGIN").await?;
+    let rows = async {
+        client
+            .query_one(
+                "SELECT pg_catalog.set_config('search_path', 'pg_catalog', true)",
+                &[],
+            )
+            .await?;
+        client.query(VIOLATIONS, &[&schemas, &app]).await
+    }
+    .await;
+    client.batch_execute("ROLLBACK").await?;
+    let rows = rows?;
     Ok(rows
         .iter()
         .map(|row| row.try_get("problem"))
@@ -98,7 +112,14 @@ async fn count_as_module(client: &Client, schema: &str, name: &str) -> Result<i6
             )
             .await?;
         client
-            .query_one(&format!(r#"SELECT count(*) FROM "{schema}"."{name}""#), &[])
+            .query_one(
+                &format!(
+                    "SELECT count(*) FROM {}.{}",
+                    crate::roles::quoted(schema),
+                    crate::roles::quoted(name)
+                ),
+                &[],
+            )
             .await?
             .try_get::<_, i64>(0)
     }

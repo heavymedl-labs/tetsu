@@ -1,2 +1,1 @@
-SELECT address
-FROM tenancy.addresses_in_use($1) AS address;
+SELECT tenancy.address_in_use($1) AS held;

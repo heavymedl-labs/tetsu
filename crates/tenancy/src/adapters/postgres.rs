@@ -191,6 +191,7 @@ impl TenantStore for PostgresTenants {
     }
 }
 
+/// Asks about one address at a time, as the lookup allows, in one transaction.
 async fn addresses_in_use(client: &mut Object, addresses: &[String]) -> Result<Vec<String>, Error> {
     let transaction = ModuleTransaction::begin(client, SCHEMA)
         .await
@@ -199,14 +200,18 @@ async fn addresses_in_use(client: &mut Object, addresses: &[String]) -> Result<V
         .prepare_cached(FIND_ADDRESSES_IN_USE)
         .await
         .map_err(|e| database(&e))?;
-    let held = transaction
-        .query(&statement, &[&addresses])
-        .await
-        .map_err(|e| database(&e))?
-        .iter()
-        .map(|row| row.try_get("address").map_err(|e| database(&e)))
-        .collect::<Result<_, _>>()?;
+    let mut held = Vec::new();
+    for address in addresses {
+        let row = transaction
+            .query_one(&statement, &[address])
+            .await
+            .map_err(|e| database(&e))?;
+        if row.try_get("held").map_err(|e| database(&e))? {
+            held.push(address.clone());
+        }
+    }
     transaction.commit().await.map_err(|e| commit_error(&e))?;
+    held.sort();
     Ok(held)
 }
 

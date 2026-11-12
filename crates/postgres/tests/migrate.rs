@@ -385,7 +385,18 @@ async fn refusal(modules: &[&dyn Module]) -> Result<String, tetsu_postgres::Erro
 async fn refuses_a_schema_that_is_not_a_lowercase_identifier() {
     let long: &'static str = "a".repeat(MAX_SCHEMA + 1).leak();
     for schema in [
-        "Billing", "", "1st", "a-b", "a b", "a;b", "pg_x", "public", long,
+        "Billing",
+        "",
+        "1st",
+        "a-b",
+        "a b",
+        "a;b",
+        "pg_x",
+        "public",
+        long,
+        "app",
+        "owner",
+        "tenancy_lookup",
     ] {
         let error = refusal(&[&Named("fake", schema, &[])]).await.expect(schema);
         assert!(error.contains("schema"), "{error}");

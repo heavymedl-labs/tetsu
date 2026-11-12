@@ -299,3 +299,28 @@ async fn module_schemas_are_found_by_their_records() {
         ["people"]
     );
 }
+
+/// A tenant left on the session, however it got there, never reaches a module transaction.
+#[tokio::test]
+async fn a_module_transaction_ignores_a_tenant_left_on_the_session() {
+    let (pool, _database) = app_pool().await;
+    add(&pool, 1, "lee.park@example.com").await.expect("adds");
+    let mut client = pool.get().await.expect("a connection");
+    client
+        .query_one(
+            "SELECT pg_catalog.set_config('app.tenant_id', '1', false)",
+            &[],
+        )
+        .await
+        .expect("leaves a tenant on the session");
+    let transaction = ModuleTransaction::begin(&mut client, "people")
+        .await
+        .expect("begins");
+    let seen: i64 = transaction
+        .query_one("SELECT count(*) FROM people.people", &[])
+        .await
+        .expect("counts")
+        .try_get(0)
+        .expect("a count");
+    assert_eq!(seen, 0);
+}
