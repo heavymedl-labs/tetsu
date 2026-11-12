@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-03
+- Schema boundary enforcement, left open below, decided by [ADR-0042](0042-tenant-isolation.md)
 
 ## Context
 

@@ -1,6 +1,6 @@
 # 0042. Tenant isolation
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-11
 - Settles the schema boundary enforcement that [ADR-0003](0003-architecture.md) left to this decision
 - Supersedes the rule in [ADR-0040](0040-identity-and-sign-in.md) that the demo's hosts sit under a domain of its

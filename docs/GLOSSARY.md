@@ -49,7 +49,8 @@ into the `--tetsu-*` CSS properties every page uses. A tenant's theme is its tok
 ([ADR-0031](adr/0031-front-end-model-revised.md)).
 
 **Domain event.** A record that something happened in a module, published for
-other modules to react to. Past tense, such as `BookingCancelled`.
+other modules to react to. Past tense, such as `booking.cancelled_late`, and delivered through the module's
+outbox ([ADR-0043](adr/0043-domain-event-delivery.md)).
 
 **Duty.** Judgment an agent or person must carry out because no tool can, such as
 simplifying a change. Listed in [AGENTS.md](../AGENTS.md#duties).
@@ -59,6 +60,9 @@ browsing only: nothing signed in is ever framed ([ADR-0031](adr/0031-front-end-m
 
 **Fresh review.** A review by an agent that did not write the change, seeing only
 the issue and the diff. See [docs/review.md](review.md).
+
+**Global table.** A table whose rows belong to no one tenant, such as the address lookup, staff identities, or
+sessions. Each says why it is global ([ADR-0042](adr/0042-tenant-isolation.md)).
 
 **Guest.** A person who books with a tenant without an account, with a client profile of their own. A guest's
 link can view or cancel that one booking ([ADR-0040](adr/0040-identity-and-sign-in.md)).
@@ -80,6 +84,9 @@ Postgres schema. Platform capabilities and verticals are both modules.
 recovery ([ADR-0041](adr/0041-account-recovery.md)).
 
 **Operator.** A person who works for Tetsu itself, not for a tenant, and signs in to Tetsu's own tools ([ADR-0040](adr/0040-identity-and-sign-in.md)).
+
+**Outbox.** A module's table of domain events, written in the same transaction as the change each describes, from
+which a dispatcher delivers them at least once ([ADR-0043](adr/0043-domain-event-delivery.md)).
 
 **Passkey.** A credential under the W3C WebAuthn standard, kept by a person's device or password manager and
 bound to one domain. It counts as multi-factor when it verifies the user ([ADR-0040](adr/0040-identity-and-sign-in.md)).
@@ -115,7 +122,8 @@ for more than one vertical, such as scheduling, booking, or the ledger.
 
 **Staff member.** A person who works for one or more tenants, with one identity and a staff role at each ([ADR-0040](adr/0040-identity-and-sign-in.md)).
 
-**Staff role.** A staff member's role at one tenant, such as front desk or owner ([ADR-0040](adr/0040-identity-and-sign-in.md)).
+**Staff role.** A staff member's role at one tenant: owner, manager, front desk, or instructor
+([ADR-0048](adr/0048-sign-in-design.md)).
 
 **Surface.** A way people reach Tetsu: booking pages in a browser, hosted or embedded,
 the staff app, native apps, or the public API. Every surface uses the same use cases.
@@ -123,6 +131,12 @@ the staff app, native apps, or the public API. Every surface uses the same use c
 **Tenant.** A business using Tetsu, such as a boutique fitness brand,
 together with all of its locations. Tenant data is isolated from every
 other tenant's.
+
+**Tenant-owned table.** A table whose every row carries `tenant_id`, enforced by forced row-level security
+([ADR-0042](adr/0042-tenant-isolation.md)).
+
+**Tenant transaction.** The only way code reaches tenant-owned tables: a transaction that first sets the module
+role, the tenant, and timeouts with transaction scope ([ADR-0042](adr/0042-tenant-isolation.md)).
 
 **Use case.** An operation a module offers. Other modules and inbound adapters
 call it; together with domain events, use cases are how modules talk.

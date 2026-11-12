@@ -6,6 +6,8 @@
   any relaxation of `v5.0.0-6.3.3`; both move to #105's ADR
 - Rules on linking client profiles, and on adding a passkey during recovery, superseded by
   [ADR-0041](0041-account-recovery.md)
+- The rule that the demo's hosts sit under a domain of its own superseded by
+  [ADR-0042](0042-tenant-isolation.md) until Tetsu has domains
 
 ## Context
 

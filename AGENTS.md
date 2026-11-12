@@ -19,10 +19,10 @@ one as current intent. The [ADR index](docs/adr/README.md) says when to read eac
 
 ## Current phase
 
-The walking skeleton is in progress. The demo is deployed, identity and recovery are decided
-([ADR-0040](docs/adr/0040-identity-and-sign-in.md), [ADR-0041](docs/adr/0041-account-recovery.md)) ahead of sign-in in
-[#20](https://github.com/heavymedl-labs/tetsu/issues/20), and business profiles
-([#101](https://github.com/heavymedl-labs/tetsu/issues/101)) are the next build task. The [README](README.md)
+The walking skeleton is in progress. The demo is deployed, and sign-in
+([#20](https://github.com/heavymedl-labs/tetsu/issues/20)) is decided in ADR-0040 to ADR-0048 and built in the slices
+[ADR-0048](docs/adr/0048-sign-in-design.md) orders, starting with tenant isolation
+([#106](https://github.com/heavymedl-labs/tetsu/issues/106)). The [README](README.md)
 describes what is implemented.
 
 ## Rules

@@ -1,6 +1,6 @@
 # 0043. Domain event delivery
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-11
 
 ## Context

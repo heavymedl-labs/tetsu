@@ -1,6 +1,6 @@
 # 0045. Operations baseline
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-11
 
 ## Context

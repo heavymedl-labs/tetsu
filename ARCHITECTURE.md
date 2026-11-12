@@ -219,13 +219,11 @@ flowchart LR
 
 ### Tenancy
 
-Provisional until tenant isolation is decided
-([#8](https://github.com/heavymedl-labs/tetsu/issues/8)). A tenant is one business:
-a brand and all its locations. Every request resolves its tenant, and every
-query is scoped to it. Customer accounts belong to their business
-([#9](https://github.com/heavymedl-labs/tetsu/issues/9)). The leading option for
-storage is shared tables with a tenant ID on every row, enforced by Postgres
-row-level security.
+A tenant is one business: a brand and all its locations. Every request resolves
+its tenant, and every query is scoped to it. Customer accounts belong to their
+business ([ADR-0040](docs/adr/0040-identity-and-sign-in.md)). Tenants share
+tables, with a tenant ID on every tenant-owned row, enforced by Postgres
+row-level security ([ADR-0042](docs/adr/0042-tenant-isolation.md)).
 
 ```mermaid
 flowchart TB

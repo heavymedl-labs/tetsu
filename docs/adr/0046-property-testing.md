@@ -1,6 +1,6 @@
 # 0046. Property testing
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-11
 
 ## Context
