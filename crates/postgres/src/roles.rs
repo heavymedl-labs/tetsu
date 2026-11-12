@@ -101,30 +101,28 @@ pub(crate) async fn prepare_module(client: &Client, schema: &str) -> Result<(), 
     Ok(())
 }
 
-/// Fails unless the application role exists, since the runner grants it each module's role.
-pub(crate) async fn require_app_role(client: &Client) -> Result<(), Error> {
-    if exists(client, APP_ROLE).await? {
+/// Fails unless `role` exists, such as the application role, which the runner grants each module's role.
+pub(crate) async fn require_role(client: &Client, role: &str) -> Result<(), Error> {
+    if exists(client, role).await? {
         Ok(())
     } else {
         Err(format!(
-            "role {APP_ROLE} must exist before migrating; create it as docs/operations/demo-environment.md shows"
+            "role {role} must exist before migrating; create it as docs/operations/demo-environment.md shows"
         )
         .into())
     }
 }
 
+/// Runs `statement`, and again after each collision, up to `RETRIES` more times with a longer pause each time.
 async fn retried(client: &Client, statement: &str) -> Result<(), Error> {
-    let mut attempt = 0;
-    loop {
+    for attempt in 1..=RETRIES {
         match client.batch_execute(statement).await {
             Ok(()) => return Ok(()),
-            Err(error) if attempt < RETRIES && collided(&error) => {
-                attempt += 1;
-                tokio::time::sleep(RETRY_PAUSE * attempt).await;
-            }
+            Err(error) if collided(&error) => tokio::time::sleep(RETRY_PAUSE * attempt).await,
             Err(error) => return Err(error.into()),
         }
     }
+    Ok(client.batch_execute(statement).await?)
 }
 
 /// Another connection changed the same catalog row first: "tuple concurrently updated" is an internal error, and a
@@ -180,6 +178,25 @@ mod tests {
             // 50, 100, 150, 200, and 250 milliseconds.
             assert!(elapsed >= Duration::from_millis(750), "{code}: {elapsed:?}");
         }
+    }
+
+    #[tokio::test]
+    async fn a_missing_role_is_named() {
+        let database = crate::test_support::fresh_database()
+            .await
+            .expect("a test database");
+        let client = crate::connect(&database).await.expect("connects");
+        require_role(&client, APP_ROLE)
+            .await
+            .expect("the app role exists");
+        let error = require_role(&client, "t_no_such_role")
+            .await
+            .expect_err("refuses")
+            .to_string();
+        assert_eq!(
+            error,
+            "role t_no_such_role must exist before migrating; create it as docs/operations/demo-environment.md shows"
+        );
     }
 
     #[tokio::test]
