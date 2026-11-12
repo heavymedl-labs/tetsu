@@ -246,7 +246,7 @@ options.
 
 **Staff span tenants by design, and customers do not.** ADR-0040 already makes a staff member "one identity with a
 staff role at each business," and a customer account belongs to one business
-([ADR-0040](../docs/adr/0040-identity-and-sign-in.md)). Customer accounts are therefore ordinary tenant rows. Staff
+([ADR-0040](../adr/0040-identity-and-sign-in.md)). Customer accounts are therefore ordinary tenant rows. Staff
 identities fit Nile's published shape: a global users table with no `tenant_id`, and a membership table keyed
 `(tenant_id, user_id)` ([Nile](https://thenile.dev/docs/auth/concepts/builtintables.md), vendor). The staff role
 table sits under tenant RLS. The app checks the role for the requested business before it sets `app.tenant_id`. A
@@ -258,7 +258,7 @@ transaction already running ([PG 18 row security](https://www.postgresql.org/doc
 transactions shrink that window.
 
 **Operators get their own login role and pool, never the request path.** Whether operators may see inside a business
-is #24's decision ([ADR-0040](../docs/adr/0040-identity-and-sign-in.md)). Mechanically, either policies `TO
+is #24's decision ([ADR-0040](../adr/0040-identity-and-sign-in.md)). Mechanically, either policies `TO
 operator_role` or the `BYPASSRLS` attribute would serve. Supabase's `service_role` has `bypassrls` and must never
 reach the browser ([Supabase RLS](https://supabase.com/docs/guides/database/postgres/row-level-security), vendor).
 Policies `TO operator_role` are narrower and auditable, and they do not depend on whether Neon lets a non-superuser

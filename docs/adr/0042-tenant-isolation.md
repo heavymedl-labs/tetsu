@@ -34,7 +34,8 @@ the application's own filters as a second layer.
   extensions, or APIs are on the path that guards tenant data.
 - **Tetsu creates its own roles** with SQL, as below. A host's built-in administrative roles, such as Neon's
   `neondb_owner` or members of `neon_superuser`, often skip RLS, so they never run migrations, serve requests,
-  or run jobs that touch tenant data. They only create Tetsu's roles.
+  or run jobs that touch tenant data. They only create Tetsu's roles. The demo's current migration role is one of
+  them, which the Consequences correct.
 - **Tetsu refuses to start on a server older than 18.6,** checked through `server_version_num`, since 18.6 fixes
   CVE-2026-14666 in row security.
 
@@ -54,19 +55,22 @@ the application's own filters as a second layer.
 ### Policies
 
 - **Every tenant-owned table has RLS enabled and forced,** so its owner is bound too.
-- **Each has two policies with the same rule:** a permissive one and a restrictive one, both
-  `tenant_id = (select nullif(current_setting('app.tenant_id', true), '')::bigint)`. The restrictive copy stops a
-  later, wider policy from widening every query, since permissive policies combine with OR. The `select` makes
-  Postgres read the setting once per query, and `nullif` makes a missing tenant return no rows rather than an
-  error.
+- **Each has two policies with the same rule,** both `TO` the owning module's role: a permissive one and a
+  restrictive one, `tenant_id = (select nullif(current_setting('app.tenant_id', true), '')::bigint)`. The
+  restrictive copy stops a later, wider policy for that role from widening its queries, since permissive policies
+  combine with OR. The `select` makes Postgres read the setting once per query, and `nullif` makes a missing tenant
+  return no rows rather than an error.
+- **Every policy names its roles with `TO`;** none applies to `PUBLIC`. A role with no policy on a table sees no
+  rows of it, so each role that works across tenants, such as the operator role or the event delivery role
+  ([ADR-0043](0043-domain-event-delivery.md)), gets its own policies on exactly the tables it needs.
 - **No view, materialized view, or `SECURITY DEFINER` function reads tenant-owned tables** except as listed below.
   Views use `security_invoker = true`.
 
 ### Roles
 
 - **An owner role** owns every schema and table and runs migrations. Nothing else logs in as it.
-- **An application role** logs in for requests. It owns nothing, holds neither `BYPASSRLS` nor `TRUNCATE`, and
-  reaches data only through module roles.
+- **An application role** logs in for requests. It owns nothing, holds no privileges of its own on any schema,
+  table, or sequence, and no default privileges name it. It reaches data only through module roles.
 - **A `NOLOGIN` role per module** holds that module's grants on its own schema alone. The application role is
   granted each `WITH INHERIT FALSE, SET TRUE`, so it has no rights of its own and uses one module's rights at a
   time through `SET LOCAL ROLE`. A module that queries another's schema by mistake gets an error. This catches
@@ -85,7 +89,9 @@ the application's own filters as a second layer.
   transaction scope (`SET LOCAL` or `set_config(..., true)`). Commit or rollback clears them, which matters
   because the pool keeps session settings between checkouts ([#53](https://github.com/heavymedl-labs/tetsu/issues/53)).
 - **Queries also filter by `tenant_id`,** so a missing policy is caught twice.
-- **A check rejects session-level `SET`, `RESET`, and `set_config(..., false)`** anywhere in Rust or SQL.
+- **A check rejects session-level `SET`, `RESET`, and `set_config(..., false)`** in Rust code and in SQL outside
+  migration files. Migrations may set their own `lock_timeout` and `statement_timeout`, since they run on the
+  direct connection and the runner resets the session after each file.
 - **The Postgres adapter tells constraints apart,** so a taken address is never reported as a taken slug.
 
 ### Tables read before a tenant is known
@@ -116,8 +122,10 @@ the application's own filters as a second layer.
 ### Tests
 
 - **Catalog checks** fail the build when a tenant-owned table lacks forced RLS, either policy, a `tenant_id`-led
-  primary key, or composite foreign keys; when any role but the owner owns a table; or when the application role
-  holds `BYPASSRLS`, `TRUNCATE`, or rights on a partition.
+  primary key, or composite foreign keys; when a policy applies to `PUBLIC`; when any role but the owner owns a
+  table; when the application role holds any privilege of its own, directly or through default privileges; or when
+  any role it can `SET ROLE` to holds `BYPASSRLS`, `TRUNCATE`, or rights on a partition, or reaches another
+  module's schema.
 - **Isolation tests run as the application role,** never the owner, since owner tests pass when RLS is broken.
   They assert row counts, since a blocked update or delete returns zero rows without an error.
 - **A pool leak test** runs two tenants' transactions on one pooled connection and checks nothing crosses.
@@ -152,6 +160,10 @@ the application's own filters as a second layer.
 
 ## Consequences
 
+- The demo database moves onto these roles in #106. Today `tetsu_migrate` belongs to `neon_superuser` and owns
+  everything, and `tetsu_app` holds table rights through default privileges
+  ([demo environment](../operations/demo-environment.md)). A new owner role made in SQL takes ownership, those
+  grants and default privileges are revoked, and the demo environment page is updated.
 - Tenancy's tables gain their class: `tenants` and `addresses` are global, and `locations` is tenant-owned and gets
   forced RLS and both policies. Tenancy moves to the Tier 1 bar in
   [#63](https://github.com/heavymedl-labs/tetsu/issues/63), and the address lookup becomes a definer function.

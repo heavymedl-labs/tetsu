@@ -76,16 +76,26 @@ ADR-0040 leaves the roles to #20. A staff member holds one role at each business
 
 ### Rate limits
 
-Documented as `v5.0.0-6.1.1` asks. Each keys on the attempt and the requester, never the account alone, so a
-stranger cannot lock out an account's owner (`v5.0.0-6.3.1`).
+Documented as `v5.0.0-6.1.1` asks. Limits on sending key on the email together with the requester, never the email
+alone, so a stranger cannot use up an owner's quota. Past a ceiling, Tetsu slows down rather than locks out
+(`v5.0.0-6.3.1`).
+
+**Email codes are 8 digits,** about 26.6 bits, above ADR-0040's floor of 20.
 
 | What | Limit |
 | --- | --- |
-| Email codes sent | 3 per attempt, 10 per email per hour, 30 per network address per hour |
+| Email codes sent | 3 per attempt, 10 per email and network address per hour, 30 per network address per hour |
 | Code guesses | 5 per code, then the attempt ends |
+| Failed code guesses per email, across every attempt | After 20 in 24 hours, a new code for that email waits, starting at 1 minute and doubling to 1 hour |
 | Failed passkey sign-ins | 10 per network address per 15 minutes, then a growing delay |
-| Recovery requests | One pending per account, 3 per email per day |
-| Notices | Never limited or batched; sent once per event (ADR-0043) |
+| Recovery requests | One pending per account, 3 per email and network address per day |
+| Notices | Never limited or batched; sent at least once per event (ADR-0043) |
+
+- **The per-email ceiling bounds guessing.** At its slowest, one email takes about 120 wrong guesses a day, so the
+  chance of guessing one target's code within a year is about 1 in 2,300.
+- **The real owner always has a way past a stranger's requests.** A passkey sign-in is never slowed by code
+  limits. And the "this wasn't me" link in a recovery notice, which only the email's holder receives, cancels the
+  pending request and lets the owner start their own at once, past the recovery limits.
 
 ### Answers to ADR-0041's questions
 
