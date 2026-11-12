@@ -3,8 +3,8 @@
 - Status: Proposed
 - Date: 2026-11-11
 - Settles the schema boundary enforcement that [ADR-0003](0003-architecture.md) left to this decision
-- Supersedes the rule in [ADR-0040](0040-identity-and-sign-in.md) that the demo mirrors the realms' hosts under a
-  domain of its own, until Tetsu has domains
+- Supersedes the rule in [ADR-0040](0040-identity-and-sign-in.md) that the demo's hosts sit under a domain of its
+  own: until Tetsu has domains, each demo realm is its own free host
 
 ## Context
 
@@ -105,9 +105,13 @@ the application's own filters as a second layer.
 - **A business's own domain comes later.** Before one is served, the business proves it owns the domain, and each
   host maps to exactly one tenant. Sign-in stays on Tetsu's hosts, as ADR-0040 decides. The rest waits for the
   first business that asks.
-- **While Tetsu has no domain, every realm shares the demo's host.** Demo passkeys are fictional and disposable,
-  so staff and customer passkeys sharing one host there is accepted. ADR-0040's separate hosts arrive with
-  Tetsu's domains ([#102](https://github.com/heavymedl-labs/tetsu/issues/102)), before the Level 2 review.
+- **While Tetsu has no domain, each demo realm runs as its own free Render service** from the one image, such as
+  `tetsu-demo` for customers, `tetsu-demo-staff` for staff, and `tetsu-demo-ops` for operators. `onrender.com` is
+  on the Public Suffix List, so browsers treat each service as its own site, with its own cookies and passkey
+  domain, which is the separation ADR-0040 sets. Which realm a process serves, and its hosts, are configuration,
+  so Tetsu's domains ([#102](https://github.com/heavymedl-labs/tetsu/issues/102)) change settings, not code. The
+  three services share Render's 750 free instance hours a month, used only while awake; if they run out, every
+  free service stops until the month ends.
 
 ### Tests
 

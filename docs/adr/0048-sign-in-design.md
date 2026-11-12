@@ -108,10 +108,10 @@ stranger cannot lock out an account's owner (`v5.0.0-6.3.1`).
 ### The demo
 
 - **The maintainer enrolls demo staff and customers** through the operator command that ADR-0040 sets, run once per
-  fictional person, so every demo sign-in uses a real passkey. Demo email codes land in the capture mailbox
-  (ADR-0044).
-- **Every realm shares the demo host** until Tetsu has domains (ADR-0042), so ADR-0040's device test runs on the
-  demo host for now and again on Tetsu's domains before the Level 2 review.
+  fictional person, so every demo sign-in uses a real passkey. Email to fictional people lands in the capture
+  mailbox, and email to the maintainer goes out for real (ADR-0044).
+- **Each realm is its own free demo service** until Tetsu has domains (ADR-0042), so ADR-0040's device test runs
+  on the demo's realm hosts now and again on Tetsu's domains before the Level 2 review.
 
 ### Build order
 

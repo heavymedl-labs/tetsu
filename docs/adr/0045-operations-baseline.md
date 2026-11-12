@@ -19,7 +19,13 @@ demo needs now, which sign-in builds on, and the targets production must meet be
 ### Now, on the demo
 
 - **Logs are structured JSON on standard output,** written through the `tracing` and `tracing-subscriber` crates.
-  Every host collects standard output, so the host's log viewer is enough for now, and moving host loses nothing.
+  Every host collects standard output, so nothing is lost if the backend below is down or replaced.
+- **Logs, traces, and metrics also go out through OpenTelemetry's protocol (OTLP)** to Grafana Cloud's free
+  tier: 50 GB of logs and 50 GB of traces a month, 10,000 metric series, and 14 days' retention. The endpoint and
+  key are settings, so another OTLP backend replaces it without code changes.
+- **Alerts are rules in that backend,** emailed to the maintainer: an event that stops retrying, and a burst of
+  server errors. No outside uptime check runs, since its pings would keep the free database awake and spend its
+  compute hours ([ADR-0012](0012-first-hosting-and-deploys.md)).
 - **Each request's log lines carry a request ID, the tenant's ID, and the realm,** never names, emails, codes,
   tokens, or request bodies. Identifiers that could find a person, such as an account ID, appear only where a log
   line needs them to be useful.
@@ -45,34 +51,44 @@ These are targets. Each is met, and the restore tested, before the Level 2 revie
 - **Availability: 99.9% a month** for booking and payment paths, and 99.5% for everything else, measured by an
   outside check and by the share of requests that succeed. Alerts fire on fast burn of that error budget, and on
   events that stop retrying, rather than on single errors.
-- **Metrics and traces go out through OpenTelemetry,** to a backend chosen with production hosting, so the backend
-  can change without code changes.
-- **Alerts reach the maintainer's phone,** through a service chosen with production hosting. With one maintainer
-  there is no rota; the targets above assume that.
+- **Alerts reach the maintainer's phone,** and an outside check measures availability. With one maintainer there
+  is no rota; the targets above assume that.
 
 ## Alternatives considered
 
 - **The host's own metrics and alerting.** Free and easy, but tied to the host, and Render and Neon each see only
   their half.
-- **OpenTelemetry from day one.** Portable, but a collector and backend cost money or setup before there is
-  anything to measure. `tracing` exports to OpenTelemetry later without rewriting call sites.
+- **Logs on standard output only, until production.** Simplest, but the free tier gives traces and alerts now at
+  no cost, and the export is the same code production uses.
+- **Sentry's free tier for errors.** Good error grouping, but a second tool and SDK; Grafana's traces and logs cover
+  errors at this scale.
 - **Self-run backups with pgBackRest.** Full control, but it needs a server and storage to run. A managed host's
   point-in-time recovery plus a daily dump elsewhere covers the same risks for less.
 - **Backups of the demo now.** Its data rebuilds from seed files, so backups would protect nothing.
 
 ## Consequences
 
-- `tracing` and `tracing-subscriber` join the workspace. Both are MIT-licensed, maintained by the Tokio project,
-  and each had over 190 million downloads in the 90 days before 2026-11-11. `tracing` 0.1.44 was released on
-  2025-12-18 and `tracing-subscriber` 0.3.23 on 2026-03-13, both needing Rust 1.65 or later. Advisory checks in
-  `scripts/check.sh` cover them like every other dependency.
+- New crates, read on crates.io on 2026-11-11, which the advisory checks in `scripts/check.sh` cover like every
+  other dependency:
+
+  | Crate | Latest | Downloads, 90 days | License |
+  | --- | --- | --- | --- |
+  | `tracing` | 0.1.44, 2025-12-18 | 267 million | MIT |
+  | `tracing-subscriber` | 0.3.23, 2026-03-13 | 191 million | MIT |
+  | `opentelemetry`, `opentelemetry_sdk` | 0.33.1, 2026-10-09 | 87 and 80 million | Apache-2.0 |
+  | `opentelemetry-otlp`, HTTP with rustls only | 0.33.1, 2026-10-09 | 57 million | Apache-2.0 |
+  | `tracing-opentelemetry` | 0.34.0, 2026-09-23 | 63 million | MIT |
+
+  The OpenTelemetry crates are pre-1.0 and change their API between minor versions, so upgrades take some work.
+- The Grafana Cloud key is a secret in the host's environment. Over the free limits, extra data is dropped, not
+  billed.
 - Sign-in ([#20](https://github.com/heavymedl-labs/tetsu/issues/20)) can ship on the demo once logging and the
   audit consumer exist; nothing else here blocks it.
 - [#27](https://github.com/heavymedl-labs/tetsu/issues/27)'s production half gates the Level 2 review rather than
   sign-in on the demo.
-- Choosing an object storage provider, an OpenTelemetry backend, an outside uptime check, and an alerting service
-  each needs its own ADR, made with production hosting
-  ([#104](https://github.com/heavymedl-labs/tetsu/issues/104)).
+- Choosing an object storage provider for backups, an outside uptime check, and phone alerts each needs its own
+  ADR, made with production hosting ([#104](https://github.com/heavymedl-labs/tetsu/issues/104)), as does a
+  production observability plan beyond the free tier.
 - Revisit the targets once real businesses give real traffic and real cost.
 
 ## Sources
@@ -82,6 +98,7 @@ These are targets. Each is met, and the restore tested, before the Level 2 revie
 - Google, [*The Site Reliability Workbook*](https://sre.google/workbook/alerting-on-slos/), "Alerting on SLOs":
   burn-rate alerts.
 - [OpenTelemetry documentation](https://opentelemetry.io/docs/).
+- Grafana, [What's included in Grafana Cloud Free](https://grafana.com/products/cloud/free-tier), read 2026-11-11.
 - PostgreSQL 18 documentation, [Continuous archiving and point-in-time recovery](https://www.postgresql.org/docs/18/continuous-archiving.html).
 - [tracing on crates.io](https://crates.io/crates/tracing) and
   [tracing-subscriber on crates.io](https://crates.io/crates/tracing-subscriber), read 2026-11-11.
