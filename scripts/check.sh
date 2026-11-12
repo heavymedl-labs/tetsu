@@ -191,19 +191,46 @@ elif ((npm_status == 3)); then
 else
   exit "$npm_status"
 fi
-cargo llvm-cov --json --summary-only --output-path "$work/coverage.json"
-# Coverage runs no doc tests, and some prove what must not compile, such as a module's port being out of reach
-# (ADR-0021). Stable proves the examples on the toolchain we ship; only nightly's rustdoc checks the error code
-# a compile_fail test names, so a test cannot pass for an unrelated error.
-cargo test --doc
-CARGO_TARGET_DIR=target/nightly cargo +"$nightly" test --doc
-cargo metadata --no-deps --format-version 1 >"$work/metadata.json"
-python3 scripts/check_coverage.py "$work/metadata.json" "$work/coverage.json"
-# Branches need a nightly compiler (ADR-0020), pinned in .nightly-toolchain, in a build folder of its own. The
-# stable run above stays the one that tests the code we ship.
-CARGO_TARGET_DIR=target/nightly cargo +"$nightly" llvm-cov --branch --json --summary-only \
-  --output-path "$work/branches.json"
-python3 scripts/check_coverage.py --branches "$work/metadata.json" "$work/branches.json"
+base="origin/main"
+if [[ "${1:-}" == "--base" ]]; then
+  base="$2"
+fi
+# cargo-mutants reads only plain text diffs with a/ and b/ paths and every changed line, so override each
+# setting that changes them. It mutates the files on disk, so the diff compares them with the base.
+plain=(--text --no-ext-diff --no-textconv --no-color --no-renames --src-prefix=a/ --dst-prefix=b/)
+merge="$(git merge-base "$base" HEAD)"
+# Coverage and mutation testing give the same result for the same Rust, so a pass is recorded against a
+# fingerprint of every input they read: the Rust and its build settings, the checks themselves, and the base the
+# mutants are drawn against. A later run outside CI that finds the same fingerprint skips both and says so.
+rust_inputs=(crates Cargo.toml Cargo.lock rust-toolchain.toml .nightly-toolchain .cargo scripts/check.sh
+  scripts/check_coverage.py)
+fingerprint="$({
+  echo "base $merge"
+  { find "${rust_inputs[@]}" -type f 2>/dev/null || true; } | LC_ALL=C sort | while IFS= read -r file; do
+    sha256sum "$file"
+  done
+} | sha256sum | cut -d ' ' -f 1)"
+pass_stamp=target/check-rust-pass
+reuse=false
+if [[ -z "${CI:-}" && "$(cat "$pass_stamp" 2>/dev/null)" == "$fingerprint" ]]; then
+  reuse=true
+  echo "Rust is unchanged since the last full pass, so coverage and mutation testing are skipped" >&2
+fi
+if [[ "$reuse" == false ]]; then
+  cargo llvm-cov --json --summary-only --output-path "$work/coverage.json"
+  # Coverage runs no doc tests, and some prove what must not compile, such as a module's port being out of reach
+  # (ADR-0021). Stable proves the examples on the toolchain we ship; only nightly's rustdoc checks the error code
+  # a compile_fail test names, so a test cannot pass for an unrelated error.
+  cargo test --doc
+  CARGO_TARGET_DIR=target/nightly cargo +"$nightly" test --doc
+  cargo metadata --no-deps --format-version 1 >"$work/metadata.json"
+  python3 scripts/check_coverage.py "$work/metadata.json" "$work/coverage.json"
+  # Branches need a nightly compiler (ADR-0020), pinned in .nightly-toolchain, in a build folder of its own. The
+  # stable run above stays the one that tests the code we ship.
+  CARGO_TARGET_DIR=target/nightly cargo +"$nightly" llvm-cov --branch --json --summary-only \
+    --output-path "$work/branches.json"
+  python3 scripts/check_coverage.py --branches "$work/metadata.json" "$work/branches.json"
+fi
 .tools/bin/lizard -l rust -C 10 -L 50 -a 5 -w crates
 .tools/bin/lizard -l typescript -C 10 -L 50 -a 5 -w web
 npx --no-install jscpd crates web --threshold 0 --ignore "**/tests/**,**/assets/build/**" --reporters console
@@ -220,32 +247,30 @@ elif docker info >/dev/null 2>&1; then
 else
   echo "warning: Docker is not running, so the image's front-end stage was not built. CI still builds it." >&2
 fi
+if [[ "$reuse" == false ]]; then
+  git diff "${plain[@]}" "$merge" -- crates >"$work/rust.diff"
+  if [[ -s "$work/rust.diff" ]]; then
+    # Each job builds its own copy of the workspace, about five seconds, then tests a share of the mutants at
+    # about five seconds each, so a job pays off from about 15 mutants: one per 15, rounded up. Never more than
+    # one per four cores, where builds start to compete, and never fewer than one. Six jobs took 90 mutants from
+    # 146 to 104 seconds on 24 cores (2026-11-11). CARGO_MUTANTS_JOBS overrides it.
+    count="$(cargo mutants --in-diff "$work/rust.diff" --list | wc -l)"
+    most=$(($(getconf _NPROCESSORS_ONLN) / 4))
+    jobs=$(((count + 14) / 15))
+    if ((jobs > most)); then jobs=$most; fi
+    if ((jobs < 1)); then jobs=1; fi
+    # The coverage runs above just passed these tests, so cargo-mutants skips its own unmutated run, which also
+    # sized its timeout, so that is set here: about six times the test suite's time. Its copies of the workspace go
+    # under target/, on disk, since a memory-backed /tmp may hold too few of them.
+    mkdir -p target/mutants-tmp
+    TMPDIR="$PWD/target/mutants-tmp" cargo mutants --in-diff "$work/rust.diff" --baseline skip --timeout 60 \
+      --jobs "${CARGO_MUTANTS_JOBS:-$jobs}"
+  elif ! git diff --quiet "${plain[@]}" "$merge" HEAD -- crates; then
+    echo "error: commits since $base change crates/, but the files on disk undo that, so there is nothing to" >&2
+    echo "mutate. Commit or restore those files first." >&2
+    exit 1
+  fi
+fi
 
-base="origin/main"
-if [[ "${1:-}" == "--base" ]]; then
-  base="$2"
-fi
-# cargo-mutants reads only plain text diffs with a/ and b/ paths and every changed line, so override each
-# setting that changes them. It mutates the files on disk, so the diff compares them with the base.
-plain=(--text --no-ext-diff --no-textconv --no-color --no-renames --src-prefix=a/ --dst-prefix=b/)
-merge="$(git merge-base "$base" HEAD)"
-git diff "${plain[@]}" "$merge" -- crates >"$work/rust.diff"
-if [[ -s "$work/rust.diff" ]]; then
-  # Each job builds its own copy of the workspace, about five seconds, so jobs pay off only with many mutants:
-  # about the square root of their count over eight, so one for under 18, two up to 49, three up to 97. Never
-  # more than one per four cores, where builds start to compete. CARGO_MUTANTS_JOBS overrides it.
-  count="$(cargo mutants --in-diff "$work/rust.diff" --list | wc -l)"
-  most=$(($(getconf _NPROCESSORS_ONLN) / 4))
-  jobs=1
-  while ((jobs < most && count >= 2 * (2 * jobs + 1) ** 2)); do jobs=$((jobs + 1)); done
-  # The coverage runs above just passed these tests, so cargo-mutants skips its own unmutated run, which also
-  # sized its timeout, so that is set here: about six times the test suite's time. Its copies of the workspace go
-  # under target/, on disk, since a memory-backed /tmp may hold too few of them.
-  mkdir -p target/mutants-tmp
-  TMPDIR="$PWD/target/mutants-tmp" cargo mutants --in-diff "$work/rust.diff" --baseline skip --timeout 60 \
-    --jobs "${CARGO_MUTANTS_JOBS:-$jobs}"
-elif ! git diff --quiet "${plain[@]}" "$merge" HEAD -- crates; then
-  echo "error: commits since $base change crates/, but the files on disk undo that, so there is nothing to" >&2
-  echo "mutate. Commit or restore those files first." >&2
-  exit 1
-fi
+mkdir -p target
+echo "$fingerprint" >"$pass_stamp"

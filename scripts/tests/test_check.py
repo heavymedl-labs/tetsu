@@ -363,7 +363,50 @@ class CheckScript(unittest.TestCase):
         self.mutants_listed(85)
         self.check(CARGO_MUTANTS_JOBS="")
         cores = os.cpu_count() or 1
-        self.assertIn(f"--jobs {max(1, min(3, cores // 4))}", self.log.read_text())
+        self.assertIn(f"--jobs {max(1, min(6, cores // 4))}", self.log.read_text())
+
+    def slow_stages_ran(self):
+        log = self.log.read_text()
+        self.log.unlink()
+        return "cargo llvm-cov --json" in log, "cargo mutants" in log
+
+    def test_a_pass_is_reused_while_the_rust_is_unchanged(self):
+        self.assertEqual(self.check().returncode, 0)
+        self.assertEqual(self.slow_stages_ran(), (True, True))
+        result = self.check()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.slow_stages_ran(), (False, False))
+        self.assertIn("coverage and mutation testing are skipped", result.stderr)
+
+    def test_changed_rust_or_checks_run_everything_again(self):
+        for changed in ("crates/a/migrations/0001.sql", "scripts/check_coverage.py", "Cargo.lock"):
+            self.assertEqual(self.check().returncode, 0)
+            self.slow_stages_ran()
+            write(self.root / changed, f"changed {changed}\n")
+            self.assertEqual(self.check().returncode, 0)
+            self.assertEqual(self.slow_stages_ran(), (True, True), changed)
+
+    def test_ci_never_reuses_a_pass(self):
+        self.assertEqual(self.check().returncode, 0)
+        self.slow_stages_ran()
+        self.assertEqual(self.check(CI="true").returncode, 0)
+        self.assertEqual(self.slow_stages_ran(), (True, True))
+
+    def test_a_failed_run_records_no_pass(self):
+        self.stub(
+            "cargo",
+            f'echo "cargo $*" >> "{self.log}"; [ "$1" = mutants ] && [ -n "${{FAIL-}}" ] && exit 1; exit 0',
+        )
+        self.assertNotEqual(self.check(FAIL="1").returncode, 0)
+        self.slow_stages_ran()
+        self.assertEqual(self.check().returncode, 0)
+        self.assertEqual(self.slow_stages_ran(), (True, True))
+
+    def test_a_job_is_added_per_fifteen_mutants(self):
+        self.mutants_listed(30)
+        self.check(CARGO_MUTANTS_JOBS="")
+        cores = os.cpu_count() or 1
+        self.assertIn(f"--jobs {max(1, min(2, cores // 4))}", self.log.read_text())
 
     def test_the_mutant_job_count_can_be_set(self):
         self.check(CARGO_MUTANTS_JOBS="3")
