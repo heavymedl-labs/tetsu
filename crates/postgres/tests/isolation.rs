@@ -334,7 +334,10 @@ async fn rights_reached_through_other_roles_or_ownership_are_caught() {
         migrate(&database, &[&support::Checked(schema, &[])]).await?;
         client
             .batch_execute(&format!(
-                "GRANT {chained} TO tetsu_{schema} WITH SET TRUE;
+                // The runner grants every module role to the shared application role, which other tests check, so
+                // this module's role leaves it before reaching the bad role.
+                "REVOKE tetsu_{schema} FROM tetsu_app;
+                 GRANT {chained} TO tetsu_{schema} WITH SET TRUE;
                  GRANT tetsu_{schema} TO {app} WITH INHERIT FALSE, SET TRUE;
                  CREATE TABLE {schema}.mine (id int); ALTER TABLE {schema}.mine OWNER TO {app}"
             ))
