@@ -668,6 +668,27 @@ async fn make_fake_roles(admin: &tokio_postgres::Client) -> Result<(), tetsu_pos
     Ok(())
 }
 
+/// A runner that can create roles, and an app role that gets rights on every table it creates. Other tests share the
+/// module's roles across the server and made them first, so the runner is given what making them itself would have
+/// given it.
+async fn make_runner(
+    admin: &tokio_postgres::Client,
+    runner: &str,
+    app: &str,
+    database: &str,
+) -> Result<(), tetsu_postgres::Error> {
+    make_fake_roles(admin).await?;
+    admin
+        .batch_execute(&format!(
+            "CREATE ROLE {runner} LOGIN CREATEROLE; CREATE ROLE {app};
+             GRANT CREATE ON DATABASE {database} TO {runner};
+             GRANT tetsu_fake, tetsu_fake_lookup TO {runner} WITH ADMIN OPTION;
+             ALTER DEFAULT PRIVILEGES FOR ROLE {runner} GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {app}"
+        ))
+        .await?;
+    Ok(())
+}
+
 /// As on Neon: the runner owns what it creates and can create roles but is no superuser, so it needs its own rights
 /// on the record, and the app role gets rights on every table it creates. A file that grants on every table in its schema covers the
 /// record too, and loses all but reading before the run ends.
@@ -683,19 +704,7 @@ async fn a_runner_that_is_no_superuser_keeps_writing_its_record() {
         format!("t_runner_app_{}", std::process::id()),
     );
     let admin = connect(&database).await.expect("connects");
-    // Other tests share the module's roles across the server and made them first, so the runner is given what
-    // making them itself would have given it.
-    make_fake_roles(&admin)
-        .await
-        .expect("makes the module's roles");
-    admin
-        .batch_execute(&format!(
-            "CREATE ROLE {runner} LOGIN CREATEROLE; CREATE ROLE {app};
-             GRANT CREATE ON DATABASE {} TO {runner};
-             GRANT tetsu_fake, tetsu_fake_lookup TO {runner} WITH ADMIN OPTION;
-             ALTER DEFAULT PRIVILEGES FOR ROLE {runner} GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {app}",
-            database.name()
-        ))
+    make_runner(&admin, &runner, &app, database.name())
         .await
         .expect("creates the roles");
     // Assumes the test server trusts local roles without a password, as CI's and check.sh's do.

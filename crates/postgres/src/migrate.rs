@@ -43,15 +43,7 @@ pub async fn migrate_with_wait(
     check_server(&client).await?;
     require_app_role(&client).await?;
     take_lock(&client, wait).await?;
-    // Every module is checked before any file is applied.
-    let mut plan = Vec::new();
-    for storage in modules.iter().filter_map(|module| module.storage()) {
-        plan.push((storage.schema, pending(&client, storage).await?));
-    }
-    // Before any file, so a file can grant to its module's roles and hand functions to its lookup role.
-    for (schema, _) in &plan {
-        prepare_module(&client, schema).await?;
-    }
+    let plan = plan(&client, modules).await?;
     // Each file ends by taking back rights on every module's record, since one may grant on every table in a
     // schema, its own or another's.
     let lock_down = plan
@@ -66,6 +58,22 @@ pub async fn migrate_with_wait(
     }
     // Closing the connection releases the lock, even after a failure above.
     Ok(())
+}
+
+/// Each module's new files. Every module is checked before any file is applied, and its roles are made before any
+/// file, so a file can grant to them and hand functions to its lookup role.
+async fn plan(
+    client: &Client,
+    modules: &[&dyn Module],
+) -> Result<Vec<(&'static str, Vec<&'static Migration>)>, Error> {
+    let mut plan = Vec::new();
+    for storage in modules.iter().filter_map(|module| module.storage()) {
+        plan.push((storage.schema, pending(client, storage).await?));
+    }
+    for (schema, _) in &plan {
+        prepare_module(client, schema).await?;
+    }
+    Ok(plan)
 }
 
 /// Refuses, before touching the database, modules that break the kernel contract: names and schemas are unique,

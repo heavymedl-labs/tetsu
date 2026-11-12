@@ -77,22 +77,7 @@ pub async fn rows_seen_without_a_tenant(
     let mut seen = Vec::new();
     for table in &tables {
         let (schema, name): (String, String) = (table.try_get(0)?, table.try_get(1)?);
-        client.batch_execute("BEGIN").await?;
-        let counted = async {
-            client
-                .query_one(
-                    "SELECT pg_catalog.set_config('role', $1, true)",
-                    &[&crate::roles::module_role(&schema)],
-                )
-                .await?;
-            client
-                .query_one(&format!(r#"SELECT count(*) FROM "{schema}"."{name}""#), &[])
-                .await?
-                .try_get::<_, i64>(0)
-        }
-        .await;
-        client.batch_execute("ROLLBACK").await?;
-        let rows = counted?;
+        let rows = count_as_module(client, &schema, &name).await?;
         if rows > 0 {
             seen.push(format!(
                 "{schema}.{name} shows {rows} rows with no tenant set"
@@ -100,4 +85,24 @@ pub async fn rows_seen_without_a_tenant(
         }
     }
     Ok(seen)
+}
+
+/// The rows a table shows its module's role, in a transaction that is always rolled back.
+async fn count_as_module(client: &Client, schema: &str, name: &str) -> Result<i64, Error> {
+    client.batch_execute("BEGIN").await?;
+    let counted = async {
+        client
+            .query_one(
+                "SELECT pg_catalog.set_config('role', $1, true)",
+                &[&crate::roles::module_role(schema)],
+            )
+            .await?;
+        client
+            .query_one(&format!(r#"SELECT count(*) FROM "{schema}"."{name}""#), &[])
+            .await?
+            .try_get::<_, i64>(0)
+    }
+    .await;
+    client.batch_execute("ROLLBACK").await?;
+    Ok(counted?)
 }
