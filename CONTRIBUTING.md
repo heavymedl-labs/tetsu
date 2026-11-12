@@ -93,9 +93,9 @@ sets its status to Todo, and to Done when it closes. Keep the rest true:
   ASVS chapters and requirements its change must meet, which its commits repeat in
   an `ASVS:` footer ([ADR-0029](docs/adr/0029-security-target-revised.md)).
 - The views: **Board** is the current milestone by status; **By feature** groups
-  open work under its feature; **Decisions** lists the open choices; **Roadmap**
-  shows each feature against its start and target dates, where set; and
-  **Backlog** holds everything.
+  open work under its feature; **Decisions** lists the open choices by priority;
+  **By milestone** shows each feature, with its sub-issues, under its milestone;
+  and **Backlog** holds everything.
 - The **Backlog** view groups work by status and sorts it by priority. Within a
   priority, items keep their board position, so the Todo group reads top to
   bottom in the order the work happens: each blocker above what it blocks, and a
