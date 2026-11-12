@@ -567,3 +567,24 @@ async fn the_module_role_cannot_list_or_rewrite_tenants_and_addresses() {
         );
     }
 }
+
+/// Only the slug's and the address's own constraints mean "taken"; any other refusal is a storage error.
+#[tokio::test]
+async fn another_unique_refusal_is_a_storage_error() {
+    let (store, database) = app_store_and_settings().await;
+    tetsu_postgres::connect(&database)
+        .await
+        .expect("connects")
+        .batch_execute("CREATE UNIQUE INDEX one_name ON tenancy.tenants (name)")
+        .await
+        .expect("adds a rule");
+    store
+        .create(&tenant("anvil-row", &[]))
+        .await
+        .expect("creates");
+    let refused = store.create(&tenant("juniper-lane", &[])).await;
+    assert!(
+        matches!(&refused, Err(Error::Storage(why)) if why.contains("one_name")),
+        "{refused:?}"
+    );
+}

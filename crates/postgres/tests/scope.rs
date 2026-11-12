@@ -264,3 +264,38 @@ async fn the_hosted_probe_finds_no_rows_without_a_tenant() {
         ["people.people shows 1 rows with no tenant set"]
     );
 }
+
+#[tokio::test]
+async fn a_module_transaction_keeps_what_it_commits() {
+    let (pool, database) = app_pool().await;
+    let mut client = pool.get().await.expect("a connection");
+    let transaction = ModuleTransaction::begin(&mut client, "people")
+        .await
+        .expect("begins");
+    transaction
+        .execute("INSERT INTO people.notes VALUES (1)", &[])
+        .await
+        .expect("writes");
+    transaction.commit().await.expect("commits");
+    let kept: i64 = tetsu_postgres::connect(&database)
+        .await
+        .expect("connects")
+        .query_one("SELECT count(*) FROM people.notes", &[])
+        .await
+        .expect("counts")
+        .try_get(0)
+        .expect("a count");
+    assert_eq!(kept, 1);
+}
+
+#[tokio::test]
+async fn module_schemas_are_found_by_their_records() {
+    let (_pool, database) = app_pool().await;
+    let client = tetsu_postgres::connect(&database).await.expect("connects");
+    assert_eq!(
+        tetsu_postgres::module_schemas(&client)
+            .await
+            .expect("finds them"),
+        ["people"]
+    );
+}

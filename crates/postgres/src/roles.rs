@@ -144,6 +144,51 @@ fn collided(error: &tokio_postgres::Error) -> bool {
 mod tests {
     use super::*;
 
+    /// Runs `failing` through `retried`, counting attempts with a sequence, which a failed transaction does not roll
+    /// back, and timing them.
+    async fn attempts(code: &str) -> (u64, Duration, String) {
+        let database = crate::test_support::fresh_database()
+            .await
+            .expect("a test database");
+        let client = crate::connect(&database).await.expect("connects");
+        client
+            .batch_execute("CREATE SEQUENCE tries")
+            .await
+            .expect("creates the counter");
+        let started = std::time::Instant::now();
+        let error = retried(
+            &client,
+            &format!("SELECT nextval('tries'); DO $$ BEGIN RAISE EXCEPTION USING ERRCODE = '{code}'; END $$"),
+        )
+        .await
+        .expect_err("keeps failing");
+        let elapsed = started.elapsed();
+        let tries: i64 = client
+            .query_one("SELECT last_value FROM tries", &[])
+            .await
+            .expect("reads the counter")
+            .try_get(0)
+            .expect("a count");
+        (tries.unsigned_abs(), elapsed, error.to_string())
+    }
+
+    #[tokio::test]
+    async fn a_collision_is_retried_with_growing_pauses_then_given_up() {
+        for code in ["XX000", "23505", "40001"] {
+            let (tries, elapsed, _) = attempts(code).await;
+            assert_eq!(tries, u64::from(RETRIES) + 1, "{code}");
+            // 50, 100, 150, 200, and 250 milliseconds.
+            assert!(elapsed >= Duration::from_millis(750), "{code}: {elapsed:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn any_other_error_is_not_retried() {
+        let (tries, _, error) = attempts("42501").await;
+        assert_eq!(tries, 1);
+        assert!(error.contains("db error"), "{error}");
+    }
+
     #[test]
     fn a_module_s_roles_fit_postgres_names() {
         let schema = "a".repeat(MAX_SCHEMA);

@@ -22,3 +22,8 @@ USING (
     tenant_id
     = (SELECT nullif(current_setting('app.tenant_id', true), '')::bigint)
 );
+
+-- A global table the module's role writes outside any tenant.
+CREATE TABLE notes (id bigint PRIMARY KEY);
+
+COMMENT ON TABLE notes IS 'tetsu:global: test';
