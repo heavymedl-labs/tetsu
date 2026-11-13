@@ -1,9 +1,9 @@
 config:
   # Line length is a style choice; tables and links run long.
   MD013: false
-  # The README header switches the logo for light and dark themes.
+  # The README header switches the logo for light and dark themes, and centers the badges under it.
   MD033:
-    allowed_elements: [h1, br, picture, source, img]
+    allowed_elements: [h1, br, picture, source, img, p, a]
 ignores:
   - "node_modules/**"
   - "target/**"

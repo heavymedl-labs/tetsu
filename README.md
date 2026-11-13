@@ -5,11 +5,13 @@
   </picture>
 </h1>
 
-[![CI](https://github.com/heavymedl-labs/tetsu/actions/workflows/ci.yml/badge.svg)](https://github.com/heavymedl-labs/tetsu/actions/workflows/ci.yml)
-[![Demo: live](https://img.shields.io/badge/demo-live-E5622B)](https://tetsu-demo.onrender.com)
-![Rust 1.99](https://img.shields.io/badge/Rust-1.99-3A4250?logo=rust)
-![Postgres 18](https://img.shields.io/badge/Postgres-18-3A4250?logo=postgresql&logoColor=white)
-[![Status: early](https://img.shields.io/badge/status-early-3A4250)](https://github.com/orgs/heavymedl-labs/projects/1)
+<p align="center">
+  <a href="https://github.com/heavymedl-labs/tetsu/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/heavymedl-labs/tetsu/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://tetsu-demo.onrender.com"><img alt="Demo: live" src="https://img.shields.io/badge/demo-live-E5622B"></a>
+  <img alt="Rust 1.99" src="https://img.shields.io/badge/Rust-1.99-3A4250?logo=rust">
+  <img alt="Postgres 18" src="https://img.shields.io/badge/Postgres-18-3A4250?logo=postgresql&amp;logoColor=white">
+  <a href="https://github.com/orgs/heavymedl-labs/projects/1"><img alt="Status: early" src="https://img.shields.io/badge/status-early-3A4250"></a>
+</p>
 
 **Booking software, built like iron.** Scheduling, memberships, and payments for businesses that sell time.
 
