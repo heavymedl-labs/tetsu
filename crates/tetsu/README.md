@@ -25,7 +25,9 @@ Exit codes are 0 for success, 1 for a failure, and 2 for a command or arguments 
 
 `serve` writes JSON lines to standard output ([ADR-0045](../../docs/adr/0045-operations-baseline.md)). Each
 request logs one `served` line with its status and milliseconds, and its `span` holds the request ID, realm,
-method, route pattern such as `/{address}`, and tenant ID once a module finds one. No line names the path, query,
+method (`OTHER` for one HTTP does not define), route pattern such as `/{address}`, and tenant ID once a module
+finds one. Tetsu's own crates log from info up, and other crates only warnings and errors, since no one has
+checked what they write. No line names the path, query,
 or body, since those could carry a name, an email, a code, or a token. What a module reports for the operator,
 such as a page that could not load, is an `ERROR` line in the request's span. Errors before serving starts, and
 every other command's output, stay plain text.

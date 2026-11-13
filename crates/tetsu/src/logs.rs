@@ -12,18 +12,24 @@ use axum::middleware::Next;
 use axum::response::Response;
 use tracing::Instrument;
 use tracing::field::Empty;
+use tracing_subscriber::filter::Targets;
 use tracing_subscriber::fmt::MakeWriter;
+use tracing_subscriber::layer::SubscriberExt;
 
 /// The realm this server serves. Only the customer realm's public pages exist until operators sign in, when the
 /// realm becomes a setting (ADR-0048, slice 5).
 const REALM: &str = "customer";
 
-/// Logs at info level and above as JSON lines to `writer`, each event's fields at the top level beside the
-/// fields of the span it happened in.
+/// Logs JSON lines to `writer`: each event's fields at the top level, and the fields of the span it happened in
+/// under `span`. Tetsu's own crates log from info up. Other crates log only warnings and errors, since no one has
+/// checked what they write for personal details.
 pub fn subscriber<W>(writer: W) -> impl tracing::Subscriber + Send + Sync
 where
     W: for<'writer> MakeWriter<'writer> + Send + Sync + 'static,
 {
+    let reviewed = Targets::new()
+        .with_target("tetsu", tracing::Level::INFO)
+        .with_default(tracing::Level::WARN);
     tracing_subscriber::fmt()
         .json()
         .flatten_event(true)
@@ -33,6 +39,7 @@ where
         .with_max_level(tracing::Level::INFO)
         .with_writer(writer)
         .finish()
+        .with(reviewed)
 }
 
 /// Sends this process's logs to standard output.
@@ -51,7 +58,7 @@ pub async fn request(request: Request, next: Next) -> Response {
         "request",
         request_id = request_id(),
         realm = REALM,
-        method = request.method().as_str(),
+        method = method_name(request.method()),
         route = Empty,
         tenant_id = Empty,
     );
@@ -74,6 +81,17 @@ pub async fn route(request: Request, next: Next) -> Response {
     next.run(request).await
 }
 
+/// The method as sent if HTTP defines it, and `OTHER` if not, since a client can send any text as a method.
+fn method_name(method: &axum::http::Method) -> &'static str {
+    const DEFINED: [&str; 9] = [
+        "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "CONNECT", "TRACE",
+    ];
+    DEFINED
+        .into_iter()
+        .find(|defined| *defined == method.as_str())
+        .unwrap_or("OTHER")
+}
+
 /// A request's ID: a random number for this process, then a count of its requests. It is unique, not secret.
 fn request_id() -> String {
     static PROCESS: OnceLock<u64> = OnceLock::new();
@@ -85,6 +103,58 @@ fn request_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Lines a test's subscriber writes.
+    #[derive(Clone, Default)]
+    struct Lines(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Lines {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// Tetsu's own crates log from info up; anything else only from warn up, since no one reviewed what it writes
+    /// for personal details.
+    #[test]
+    fn other_crates_log_only_warnings_and_errors() {
+        let lines = Lines::default();
+        let writer = lines.clone();
+        tracing::subscriber::with_default(subscriber(move || writer.clone()), || {
+            tracing::info!(target: "tetsu_tenancy::adapters", "kept");
+            tracing::info!(target: "deadpool_postgres", "dropped");
+            tracing::warn!(target: "deadpool_postgres", "a warning kept");
+            tracing::debug!(target: "tetsu", "dropped too");
+        });
+        let text = String::from_utf8(lines.0.lock().unwrap().clone()).unwrap();
+        assert!(text.contains("\"kept\""), "{text}");
+        assert!(text.contains("a warning kept"), "{text}");
+        assert!(!text.contains("dropped"), "{text}");
+    }
+
+    /// A method is client text, so one HTTP does not define is logged as OTHER.
+    #[test]
+    fn only_known_methods_are_logged_as_sent() {
+        for (method, shown) in [
+            ("GET", "GET"),
+            ("HEAD", "HEAD"),
+            ("POST", "POST"),
+            ("PUT", "PUT"),
+            ("PATCH", "PATCH"),
+            ("DELETE", "DELETE"),
+            ("OPTIONS", "OPTIONS"),
+            ("CONNECT", "CONNECT"),
+            ("TRACE", "TRACE"),
+            ("LEE.PARK-EXAMPLE", "OTHER"),
+        ] {
+            let method = axum::http::Method::from_bytes(method.as_bytes()).unwrap();
+            assert_eq!(method_name(&method), shown);
+        }
+    }
 
     #[test]
     fn request_ids_share_the_process_part_and_count_up() {
