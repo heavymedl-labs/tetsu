@@ -33,7 +33,8 @@ ROOT = Path(__file__).resolve().parent.parent
 TEST_DATABASE = re.compile(rb"DATABASE_URL=.*/t_\d+_\d+_\d+(\?.*)?")
 TEST_TEMPORARY = re.compile(r"tetsu-(\d+)-.+|t_\d+_(\d+)_\d+\.pem")
 BUILD_OUTPUTS = ("deps", "incremental", "build", ".fingerprint", "examples")
-BUILD_UNIT = re.compile(r"(.*)-[0-9a-f]{16}(\..*)?")
+# Cargo hashes outputs in 16 hex digits, and incremental folders in 13 base-36 ones.
+BUILD_UNIT = re.compile(r"(.*)-(?:[0-9a-f]{16}|[0-9a-z]{13})(\..*)?")
 KEPT_COPIES = 3
 # Build output folders sit in a profile folder, such as target/debug or target/nightly/<triple>/debug.
 PROFILE_DEPTH = 3

@@ -125,6 +125,15 @@ class CleanTest(unittest.TestCase):
         kept = [name for hash_ in HASHES[:3] for name in (f"tetsu-{hash_}", f"tetsu-{hash_}.d")]
         self.assertEqual(left, sorted(["README", "libtokio-eeeeeeeeeeeeeeee.rlib", *kept]))
 
+    def test_superseded_incremental_folders_go_too(self):
+        for days, hash_ in enumerate(["3pbsn1u98tw0c", "3a60esjx1chbr", "2en701jb079ny", "0fzasr1p0elfm"]):
+            self.built(f"debug/incremental/tetsu-{hash_}/s-session", days + 2)
+            (self.root / "target" / "debug" / "incremental" / f"tetsu-{hash_}").touch()
+            stamp = NOW - (days + 2) * DAY
+            os.utime(self.root / "target" / "debug" / "incremental" / f"tetsu-{hash_}", (stamp, stamp))
+        found = [path.name for path in clean.superseded_builds(self.root / "target", NOW)]
+        self.assertEqual(found, ["tetsu-0fzasr1p0elfm"])
+
     def test_a_copy_under_a_day_old_stays_though_superseded(self):
         for hours, hash_ in enumerate(HASHES):
             self.built(f"debug/deps/tetsu-{hash_}", hours / 24)
