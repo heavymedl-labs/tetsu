@@ -156,9 +156,12 @@ python3 scripts/check_dated_entries.py npm-checks.toml overrides entries
 # Limits are in ADR-0015 and ADR-0016. Cargo skips the benchmark harness, except for formatting.
 work="$(mktemp -d)"
 # Drop every test database on the way out, pass or fail. Tests drop their own, but a killed test cannot (#43).
+# A killed test also leaves its server running, and cargo-mutants its copies of the workspace (#124).
 finish() {
   local status=$?
   rm -rf "$work"
+  rm -rf target/mutants-tmp
+  python3 scripts/clean.py --test-servers
   if ! cargo run -q -p tetsu-postgres --example drop_test_databases; then
     echo "error: test databases were not dropped; drop them or rerun the checks" >&2
     status=1

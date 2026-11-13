@@ -27,22 +27,22 @@ describes what is implemented.
 
 ## Rules
 
-- Adopting a framework, library, service, or tool needs a `Proposed` ADR
-  first. Only the maintainer accepts ADRs
-  ([ADR-0001](docs/adr/0001-how-we-work.md)).
-- Evaluate what you adopt through the steps in
-  [ADR-0010](docs/adr/0010-evaluating-technology.md).
+- Adopting a framework, library, service, or tool needs a `Proposed` ADR first. Only the maintainer accepts
+  ADRs ([ADR-0001](docs/adr/0001-how-we-work.md)).
+- Evaluate what you adopt through the steps in [ADR-0010](docs/adr/0010-evaluating-technology.md).
 - Meet the rigor tier and performance rules for the area you change
   ([ADR-0005](docs/adr/0005-testing-and-performance.md)).
-- Settle an [open decision](docs/adr/README.md#open-decisions) only when its
-  issue is your task, by proposing an ADR. Otherwise raise it on that issue
-  and wait.
-- Follow the workflow in [CONTRIBUTING.md](CONTRIBUTING.md).
-- Write commit messages in the [Conventional Commits](CONTRIBUTING.md#commits) format.
+- Settle an [open decision](docs/adr/README.md#open-decisions) only when its issue is your task, by proposing an
+  ADR. Otherwise raise it on that issue and wait.
+- Follow the workflow in [CONTRIBUTING.md](CONTRIBUTING.md), with [Conventional Commits](CONTRIBUTING.md#commits).
 - Audit every change to docs, issues, or the project board, as
   [CONTRIBUTING.md](CONTRIBUTING.md#docs-audit) describes.
-- Read [CONSTRAINTS.md](CONSTRAINTS.md) before writing code, and do not weaken it
-  to make a change pass. Add a language only once its row there is filled.
+- Read [CONSTRAINTS.md](CONSTRAINTS.md) before writing code, and do not weaken it to make a change pass. Add a
+  language only once its row there is filled.
+- Clean up what you start: servers, containers, images, databases, and temporary files. Keep only what the
+  project needs, such as the test Postgres. `scripts/clean.py` sweeps what tests leave.
+- Type no settings into commands. They come from the environment or a local `.env`
+  ([ADR-0050](docs/adr/0050-local-settings-file.md)), and a local default goes in `.env.example`.
 
 ## Duties
 
