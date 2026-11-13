@@ -17,7 +17,7 @@ Proposals, not decisions. The open ones are listed in the [ADR index](../../adr/
 
 ## Platform capabilities
 
-Three groups, named as in the [glossary](../../GLOSSARY.md): the **control plane** (tenants and access), **shared capabilities** that several verticals reuse, and **connectors**. Each vertical's industry-specific code sits on top.
+Three groups, named as in the [glossary](../../glossary.md): the **control plane** (tenants and access), **shared capabilities** that several verticals reuse, and **connectors**. Each vertical's industry-specific code sits on top.
 
 | Group | Capability | Role | Pattern |
 | --- | --- | --- | --- |

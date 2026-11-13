@@ -49,7 +49,7 @@ Switching, the API and processor choice are covered in [Platform implications](p
 
 ### Reading the feature matrix
 
-Each row in [Compare](boutique-fitness/compare.md) has a **Tag** for how we'd build it. Capabilities and their patterns are listed in [Platform implications](platform-implications.md); role terms are in the [glossary](../../GLOSSARY.md).
+Each row in [Compare](boutique-fitness/compare.md) has a **Tag** for how we'd build it. Capabilities and their patterns are listed in [Platform implications](platform-implications.md); role terms are in the [glossary](../../glossary.md).
 
 | Tag | Meaning |
 | --- | --- |
