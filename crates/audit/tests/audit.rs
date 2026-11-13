@@ -1,8 +1,6 @@
 //! The audit record, built from events the dispatcher delivers (ADR-0043, ADR-0045). Events arrive twice and in
 //! shuffled order, as delivery allows, and each is recorded once, for its own tenant alone.
 
-use std::sync::Arc;
-
 use tetsu_audit::{Audit, consumer};
 use tetsu_kernel::{Migration, Module, Storage};
 use tetsu_postgres::test_support::{TestDatabase, fresh_database};
@@ -220,6 +218,8 @@ async fn audit_s_role_cannot_change_or_remove_a_record() {
         "DELETE FROM audit.records",
         "UPDATE audit.records_global SET payload = '{}'",
         "DELETE FROM audit.records_global",
+        "TRUNCATE audit.records",
+        "TRUNCATE audit.records_global",
     ] {
         let mut client = pool.get().await.expect("a connection");
         let transaction = TenantTransaction::begin(&mut client, "audit", 1)
@@ -267,12 +267,66 @@ async fn audit_s_tables_follow_the_isolation_rules() {
 }
 
 #[test]
-fn audit_registers_its_schema() {
+fn audit_registers_its_schema_with_an_inbox() {
     let storage = Audit.storage().expect("stores data");
     assert_eq!((Audit.name(), storage.schema), ("audit", "audit"));
-    assert_eq!(
-        storage.migrations.last().map(|m| m.sql),
-        Some(tetsu_postgres::INBOX)
+    assert!(
+        storage
+            .migrations
+            .iter()
+            .any(|migration| migration.sql == tetsu_postgres::INBOX)
     );
-    let _: Arc<dyn tetsu_postgres::Consumer> = consumer(&[]);
+}
+
+/// The audit record may not be lost (ADR-0045), so an event Audit cannot record keeps retrying past the limit
+/// other events stop at.
+#[tokio::test]
+async fn an_event_audit_cannot_record_is_never_given_up() {
+    let (pool, dispatcher, database) = ready().await;
+    record(&pool, "signins", None, &signed_in(1)).await;
+    run_as_owner(
+        &database,
+        "REVOKE INSERT ON audit.records_global FROM tetsu_audit",
+    )
+    .await;
+    for _ in 0..tetsu_postgres::MAX_ATTEMPTS + 2 {
+        run_as_owner(&database, "UPDATE signins.outbox_global SET due_at = now()").await;
+        assert_eq!(dispatcher.deliver_due().await.expect("tries"), 0);
+    }
+    run_as_owner(
+        &database,
+        "GRANT INSERT ON audit.records_global TO tetsu_audit; UPDATE signins.outbox_global SET due_at = now()",
+    )
+    .await;
+    assert_eq!(dispatcher.deliver_due().await.expect("delivers"), 1);
+}
+
+/// A record names the event's own tenant, so a transaction opened for another tenant cannot take it.
+#[tokio::test]
+async fn an_event_is_recorded_only_for_its_own_tenant() {
+    let (pool, _dispatcher, _database) = ready().await;
+    let event = tetsu_postgres::Event {
+        id: "0190a3d2-0000-7000-8000-000000000009".into(),
+        producer: "signins".into(),
+        tenant: Some(1),
+        kind: "signins.signed_in".into(),
+        version: 1,
+        occurred_at: std::time::SystemTime::now(),
+        payload: signed_in(1),
+    };
+    let mut client = pool.get().await.expect("a connection");
+    let transaction = TenantTransaction::begin(&mut client, "audit", 2)
+        .await
+        .expect("begins");
+    let refused = consumer(&["signins"])
+        .apply(&transaction, &event)
+        .await
+        .expect_err("another tenant's event");
+    assert_eq!(
+        refused
+            .downcast_ref::<tokio_postgres::Error>()
+            .and_then(tokio_postgres::Error::code),
+        Some(&tokio_postgres::error::SqlState::INSUFFICIENT_PRIVILEGE),
+        "the tenant policy refuses it"
+    );
 }

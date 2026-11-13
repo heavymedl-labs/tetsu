@@ -5,9 +5,9 @@
 //! The public surface (ADR-0021): the module's registration, [`Audit`], and the adapter constructor,
 //! [`consumer`], which the composition root hands to the dispatcher.
 
-mod consumer;
+mod adapters;
 
-pub use consumer::consumer;
+pub use adapters::events::consumer;
 
 use tetsu_kernel::{Migration, Module, Storage};
 

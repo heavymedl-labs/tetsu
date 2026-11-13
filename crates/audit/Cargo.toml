@@ -13,10 +13,10 @@ tier = 1
 [dependencies]
 tetsu-kernel.workspace = true
 tetsu-postgres.workspace = true
+tokio-postgres.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true
-tokio-postgres.workspace = true
 
 [lints]
 workspace = true

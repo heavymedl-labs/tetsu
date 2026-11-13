@@ -43,5 +43,6 @@ USING (
 );
 
 -- The record is append-only: its role adds and reads rows, and never changes
--- or removes one.
-REVOKE UPDATE, DELETE ON records, records_global FROM tetsu_audit;
+-- or removes one, whatever the schema's defaults grant.
+REVOKE ALL ON records, records_global FROM tetsu_audit;
+GRANT SELECT, INSERT ON records, records_global TO tetsu_audit;
