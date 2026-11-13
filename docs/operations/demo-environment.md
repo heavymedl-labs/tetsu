@@ -126,7 +126,9 @@ Render keeps standard output, and Grafana Cloud's free stack receives the same l
 - `OTEL_EXPORTER_OTLP_ENDPOINT`: the stack's OTLP endpoint, such as
   `https://otlp-gateway-prod-us-east-0.grafana.net/otlp`.
 - `OTEL_EXPORTER_OTLP_HEADERS`: `Authorization=Basic%20<instance ID and token, base64>`, as a secret
-  ([secrets.md](secrets.md)).
+  ([secrets.md](secrets.md)). Make the token from an access policy with only the `logs:write` scope and an
+  expiry, rather than the tile's default, so a leaked key can write logs and nothing else, and record the expiry
+  in secrets.md.
 - `OTEL_RESOURCE_ATTRIBUTES`: `deployment.environment.name=demo`.
 
 A bad value logs `logs are not exported` as a warning on Render, and the site serves without export. A refused key

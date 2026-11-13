@@ -56,7 +56,7 @@ pub fn demo(var: impl Fn(&str) -> Result<String, VarError>) -> Result<bool, Stri
 }
 
 /// Where logs are exported over OTLP (ADR-0049), read from OpenTelemetry's standard names.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 pub struct Export {
     /// The full address logs are sent to, ending in `/v1/logs` unless the logs endpoint was set itself.
     pub endpoint: String,
@@ -67,6 +67,21 @@ pub struct Export {
     pub service_name: String,
     /// Further attributes naming this process to the backend, such as its environment, decoded.
     pub resource: Vec<(String, String)>,
+}
+
+/// Shows header names and never their values, which hold the backend's key, so printing settings leaks nothing.
+impl std::fmt::Debug for Export {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut names: Vec<&String> = self.headers.keys().collect();
+        names.sort();
+        f.debug_struct("Export")
+            .field("endpoint", &self.endpoint)
+            .field("headers", &names)
+            .field("gzip", &self.gzip)
+            .field("service_name", &self.service_name)
+            .field("resource", &self.resource)
+            .finish()
+    }
 }
 
 /// Reads the export settings as the exporter does, the logs-only name over the shared one: the endpoint from
@@ -88,7 +103,8 @@ pub fn export(var: impl Fn(&str) -> Result<String, VarError>) -> Result<Option<E
     }))
 }
 
-/// The logs endpoint, which must be HTTPS, since the headers carry a key, or HTTP to this machine.
+/// The logs endpoint, which must be HTTPS, since the headers carry a key, or HTTP to this machine. It may not carry
+/// a credential itself, since the exporter's errors quote it on standard output.
 fn endpoint(var: impl Fn(&str) -> Result<String, VarError>) -> Result<Option<String>, String> {
     let (name, endpoint) = match (
         value(&var, "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")?,
@@ -101,15 +117,26 @@ fn endpoint(var: impl Fn(&str) -> Result<String, VarError>) -> Result<Option<Str
         ),
         (None, None) => return Ok(None),
     };
+    checked_endpoint(name, &endpoint)?;
+    Ok(Some(endpoint))
+}
+
+fn checked_endpoint(name: &str, endpoint: &str) -> Result<(), String> {
     let wrong = || format!("{name} must be an https URL, or http to this machine");
     let uri: axum::http::Uri = endpoint.parse().map_err(|_| wrong())?;
+    if uri
+        .authority()
+        .is_some_and(|authority| authority.as_str().contains('@'))
+    {
+        return Err(format!(
+            "{name} must not carry a credential; send it in OTEL_EXPORTER_OTLP_HEADERS"
+        ));
+    }
     let local = matches!(uri.host(), Some("127.0.0.1" | "localhost" | "[::1]"));
     match uri.scheme_str() {
-        Some("https") => Ok(Some(endpoint)),
-        Some("http") if local => Ok(Some(endpoint)),
-        _ => Err(format!(
-            "{name} must be an https URL, or http to this machine"
-        )),
+        Some("https") => Ok(()),
+        Some("http") if local => Ok(()),
+        _ => Err(wrong()),
     }
 }
 
@@ -606,6 +633,38 @@ mod tests {
                     .into()
             )
         );
+    }
+
+    #[test]
+    fn the_endpoint_may_not_carry_a_credential() {
+        assert_eq!(
+            exporting(&[("OTEL_EXPORTER_OTLP_ENDPOINT", "https://user:key@otlp.example")]),
+            Err("OTEL_EXPORTER_OTLP_ENDPOINT must not carry a credential; send it in OTEL_EXPORTER_OTLP_HEADERS".into())
+        );
+    }
+
+    /// Printed settings name each header and never its value, the backend's key.
+    #[test]
+    fn printed_settings_hide_header_values() {
+        let export = exporting(&[
+            ("OTEL_EXPORTER_OTLP_ENDPOINT", "https://otlp.example"),
+            (
+                "OTEL_EXPORTER_OTLP_HEADERS",
+                "Authorization=Basic%20c2VjcmV0,x-scope=a",
+            ),
+        ])
+        .unwrap()
+        .unwrap();
+        let printed = format!("{export:?}");
+        assert!(
+            printed.contains("[\"authorization\", \"x-scope\"]"),
+            "{printed}"
+        );
+        assert!(
+            printed.contains("https://otlp.example/v1/logs"),
+            "{printed}"
+        );
+        assert!(!printed.contains("c2VjcmV0"), "{printed}");
     }
 
     #[test]
