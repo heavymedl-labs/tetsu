@@ -56,6 +56,7 @@ number, and add a row below. Never renumber.
 | [0048](0048-sign-in-design.md) | Sign-in design | Building sign-in, sessions, staff roles, rate limits, or recovery | Accepted |
 | [0049](0049-log-export.md) | Log export | Exporting logs, or changing what a log line carries off the host | Accepted |
 | [0050](0050-local-settings-file.md) | Local settings file | Running `tetsu` locally, or adding a setting | Accepted |
+| [0051](0051-coverage-reporting.md) | Coverage reporting | Reporting or showing test coverage | Proposed |
 
 ## Open decisions
 
