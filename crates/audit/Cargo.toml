@@ -1,0 +1,22 @@
+[package]
+name = "tetsu-audit"
+description = "The audit record: security events, kept per tenant."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[package.metadata.tetsu]
+kind = "platform"
+tier = 1
+
+[dependencies]
+tetsu-kernel.workspace = true
+tetsu-postgres.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+tokio-postgres.workspace = true
+
+[lints]
+workspace = true

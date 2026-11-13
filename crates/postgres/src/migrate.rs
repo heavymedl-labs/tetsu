@@ -7,9 +7,7 @@ use tetsu_kernel::{Migration, Module, Storage};
 use tokio_postgres::Client;
 
 use crate::connection::{Error, Settings, connect};
-use crate::roles::{
-    APP_ROLE, MAX_SCHEMA, prepare_delivery, prepare_module, require_bound_runner, require_role,
-};
+use crate::roles::{APP_ROLE, MAX_SCHEMA, prepare_module, require_bound_runner, require_role};
 
 /// Taken by polling, never by blocking, which can deadlock with
 /// `CREATE INDEX CONCURRENTLY` (ADR-0011).
@@ -71,7 +69,6 @@ async fn plan(
     for storage in modules.iter().filter_map(|module| module.storage()) {
         plan.push((storage.schema, pending(client, storage).await?));
     }
-    prepare_delivery(client).await?;
     for (schema, _) in &plan {
         prepare_module(client, schema).await?;
     }

@@ -13,6 +13,7 @@ serde.workspace = true
 # The manifest reader build.rs shares is compiled here too, so its tests and mutants cover it; the binary uses none
 # of it.
 serde_json.workspace = true
+tetsu-audit.workspace = true
 tetsu-kernel.workspace = true
 tetsu-postgres.workspace = true
 tetsu-tenancy.workspace = true

@@ -444,6 +444,8 @@ async fn delivered_events_go_after_seven_days() {
         &database,
         "WITH oldest AS (SELECT id FROM people.outbox WHERE delivered_at IS NOT NULL LIMIT 2)
            UPDATE people.outbox SET delivered_at = now() - interval '7 days 1 minute' WHERE id IN (SELECT id FROM oldest);
+         UPDATE people.outbox SET delivered_at = now() - interval '6 days 23 hours'
+           WHERE delivered_at > now() - interval '1 hour';
          UPDATE people.outbox_global SET delivered_at = now() - interval '8 days'",
     )
     .await;
@@ -543,5 +545,57 @@ async fn outboxes_and_inboxes_follow_the_isolation_rules() {
             .await
             .expect("checks"),
         Vec::<String>::new()
+    );
+}
+
+/// The dispatcher removes old events when it starts, then once an hour, not on every pass.
+#[tokio::test]
+async fn old_events_are_removed_at_start_then_hourly() {
+    let World {
+        pool,
+        dispatcher,
+        database,
+        ..
+    } = world().await;
+    record(&pool, 1, &JOINED, true).await;
+    dispatcher.deliver_due().await.expect("delivers");
+    let age = "UPDATE people.outbox SET delivered_at = now() - interval '8 days' WHERE delivered_at IS NOT NULL";
+    run_as_owner(&database, age).await;
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let running = tokio::spawn(async move {
+        dispatcher
+            .run(Duration::from_secs(600), async {
+                let _ = stopped.await;
+            })
+            .await;
+    });
+    let count = |sql: &'static str| {
+        let database = &database;
+        async move { read::<i64>(database, sql).await }
+    };
+    let settled = |wanted: i64, sql: &'static str| async move {
+        for _ in 0..50 {
+            if count(sql).await == wanted {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        false
+    };
+    let removed_at_start = settled(0, "SELECT count(*) FROM people.outbox").await;
+    record(&pool, 1, &JOINED, true).await;
+    let delivered = "SELECT count(*) FROM people.outbox WHERE delivered_at IS NOT NULL";
+    let first_woken = settled(1, delivered).await;
+    run_as_owner(&database, age).await;
+    record(&pool, 1, &JOINED, true).await;
+    let second_woken = settled(2, delivered).await;
+    let _ = stop.send(());
+    running.await.expect("stops");
+    assert!(removed_at_start && first_woken && second_woken);
+    assert_eq!(
+        count("SELECT count(*) FROM people.outbox WHERE delivered_at < now() - interval '7 days'")
+            .await,
+        1,
+        "an old event waits for the next hourly removal"
     );
 }

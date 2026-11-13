@@ -114,6 +114,7 @@ async fn every_module_follows_the_isolation_rules() {
         .await
         .expect("finds the modules");
     assert!(schemas.contains(&"tenancy".to_string()), "{schemas:?}");
+    assert!(schemas.contains(&"audit".to_string()), "{schemas:?}");
     let schemas: Vec<&str> = schemas.iter().map(String::as_str).collect();
     let problems = tetsu_postgres::isolation_violations(&mut client, &schemas)
         .await

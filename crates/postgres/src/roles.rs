@@ -80,10 +80,11 @@ async fn ensure_member(client: &Client, role: &str, member: &str) -> Result<(), 
 }
 
 /// Makes a module's roles, lets the application role and the runner act as its module role one transaction at a
-/// time, and lets the runner hand functions to its lookup role. A grant that already exists is kept.
+/// time, and lets the runner hand functions to its lookup role. A grant that already exists is kept. It also makes
+/// the delivery role, which a module's outbox file grants to.
 pub(crate) async fn prepare_module(client: &Client, schema: &str) -> Result<(), Error> {
     let (module, lookup) = (module_role(schema), lookup_role(schema));
-    for role in [&module, &lookup] {
+    for role in [&module, &lookup, &DELIVERY_ROLE.to_string()] {
         ensure_role(client, role, &format!("CREATE ROLE {role} NOLOGIN")).await?;
     }
     let runner: String = client
@@ -91,6 +92,7 @@ pub(crate) async fn prepare_module(client: &Client, schema: &str) -> Result<(), 
         .await?
         .try_get("runner")?;
     ensure_member(client, &module, APP_ROLE).await?;
+    ensure_member(client, DELIVERY_ROLE, APP_ROLE).await?;
     ensure_member(client, &module, &runner).await?;
     ensure_member(client, &lookup, &runner).await?;
     // These belong to this database alone, so nothing else races them. Functions are revoked from `PUBLIC` in the
@@ -104,18 +106,6 @@ pub(crate) async fn prepare_module(client: &Client, schema: &str) -> Result<(), 
         ))
         .await?;
     Ok(())
-}
-
-/// Makes the delivery role and lets the application role act as it, one transaction at a time. Each module's outbox
-/// file grants it what it needs.
-pub(crate) async fn prepare_delivery(client: &Client) -> Result<(), Error> {
-    ensure_role(
-        client,
-        DELIVERY_ROLE,
-        &format!("CREATE ROLE {DELIVERY_ROLE} NOLOGIN"),
-    )
-    .await?;
-    ensure_member(client, DELIVERY_ROLE, APP_ROLE).await
 }
 
 /// A name as a quoted identifier, so no name can end the statement or change its case.

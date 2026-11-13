@@ -8,7 +8,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use deadpool_postgres::{Pool, Transaction};
-use tokio::sync::Notify;
+use std::sync::OnceLock;
+
+use tokio::sync::watch;
 
 use crate::connection::Error;
 use crate::scope::{DeliveryTransaction, ModuleTransaction, TenantTransaction};
@@ -26,8 +28,12 @@ const CLEAN_EVERY: Duration = Duration::from_hours(1);
 /// How many events one pass takes from one outbox.
 const BATCH: i64 = 50;
 
-/// Wakes the dispatcher when this process commits an event, so it need not wait for its next poll.
-static RECORDED: Notify = Notify::const_new();
+/// Counts the events this process commits, so every dispatcher wakes at once rather than at its next poll. A
+/// dispatcher busy when one commits sees the count changed when it next waits, so no wake is lost.
+fn recorded() -> &'static watch::Sender<u64> {
+    static RECORDED: OnceLock<watch::Sender<u64>> = OnceLock::new();
+    RECORDED.get_or_init(|| watch::channel(0).0)
+}
 
 /// An event to record: a fact in the past tense, such as `identity.signed_in`, its version, and a JSON payload of
 /// IDs and facts, never personal details.
@@ -119,7 +125,7 @@ async fn insert(
 
 /// Lets the dispatcher know at once that an event committed.
 pub(crate) fn wake() {
-    RECORDED.notify_one();
+    recorded().send_modify(|count| *count = count.wrapping_add(1));
 }
 
 /// Delivers every producer's events to the consumers that want them.
@@ -179,6 +185,7 @@ impl Dispatcher {
     /// delivered events past [`KEPT_FOR`] every [`CLEAN_EVERY`]. A failed pass is logged and tried again on the next.
     pub async fn run(&self, poll: Duration, stop: impl Future<Output = ()>) {
         tokio::pin!(stop);
+        let mut woken = recorded().subscribe();
         let mut cleaned: Option<Instant> = None;
         loop {
             if let Err(error) = self.deliver_due().await {
@@ -195,7 +202,7 @@ impl Dispatcher {
             tokio::select! {
                 () = &mut stop => return,
                 () = tokio::time::sleep(poll) => {}
-                () = RECORDED.notified() => {}
+                _ = woken.changed() => {}
             }
         }
     }

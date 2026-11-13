@@ -3377,6 +3377,7 @@ dependencies = [
  "axum",
  "serde",
  "serde_json",
+ "tetsu-audit",
  "tetsu-kernel",
  "tetsu-postgres",
  "tetsu-tenancy",
@@ -3385,6 +3386,16 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "tetsu-audit"
+version = "0.1.0"
+dependencies = [
+ "tetsu-kernel",
+ "tetsu-postgres",
+ "tokio",
+ "tokio-postgres",
 ]
 
 [[package]]
