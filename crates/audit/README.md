@@ -19,8 +19,9 @@ business, such as an operator's sign-in. Each row keeps the event's ID, producer
 
 ## Hot paths
 
-- **Recording.** One insert per event, inside the dispatcher's transaction, beside the inbox insert. Its indexes are
-  the primary key and one unique index on `(tenant_id, event_id)`.
+- **Recording.** One insert per event, in Audit's own transaction for the event's tenant, beside the inbox insert.
+  Each table has its primary key and one unique index on the event: `(tenant_id, event_id)` for `records`, and
+  `event_id` for `records_global`.
 - **Reading.** No use case reads the record yet. The first one, such as a business viewing its sign-ins, adds an
   index on `(tenant_id, occurred_at)` and partitions by time, as ARCHITECTURE.md plans for the audit log.
 

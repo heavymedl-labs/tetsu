@@ -1,5 +1,5 @@
-//! Audit's inbound adapter: each event it wants becomes a row of the record, in the dispatcher's transaction, which
-//! acts as Audit's role for the event's tenant.
+//! Audit's inbound adapter: each event it wants becomes a row of the record, in the transaction the dispatcher opens
+//! as Audit's role for the event's tenant.
 
 use std::sync::Arc;
 
