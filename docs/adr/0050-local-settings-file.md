@@ -32,8 +32,12 @@ a local run. Commands should run as written, with their settings already in plac
 - **Cargo's `[env]` in `.cargo/config.toml`.** Already holds `TEST_DATABASE_URL`, and needs no code. But it applies
   only under `cargo run`, is committed, so it cannot hold a personal value such as an export key, and it reaches
   `cargo test` too.
-- **The `dotenvy` crate.** Widely used, but quoting, escapes, and expansion are features no setting here needs, and
-  each is a way for a value to read differently than written. It would need an ADR-0010 review for 30 lines.
+- **The `dotenvy` crate.** The common choice, with 67 million downloads in 90 days, but read on 2026-11-13 it fails
+  three needs here. Its parse error prints the whole line, which may hold a password. It expands `$` and ends a
+  value at a space, so a password with either reads differently than written. Its loading functions call
+  `std::env::set_var`, which Rust 2024 marks unsafe once threads run, as they do under `#[tokio::main]`; we forbid
+  unsafe code. Its last release, 0.15.7, was in March 2023. Its line iterator avoids `set_var`, but the other two
+  remain, for a 30-line job.
 - **A wrapper script that exports the settings.** Works for one command, but every other way of running `tetsu`
   misses it.
 - **direnv.** Loads `.env` for any program, but every contributor installs and trusts it first.
