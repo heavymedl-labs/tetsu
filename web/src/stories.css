@@ -47,10 +47,12 @@
     stroke-dashoffset: 0;
   }
 
-  /* A number that counts from --from to --to. */
+  /* A number that counts from --from to --to. WebKit leaves an <integer> property fractional while it transitions,
+     which counter-reset refuses, so the counter showed 0 until the end; rounding here fixes that and changes nothing
+     where the browser already rounds. */
   .tetsu-count {
     --tetsu-n: var(--to);
-    counter-reset: tetsu-count var(--tetsu-n);
+    counter-reset: tetsu-count round(nearest, var(--tetsu-n), 1);
   }
 
   .tetsu-count::after {
