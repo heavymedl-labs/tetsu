@@ -76,11 +76,13 @@ pub trait Consumer: Send + Sync {
     /// Whether it wants this event at all.
     fn wants(&self, event: &Event) -> bool;
     /// Whether an event it fails to apply must keep retrying, however often it fails, as the audit record's must
-    /// (ADR-0045). Such an event is marked kept.
+    /// (ADR-0045). An event is marked kept when such a consumer is still failing at its last attempt, and stays
+    /// kept after.
     fn never_lose(&self) -> bool {
         false
     }
-    /// Applies the event. It may see the same event again, and events in any order.
+    /// Applies the event. It may see the same event again, and events in any order. Return a database error as it
+    /// came, with `?`, so the log can name it by its SQL state rather than by text that may quote a row's values.
     fn apply<'a>(&'a self, transaction: &'a Transaction<'a>, event: &'a Event) -> Applied<'a>;
 }
 
@@ -173,11 +175,29 @@ impl Outbox {
 }
 
 /// What became of one event in a pass.
+#[derive(Clone, Copy)]
 enum Handed {
     Delivered,
     Retried,
-    /// The pool had no connection for a consumer, so the event, and the rest of the outbox, wait.
-    NoConnection,
+    /// The pool had no connection for a consumer, so the event, and the rest of the pass, wait.
+    Starved,
+}
+
+/// What one outbox's pass did.
+#[derive(Default)]
+struct Pass {
+    delivered: usize,
+    starved: bool,
+}
+
+impl Pass {
+    fn count(&mut self, handed: Handed) {
+        match handed {
+            Handed::Delivered => self.delivered += 1,
+            Handed::Retried => {}
+            Handed::Starved => self.starved = true,
+        }
+    }
 }
 
 /// An error as logs may show it: a database error by its SQL state alone, since its text and detail can quote a
@@ -258,9 +278,8 @@ impl Dispatcher {
         let mut woken = recorded().subscribe();
         let mut cleaned: Option<Instant> = None;
         loop {
-            if let Err(error) = self.deliver_due().await {
-                tracing::error!(error = described(&*error), "event delivery failed");
-            }
+            // Each failing outbox is logged where it fails.
+            let _ = self.deliver_due().await;
             // A failed removal waits for the next hour too, rather than running on every poll.
             if cleaned.is_none_or(|at| at.elapsed() >= CLEAN_EVERY) {
                 cleaned = Some(Instant::now());
@@ -280,19 +299,31 @@ impl Dispatcher {
     }
 
     /// One pass over every outbox: each due event goes to every consumer that wants it, and is settled. An outbox
-    /// that fails does not hold up the others.
+    /// that fails is logged by name and does not hold up the others, and a pool with no connection for a consumer
+    /// ends the pass, so the dispatcher does not compete with requests for connections it cannot have.
     ///
     /// # Errors
-    /// Fails, after trying every outbox, with the first outbox that could not be read or settled. A consumer's own
-    /// failure is not an error here; it schedules a retry.
+    /// Fails, after the pass, with the first outbox that could not be read or settled. A consumer's own failure is
+    /// not an error here; it schedules a retry.
     pub async fn deliver_due(&self) -> Result<usize, Error> {
         let mut delivered = 0;
         let mut first_error = None;
-        for producer in &self.producers {
+        'pass: for producer in &self.producers {
             for outbox in [Outbox::Tenant, Outbox::Global] {
-                match self.deliver_from(producer, outbox).await {
-                    Ok(count) => delivered += count,
+                let place = Place::new(producer, outbox);
+                match self.deliver_from(&place).await {
+                    Ok(pass) => {
+                        delivered += pass.delivered;
+                        if pass.starved {
+                            break 'pass;
+                        }
+                    }
                     Err(error) => {
+                        tracing::error!(
+                            outbox = place.table,
+                            error = described(&*error),
+                            "event delivery failed"
+                        );
                         first_error.get_or_insert(error);
                     }
                 }
@@ -301,27 +332,22 @@ impl Dispatcher {
         first_error.map_or(Ok(delivered), Err)
     }
 
-    /// Delivers one outbox's due events, and commits what it has settled when the pool has no connection for a
-    /// consumer or the pass reaches [`PASS_LIMIT`], leaving the rest for the next pass with nothing charged.
-    async fn deliver_from(&self, producer: &str, outbox: Outbox) -> Result<usize, Error> {
-        let place = Place::new(producer, outbox);
+    /// Delivers one outbox's due events, and commits what it has settled and charged when the pool has no
+    /// connection for a consumer or the pass reaches [`PASS_LIMIT`], leaving the rest for the next pass.
+    async fn deliver_from(&self, place: &Place<'_>) -> Result<Pass, Error> {
         let started = Instant::now();
         let mut client = self.pool.get().await?;
         let transaction = DeliveryTransaction::begin(&mut client).await?;
-        let rows = due(&transaction, &place).await?;
-        let mut delivered = 0;
+        let rows = due(&transaction, place).await?;
+        let mut pass = Pass::default();
         for row in &rows {
-            match self.deliver_one(&transaction, &place, row).await? {
-                Handed::Delivered => delivered += 1,
-                Handed::Retried => {}
-                Handed::NoConnection => break,
-            }
-            if started.elapsed() >= PASS_LIMIT {
+            pass.count(self.deliver_one(&transaction, place, row).await?);
+            if pass.starved || started.elapsed() >= PASS_LIMIT {
                 break;
             }
         }
         transaction.commit().await?;
-        Ok(delivered)
+        Ok(pass)
     }
 
     /// Hands one due event over, then settles it, or schedules its retry.
@@ -332,32 +358,38 @@ impl Dispatcher {
         row: &tokio_postgres::Row,
     ) -> Result<Handed, Error> {
         let event = read_event(row, place.producer)?;
-        let Some(failed) = self.hand_over(&event).await else {
-            return Ok(Handed::NoConnection);
-        };
-        if failed.is_empty() {
-            settle(transaction, place, &event).await?;
-            Ok(Handed::Delivered)
-        } else {
+        let (failed, starved) = self.hand_over(&event).await;
+        if !failed.is_empty() {
             retry_later(transaction, place, &event, &failed).await?;
-            Ok(Handed::Retried)
+        } else if !starved {
+            settle(transaction, place, &event).await?;
         }
+        Ok(match (starved, failed.is_empty()) {
+            (true, _) => Handed::Starved,
+            (false, true) => Handed::Delivered,
+            (false, false) => Handed::Retried,
+        })
     }
 
-    /// Gives the event to each consumer that wants it, and returns those that failed, or nothing when the pool has
-    /// no connection for a consumer, which is no consumer's failure.
-    async fn hand_over(&self, event: &Event) -> Option<Vec<&dyn Consumer>> {
+    /// Gives the event to each consumer that wants it, and returns those that failed, and whether the pool ran
+    /// out of connections before every consumer had one. A shortage is no consumer's failure, so it charges only
+    /// the failures that came before it.
+    async fn hand_over(&self, event: &Event) -> (Vec<&dyn Consumer>, bool) {
         let mut failed = Vec::new();
         for consumer in self
             .consumers
             .iter()
             .filter(|consumer| consumer.wants(event))
         {
-            let Ok(mut client) = self.pool.get().await else {
-                tracing::warn!(
-                    "no connection for a consumer; the rest of the outbox waits for the next pass"
-                );
-                return None;
+            let mut client = match self.pool.get().await {
+                Ok(client) => client,
+                Err(error) => {
+                    tracing::warn!(
+                        error = described(&error),
+                        "no connection for a consumer; the pass ends here"
+                    );
+                    return (failed, true);
+                }
             };
             let applied = tokio::time::timeout(
                 self.apply_timeout,
@@ -376,7 +408,7 @@ impl Dispatcher {
                 failed.push(consumer.as_ref());
             }
         }
-        Some(failed)
+        (failed, false)
     }
 
     /// Deletes events delivered more than `age` ago, and returns how many.

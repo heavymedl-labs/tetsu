@@ -111,6 +111,35 @@ mod support {
         }
     }
 
+    /// Fails, and on its way out queues for a connection, which takes the one it is returning, so the next
+    /// consumer finds the pool empty.
+    pub struct Hog {
+        pub pool: Pool,
+        pub held: Arc<std::sync::Mutex<Vec<tetsu_postgres::Object>>>,
+    }
+
+    impl Consumer for Hog {
+        fn schema(&self) -> &'static str {
+            "journal"
+        }
+        fn wants(&self, event: &Event) -> bool {
+            event.producer == "people"
+        }
+        fn apply<'a>(&'a self, _: &'a Transaction<'a>, _: &'a Event) -> Applied<'a> {
+            let (pool, held) = (self.pool.clone(), self.held.clone());
+            tokio::spawn(async move {
+                if let Ok(client) = pool.get().await {
+                    held.lock().expect("unpoisoned").push(client);
+                }
+            });
+            Box::pin(async {
+                // Lets the task queue for a connection before this one is returned.
+                tokio::task::yield_now().await;
+                Err("the journal is down".into())
+            })
+        }
+    }
+
     impl Consumer for Ledger {
         fn schema(&self) -> &'static str {
             "ledger"
@@ -887,4 +916,83 @@ async fn a_consumer_s_database_error_is_logged_without_its_values() {
     assert!(text.contains("event not applied"), "{text}");
     assert!(text.contains("22P02"), "{text}");
     assert!(!text.contains("lee.park"), "{text}");
+}
+
+/// A pool with no connection to spare ends the whole pass, rather than each later outbox waiting for one too.
+#[tokio::test]
+async fn a_shortage_ends_the_whole_pass() {
+    let World {
+        pool,
+        dispatcher,
+        database,
+        ..
+    } = world().await;
+    // Two in one outbox and one in the next, so stopping at the first shortage shows within an outbox and across.
+    record(&pool, 1, &JOINED, true).await;
+    record(&pool, 2, &JOINED, true).await;
+    record_global(&pool, &JOINED).await;
+    let logs = Logs::default();
+    let _guard = tracing::subscriber::set_default(logs.subscriber());
+    let mut held = Vec::new();
+    for _ in 1..pool.status().max_size {
+        held.push(pool.get().await.expect("a connection"));
+    }
+    assert_eq!(dispatcher.deliver_due().await.expect("ends quietly"), 0);
+    drop(held);
+    let short = logs
+        .lines()
+        .into_iter()
+        .filter(|line| line.contains("no connection for a consumer"))
+        .count();
+    assert_eq!(
+        short,
+        1,
+        "stopped at the first shortage: {:?}",
+        logs.lines()
+    );
+    assert_eq!(
+        read::<i64>(
+            &database,
+            "SELECT ((SELECT sum(attempts) FROM people.outbox) + (SELECT sum(attempts) FROM people.outbox_global))::bigint"
+        )
+        .await,
+        0
+    );
+}
+
+/// A consumer that failed before the pool ran short is still charged for it, so its event can reach the limit.
+#[tokio::test]
+async fn a_failure_before_a_shortage_is_still_charged() {
+    let World {
+        pool,
+        ledger,
+        database,
+        ..
+    } = world().await;
+    let held = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let hog = Arc::new(support::Hog {
+        pool: pool.clone(),
+        held: held.clone(),
+    });
+    let consumers: Vec<Arc<dyn Consumer>> = vec![hog, ledger];
+    let dispatcher = Dispatcher::new(pool.clone(), &["people"], consumers)
+        .await
+        .expect("a dispatcher");
+    record(&pool, 1, &JOINED, true).await;
+    // Every connection but the dispatcher's own and the one the first consumer uses.
+    let mut taken = Vec::new();
+    for _ in 2..pool.status().max_size {
+        taken.push(pool.get().await.expect("a connection"));
+    }
+    dispatcher.deliver_due().await.expect("ends quietly");
+    drop(taken);
+    held.lock().expect("unpoisoned").clear();
+    assert_eq!(
+        read::<i64>(
+            &database,
+            "SELECT attempts FROM people.outbox WHERE delivered_at IS NULL"
+        )
+        .await,
+        1
+    );
 }

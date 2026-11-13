@@ -19,7 +19,8 @@ business, such as an operator's sign-in. Each row keeps the event's ID, producer
 
 ## Hot paths
 
-- **Recording.** One insert per event, in Audit's own transaction for the event's tenant, beside the inbox insert.
+- **Recording.** One insert per event, in Audit's own transaction, for the event's tenant when it has one, beside
+  the inbox insert.
   Each table has its primary key and one unique index on the event: `(tenant_id, event_id)` for `records`, and
   `event_id` for `records_global`.
 - **Reading.** No use case reads the record yet. The first one, such as a business viewing its sign-ins, adds an
