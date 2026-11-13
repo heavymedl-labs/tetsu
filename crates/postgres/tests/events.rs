@@ -54,7 +54,18 @@ mod support {
             version: 2,
             sql: INBOX,
         },
+        // A second producer, so a pass has more than one outbox to get through.
+        Migration {
+            version: 3,
+            sql: OUTBOX,
+        },
     ];
+
+    /// A second consumer, with its own inbox and nothing else.
+    pub const JOURNAL: &[Migration] = &[Migration {
+        version: 1,
+        sql: INBOX,
+    }];
 
     /// Writes one row per event, and counts its calls, which a repeat its inbox skips does not reach.
     #[derive(Default)]
@@ -63,14 +74,19 @@ mod support {
         pub failing: AtomicBool,
         /// Never answers, as a consumer stuck on an outside call would.
         pub hanging: AtomicBool,
+        /// Fails with a database error whose text holds a person's email.
+        pub leaky: AtomicBool,
     }
 
-    /// A consumer that must never lose an event, as Audit must not, and that always fails.
-    pub struct Unready;
+    /// A consumer that must never lose an event, as Audit must not, which fails a given number of times and then
+    /// applies events by recording them in its inbox alone.
+    pub struct Journal {
+        pub failures_left: AtomicUsize,
+    }
 
-    impl Consumer for Unready {
+    impl Consumer for Journal {
         fn schema(&self) -> &'static str {
-            "ledger"
+            "journal"
         }
         fn wants(&self, event: &Event) -> bool {
             event.producer == "people"
@@ -79,7 +95,19 @@ mod support {
             true
         }
         fn apply<'a>(&'a self, _: &'a Transaction<'a>, _: &'a Event) -> Applied<'a> {
-            Box::pin(async { Err("not ready".into()) })
+            let failing = self
+                .failures_left
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                    left.checked_sub(1)
+                })
+                .is_ok();
+            Box::pin(async move {
+                if failing {
+                    Err("not ready".into())
+                } else {
+                    Ok(())
+                }
+            })
         }
     }
 
@@ -98,6 +126,11 @@ mod support {
                 }
                 if self.hanging.load(Ordering::SeqCst) {
                     std::future::pending::<()>().await;
+                }
+                if self.leaky.load(Ordering::SeqCst) {
+                    transaction
+                        .execute("SELECT 'lee.park@example.com'::uuid", &[])
+                        .await?;
                 }
                 let sql = match event.tenant {
                     Some(_) => "INSERT INTO ledger.effects (tenant_id, event_id)
@@ -121,7 +154,11 @@ mod support {
         let database = fresh_database().await.expect("a test database");
         migrate(
             &database,
-            &[&Named("people", PEOPLE), &Named("ledger", LEDGER)],
+            &[
+                &Named("people", PEOPLE),
+                &Named("ledger", LEDGER),
+                &Named("journal", JOURNAL),
+            ],
         )
         .await
         .expect("migrates");
@@ -568,7 +605,7 @@ async fn outboxes_and_inboxes_follow_the_isolation_rules() {
     let World { database, .. } = world().await;
     let mut client = connect(&database).await.expect("connects");
     assert_eq!(
-        tetsu_postgres::isolation_violations(&mut client, &["people", "ledger"])
+        tetsu_postgres::isolation_violations(&mut client, &["people", "ledger", "journal"])
             .await
             .expect("checks"),
         Vec::<String>::new()
@@ -716,8 +753,9 @@ async fn a_busy_pool_costs_no_attempts() {
     for _ in 1..pool.status().max_size {
         held.push(pool.get().await.expect("a connection"));
     }
-    let _ = dispatcher.deliver_due().await;
+    let passed = dispatcher.deliver_due().await;
     drop(held);
+    assert_eq!(passed.expect("a shortage ends the pass quietly"), 0);
     assert_eq!(
         read::<i64>(&database, "SELECT attempts FROM people.outbox").await,
         0
@@ -751,7 +789,10 @@ async fn a_consumer_that_never_answers_fails_after_its_time() {
 #[tokio::test]
 async fn an_event_a_never_lose_consumer_fails_keeps_retrying() {
     let World { pool, database, .. } = world().await;
-    let consumers: Vec<Arc<dyn Consumer>> = vec![Arc::new(support::Unready)];
+    let journal = Arc::new(support::Journal {
+        failures_left: AtomicUsize::new(usize::MAX),
+    });
+    let consumers: Vec<Arc<dyn Consumer>> = vec![journal];
     let dispatcher = Dispatcher::new(pool.clone(), &["people"], consumers)
         .await
         .expect("a dispatcher");
@@ -765,4 +806,85 @@ async fn an_event_a_never_lose_consumer_fails_keeps_retrying() {
         MAX_ATTEMPTS + 2,
         "marked kept, and still tried"
     );
+}
+
+/// A never-lose consumer that failed once and then recovered does not keep an event another consumer goes on
+/// failing, so that event still stops for a fix.
+#[tokio::test]
+async fn an_event_is_kept_only_for_a_never_lose_consumer_still_failing() {
+    let World {
+        pool,
+        ledger,
+        database,
+        ..
+    } = world().await;
+    ledger.failing.store(true, Ordering::SeqCst);
+    let journal = Arc::new(support::Journal {
+        failures_left: AtomicUsize::new(1),
+    });
+    let consumers: Vec<Arc<dyn Consumer>> = vec![journal, ledger.clone()];
+    let dispatcher = Dispatcher::new(pool.clone(), &["people"], consumers)
+        .await
+        .expect("a dispatcher");
+    record(&pool, 1, &JOINED, true).await;
+    for _ in 0..MAX_ATTEMPTS + 2 {
+        run_as_owner(&database, "UPDATE people.outbox SET due_at = now()").await;
+        dispatcher.deliver_due().await.expect("tries");
+    }
+    assert_eq!(
+        read::<i64>(
+            &database,
+            "SELECT attempts FROM people.outbox WHERE NOT keep"
+        )
+        .await,
+        MAX_ATTEMPTS,
+        "stopped, not kept"
+    );
+}
+
+/// An outbox that cannot be read is reported, and the other producers' events are still delivered.
+#[tokio::test]
+async fn one_broken_outbox_holds_up_no_other() {
+    let World {
+        pool,
+        dispatcher,
+        database,
+        ..
+    } = world().await;
+    record(&pool, 1, &JOINED, true).await;
+    // The ledger's outbox comes first, and the delivery role can no longer read it.
+    run_as_owner(
+        &database,
+        "REVOKE SELECT ON ledger.outbox FROM tetsu_delivery",
+    )
+    .await;
+    assert!(
+        dispatcher.deliver_due().await.is_err(),
+        "reports the broken outbox"
+    );
+    assert_eq!(
+        read::<i64>(&database, "SELECT count(*) FROM ledger.effects").await,
+        1,
+        "delivers the people's event anyway"
+    );
+}
+
+/// A consumer's database error is logged by its SQL state alone, since its text can quote a row's values.
+#[tokio::test]
+async fn a_consumer_s_database_error_is_logged_without_its_values() {
+    let World {
+        pool,
+        ledger,
+        dispatcher,
+        database: _database,
+    } = world().await;
+    ledger.leaky.store(true, Ordering::SeqCst);
+    record(&pool, 1, &JOINED, true).await;
+    let logs = Logs::default();
+    let _guard = tracing::subscriber::set_default(logs.subscriber());
+    dispatcher.deliver_due().await.expect("tries");
+    let text = logs.lines().join("\n");
+    assert!(text.contains("event not applied"), "{text}");
+    assert!(text.contains("22P02"), "{text}");
+    assert!(!text.contains("lee.park"), "{text}");
 }

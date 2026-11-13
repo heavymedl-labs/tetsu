@@ -134,11 +134,16 @@ UPDATE tenancy.addresses SET address = '/new-slug' WHERE address = '/login';
 An event that fails 10 times logs an `ERROR` line, `event stopped retrying`, with its ID, type, and each
 failing consumer ([ADR-0043](../adr/0043-domain-event-delivery.md)). A kept event logs `event keeps failing`
 instead and goes on retrying hourly. Once the consumer is fixed and deployed, replay a stopped event by making it
-due again, as `tetsu_owner`, with the schema of the module that recorded it:
+due again. `tetsu_owner` cannot: row-level security binds it and shows it no tenant's events. Connect with the
+service's `DATABASE_URL`, as `tetsu_app`, and act as the delivery role, which may settle every tenant's events,
+with the schema of the module that recorded it:
 
 ```sql
+BEGIN;
+SET LOCAL ROLE tetsu_delivery;
 UPDATE identity.outbox SET attempts = 0, due_at = now() WHERE id = '<event ID>';
+COMMIT;
 ```
 
-Use `outbox_global` for an event that belongs to no business. Consumers skip what they already applied, so a
-replay repeats nothing.
+Check that it reports `UPDATE 1`. Use `outbox_global` for an event that belongs to no business. Consumers skip
+what they already applied, so a replay repeats nothing.
