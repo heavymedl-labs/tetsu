@@ -792,8 +792,7 @@ mod tests {
 
     #[test]
     fn a_folder_without_a_file_has_no_local_settings() {
-        let folder = std::env::temp_dir().join(format!("tetsu-no-env-{}", std::process::id()));
-        std::fs::create_dir_all(&folder).unwrap();
+        let folder = tetsu_postgres::test_support::Scratch::folder("no-env").unwrap();
         assert_eq!(Local::load(&folder), Ok(Local::default()));
         std::fs::write(folder.join(".env"), "TETSU_DEMO=false\n").unwrap();
         assert_eq!(
@@ -802,15 +801,13 @@ mod tests {
                 .or(Err(VarError::NotPresent), "TETSU_DEMO"),
             Ok("false".into())
         );
-        std::fs::remove_dir_all(&folder).unwrap();
     }
 
     #[test]
     fn a_file_that_cannot_be_read_is_an_error() {
-        let folder = std::env::temp_dir().join(format!("tetsu-bad-env-{}", std::process::id()));
+        let folder = tetsu_postgres::test_support::Scratch::folder("bad-env").unwrap();
         std::fs::create_dir_all(folder.join(".env")).unwrap();
         let error = Local::load(&folder).unwrap_err();
         assert!(error.starts_with(".env could not be read: "), "{error}");
-        std::fs::remove_dir_all(&folder).unwrap();
     }
 }

@@ -127,14 +127,13 @@ async fn every_module_follows_the_isolation_rules() {
 #[tokio::test]
 async fn a_local_env_file_supplies_settings_and_the_environment_wins() {
     let settings = fresh_database().await.expect("a test database");
-    let folder = std::env::temp_dir().join(format!("tetsu-env-{}", std::process::id()));
-    std::fs::create_dir_all(&folder).expect("a folder");
+    let folder = tetsu_postgres::test_support::Scratch::folder("env").expect("a folder");
     let run = |env_file: &str, url: Option<&str>| {
         std::fs::write(folder.join(".env"), env_file).expect("writes .env");
         let mut command = Command::new(env!("CARGO_BIN_EXE_tetsu"));
         command
             .arg("migrate")
-            .current_dir(&folder)
+            .current_dir(&*folder)
             .env_remove("DATABASE_URL")
             .env_remove("DATABASE_TLS");
         if let Some(url) = url {
@@ -164,5 +163,4 @@ async fn a_local_env_file_supplies_settings_and_the_environment_wins() {
     let stderr = String::from_utf8_lossy(&broken.stderr);
     assert!(stderr.contains(".env line 2 is not NAME=value"), "{stderr}");
     assert!(!stderr.contains("s3cret"), "{stderr}");
-    std::fs::remove_dir_all(&folder).expect("removes the folder");
 }

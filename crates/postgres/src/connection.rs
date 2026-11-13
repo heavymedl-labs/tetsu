@@ -312,10 +312,8 @@ mod tests {
         }
     }
 
-    fn written(name: &str, contents: &str) -> std::path::PathBuf {
-        let path = std::env::temp_dir().join(format!("tetsu-{}-{name}", std::process::id()));
-        std::fs::write(&path, contents).unwrap();
-        path
+    fn written(name: &str, contents: &str) -> crate::test_support::Scratch {
+        crate::test_support::Scratch::file(name, contents).unwrap()
     }
 
     #[test]
@@ -335,7 +333,6 @@ mod tests {
             .with_ca_file(&text)
             .unwrap_err()
             .to_string();
-        std::fs::remove_file(&text).unwrap();
         assert_eq!(error, "the CA file holds no PEM certificate");
         assert!(!error.contains("fake-secret"), "{error}");
     }
@@ -359,7 +356,6 @@ mod tests {
                 .with_ca_file(&path)
                 .unwrap_err()
                 .to_string();
-            std::fs::remove_file(&path).unwrap();
             assert_eq!(error, expected, "{name}");
         }
     }
@@ -387,7 +383,6 @@ mod tests {
         let settings = Settings::new("postgres://h/db")
             .with_ca_file(&path)
             .unwrap();
-        std::fs::remove_file(&path).unwrap();
         assert_eq!(settings.roots().len(), 1);
     }
 }

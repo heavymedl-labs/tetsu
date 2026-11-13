@@ -1,7 +1,8 @@
 //! Fresh databases for tests. `TEST_DATABASE_URL` points at a Postgres the tests may create databases on.
 //!
 //! Every database is dropped when its test is done with it, including when the test fails or panics. One
-//! left by a run that was killed is swept by a later run (#43).
+//! left by a run that was killed is swept by a later run (#43). Temporary files work the same way: a [`Scratch`]
+//! is removed when dropped, and `scripts/clean.py` sweeps one a killed run left (#124).
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -255,8 +256,73 @@ fn quoted(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
 }
 
+/// A file or folder in the system's temporary folder, named `tetsu-<process>-<name>`, and removed when dropped,
+/// including when its test fails or panics, so failing tests leave nothing behind (#124).
+pub struct Scratch(std::path::PathBuf);
+
+impl Scratch {
+    /// A file holding `contents`.
+    ///
+    /// # Errors
+    /// Fails if the file cannot be written.
+    pub fn file(name: &str, contents: &str) -> std::io::Result<Self> {
+        let scratch = Self::named(name);
+        std::fs::write(&scratch.0, contents)?;
+        Ok(scratch)
+    }
+
+    /// An empty folder.
+    ///
+    /// # Errors
+    /// Fails if the folder cannot be made.
+    pub fn folder(name: &str) -> std::io::Result<Self> {
+        let scratch = Self::named(name);
+        std::fs::create_dir_all(&scratch.0)?;
+        Ok(scratch)
+    }
+
+    fn named(name: &str) -> Self {
+        Self(std::env::temp_dir().join(format!("tetsu-{}-{name}", std::process::id())))
+    }
+}
+
+impl std::ops::Deref for Scratch {
+    type Target = std::path::Path;
+
+    fn deref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl AsRef<std::path::Path> for Scratch {
+    fn as_ref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0).or_else(|_| std::fs::remove_file(&self.0));
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn scratch_files_and_folders_go_when_dropped_even_by_a_panic() {
+        let file = Scratch::file("scratch.txt", "x").unwrap();
+        let folder = Scratch::folder("scratch-folder").unwrap();
+        std::fs::write(folder.join("inside"), "y").unwrap();
+        let (file_path, folder_path) = (file.to_path_buf(), folder.to_path_buf());
+        assert!(file_path.is_file() && folder_path.is_dir());
+        let panicked = std::panic::catch_unwind(move || {
+            let _held = (file, folder);
+            panic!("a failing test");
+        });
+        assert!(panicked.is_err());
+        assert!(!file_path.exists() && !folder_path.exists());
+    }
+
     use super::*;
 
     #[test]

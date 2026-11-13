@@ -1,9 +1,8 @@
 //! Connection rules from ADR-0011 and ADR-0013.
 
-use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use tetsu_postgres::test_support::fresh_database;
+use tetsu_postgres::test_support::{Scratch, fresh_database};
 use tetsu_postgres::{Settings, Tls, pool};
 
 /// Real timeouts are seconds long, so tests that wait them out use these instead. The defaults are pinned in
@@ -83,15 +82,13 @@ async fn tls_refuses_a_certificate_no_trusted_authority_signed() {
 /// self-signed for localhost, so trusting it makes it the authority.
 async fn server_certificate(
     database: &tetsu_postgres::test_support::TestDatabase,
-) -> Result<PathBuf, tetsu_postgres::Error> {
+) -> Result<Scratch, tetsu_postgres::Error> {
     let client = tetsu_postgres::connect(database).await?;
     let pem: String = client
         .query_one("SELECT pg_read_file(current_setting('ssl_cert_file'))", &[])
         .await?
         .try_get(0)?;
-    let path = std::env::temp_dir().join(format!("{}.pem", database.name()));
-    std::fs::write(&path, pem)?;
-    Ok(path)
+    Ok(Scratch::file(&format!("{}.pem", database.name()), &pem)?)
 }
 
 /// What rustls says when a trusted certificate names another host.

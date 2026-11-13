@@ -1,5 +1,6 @@
 """scripts/clean.py: which servers it stops, and how it is called."""
 
+import os
 import shutil
 import tempfile
 import unittest
@@ -19,6 +20,8 @@ class CleanTest(unittest.TestCase):
     def setUp(self):
         self.proc = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: shutil.rmtree(self.proc))
+        self.temporary = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: shutil.rmtree(self.temporary))
 
     def process(self, pid, name, exe, env):
         folder = self.proc / str(pid)
@@ -53,7 +56,7 @@ class CleanTest(unittest.TestCase):
         self.process(12, "postgres", "/usr/bin/postgres", environ(TEST_URL))
         (self.proc / "self").mkdir()
         with mock.patch("os.kill") as kill:
-            self.assertEqual(clean.main(["--test-servers"], proc=self.proc), 0)
+            self.assertEqual(clean.main(["--test-servers"], proc=self.proc, temporary=self.temporary), 0)
         self.assertEqual([call.args[0] for call in kill.call_args_list], [10])
 
     def test_a_full_clean_stops_everything_built_here(self):
@@ -64,7 +67,7 @@ class CleanTest(unittest.TestCase):
         self.process(21, "tetsu", "/usr/local/bin/tetsu", environ(b"PORT=8080"))
         with mock.patch("os.kill") as kill, mock.patch("subprocess.run") as run:
             run.return_value.returncode = 0
-            self.assertEqual(clean.main([], proc=self.proc, root=root), 0)
+            self.assertEqual(clean.main([], proc=self.proc, root=root, temporary=self.temporary), 0)
         self.assertEqual([call.args[0] for call in kill.call_args_list], [20])
         self.assertFalse((root / "mutants.out").exists())
         self.assertIn("drop_test_databases", run.call_args_list[0].args[0])
@@ -79,9 +82,32 @@ class CleanTest(unittest.TestCase):
         with mock.patch("os.kill", side_effect=ProcessLookupError):
             clean.stop([99])
 
+    def test_temporary_files_go_only_once_their_test_process_is_gone(self):
+        temporary = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: shutil.rmtree(temporary))
+        for name in [
+            "tetsu-111-server.pem",
+            "t_1794261454_111_6.pem",
+            "tetsu-222-env",
+            "tetsu-review-notes",
+            "x.pem",
+        ]:
+            (temporary / name).write_text("")
+        (temporary / "tetsu-111-folder").mkdir()
+        (temporary / "tetsu-111-folder" / ".env").write_text("")
+        with mock.patch("os.kill"):
+            clean.main(["--test-servers"], proc=self.proc, temporary=temporary, alive=lambda pid: pid == 222)
+        self.assertEqual(
+            sorted(p.name for p in temporary.iterdir()), ["tetsu-222-env", "tetsu-review-notes", "x.pem"]
+        )
+
+    def test_only_a_process_that_exists_is_running(self):
+        self.assertTrue(clean.running(os.getpid()))
+        self.assertFalse(clean.running(2**30))
+
     def test_unknown_arguments_print_the_usage(self):
         with mock.patch("sys.stderr"):
-            self.assertEqual(clean.main(["--all"], proc=self.proc), 2)
+            self.assertEqual(clean.main(["--all"], proc=self.proc, temporary=self.temporary), 2)
 
 
 if __name__ == "__main__":
