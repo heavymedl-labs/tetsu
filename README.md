@@ -30,7 +30,7 @@ demo. Tenant isolation is in place, and sign-in is being built.
 
 - [ARCHITECTURE.md](ARCHITECTURE.md): the system's shape and invariants
 - [docs/adr](docs/adr/README.md): decisions and the reasoning behind them
-- [docs/GLOSSARY.md](docs/GLOSSARY.md): shared vocabulary
+- [docs/glossary.md](docs/glossary.md): shared vocabulary
 - [CONSTRAINTS.md](CONSTRAINTS.md): the quality bar
 - [docs/reference-businesses](docs/reference-businesses/README.md): fictional
   businesses we check the product against
@@ -38,6 +38,8 @@ demo. Tenant isolation is in place, and sign-in is being built.
   informs decisions
 - [CONTRIBUTING.md](CONTRIBUTING.md): how work moves from issue to merge
 - [AGENTS.md](AGENTS.md): rules for coding agents, and the checks to run
+- `.config/`: settings only our own scripts read, such as the dependency and secret-scan rules. Tool settings
+  that editors also read, such as `ruff.toml` and `biome.json`, stay at the root, where editors look
 - [Milestones](https://github.com/heavymedl-labs/tetsu/milestones): the roadmap,
   from walking skeleton to each reference business going live
 - [Tetsu project](https://github.com/orgs/heavymedl-labs/projects/1): tracked work

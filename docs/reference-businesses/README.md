@@ -33,7 +33,7 @@ product decision, not a test fix.
 - Keep them fictional. Base details on the
   [Market Scan](../research/market-scan/README.md) and, when they happen,
   owner interviews, never on a real business without its consent.
-- Use the [glossary](../GLOSSARY.md) terms. Industry words such as "class" or
+- Use the [glossary](../glossary.md) terms. Industry words such as "class" or
   "stylist" belong here, not in platform docs.
 - Every person, price, and policy stays consistent across both pages and any
   test built on them.

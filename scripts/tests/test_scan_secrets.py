@@ -1,4 +1,4 @@
-"""scan_secrets.sh must stop each secret form ADR-0027 names, at commit, at push, and in history, and must
+"""scan-secrets.sh must stop each secret form ADR-0027 names, at commit, at push, and in history, and must
 pass code that only reads a secret. Planted values are built here at run time, so this file holds none."""
 
 import base64
@@ -13,7 +13,7 @@ from pathlib import Path
 
 from scripts.tests.support import ROOT, run, write
 
-SCRIPT = ROOT / "scripts" / "scan_secrets.sh"
+SCRIPT = ROOT / "scripts" / "scan-secrets.sh"
 BETTERLEAKS = ROOT / ".tools" / "bin" / "betterleaks"
 NEON_HOST = "ep-cool-river-a1b2c3d4.us-east-2.aws.neon.tech"
 # Built here so this file does not itself hold the comment the scan must ignore.
@@ -97,8 +97,8 @@ class ScanSecrets(unittest.TestCase):
         self.configure(self.repo)
         (self.repo / "scripts").mkdir()
         shutil.copy(SCRIPT, self.repo / "scripts")
-        shutil.copy(ROOT / ".betterleaks.toml", self.repo)
-        write(self.repo / ".betterleaksignore", "# none\n")
+        write(self.repo / ".config" / "betterleaks.toml", (ROOT / ".config" / "betterleaks.toml").read_text())
+        write(self.repo / ".config" / "betterleaks-ignore", "# none\n")
         (self.repo / ".tools" / "bin").mkdir(parents=True)
         (self.repo / ".tools" / "bin" / "betterleaks").symlink_to(BETTERLEAKS)
         write(self.repo / ".gitignore", "/.tools\n")
@@ -119,7 +119,7 @@ class ScanSecrets(unittest.TestCase):
         self.git("commit", "-q", "-m", message)
 
     def scan(self, *args, stdin=None):
-        return run([self.repo / "scripts" / "scan_secrets.sh", *args], self.repo, input=stdin)
+        return run([self.repo / "scripts" / "scan-secrets.sh", *args], self.repo, input=stdin)
 
     def push(self, ref="HEAD", remote_ref="refs/heads/main"):
         line = f"refs/heads/main {self.git('rev-parse', ref)} {remote_ref} {'0' * 40}\n"
@@ -222,7 +222,7 @@ class ScanSecrets(unittest.TestCase):
         self.git("add", "a.txt")
         self.git("commit", "-q", "-m", f"fix: thing\n\n{leaks()['github token']}")
         leak = self.git("rev-parse", "HEAD")
-        write(self.repo / ".betterleaksignore", f"# rotated\n{leak}:github-pat:3\n")
+        write(self.repo / ".config" / "betterleaks-ignore", f"# rotated\n{leak}:github-pat:3\n")
         self.assertClean(self.scan("--history"))
         self.git("commit", "-q", "--allow-empty", "-m", "later")
         self.assertClean(self.scan("--history"))
@@ -292,7 +292,7 @@ class ScanSecrets(unittest.TestCase):
 
     def test_a_real_push_through_a_hook_is_stopped(self):
         hooks = self.repo / "hooks"
-        hook = '#!/bin/sh\nexec "$(git rev-parse --show-toplevel)/scripts/scan_secrets.sh" --push "$1"\n'
+        hook = '#!/bin/sh\nexec "$(git rev-parse --show-toplevel)/scripts/scan-secrets.sh" --push "$1"\n'
         write(hooks / "pre-push", hook)
         (hooks / "pre-push").chmod(0o755)
         self.git("config", "core.hooksPath", str(hooks))
@@ -323,7 +323,7 @@ class ScanSecrets(unittest.TestCase):
         self.assertNotIn(value, result.stdout + result.stderr)
 
     def test_an_ignore_entry_without_a_commit_is_refused(self):
-        write(self.repo / ".betterleaksignore", "src/a.rs:github-pat:1\n")
+        write(self.repo / ".config" / "betterleaks-ignore", "src/a.rs:github-pat:1\n")
         result = self.scan("--staged")
         self.assertEqual(result.returncode, 1)
         self.assertIn("must start with the commit", result.stderr)
@@ -340,36 +340,36 @@ class ScanSecrets(unittest.TestCase):
             line = f"refs/heads/main {'1' * 40} refs/heads/main {'0' * 40}\n"
             self.assertNotEqual(self.scan("--push", "origin", stdin=line).returncode, 0)
         with self.subTest(case="missing config"):
-            (self.repo / ".betterleaks.toml").rename(self.repo / "moved.toml")
+            (self.repo / ".config" / "betterleaks.toml").rename(self.repo / "moved.toml")
             self.assertNotEqual(self.scan("--history").returncode, 0)
-            (self.repo / "moved.toml").rename(self.repo / ".betterleaks.toml")
+            (self.repo / "moved.toml").rename(self.repo / ".config" / "betterleaks.toml")
         with self.subTest(case="not a repository"):
             plain = self.tmp / "plain"
             shutil.copytree(self.repo, plain, ignore=shutil.ignore_patterns(".git"), symlinks=True)
             self.assertNotEqual(
-                run([plain / "scripts" / "scan_secrets.sh", "--history"], plain).returncode, 0
+                run([plain / "scripts" / "scan-secrets.sh", "--history"], plain).returncode, 0
             )
 
     def test_the_scan_reads_rules_and_ignores_only_from_its_own_files(self):
         with self.subTest(case="symlinked ignore list"):
             write(self.tmp / "elsewhere", "# anything\n")
-            (self.repo / ".betterleaksignore").unlink()
-            (self.repo / ".betterleaksignore").symlink_to(self.tmp / "elsewhere")
+            (self.repo / ".config" / "betterleaks-ignore").unlink()
+            (self.repo / ".config" / "betterleaks-ignore").symlink_to(self.tmp / "elsewhere")
             result = self.scan("--staged")
             self.assertEqual(result.returncode, 1)
             self.assertIn("must be a regular file", result.stderr)
-        write_ignore = self.repo / ".betterleaksignore"
+        write_ignore = self.repo / ".config" / "betterleaks-ignore"
         write_ignore.unlink()
         write(write_ignore, "# none\n")
         with self.subTest(case="symlinked config"):
-            config = self.repo / ".betterleaks.toml"
+            config = self.repo / ".config" / "betterleaks.toml"
             (self.tmp / "loose.toml").write_text(config.read_text())
             config.rename(self.tmp / "real.toml")
             config.symlink_to(self.tmp / "loose.toml")
             self.assertIn("must be a regular file", self.scan("--staged").stderr)
             config.unlink()
             (self.tmp / "real.toml").rename(config)
-        ignore = self.repo / ".betterleaksignore"
+        ignore = self.repo / ".config" / "betterleaks-ignore"
         for case in ("missing", "folder"):
             with self.subTest(case=f"{case} ignore list"):
                 ignore.unlink()
@@ -381,7 +381,7 @@ class ScanSecrets(unittest.TestCase):
                 if case == "folder":
                     ignore.rmdir()
                 write(ignore, "# none\n")
-        config = self.repo / ".betterleaks.toml"
+        config = self.repo / ".config" / "betterleaks.toml"
         original = config.read_text()
         dotted = original.replace("[extend]\nuseDefault = true", 'extend.path = "x.toml"')
         for form in (
@@ -431,7 +431,7 @@ class ScanSecrets(unittest.TestCase):
                 self.assertEqual(self.alone(rule, "\n".join(READS)), 0)
 
     def alone(self, rule, text):
-        config = ["-c", ".betterleaks.toml", "--isolate-rule", rule, "--no-banner", "--redact"]
+        config = ["-c", ".config/betterleaks.toml", "--isolate-rule", rule, "--no-banner", "--redact"]
         return run([BETTERLEAKS, "stdin", *config], self.repo, input=text + "\n").returncode
 
     def test_an_unknown_mode_is_a_usage_error(self):

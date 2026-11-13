@@ -67,7 +67,7 @@ done
 
 # Checked before any slow stage, even the linters, so a clone set up before the nightly was pinned, or since its
 # date moved, learns at once. Otherwise rustup could also install it alone, without the coverage tools.
-nightly="$(<.nightly-toolchain)"
+nightly="$(<.config/nightly-toolchain)"
 if [[ "$fast" == false ]]; then
   components="$(rustup component list --toolchain "$nightly" --installed 2>/dev/null || true)"
   if [[ $'\n'"$components" != *$'\n'llvm-tools* ]]; then
@@ -88,7 +88,7 @@ lint() {
   local migrations=()
   while IFS= read -r file; do migrations+=("$file"); done < <(find crates -path '*/migrations/*.sql' | sort)
   if ((${#migrations[@]} > 0)); then
-    .tools/bin/squawk "${migrations[@]}"
+    .tools/bin/squawk --config .config/squawk.toml "${migrations[@]}"
   fi
   local sql=()
   while IFS= read -r file; do sql+=("$file"); done < <(find crates benchmarks -name '*.sql' 2>/dev/null | sort)
@@ -107,7 +107,7 @@ lint() {
 lint
 if [[ "$fast" == true ]]; then
   # The pre-commit hook runs this mode, so staged secrets stop here (ADR-0027).
-  scripts/scan_secrets.sh --staged
+  scripts/scan-secrets.sh --staged
   exit 0
 fi
 
@@ -130,7 +130,7 @@ if [[ -z "${TEST_DATABASE_URL:-}" ]]; then
 fi
 
 python3 scripts/floor_guard.py "$@"
-scripts/scan_secrets.sh --history
+scripts/scan-secrets.sh --history
 # Each script test in its own process, one per core, so the slowest one sets the time.
 python3 scripts/parallel_unittest.py scripts/tests .
 scripts/check-adrs.sh
@@ -138,20 +138,21 @@ python3 scripts/check_doc_sizes.py
 python3 scripts/check_secrets.py
 
 # Dependencies (ADR-0028). The version is checked, not only that the tool exists. Advisories need the network:
-# when the fetch fails, the check runs offline on a cache deny.toml lets be at most 7 days old.
+# when the fetch fails, the check runs offline on a cache .config/deny.toml lets be at most 7 days old.
 if [[ "$(cargo deny --version 2>/dev/null)" != "cargo-deny 0.20.2" ]]; then
   echo "error: cargo-deny 0.20.2 is needed. Run scripts/install-tools.sh" >&2
   exit 1
 fi
 offline=()
-if ! cargo deny fetch >/dev/null 2>&1; then
+if ! cargo deny --config .config/deny.toml fetch >/dev/null 2>&1; then
   echo "warning: could not fetch the advisory database; checking against the cached copy" >&2
   offline=(--offline)
 fi
-cargo deny ${offline[@]+"${offline[@]}"} check --hide-inclusion-graph -D advisory-not-detected
-python3 scripts/check_dated_entries.py deny.toml advisories ignore
-python3 scripts/check_dated_entries.py npm-checks.toml advisories ignore
-python3 scripts/check_dated_entries.py npm-checks.toml overrides entries
+cargo deny --config .config/deny.toml ${offline[@]+"${offline[@]}"} check --hide-inclusion-graph \
+  -D advisory-not-detected
+python3 scripts/check_dated_entries.py .config/deny.toml advisories ignore
+python3 scripts/check_dated_entries.py .config/npm-checks.toml advisories ignore
+python3 scripts/check_dated_entries.py .config/npm-checks.toml overrides entries
 
 # Limits are in ADR-0015 and ADR-0016. Cargo skips the benchmark harness, except for formatting.
 work="$(mktemp -d)"
@@ -205,7 +206,7 @@ merge="$(git merge-base "$base" HEAD)"
 # Coverage and mutation testing give the same result for the same Rust, so a pass is recorded against a
 # fingerprint of every input they read: the Rust and its build settings, the checks themselves, and the base the
 # mutants are drawn against. A later run outside CI that finds the same fingerprint skips both and says so.
-rust_inputs=(crates Cargo.toml Cargo.lock rust-toolchain.toml .nightly-toolchain .cargo scripts/check.sh
+rust_inputs=(crates Cargo.toml Cargo.lock rust-toolchain.toml .config/nightly-toolchain .cargo scripts/check.sh
   scripts/check_coverage.py)
 fingerprint="$({
   echo "base $merge"
@@ -228,7 +229,7 @@ if [[ "$reuse" == false ]]; then
   CARGO_TARGET_DIR=target/nightly cargo +"$nightly" test --doc
   cargo metadata --no-deps --format-version 1 >"$work/metadata.json"
   python3 scripts/check_coverage.py "$work/metadata.json" "$work/coverage.json"
-  # Branches need a nightly compiler (ADR-0020), pinned in .nightly-toolchain, in a build folder of its own. The
+  # Branches need a nightly compiler (ADR-0020), pinned in .config/nightly-toolchain, in a build folder of its own. The
   # stable run above stays the one that tests the code we ship.
   CARGO_TARGET_DIR=target/nightly cargo +"$nightly" llvm-cov --branch --json --summary-only \
     --output-path "$work/branches.json"

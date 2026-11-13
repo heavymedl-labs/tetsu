@@ -26,7 +26,7 @@ protection, or rulesets, so GitHub cannot fence a secret to one job or branch.
 - **Betterleaks scans for secrets,** pinned to v1.10.0. `scripts/install-tools.sh` downloads its release
   archive for the machine's platform, checks the SHA-256 written in the script, and installs it in
   `.tools/bin`. Local machines and CI run the same binary.
-- **`.betterleaks.toml` extends the default rules** with:
+- **`.config/betterleaks.toml` extends the default rules** with:
   - `postgres-password`, for `PGPASSWORD` and `password=` inside a keyword connection string, with
     `postgres-password-first` for a password before the other keywords
   - `provider-key`, for a Render API key (`rnd_`) or Neon role password (`npg_`) wherever it appears
@@ -38,7 +38,7 @@ protection, or rulesets, so GitHub cannot fence a secret to one job or branch.
 
   The research page records each rule's pattern and the tests it passed, including code that only reads a
   secret, which the rules must not flag.
-- **Every scan passes `-c .betterleaks.toml --redact --ignore-gitleaks-allow`.** So findings never print
+- **Every scan passes `-c .config/betterleaks.toml --redact --ignore-gitleaks-allow`.** So findings never print
   the secret, and inline `betterleaks:allow` comments do nothing. Scans never pass `--validation`, so
   nothing leaves the machine. Git scans pass `-m`, so changes made in a merge commit are scanned too.
 - **It runs in three places:**
@@ -58,19 +58,19 @@ protection, or rulesets, so GitHub cannot fence a secret to one job or branch.
   - A test that needs a value the scanner must catch builds it when the test runs, never as a literal.
   - Keys and certificates are generated when the test runs, never committed.
   - Docs show secrets only in shortened form, such as `npg_...`.
-- **`.betterleaksignore` lists findings by commit, file, rule, and line.** Commits never change, so an
+- **`.config/betterleaks-ignore` lists findings by commit, file, rule, and line.** Commits never change, so an
   entry cannot drift. The scan refuses an entry without a commit or tag id, which would skip that file and
   line everywhere, and a config that names another file to read rules from. It holds only two kinds of entry, each under a comment saying why:
   - **Fake credentials committed before the scan was adopted,** reviewed once in
     [#81](https://github.com/heavymedl-labs/tetsu/issues/81).
   - **Rotated real secrets left in history,** with the date they were rotated.
 - **The floor guard protects the scan's inputs.** Any changed line, added or removed, in
-  `.betterleaks.toml`, `.betterleaksignore`, or `.gitattributes` needs a `Floor-reason:` trailer recording
+  `.config/betterleaks.toml`, `.config/betterleaks-ignore`, or `.gitattributes` needs a `Floor-reason:` trailer recording
   the maintainer's approval. So does creating a `.gitleaks.toml` or `.gitleaksignore`, which Betterleaks
   would also read.
 - **A secret has leaked** once its value is anywhere outside its store. That includes a pushed commit or
   its message, a CI log, an issue, and an agent's or chat's context. Rotate it at its provider first, then
-  remove it and record its old commit in `.betterleaksignore`.
+  remove it and record its old commit in `.config/betterleaks-ignore`.
 - **Secret values travel straight to their store.** When a CLI creates or prints one, such as a Neon role's
   password, its output is piped into the store, such as `gh secret set` or Render's environment, without
   being shown. If a value is shown anyway, it is rotated.

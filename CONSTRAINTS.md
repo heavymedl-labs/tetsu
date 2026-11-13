@@ -9,7 +9,7 @@ Only the maintainer approves loosening anything here.
 ## Floor
 
 These apply to every change. [scripts/floor_guard.py](scripts/floor_guard.py) catches the common
-forms, [scripts/scan_secrets.sh](scripts/scan_secrets.sh) finds secrets
+forms, [scripts/scan-secrets.sh](scripts/scan-secrets.sh) finds secrets
 ([ADR-0027](docs/adr/0027-secrets-revised.md)), and the [fresh review](docs/review.md) covers the rest. A
 `Floor-reason:` trailer on a commit records the maintainer's approval for the files that commit touches.
 
@@ -17,7 +17,7 @@ forms, [scripts/scan_secrets.sh](scripts/scan_secrets.sh) finds secrets
 - No unfinished stubs or empty error handlers.
 - No skipped or deleted test without a reason in the commit message.
 - No secrets in source.
-- No dependency with an advisory, a license outside [deny.toml](deny.toml)'s list, or a source other than
+- No dependency with an advisory, a license outside [.config/deny.toml](.config/deny.toml)'s list, or a source other than
   crates.io, as cargo-deny checks ([ADR-0028](docs/adr/0028-dependency-checks-revised.md)).
 - No bypassing checks with `--no-verify`.
 - `AGENTS.md` stays at or under 100 lines, because agents load it every session.
@@ -54,7 +54,7 @@ is in [AGENTS.md](AGENTS.md#checks), and docs also get the
 
 | ID | Rule | Path | Reason | Owner | Expires |
 | --- | --- | --- | --- | --- | --- |
-| E1 | Scripts need tests | `scripts/generate-brand.py` | One-off generator, and its output is checked by eye | Maintainer | 2027-02-04 |
+| E1 | Scripts need tests | `scripts/generate_brand.py` | One-off generator, and its output is checked by eye | Maintainer | 2027-02-04 |
 | E2 | Bash and Python coverage, duplication, and boundaries, and Bash complexity | `scripts/` | Tooling only, with no numeric limit, and too small to justify more tools yet, so the fresh review covers these | Maintainer | 2027-02-04 |
 | E4 | SQL coverage, duplication, and complexity | `crates/` | No good tool fits: module tests run every query against Postgres, and the fresh review covers the rest | Maintainer | 2027-02-04 |
 | E5 | TypeScript and CSS tests, coverage, and boundaries | `web/` | Only build configuration and the shared stylesheet exist; the first island ([#88](https://github.com/heavymedl-labs/tetsu/issues/88)) fills these | Maintainer | 2027-02-10 |

@@ -2,7 +2,7 @@
 """Generates the Tetsu brand SVGs in docs/brand: booked time slots on an open
 schedule grid.
 
-usage: scripts/generate-brand.py [output-dir]
+usage: scripts/generate_brand.py [output-dir]
 
 PNG exports for uploading are rendered from the SVGs; see docs/brand/README.md.
 """

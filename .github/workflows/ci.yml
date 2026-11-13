@@ -52,7 +52,7 @@ jobs:
             ~/.rustup/toolchains/nightly-*
             .tools
             target
-          key: tools-${{ hashFiles('scripts/install-tools.sh', 'Cargo.lock', 'rust-toolchain.toml', '.nightly-toolchain') }}
+          key: tools-${{ hashFiles('scripts/install-tools.sh', 'Cargo.lock', 'rust-toolchain.toml', '.config/nightly-toolchain') }}
           # A new key starts from the latest cache, so only what changed is rebuilt, and saves under the new key.
           restore-keys: tools-
       # The settings in check.sh's setup hint, since services take no server flags: throwaway data traded for

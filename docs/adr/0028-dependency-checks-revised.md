@@ -35,7 +35,7 @@ Only fxhash and pin-utils remain. Both are unmaintained and come through monoio,
 - **cargo-deny checks the whole workspace** in `scripts/check.sh`, and so in the pre-push hook and CI. It
   is pinned in `scripts/install-tools.sh`. `check.sh` checks the installed version matches the pin, as
   well as that the tool exists.
-- **`deny.toml` sets every rule explicitly,** since several of cargo-deny's defaults only warn:
+- **`.config/deny.toml` sets every rule explicitly,** since several of cargo-deny's defaults only warn:
   - **Targets:** Linux and macOS, x86-64 and ARM, so Windows-only crates add no noise.
   - **Advisories:** a vulnerability, an unsound or unmaintained crate, or a yanked version fails.
     `check.sh` passes `-D advisory-not-detected`, so an ignore entry that no longer matches fails too.
@@ -56,7 +56,7 @@ Only fxhash and pin-utils remain. Both are unmaintained and come through monoio,
   - `check.sh` fails once a date has passed in UTC.
   - When the issue decides to keep the crate, the entry stays and is still renewed monthly, so each year
     holds twelve reviews of it. The script that reads the entries has tests.
-- **The floor guard protects `deny.toml` for any changed line,** added or removed, and flags creating any
+- **The floor guard protects `.config/deny.toml` for any changed line,** added or removed, and flags creating any
   other file cargo-deny reads: `.deny.toml`, `.cargo/deny.toml`, and the `deny.exceptions.toml` forms. So
   every ignore entry, renewal, license, or source change needs a `Floor-reason:` trailer recording the
   maintainer's approval.
@@ -93,7 +93,7 @@ Only fxhash and pin-utils remain. Both are unmaintained and come through monoio,
 - Yanked status comes from cargo's local index cache, which CI restores with its cache. A crate yanked
   after the cache was saved may pass in CI until `Cargo.lock` changes.
 - The floor guard accepts one `Floor-reason:` trailer for every change to a file in a push, so approval is
-  per push, not per entry. Commits that change `deny.toml` say what each change is.
+  per push, not per entry. Commits that change `.config/deny.toml` say what each change is.
 - Dependabot alerts and cargo-deny ignore entries are separate lists, so dismissing one does not dismiss
   the other. cargo-deny is what reports unmaintained crates.
 - Duplicate-version warnings print on every run and are left alone unless they cost build time.

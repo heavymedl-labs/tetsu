@@ -17,7 +17,7 @@ grid, and one slot runs hot in forge orange. `tetsu` (鉄) means iron.
 | Paper | `#F4F2EE` | Slots on the avatar |
 | Night | `#16181C` | Social preview background |
 
-[scripts/generate-brand.py](../../scripts/generate-brand.py) generates the SVGs.
+[scripts/generate_brand.py](../../scripts/generate_brand.py) generates the SVGs.
 To refresh the PNGs, render the SVGs at their own size, for example with
 headless Chrome:
 

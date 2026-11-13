@@ -15,7 +15,7 @@ EXECUTABLE = stat.S_IRWXU
 # Every cargo stand-in reports the cargo-deny version the environment names, and fails a fetch when asked to.
 CARGO_DENY = (
     'if [ "$1 $2" = "deny --version" ]; then echo "cargo-deny ${DENY_VERSION-0.20.2}"; exit 0; fi\n'
-    'if [ "$1 $2" = "deny fetch" ]; then exit "${DENY_FETCH-0}"; fi\n'
+    'if [ "$1 $2 $3 $4" = "deny --config .config/deny.toml fetch" ]; then exit "${DENY_FETCH-0}"; fi\n'
 )
 
 
@@ -27,7 +27,7 @@ class CheckScript(unittest.TestCase):
         self.log = self.root / "log"
         (self.root / "scripts").mkdir()
         shutil.copy(ROOT / "scripts" / "check.sh", self.root / "scripts")
-        write(self.root / ".nightly-toolchain", "nightly-2026-11-01\n")
+        write(self.root / ".config/nightly-toolchain", "nightly-2026-11-01\n")
         write(self.root / ".nvmrc", "26\n")
         self.bin = self.root / "bin"
         self.stub("node", "echo v26.1.0")
@@ -84,7 +84,7 @@ class CheckScript(unittest.TestCase):
         write(self.root / "crates" / "a" / "migrations" / "0001.sql", "SELECT 1;\n")
         write(self.root / "scripts" / "check-adrs.sh", f'#!/bin/sh\necho adrs >> "{self.log}"\n', EXECUTABLE)
         scan = f'#!/bin/sh\necho "scan $1" >> "{self.log}"\n'
-        write(self.root / "scripts" / "scan_secrets.sh", scan, EXECUTABLE)
+        write(self.root / "scripts" / "scan-secrets.sh", scan, EXECUTABLE)
         write(self.root / ".tools" / "bin" / "betterleaks", "#!/bin/sh\n", EXECUTABLE)
 
     no_database = False
@@ -115,10 +115,10 @@ class CheckScript(unittest.TestCase):
             "unittest",
             "adrs",
             "check_doc_sizes.py",
-            "cargo deny check --hide-inclusion-graph -D advisory-not-detected",
-            "check_dated_entries.py deny.toml advisories",
-            "check_dated_entries.py npm-checks.toml advisories",
-            "check_dated_entries.py npm-checks.toml overrides",
+            "cargo deny --config .config/deny.toml check --hide-inclusion-graph -D advisory-not-detected",
+            "check_dated_entries.py .config/deny.toml advisories",
+            "check_dated_entries.py .config/npm-checks.toml advisories",
+            "check_dated_entries.py .config/npm-checks.toml overrides",
             "check_npm.py . --audit",
             "check_templates.py",
             "npm audit --json --include=dev",
@@ -179,7 +179,7 @@ class CheckScript(unittest.TestCase):
         result = self.check(DENY_FETCH="1")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("cached copy", result.stderr)
-        self.assertIn("cargo deny --offline check", self.log.read_text())
+        self.assertIn("cargo deny --config .config/deny.toml --offline check", self.log.read_text())
 
     def test_npm_must_be_the_version_package_json_names(self):
         result = self.check(NPM_VERSION="11.19.0")
@@ -272,7 +272,7 @@ class CheckScript(unittest.TestCase):
             self.assertNotIn(slow, log)
 
     def test_a_failing_secret_scan_fails_both_modes(self):
-        write(self.root / "scripts" / "scan_secrets.sh", "#!/bin/sh\nexit 1\n", EXECUTABLE)
+        write(self.root / "scripts" / "scan-secrets.sh", "#!/bin/sh\nexit 1\n", EXECUTABLE)
         for args in (("--fast",), ()):
             with self.subTest(args=args):
                 self.assertNotEqual(self.check(*args).returncode, 0)
@@ -567,7 +567,7 @@ class InstallTools(unittest.TestCase):
             log = root / "log"
             (root / "scripts").mkdir()
             shutil.copy(ROOT / "scripts" / "install-tools.sh", root / "scripts")
-            write(root / ".nightly-toolchain", "nightly-2026-11-01\n")
+            write(root / ".config/nightly-toolchain", "nightly-2026-11-01\n")
             write(root / ".tools" / "bin" / "betterleaks", "#!/bin/sh\necho 1.10.0\n", EXECUTABLE)
             for tool in ("cargo", "uv", "rustup", "curl"):
                 write(root / "bin" / tool, f'#!/bin/sh\necho "{tool} $*" >> "{log}"\n', EXECUTABLE)
@@ -593,7 +593,7 @@ class InstallTools(unittest.TestCase):
             log = root / "log"
             (root / "scripts").mkdir()
             shutil.copy(ROOT / "scripts" / "install-tools.sh", root / "scripts")
-            write(root / ".nightly-toolchain", "nightly-2026-11-01\n")
+            write(root / ".config/nightly-toolchain", "nightly-2026-11-01\n")
             write(root / ".tools" / "bin" / "betterleaks", "#!/bin/sh\necho 1.10.0\n", EXECUTABLE)
             for tool in ("cargo", "uv"):
                 write(root / "bin" / tool, "#!/bin/sh\n", EXECUTABLE)
@@ -613,7 +613,7 @@ class InstallTools(unittest.TestCase):
             log = root / "log"
             (root / "scripts").mkdir()
             shutil.copy(ROOT / "scripts" / "install-tools.sh", root / "scripts")
-            write(root / ".nightly-toolchain", "nightly-2026-11-01\n")
+            write(root / ".config/nightly-toolchain", "nightly-2026-11-01\n")
             write(root / ".tools" / "bin" / "betterleaks", "#!/bin/sh\necho 1.9.0\n", EXECUTABLE)
             for tool in ("cargo", "uv", "rustup"):
                 write(root / "bin" / tool, "#!/bin/sh\n", EXECUTABLE)
@@ -640,7 +640,7 @@ class PrePushHook(unittest.TestCase):
         shutil.copy(ROOT / ".githooks" / "pre-push", self.root / ".githooks")
         self.pushed = self.root / "pushed"
         scan = f'[ "$1" = --push ] || exit 5\necho "$2" > "{self.pushed}"\ncat >> "{self.pushed}"'
-        write(self.root / "scripts" / "scan_secrets.sh", f"#!/bin/sh\n{scan}\n", EXECUTABLE)
+        write(self.root / "scripts" / "scan-secrets.sh", f"#!/bin/sh\n{scan}\n", EXECUTABLE)
 
     def test_hook_fails_when_the_script_fails(self):
         write(self.root / "scripts" / "check.sh", "#!/bin/sh\nexit 3\n", EXECUTABLE)
@@ -668,7 +668,7 @@ class PrePushHook(unittest.TestCase):
         self.assertEqual(self.pushed.read_text(), "origin\n" + refs)
 
     def test_hook_fails_and_skips_the_checks_when_the_scan_fails(self):
-        write(self.root / "scripts" / "scan_secrets.sh", "#!/bin/sh\nexit 1\n", EXECUTABLE)
+        write(self.root / "scripts" / "scan-secrets.sh", "#!/bin/sh\nexit 1\n", EXECUTABLE)
         write(self.root / "scripts" / "check.sh", f'#!/bin/sh\ntouch "{self.root / "checked"}"\n', EXECUTABLE)
         result = run([self.root / ".githooks" / "pre-push"], self.root)
         self.assertEqual(result.returncode, 1)

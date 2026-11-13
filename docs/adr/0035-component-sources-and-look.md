@@ -27,7 +27,7 @@ follow the system setting ([research](../research/component-sources.md)).
 - **Each adapted section names its source** in a comment at its top, and `THIRD-PARTY-NOTICES.md` carries each
   source's license and copyright notice, as MIT and the OFL require.
 - **Inter is the typeface,** from `@fontsource-variable/inter` (OFL-1.1), built by Vite and served from `/assets/`.
-  The policy gains `font-src 'self'`, and `npm-checks.toml` allows OFL-1.1, a font license, with its reason.
+  The policy gains `font-src 'self'`, and `.config/npm-checks.toml` allows OFL-1.1, a font license, with its reason.
 - **Tetsu's own pages take Linear's look and feel:** restrained neutrals with one accent, Inter with tight display
   tracking, hairline borders, soft gradients and glows, small mono labels, and generous space. That is a style to
   draw on; Linear's code, images, logo, copy, and distinctive layouts stay out, so Tetsu keeps its own identity.
@@ -59,7 +59,7 @@ ADR-0032's build, tokens, template check, and `@theme inline` mapping stand.
 - Every token needs a dark value, and #96's contrast check covers both schemes.
 - Tailwind Plus stays a paid reference: the bar every component is compared against, and outside the repository at
   most a throwaway prototype, never code we keep.
-- Allowing OFL-1.1 in `npm-checks.toml` changes a protected file, so it needs a `Floor-reason:`.
+- Allowing OFL-1.1 in `.config/npm-checks.toml` changes a protected file, so it needs a `Floor-reason:`.
 
 **Weakest evidence.** No page has been built from HyperUI yet, and it has one maintainer, though its sections are
 copied, not installed.

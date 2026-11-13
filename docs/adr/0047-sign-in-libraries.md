@@ -36,7 +36,7 @@ covered the options and community practice.
   binding to the attempt, and rate limits, as ADR-0040 sets.
 - **`webauthn-rs` stays behind the sign-in port,** so its types never reach other modules, and a replacement keeps
   every passkey, which belongs to its relying party ID, not to the library.
-- **`deny.toml` allows MPL-2.0.** It is file-level copyleft: Tetsu may ship the crate unmodified in a closed
+- **`.config/deny.toml` allows MPL-2.0.** It is file-level copyleft: Tetsu may ship the crate unmodified in a closed
   binary, and only changes to its own files would have to be shared. This is the one licence change, and the
   maintainer approves it with this ADR.
 - **The failure tests run before acceptance,** in a spike, step 6 of ADR-0010:

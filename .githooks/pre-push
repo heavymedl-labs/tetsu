@@ -2,5 +2,5 @@
 # Enable with: git config core.hooksPath .githooks
 # Git names the remote and passes the refs being pushed on stdin; the secret scan reads both (ADR-0027).
 top="$(git rev-parse --show-toplevel)"
-"$top/scripts/scan_secrets.sh" --push "$1" || exit 1
+"$top/scripts/scan-secrets.sh" --push "$1" || exit 1
 exec "$top/scripts/check.sh"

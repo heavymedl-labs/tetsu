@@ -1,4 +1,4 @@
-"""Checks npm dependencies as ADR-0034 asks, from package.json, package-lock.json, and npm-checks.toml.
+"""Checks npm dependencies as ADR-0034 asks, from package.json, its lockfile, and .config/npm-checks.toml.
 
 Offline it checks sources, licenses, install scripts, exact versions, and overrides. Given `npm audit --json`
 output and a registry, it also fails on advisories, ignore entries that no longer match, and deprecated
@@ -180,7 +180,7 @@ def deprecation_problems(registry, packages):
 
 
 def problems(root, audit, registry):
-    lines = (root / "npm-checks.toml").read_text().splitlines()
+    lines = (root / ".config" / "npm-checks.toml").read_text().splitlines()
     manifest = json.loads((root / "package.json").read_text())
     lock = json.loads((root / "package-lock.json").read_text())
     packages = {path: package for path, package in lock["packages"].items() if path}

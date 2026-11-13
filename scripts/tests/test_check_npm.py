@@ -56,7 +56,7 @@ class NpmChecksTest(unittest.TestCase):
         write(self.root / "package.json", json.dumps(self.manifest))
         packages = {"": {"name": "t"}, **self.locked}
         write(self.root / "package-lock.json", json.dumps({"lockfileVersion": 3, "packages": packages}))
-        write(self.root / "npm-checks.toml", self.settings)
+        write(self.root / ".config" / "npm-checks.toml", self.settings)
         for path, package in self.locked.items():
             if "version" not in package:
                 continue

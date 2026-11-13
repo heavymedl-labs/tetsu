@@ -11,12 +11,12 @@ root="$PWD"
 
 scanner="$root/.tools/bin/betterleaks"
 # Findings print redacted, inline allow comments do nothing, and nothing is validated against a live service.
-flags=(-c "$root/.betterleaks.toml" -i "$root/.betterleaksignore" --redact --ignore-gitleaks-allow --no-banner
+flags=(-c "$root/.config/betterleaks.toml" -i "$root/.config/betterleaks-ignore" --redact --ignore-gitleaks-allow --no-banner
   --log-level warn)
 
 # The floor guard watches these two files, so the scan must not read rules or ignores from anywhere else. A
 # missing ignore file would let Betterleaks fall back to an unchecked .gitleaksignore.
-for input in .betterleaks.toml .betterleaksignore; do
+for input in .config/betterleaks.toml .config/betterleaks-ignore; do
   if [[ -L "$input" || ! -f "$input" ]]; then
     echo "error: $input must be a regular file; the scan reads only that file" >&2
     exit 1
@@ -24,14 +24,14 @@ for input in .betterleaks.toml .betterleaksignore; do
 done
 # Any "path" key, quoted, dotted, or inline, could point [extend] at another file, and so could an escaped
 # one. No rule here needs either.
-if grep -Eq '(^|[{,.[:space:]])["'"'"']?path["'"'"']?[[:space:]]*=|\\[uU][0-9a-fA-F]{4}' .betterleaks.toml; then
-  echo "error: .betterleaks.toml names a path; keep every rule in it, not in another file" >&2
+if grep -Eq '(^|[{,.[:space:]])["'"'"']?path["'"'"']?[[:space:]]*=|\\[uU][0-9a-fA-F]{4}' .config/betterleaks.toml; then
+  echo "error: .config/betterleaks.toml names a path; keep every rule in it, not in another file" >&2
   exit 1
 fi
 # An entry without a commit or tag id would skip that file and line in every commit, forever.
-entries="$(grep -Ev '^[[:space:]]*(#|$)' .betterleaksignore || true)"
+entries="$(grep -Ev '^[[:space:]]*(#|$)' .config/betterleaks-ignore || true)"
 if [[ -n "$entries" ]] && grep -Evq '^[0-9a-f]{40}:' <<<"$entries"; then
-  echo "error: every .betterleaksignore entry must start with the commit or tag id it applies to" >&2
+  echo "error: every .config/betterleaks-ignore entry must start with the commit or tag id it applies to" >&2
   exit 1
 fi
 
@@ -68,7 +68,7 @@ commits() {
 
 # Scans the messages of the commit and tag objects named as arguments, one file each, named by its object id. A
 # finding's fingerprint is then "<object>:<rule>:<line>", which stays put as history grows, so a rotated secret in
-# a message can be listed in .betterleaksignore like any other.
+# a message can be listed in .config/betterleaks-ignore like any other.
 messages() {
   (($#)) || return 0
   local dir="$work/messages" object status=0
@@ -119,7 +119,7 @@ case "${1:-}" in
     messages ${objects[@]+"${objects[@]}"} || found=1
     ;;
   --push)
-    remote="${2:?usage: scripts/scan_secrets.sh --push <remote>}"
+    remote="${2:?usage: scripts/scan-secrets.sh --push <remote>}"
     # Each line is "<local ref> <local object> <remote ref> <remote object>". What the remote's own branches
     # lack is what this push sends, which covers new branches and a remote holding commits this clone lacks.
     while read -r _ local_object _ _; do
@@ -140,7 +140,7 @@ case "${1:-}" in
     done
     ;;
   *)
-    echo "usage: scripts/scan_secrets.sh --staged | --push <remote> | --history" >&2
+    echo "usage: scripts/scan-secrets.sh --staged | --push <remote> | --history" >&2
     exit 2
     ;;
 esac

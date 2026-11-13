@@ -20,13 +20,13 @@ evidence is in [Format and lint research](../research/format-and-lint.md).
   the tools no longer depend on the machine's Python. Our own scripts still run on the system `python3`.
 - **Settings live in standard files.** `.sqlfluff` uses the Postgres dialect and every default rule, allowing only
   the column name `name`, which Postgres does not reserve. `ruff.toml` picks a strict rule set that includes security,
-  complexity at 10 as in Rust, and modern syntax, and leaves out docstring and type annotation rules. `.squawk.toml`
+  complexity at 10 as in Rust, and modern syntax, and leaves out docstring and type annotation rules. `.config/squawk.toml`
   assumes each migration runs in a transaction, as our runner does. `.editorconfig` sets shell formatting.
 - **Two stages.** The pre-commit hook runs `scripts/check.sh --fast`: formatters, linters, and markdownlint,
   in seconds. The pre-push hook and CI run everything. The floor guard runs only at push, because it reads
   `Floor-reason:` from commit messages, which do not exist yet at commit time.
 - **The floor guard protects lint settings.** Removing a line from `clippy.toml`, `ruff.toml`,
-  `.squawk.toml`, `.sqlfluff`, `.editorconfig`, the root `Cargo.toml`, or either hook needs a `Floor-reason:`.
+  `.config/squawk.toml`, `.sqlfluff`, `.editorconfig`, the root `Cargo.toml`, or either hook needs a `Floor-reason:`.
 - **Every language row has a format and lint column** in [CONSTRAINTS.md](../../CONSTRAINTS.md), so a new
   language, such as TypeScript for [#32](https://github.com/heavymedl-labs/tetsu/issues/32), must name both before
   it lands.

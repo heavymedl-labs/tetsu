@@ -11,7 +11,7 @@ The patterns are shallow on purpose: they catch the cheap road to green, not a
 determined person, so the fresh review still applies.
 
 Adapted from the floor guard in addyosmani/agent-skills (MIT), with Rust and
-Python patterns. Secrets themselves are found by scripts/scan_secrets.sh (ADR-0027); this guards that
+Python patterns. Secrets themselves are found by scripts/scan-secrets.sh (ADR-0027); this guards that
 scan's inputs.
 """
 
@@ -30,7 +30,7 @@ SCAN_EXEMPT = {"scripts/floor_guard.py", "scripts/tests/test_floor_guard.py"}
 LINT_CONFIG = {
     "clippy.toml",
     "ruff.toml",
-    ".squawk.toml",
+    ".config/squawk.toml",
     ".sqlfluff",
     ".editorconfig",
     ".markdownlint-cli2.yaml",
@@ -47,7 +47,7 @@ PROTECTED = LINT_CONFIG | {
     "scripts/check_doc_sizes.py",
     "scripts/check-adrs.sh",
     "scripts/check_secrets.py",
-    "scripts/scan_secrets.sh",
+    "scripts/scan-secrets.sh",
     "scripts/install-tools.sh",
     "scripts/floor_guard.py",
     ".githooks/pre-push",
@@ -58,7 +58,8 @@ PROTECTED = LINT_CONFIG | {
 # The secret scan's rules, its ignore lists, and the attributes that can hide a file from it, at any depth.
 # Adding a line can loosen these as easily as removing one, so every change needs a reason (ADR-0027).
 SCAN_INPUT = re.compile(
-    r"(^|/)(\.betterleaks\.toml|\.betterleaksignore|\.gitleaks\.toml|\.gitleaksignore|\.gitattributes)$"
+    r"(^|/)(\.?betterleaks\.toml|\.betterleaksignore|betterleaks-ignore|\.gitleaks\.toml|\.gitleaksignore"
+    r"|\.gitattributes)$"
 )
 # cargo-deny's config, and the other files it would read: an ignore entry, renewal, license, or source change
 # needs the maintainer's approval, added or removed (ADR-0028).
@@ -68,9 +69,9 @@ NPM_CONFIG = re.compile(r"(^|/)(\.npmrc|npm-checks\.toml|biome\.jsonc?|tsconfig[
 # What package.json runs, overrides, or pins: any change needs a reason, while a version bump does not.
 PACKAGE_FIELDS = ("overrides", "allowScripts", "scripts", "packageManager", "engines")
 # The scan itself and the hooks that run it: one added line, such as an early exit, could switch it off.
-SCAN_FILES = {"scripts/scan_secrets.sh", ".githooks/pre-commit", ".githooks/pre-push"}
+SCAN_FILES = {"scripts/scan-secrets.sh", ".githooks/pre-commit", ".githooks/pre-push"}
 # A line added to a check script that names the scanner could bypass or replace it.
-SCANNER_MENTION = re.compile(r"betterleaks|scan_secrets", re.IGNORECASE)
+SCANNER_MENTION = re.compile(r"betterleaks|scan[-_]secrets", re.IGNORECASE)
 # A mode change on a hook can stop git running it, with no line changed.
 MODE = re.compile(r'^diff --git ("?a/.+?"?) "?b/.+?"?\nold mode \d+\nnew mode \d+', re.MULTILINE)
 # A new file, including an empty one, which has no lines to show.

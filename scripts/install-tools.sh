@@ -10,7 +10,7 @@ cargo install --locked --version 0.20.2 cargo-deny
 # when none is set, which would change what this machine builds with everywhere, so that is undone.
 had_default=true
 rustup default >/dev/null 2>&1 || had_default=false
-rustup toolchain install "$(<.nightly-toolchain)" --profile minimal --component llvm-tools-preview
+rustup toolchain install "$(<.config/nightly-toolchain)" --profile minimal --component llvm-tools-preview
 [[ "$had_default" == true ]] || rustup default none
 # uv provides the tools' own Python, so it does not depend on the machine's (ADR-0017).
 if ! command -v uv >/dev/null; then

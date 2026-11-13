@@ -25,7 +25,7 @@ wellness, salon and spa from one product.
   platform use cases and events.
 - The platform never depends on, imports, or names a vertical. Platform code
   uses industry-neutral names, and new terms go in the
-  [glossary](../GLOSSARY.md).
+  [glossary](../glossary.md).
 
 ## Alternatives considered
 

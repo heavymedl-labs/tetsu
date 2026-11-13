@@ -292,7 +292,7 @@ class GuardProtectsItself(GuardCase):
             ".github/workflows/ci.yml",
             "clippy.toml",
             "ruff.toml",
-            ".squawk.toml",
+            ".config/squawk.toml",
             ".sqlfluff",
             ".editorconfig",
             "Cargo.toml",
@@ -300,7 +300,7 @@ class GuardProtectsItself(GuardCase):
             ".cargo/config.toml",
             "scripts/check_doc_sizes.py",
             "scripts/check-adrs.sh",
-            "scripts/scan_secrets.sh",
+            "scripts/scan-secrets.sh",
             "scripts/install-tools.sh",
             ".markdownlint-cli2.yaml",
         ):
@@ -458,6 +458,8 @@ class SecretScan(GuardCase):
         for path in (
             ".betterleaks.toml",
             ".betterleaksignore",
+            ".config/betterleaks.toml",
+            ".config/betterleaks-ignore",
             ".gitattributes",
             "crates/a/.gitattributes",
             ".gitleaksignore",
@@ -473,7 +475,7 @@ class SecretScan(GuardCase):
                     self.assertFlags("scan-input-changed")
 
     def test_an_added_line_in_the_scan_or_its_hooks_is_flagged(self):
-        for path in ("scripts/scan_secrets.sh", ".githooks/pre-push", ".githooks/pre-commit"):
+        for path in ("scripts/scan-secrets.sh", ".githooks/pre-push", ".githooks/pre-commit"):
             with self.subTest(path=path):
                 write(self.repo / path, "#!/bin/sh\nscan\n")
                 self.commit(f"add {path}\n\nFloor-reason: test setup")
@@ -486,6 +488,8 @@ class SecretScan(GuardCase):
         for path in (
             ".betterleaks.toml",
             ".betterleaksignore",
+            ".config/betterleaks.toml",
+            ".config/betterleaks-ignore",
             ".gitattributes",
             "crates/a/.gitattributes",
             ".gitleaks.toml",
@@ -552,9 +556,9 @@ class SecretScan(GuardCase):
 
     def test_a_line_naming_the_scanner_added_to_a_check_script_is_flagged(self):
         for path, line in (
-            ("scripts/check.sh", "scripts/scan_secrets.sh --staged || true"),
+            ("scripts/check.sh", "scripts/scan-secrets.sh --staged || true"),
             ("scripts/install-tools.sh", "printf 'exit 0' > .tools/bin/betterleaks"),
-            (".github/workflows/ci.yml", "      - run: echo 'exit 0' > scripts/scan_secrets.sh"),
+            (".github/workflows/ci.yml", "      - run: echo 'exit 0' > scripts/scan-secrets.sh"),
         ):
             with self.subTest(path=path):
                 write(self.repo / path, "one\n")

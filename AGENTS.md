@@ -6,7 +6,7 @@ Instructions for coding agents working in Tetsu. Humans follow them too.
 
 Read [docs/invariants.md](docs/invariants.md), which are hard rules, then only what
 your task needs. Use glossary terms exactly, and look one up in
-[docs/GLOSSARY.md](docs/GLOSSARY.md) when unsure. Follow ADRs, and treat a proposed
+[docs/glossary.md](docs/glossary.md) when unsure. Follow ADRs, and treat a proposed
 one as current intent. The [ADR index](docs/adr/README.md) says when to read each.
 
 | Task | Also read |
