@@ -7,7 +7,9 @@ use tetsu_kernel::{Migration, Module, Storage};
 use tokio_postgres::Client;
 
 use crate::connection::{Error, Settings, connect};
-use crate::roles::{APP_ROLE, MAX_SCHEMA, prepare_module, require_bound_runner, require_role};
+use crate::roles::{
+    APP_ROLE, MAX_SCHEMA, prepare_delivery, prepare_module, require_bound_runner, require_role,
+};
 
 /// Taken by polling, never by blocking, which can deadlock with
 /// `CREATE INDEX CONCURRENTLY` (ADR-0011).
@@ -69,6 +71,7 @@ async fn plan(
     for storage in modules.iter().filter_map(|module| module.storage()) {
         plan.push((storage.schema, pending(client, storage).await?));
     }
+    prepare_delivery(client).await?;
     for (schema, _) in &plan {
         prepare_module(client, schema).await?;
     }
@@ -131,7 +134,7 @@ fn plain_schema(schema: &str) -> bool {
 
 /// Schemas whose module role would be another of Tetsu's roles, or the demo's migration role, or one the catalog
 /// checks read as a lookup role. A schema ending in `_lookup` would be another module's lookup role.
-const RESERVED_SCHEMAS: &[&str] = &["app", "owner", "migrate", "lookup"];
+const RESERVED_SCHEMAS: &[&str] = &["app", "owner", "migrate", "lookup", "delivery"];
 
 /// The oldest server Tetsu runs on: 18.6 fixes CVE-2026-14666 in row security (ADR-0042).
 pub const MIN_SERVER_VERSION: i32 = 180_006;

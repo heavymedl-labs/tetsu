@@ -137,7 +137,7 @@ per-tenant configuration.
 ```mermaid
 flowchart TB
     accTitle: Components of the Tetsu server
-    accDescr: Inbound adapters, server-rendered HTML pages and a JSON HTTP API, call use cases of the modules, one crate each: verticals, shared capabilities, control plane, and connectors. Verticals call use cases of shared capabilities. Modules call driven ports that outbound adapters implement, reaching their own Postgres schema, object storage, and outside systems. Modules publish domain events, which are delivered to other modules. Delivery is decided in #11. Modules implement the kernel's module contract, and the composition root registers them.
+    accDescr: Inbound adapters, server-rendered HTML pages and a JSON HTTP API, call use cases of the modules, one crate each: verticals, shared capabilities, control plane, and connectors. Verticals call use cases of shared capabilities. Modules call driven ports that outbound adapters implement, reaching their own Postgres schema, object storage, and outside systems. Modules publish domain events, which a transactional outbox delivers to other modules (ADR-0043). Modules implement the kernel's module contract, and the composition root registers them.
 
     subgraph inbound[Inbound adapters]
         pages["Server-rendered pages<br/>HTML"] ~~~ api["HTTP API<br/>JSON, OpenAPI"]
@@ -255,11 +255,10 @@ flowchart TB
 
 ### Request flow
 
-Provisional: one booking, end to end. Tokens, tenant resolution, and event
-delivery follow the leading options for
-[#9](https://github.com/heavymedl-labs/tetsu/issues/9),
-[#8](https://github.com/heavymedl-labs/tetsu/issues/8), and
-[#11](https://github.com/heavymedl-labs/tetsu/issues/11).
+Provisional: one booking, end to end. Sign-in, tenant isolation, and event
+delivery follow [ADR-0040](docs/adr/0040-identity-and-sign-in.md),
+[ADR-0042](docs/adr/0042-tenant-isolation.md), and
+[ADR-0043](docs/adr/0043-domain-event-delivery.md).
 
 ```mermaid
 sequenceDiagram

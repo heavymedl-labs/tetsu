@@ -10,6 +10,9 @@
 -- belongs only to module roles, which it may act as but not inherit. Anything
 -- granted to PUBLIC counts as the application role's own. A module's record of
 -- applied files is the runner's own, so it is left out of the table rules.
+-- The delivery role tetsu_delivery works across tenants by design (ADR-0043):
+-- it may use module schemas, read, settle, and delete outbox rows, and see
+-- every tenant's outbox through one policy, and nothing else.
 WITH RECURSIVE modules AS (
     SELECT
         n.oid,
@@ -341,9 +344,25 @@ judged AS (
                 AND g.privilege_type = 'USAGE'
                 AND NOT g.is_grantable
             )
+            OR (
+                gr.rolname = 'tetsu_delivery'
+                AND NOT g.is_grantable
+                AND (
+                    (
+                        g.kind = 'table'
+                        AND g.shown IN (
+                            pg_catalog.format('%I.outbox', g.schema_name),
+                            pg_catalog.format('%I.outbox_global', g.schema_name)
+                        )
+                        AND g.privilege_type IN ('SELECT', 'UPDATE', 'DELETE')
+                    )
+                    OR (g.kind = 'schema' AND g.privilege_type = 'USAGE')
+                )
+            )
         ), FALSE) AS allowed,
         gr.rolname IS NOT NULL
         AND gr.rolname ~ '^tetsu_'
+        AND gr.rolname <> 'tetsu_delivery'
         AND gr.rolname NOT IN (
             pg_catalog.format('tetsu_%s', g.schema_name),
             pg_catalog.format('tetsu_%s_lookup', g.schema_name)
@@ -427,10 +446,23 @@ FROM tenant_owned AS t
 INNER JOIN pg_catalog.pg_policy AS p ON t.oid = p.polrelid
 CROSS JOIN tenant_rule AS tr
 WHERE
-    p.polroles <> t.module_roles
-    OR p.polcmd <> '*'
-    OR p.polwithcheck IS NOT NULL
-    OR pg_catalog.pg_get_expr(p.polqual, p.polrelid) <> tr.expected
+    NOT (
+        t.relname = 'outbox'
+        AND p.polroles = ARRAY[(
+            SELECT r.oid FROM pg_catalog.pg_roles AS r
+            WHERE r.rolname = 'tetsu_delivery'
+        )]
+        AND p.polpermissive
+        AND p.polcmd = '*'
+        AND p.polwithcheck IS NULL
+        AND pg_catalog.pg_get_expr(p.polqual, p.polrelid) = 'true'
+    )
+    AND (
+        p.polroles <> t.module_roles
+        OR p.polcmd <> '*'
+        OR p.polwithcheck IS NOT NULL
+        OR pg_catalog.pg_get_expr(p.polqual, p.polrelid) <> tr.expected
+    )
 
 UNION ALL
 SELECT r.shown || ' has policy ' || p.polname || ' for every role'

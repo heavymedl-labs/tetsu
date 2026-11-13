@@ -3433,6 +3433,8 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "tokio-postgres-rustls",
+ "tracing",
+ "tracing-subscriber",
  "webpki-roots",
 ]
 

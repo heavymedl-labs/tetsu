@@ -17,7 +17,13 @@ tetsu-kernel.workspace = true
 tokio.workspace = true
 tokio-postgres.workspace = true
 tokio-postgres-rustls.workspace = true
+# A delivery that stops retrying is logged (ADR-0043, ADR-0045).
+tracing.workspace = true
 webpki-roots.workspace = true
+
+[dev-dependencies]
+# Reads what the dispatcher logs.
+tracing-subscriber.workspace = true
 
 [lints]
 workspace = true

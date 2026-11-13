@@ -10,6 +10,8 @@ use crate::connection::Error;
 
 /// The role `tetsu serve` signs in as. It holds no rights of its own and acts through module roles.
 pub const APP_ROLE: &str = "tetsu_app";
+/// The role the dispatcher acts as: it reads and settles every tenant's outbox rows, and nothing else (ADR-0043).
+pub const DELIVERY_ROLE: &str = "tetsu_delivery";
 /// Module roles are `tetsu_<schema>` and `tetsu_<schema>_lookup`, so a schema leaves room for both in Postgres's
 /// 63-byte names.
 pub const MAX_SCHEMA: usize = 63 - "tetsu_".len() - "_lookup".len();
@@ -102,6 +104,18 @@ pub(crate) async fn prepare_module(client: &Client, schema: &str) -> Result<(), 
         ))
         .await?;
     Ok(())
+}
+
+/// Makes the delivery role and lets the application role act as it, one transaction at a time. Each module's outbox
+/// file grants it what it needs.
+pub(crate) async fn prepare_delivery(client: &Client) -> Result<(), Error> {
+    ensure_role(
+        client,
+        DELIVERY_ROLE,
+        &format!("CREATE ROLE {DELIVERY_ROLE} NOLOGIN"),
+    )
+    .await?;
+    ensure_member(client, DELIVERY_ROLE, APP_ROLE).await
 }
 
 /// A name as a quoted identifier, so no name can end the statement or change its case.

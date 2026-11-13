@@ -2,9 +2,11 @@
 //! with transaction scope in one round trip, so commit or rollback clears it before the pool hands the connection
 //! to the next request (#53).
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use deadpool_postgres::{Object, Transaction};
 
-use crate::roles::module_role;
+use crate::roles::{DELIVERY_ROLE, module_role};
 
 /// A query's limit inside a transaction, the same as the pool's own (ADR-0011).
 pub const STATEMENT_TIMEOUT: &str = "5s";
@@ -22,16 +24,50 @@ const SET_TENANT_TOO: &str = "SELECT pg_catalog.set_config('role', $1, true),
        pg_catalog.set_config('lock_timeout', $3, true),
        pg_catalog.set_config('app.tenant_id', $4, true)";
 const SET_TENANT: &str = "SELECT pg_catalog.set_config('app.tenant_id', $1, true)";
+/// What a module transaction sets, as the delivery role, which may reach no tenant through a setting either.
+const SET_DELIVERY: &str = SET_MODULE;
 
 /// A transaction acting as one module's role, with no tenant: it reaches global tables and lookup functions, and
 /// tenant-owned tables show it no rows.
 pub struct ModuleTransaction<'a> {
-    transaction: Transaction<'a>,
+    scoped: Scoped<'a>,
 }
 
 /// A transaction acting as one module's role for one tenant. Tenant-owned tables show it that tenant's rows alone.
 pub struct TenantTransaction<'a> {
+    scoped: Scoped<'a>,
+}
+
+/// A transaction as the delivery role, which reads and settles every module's outboxes and reaches nothing else
+/// (ADR-0043).
+pub struct DeliveryTransaction<'a> {
     transaction: Transaction<'a>,
+}
+
+/// A module's transaction, the schema it acts in, and whether it recorded an event, which wakes the dispatcher
+/// once it commits.
+struct Scoped<'a> {
+    transaction: Transaction<'a>,
+    schema: String,
+    recorded: AtomicBool,
+}
+
+impl<'a> Scoped<'a> {
+    fn new(transaction: Transaction<'a>, schema: &str) -> Self {
+        Self {
+            transaction,
+            schema: schema.to_string(),
+            recorded: AtomicBool::new(false),
+        }
+    }
+
+    async fn commit(self) -> Result<(), tokio_postgres::Error> {
+        self.transaction.commit().await?;
+        if self.recorded.load(Ordering::Relaxed) {
+            crate::events::wake();
+        }
+        Ok(())
+    }
 }
 
 impl<'a> ModuleTransaction<'a> {
@@ -47,7 +83,9 @@ impl<'a> ModuleTransaction<'a> {
             &[&module_role(schema), &STATEMENT_TIMEOUT, &LOCK_TIMEOUT],
         )
         .await?;
-        Ok(Self { transaction })
+        Ok(Self {
+            scoped: Scoped::new(transaction, schema),
+        })
     }
 
     /// Narrows this transaction to one tenant, such as once a lookup has found it.
@@ -58,19 +96,14 @@ impl<'a> ModuleTransaction<'a> {
         self,
         tenant: i64,
     ) -> Result<TenantTransaction<'a>, tokio_postgres::Error> {
-        let statement = self.transaction.prepare_cached(SET_TENANT).await?;
-        self.transaction
+        let statement = self.scoped.transaction.prepare_cached(SET_TENANT).await?;
+        self.scoped
+            .transaction
             .query_one(&statement, &[&tenant.to_string()])
             .await?;
         Ok(TenantTransaction {
-            transaction: self.transaction,
+            scoped: self.scoped,
         })
-    }
-
-    /// # Errors
-    /// Fails if Postgres refuses the commit, or does not answer.
-    pub async fn commit(self) -> Result<(), tokio_postgres::Error> {
-        self.transaction.commit().await
     }
 }
 
@@ -91,6 +124,22 @@ impl<'a> TenantTransaction<'a> {
                 &LOCK_TIMEOUT,
                 &tenant.to_string(),
             ],
+        )
+        .await?;
+        Ok(Self {
+            scoped: Scoped::new(transaction, schema),
+        })
+    }
+}
+
+impl<'a> DeliveryTransaction<'a> {
+    /// # Errors
+    /// Fails if the transaction cannot start, or the connection's role may not act as the delivery role.
+    pub async fn begin(client: &'a mut Object) -> Result<Self, tokio_postgres::Error> {
+        let transaction = open(
+            client,
+            SET_DELIVERY,
+            &[&DELIVERY_ROLE, &STATEMENT_TIMEOUT, &LOCK_TIMEOUT],
         )
         .await?;
         Ok(Self { transaction })
@@ -115,15 +164,42 @@ async fn open<'a>(
     Ok(transaction)
 }
 
-impl<'a> std::ops::Deref for ModuleTransaction<'a> {
-    type Target = Transaction<'a>;
+/// What both module transactions offer: commit, their schema, and the transaction itself.
+macro_rules! module_transaction {
+    ($name:ident) => {
+        impl<'a> $name<'a> {
+            /// # Errors
+            /// Fails if Postgres refuses the commit, or does not answer.
+            pub async fn commit(self) -> Result<(), tokio_postgres::Error> {
+                self.scoped.commit().await
+            }
 
-    fn deref(&self) -> &Self::Target {
-        &self.transaction
-    }
+            /// The schema of the module this transaction acts as.
+            #[must_use]
+            pub fn schema(&self) -> &str {
+                &self.scoped.schema
+            }
+
+            /// Marks that this transaction recorded an event, so its commit wakes the dispatcher.
+            pub(crate) fn recorded(&self) {
+                self.scoped.recorded.store(true, Ordering::Relaxed);
+            }
+        }
+
+        impl<'a> std::ops::Deref for $name<'a> {
+            type Target = Transaction<'a>;
+
+            fn deref(&self) -> &Self::Target {
+                &self.scoped.transaction
+            }
+        }
+    };
 }
 
-impl<'a> std::ops::Deref for TenantTransaction<'a> {
+module_transaction!(ModuleTransaction);
+module_transaction!(TenantTransaction);
+
+impl<'a> std::ops::Deref for DeliveryTransaction<'a> {
     type Target = Transaction<'a>;
 
     fn deref(&self) -> &Self::Target {
