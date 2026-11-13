@@ -169,7 +169,7 @@ async fn lookup<S: TenantStore>(
     };
     // The page says only that it is unavailable, since the detail could name the database. The operator gets
     // the detail through `report`.
-    (served.report)(&failure_line(&address, &failure));
+    (served.report)(&failure_line(&failure));
     Err(Box::new(html(
         StatusCode::SERVICE_UNAVAILABLE,
         &UnavailablePage {
@@ -179,14 +179,10 @@ async fn lookup<S: TenantStore>(
     )))
 }
 
-/// What the operator sees when a page could not be loaded. Both parts are escaped, so an address or a server
-/// message cannot write control characters to the log.
-fn failure_line(address: &str, failure: &str) -> String {
-    format!(
-        "tenancy: could not load {}: {}",
-        address.escape_debug(),
-        failure.escape_debug()
-    )
+/// What the operator sees when a page could not be loaded: the cause, and never the address, which is whatever
+/// the visitor put in the path, such as an email (ADR-0045). The log's JSON escapes control characters.
+fn failure_line(failure: &str) -> String {
+    format!("tenancy: could not load a page: {failure}")
 }
 
 fn show<S>(tenant: &Tenant, served: &Served<S>) -> Response {
@@ -462,10 +458,10 @@ mod tests {
     }
 
     #[test]
-    fn the_operator_line_names_the_address_and_cause_with_control_characters_escaped() {
+    fn the_operator_line_names_the_cause_and_never_the_address() {
         assert_eq!(
-            failure_line("/anvil-row\n", "db \u{1b}[31mdown"),
-            "tenancy: could not load /anvil-row\\n: db \\u{1b}[31mdown"
+            failure_line("db down"),
+            "tenancy: could not load a page: db down"
         );
     }
 
@@ -544,9 +540,14 @@ mod tests {
         .await;
         let reported = REPORTED.lock().unwrap().clone();
         assert!(
-            reported.iter().any(|line| line
-                .starts_with("tenancy: could not load /reported-studio: ")
-                && line.contains("password authentication failed")),
+            reported
+                .iter()
+                .any(|line| line.starts_with("tenancy: could not load a page: ")
+                    && line.contains("password authentication failed")),
+            "{reported:?}"
+        );
+        assert!(
+            !reported.iter().any(|line| line.contains("reported-studio")),
             "{reported:?}"
         );
     }

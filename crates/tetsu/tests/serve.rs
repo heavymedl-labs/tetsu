@@ -389,7 +389,8 @@ async fn a_page_that_cannot_load_tells_the_operator_why_but_not_the_visitor() {
     assert!(
         reported["message"]
             .as_str()
-            .is_some_and(|text| text.starts_with("tenancy: could not load /sample-studio: ")),
+            .is_some_and(|text| text.starts_with("tenancy: could not load a page: ")
+                && !text.contains("sample-studio")),
         "{reported}"
     );
     assert!(reported["span"]["request_id"].is_string(), "{reported}");
