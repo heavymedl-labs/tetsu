@@ -80,7 +80,7 @@ cargo run -- migrate
 cargo run -- seed crates/tetsu/tests/fixtures/sample.toml
 ```
 
-Then `cargo run -- serve` serves <http://localhost:8080> until Ctrl+C. Settings come from `.env` for any the
+Then `cargo run -- serve` serves `http://localhost:8080` until Ctrl+C. Settings come from `.env` for any the
 environment leaves unset ([ADR-0050](../../docs/adr/0050-local-settings-file.md)), so no command needs them typed.
 Stop the server when you are done.
 
