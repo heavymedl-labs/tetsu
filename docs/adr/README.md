@@ -54,7 +54,7 @@ number, and add a row below. Never renumber.
 | [0046](0046-property-testing.md) | Property testing | Writing property tests for Tier 1 code | Accepted |
 | [0047](0047-sign-in-libraries.md) | Sign-in libraries | Adding or upgrading a sign-in crate, or hashing tokens and codes | Proposed |
 | [0048](0048-sign-in-design.md) | Sign-in design | Building sign-in, sessions, staff roles, rate limits, or recovery | Accepted |
-| [0049](0049-log-export.md) | Log export | Exporting logs, or changing what a log line carries off the host | Proposed |
+| [0049](0049-log-export.md) | Log export | Exporting logs, or changing what a log line carries off the host | Accepted |
 
 ## Open decisions
 
