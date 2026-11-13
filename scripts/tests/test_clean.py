@@ -1,4 +1,4 @@
-"""scripts/clean.py: which servers it stops, and how it is called."""
+"""scripts/clean.py: what each mode removes, and what it leaves alone."""
 
 import os
 import shutil
@@ -10,6 +10,9 @@ from unittest import mock
 from scripts import clean
 
 TEST_URL = b"DATABASE_URL=postgres://postgres@localhost:54329/t_1763050000_4242_7"
+DAY = 24 * 3600
+NOW = 1_800_000_000.0
+HASHES = ["aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", "cccccccccccccccc", "dddddddddddddddd"]
 
 
 def environ(*variables):
@@ -18,17 +21,31 @@ def environ(*variables):
 
 class CleanTest(unittest.TestCase):
     def setUp(self):
-        self.proc = Path(tempfile.mkdtemp())
-        self.addCleanup(lambda: shutil.rmtree(self.proc))
-        self.temporary = Path(tempfile.mkdtemp())
-        self.addCleanup(lambda: shutil.rmtree(self.temporary))
+        self.proc, self.root, self.temporary = (Path(tempfile.mkdtemp()) for _ in range(3))
+        for path in (self.proc, self.root, self.temporary):
+            self.addCleanup(shutil.rmtree, path)
+        self.host = clean.Host(proc=self.proc, root=self.root, temporary=self.temporary, now=NOW)
+        self.docker = mock.patch("scripts.clean.docker").start()
+        self.run_command = mock.patch("subprocess.run").start()
+        self.run_command.return_value.returncode = 0
+        self.kill = mock.patch("os.kill").start()
+        self.addCleanup(mock.patch.stopall)
 
     def process(self, pid, name, exe, env):
-        folder = self.proc / str(pid)
-        folder.mkdir()
-        (folder / "comm").write_text(f"{name}\n")
-        (folder / "environ").write_bytes(env)
-        (folder / "exe").symlink_to(exe)
+        place = self.proc / str(pid)
+        place.mkdir()
+        (place / "comm").write_text(f"{name}\n")
+        (place / "environ").write_bytes(env)
+        (place / "exe").symlink_to(exe)
+
+    def built(self, path, age_days):
+        path = self.root / "target" / path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("")
+        os.utime(path, (NOW - age_days * DAY, NOW - age_days * DAY))
+
+    def stopped(self):
+        return [call.args[0] for call in self.kill.call_args_list]
 
     def test_only_a_test_database_marks_a_test_server(self):
         self.assertTrue(clean.is_test_server(environ(b"PORT=1", TEST_URL)))
@@ -48,29 +65,81 @@ class CleanTest(unittest.TestCase):
         self.assertFalse(clean.built_here("/usr/local/bin/tetsu", root))
         self.assertFalse(clean.built_here("/work/tetsu/targets/tetsu", root))
 
-    def test_test_servers_are_stopped_and_a_server_started_by_hand_is_not(self):
-        self.process(10, "tetsu", "/work/tetsu/target/debug/tetsu", environ(TEST_URL))
+    def test_routine_stops_test_servers_and_never_one_started_by_hand(self):
+        self.process(10, "tetsu", f"{self.root}/target/debug/tetsu", environ(TEST_URL))
         self.process(
-            11, "tetsu", "/work/tetsu/target/debug/tetsu", environ(b"DATABASE_URL=postgres://h/tetsu_local")
+            11, "tetsu", f"{self.root}/target/debug/tetsu", environ(b"DATABASE_URL=postgres://h/tetsu_local")
         )
         self.process(12, "postgres", "/usr/bin/postgres", environ(TEST_URL))
         (self.proc / "self").mkdir()
-        with mock.patch("os.kill") as kill:
-            self.assertEqual(clean.main(["--test-servers"], proc=self.proc, temporary=self.temporary), 0)
-        self.assertEqual([call.args[0] for call in kill.call_args_list], [10])
+        self.assertEqual(clean.main(["--routine"], self.host), 0)
+        self.assertEqual(self.stopped(), [10])
+        self.run_command.assert_not_called()
 
-    def test_a_full_clean_stops_everything_built_here(self):
-        root = Path(tempfile.mkdtemp())
-        self.addCleanup(lambda: shutil.rmtree(root))
-        (root / "mutants.out").mkdir()
-        self.process(20, "tetsu", f"{root}/target/debug/tetsu", environ(b"PORT=8080"))
+    def test_a_full_clean_stops_everything_built_here_and_drops_test_databases(self):
+        (self.root / "mutants.out").mkdir()
+        self.process(20, "tetsu", f"{self.root}/target/debug/tetsu", environ(b"PORT=8080"))
         self.process(21, "tetsu", "/usr/local/bin/tetsu", environ(b"PORT=8080"))
-        with mock.patch("os.kill") as kill, mock.patch("subprocess.run") as run:
-            run.return_value.returncode = 0
-            self.assertEqual(clean.main([], proc=self.proc, root=root, temporary=self.temporary), 0)
-        self.assertEqual([call.args[0] for call in kill.call_args_list], [20])
-        self.assertFalse((root / "mutants.out").exists())
-        self.assertIn("drop_test_databases", run.call_args_list[0].args[0])
+        self.assertEqual(clean.main([], self.host), 0)
+        self.assertEqual(self.stopped(), [20])
+        self.assertFalse((self.root / "mutants.out").exists())
+        self.assertIn("drop_test_databases", self.run_command.call_args.args[0])
+
+    def test_routine_prunes_week_old_build_cache_and_a_full_clean_all_of_it(self):
+        clean.main(["--routine"], self.host)
+        self.assertIn(
+            mock.call("builder", "prune", "-f", "--filter", "until=168h"), self.docker.call_args_list
+        )
+        self.assertIn(mock.call("image", "prune", "-f"), self.docker.call_args_list)
+        self.docker.reset_mock()
+        clean.main([], self.host)
+        self.assertIn(mock.call("builder", "prune", "-f"), self.docker.call_args_list)
+
+    def test_temporary_files_go_only_once_their_test_process_is_gone(self):
+        for name in [
+            "tetsu-111-server.pem",
+            "t_1794261454_111_6.pem",
+            "tetsu-222-env",
+            "tetsu-review-notes",
+            "x.pem",
+        ]:
+            (self.temporary / name).write_text("")
+        (self.temporary / "tetsu-111-folder").mkdir()
+        (self.temporary / "tetsu-111-folder" / ".env").write_text("")
+        host = clean.Host(
+            proc=self.proc, root=self.root, temporary=self.temporary, alive=lambda pid: pid == 222
+        )
+        clean.main(["--routine"], host)
+        left = sorted(path.name for path in self.temporary.iterdir())
+        self.assertEqual(left, ["tetsu-222-env", "tetsu-review-notes", "x.pem"])
+
+    def test_superseded_copies_of_a_unit_go_and_its_newest_three_stay(self):
+        for days, hash_ in enumerate(HASHES):
+            self.built(f"debug/deps/tetsu-{hash_}", days + 2)
+            self.built(f"debug/deps/tetsu-{hash_}.d", days + 2)
+        self.built("debug/deps/libtokio-eeeeeeeeeeeeeeee.rlib", 30)
+        self.built("debug/deps/README", 30)
+        self.built("nightly/x86_64-unknown-linux-gnu/debug/incremental/tetsu-1111111111111111", 9)
+        clean.main(["--routine"], self.host)
+        left = sorted(path.name for path in (self.root / "target" / "debug" / "deps").iterdir())
+        kept = [name for hash_ in HASHES[:3] for name in (f"tetsu-{hash_}", f"tetsu-{hash_}.d")]
+        self.assertEqual(left, sorted(["README", "libtokio-eeeeeeeeeeeeeeee.rlib", *kept]))
+
+    def test_a_copy_under_a_day_old_stays_though_superseded(self):
+        for hours, hash_ in enumerate(HASHES):
+            self.built(f"debug/deps/tetsu-{hash_}", hours / 24)
+        self.assertEqual(list(clean.superseded_builds(self.root / "target", NOW)), [])
+
+    def test_copies_deeper_than_a_profile_count_and_mutants_reports_never_do(self):
+        for days, hash_ in enumerate(HASHES):
+            self.built(f"nightly/x86_64-unknown-linux-gnu/debug/deps/tetsu-{hash_}", days + 2)
+            self.built(f"mutants.out/deps/tetsu-{hash_}", days + 2)
+        found = [
+            path.relative_to(self.root / "target")
+            for path in clean.superseded_builds(self.root / "target", NOW)
+        ]
+        self.assertEqual(found, [Path(f"nightly/x86_64-unknown-linux-gnu/debug/deps/tetsu-{HASHES[3]}")])
+        self.assertEqual(list(clean.superseded_builds(self.root / "missing", NOW)), [])
 
     def test_a_process_that_ends_while_read_is_skipped(self):
         self.process(30, "tetsu", "/work/tetsu/target/debug/tetsu", environ(TEST_URL))
@@ -79,35 +148,25 @@ class CleanTest(unittest.TestCase):
         self.assertEqual(list(clean.tetsu_processes(self.proc / "missing")), [])
 
     def test_a_server_already_gone_is_not_an_error(self):
-        with mock.patch("os.kill", side_effect=ProcessLookupError):
-            clean.stop([99])
-
-    def test_temporary_files_go_only_once_their_test_process_is_gone(self):
-        temporary = Path(tempfile.mkdtemp())
-        self.addCleanup(lambda: shutil.rmtree(temporary))
-        for name in [
-            "tetsu-111-server.pem",
-            "t_1794261454_111_6.pem",
-            "tetsu-222-env",
-            "tetsu-review-notes",
-            "x.pem",
-        ]:
-            (temporary / name).write_text("")
-        (temporary / "tetsu-111-folder").mkdir()
-        (temporary / "tetsu-111-folder" / ".env").write_text("")
-        with mock.patch("os.kill"):
-            clean.main(["--test-servers"], proc=self.proc, temporary=temporary, alive=lambda pid: pid == 222)
-        self.assertEqual(
-            sorted(p.name for p in temporary.iterdir()), ["tetsu-222-env", "tetsu-review-notes", "x.pem"]
-        )
+        self.kill.side_effect = ProcessLookupError
+        clean.stop([99])
 
     def test_only_a_process_that_exists_is_running(self):
         self.assertTrue(clean.running(os.getpid()))
         self.assertFalse(clean.running(2**30))
 
+    def test_docker_runs_only_where_it_is_installed(self):
+        mock.patch.stopall()
+        with mock.patch("shutil.which", return_value=None), mock.patch("subprocess.run") as run:
+            clean.docker("image", "prune", "-f")
+        run.assert_not_called()
+        with mock.patch("shutil.which", return_value="/usr/bin/docker"), mock.patch("subprocess.run") as run:
+            clean.docker("image", "prune", "-f")
+        self.assertEqual(run.call_args.args[0], ["docker", "image", "prune", "-f"])
+
     def test_unknown_arguments_print_the_usage(self):
         with mock.patch("sys.stderr"):
-            self.assertEqual(clean.main(["--all"], proc=self.proc, temporary=self.temporary), 2)
+            self.assertEqual(clean.main(["--all"], self.host), 2)
 
 
 if __name__ == "__main__":

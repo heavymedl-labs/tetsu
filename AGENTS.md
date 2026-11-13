@@ -40,7 +40,7 @@ describes what is implemented.
 - Read [CONSTRAINTS.md](CONSTRAINTS.md) before writing code, and do not weaken it to make a change pass. Add a
   language only once its row there is filled.
 - Clean up what you start: servers, containers, images, databases, and files in `/tmp`, including a headless
-  browser's profile. Tests write them through `Scratch`. `scripts/clean.py` sweeps what tests leave.
+  browser's profile. Tests write them through `Scratch`. `scripts/clean.py` sweeps the rest after every check.
 - Type no settings into commands. They come from the environment or a local `.env`
   ([ADR-0050](docs/adr/0050-local-settings-file.md)), and a local default goes in `.env.example`.
 
