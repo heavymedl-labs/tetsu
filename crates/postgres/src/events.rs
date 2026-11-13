@@ -7,9 +7,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
-use deadpool_postgres::{Pool, Transaction};
 use std::sync::OnceLock;
 
+use deadpool_postgres::{Object, Pool, Transaction};
 use tokio::sync::watch;
 
 use crate::connection::Error;
@@ -19,8 +19,12 @@ use crate::scope::{DeliveryTransaction, ModuleTransaction, TenantTransaction};
 pub const OUTBOX: &str = include_str!("../migrations/outbox.sql");
 /// A consuming module's inboxes, as one of its migrations.
 pub const INBOX: &str = include_str!("../migrations/inbox.sql");
-/// After this many failed attempts an event stops, unless it is kept, and its failure is logged as an error.
+/// After this many failed attempts an event stops, unless it is kept, and its failure is logged as an error either
+/// way, so operations can alert on it (#27).
 pub const MAX_ATTEMPTS: i64 = 10;
+/// How long a consumer may take to apply one event before it counts as failed, so one stuck on an outside call
+/// cannot stop delivery.
+const APPLY_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long a delivered event stays before it is deleted. The outbox delivers; it is no history.
 pub const KEPT_FOR: Duration = Duration::from_hours(7 * 24);
 /// How often the dispatcher removes delivered events past [`KEPT_FOR`].
@@ -68,6 +72,11 @@ pub trait Consumer: Send + Sync {
     fn schema(&self) -> &'static str;
     /// Whether it wants this event at all.
     fn wants(&self, event: &Event) -> bool;
+    /// Whether an event it fails to apply must keep retrying, however often it fails, as the audit record's must
+    /// (ADR-0045). Such an event is marked kept.
+    fn never_lose(&self) -> bool {
+        false
+    }
     /// Applies the event. It may see the same event again, and events in any order.
     fn apply<'a>(&'a self, transaction: &'a Transaction<'a>, event: &'a Event) -> Applied<'a>;
 }
@@ -133,6 +142,7 @@ pub struct Dispatcher {
     pool: Pool,
     producers: Vec<String>,
     consumers: Vec<Arc<dyn Consumer>>,
+    apply_timeout: Duration,
 }
 
 /// One outbox: a module's tenant-owned or global table.
@@ -147,6 +157,31 @@ impl Outbox {
         match self {
             Self::Tenant => "outbox",
             Self::Global => "outbox_global",
+        }
+    }
+
+    /// Finds one event by `$1`, its ID, and `$2`, its tenant, so the tenant outbox's key is used whole.
+    fn row(self) -> &'static str {
+        match self {
+            Self::Tenant => "tenant_id = $2 AND id = $1::text::uuid",
+            Self::Global => "id = $1::text::uuid AND $2::bigint IS NULL",
+        }
+    }
+}
+
+/// One producer's outbox, as one pass reads and settles it.
+struct Place<'a> {
+    producer: &'a str,
+    table: String,
+    outbox: Outbox,
+}
+
+impl<'a> Place<'a> {
+    fn new(producer: &'a str, outbox: Outbox) -> Self {
+        Self {
+            producer,
+            table: format!(r#""{producer}".{}"#, outbox.table()),
+            outbox,
         }
     }
 }
@@ -178,7 +213,17 @@ impl Dispatcher {
             pool,
             producers,
             consumers,
+            apply_timeout: APPLY_TIMEOUT,
         })
+    }
+
+    /// The same dispatcher, giving each consumer `timeout` to apply an event.
+    #[must_use]
+    pub fn with_apply_timeout(self, timeout: Duration) -> Self {
+        Self {
+            apply_timeout: timeout,
+            ..self
+        }
     }
 
     /// Delivers until `stop` finishes: every `poll`, and at once when this process records an event. Removes
@@ -191,12 +236,11 @@ impl Dispatcher {
             if let Err(error) = self.deliver_due().await {
                 tracing::error!(error = %error, "event delivery failed");
             }
+            // A failed removal waits for the next hour too, rather than running on every poll.
             if cleaned.is_none_or(|at| at.elapsed() >= CLEAN_EVERY) {
-                match self.remove_delivered(KEPT_FOR).await {
-                    Ok(_) => cleaned = Some(Instant::now()),
-                    Err(error) => {
-                        tracing::error!(error = %error, "removing delivered events failed");
-                    }
+                cleaned = Some(Instant::now());
+                if let Err(error) = self.remove_delivered(KEPT_FOR).await {
+                    tracing::error!(error = %error, "removing delivered events failed");
                 }
             }
             tokio::select! {
@@ -210,7 +254,8 @@ impl Dispatcher {
     /// One pass over every outbox: each due event goes to every consumer that wants it, and is settled.
     ///
     /// # Errors
-    /// Fails if an outbox cannot be read or settled. A consumer's failure is not an error here; it schedules a retry.
+    /// Fails if an outbox cannot be read or settled, or the pool has no connection for a consumer, which ends the
+    /// pass with nothing charged to any event. A consumer's own failure is not an error here; it schedules a retry.
     pub async fn deliver_due(&self) -> Result<usize, Error> {
         let mut delivered = 0;
         for producer in &self.producers {
@@ -222,34 +267,55 @@ impl Dispatcher {
     }
 
     async fn deliver_from(&self, producer: &str, outbox: Outbox) -> Result<usize, Error> {
-        let table = format!(r#""{producer}".{}"#, outbox.table());
+        let place = Place::new(producer, outbox);
         let mut client = self.pool.get().await?;
         let transaction = DeliveryTransaction::begin(&mut client).await?;
-        let rows = due(&transaction, &table, outbox).await?;
+        let rows = due(&transaction, &place).await?;
         let mut delivered = 0;
         for row in &rows {
-            let (event, keep) = read_event(row, producer)?;
-            let failed = self.hand_over(&event).await;
-            if failed.is_empty() {
-                settle(&transaction, &table, &event).await?;
+            if self.deliver_one(&transaction, &place, row).await? {
                 delivered += 1;
-            } else {
-                retry_later(&transaction, &table, &event, keep, &failed).await?;
             }
         }
         transaction.commit().await?;
         Ok(delivered)
     }
 
-    /// Gives the event to each consumer that wants it, and returns the schemas of those that failed.
-    async fn hand_over(&self, event: &Event) -> Vec<&'static str> {
+    /// Hands one due event over, then settles it, or schedules its retry. Returns whether it was delivered.
+    async fn deliver_one(
+        &self,
+        transaction: &Transaction<'_>,
+        place: &Place<'_>,
+        row: &tokio_postgres::Row,
+    ) -> Result<bool, Error> {
+        let (event, keep) = read_event(row, place.producer)?;
+        let failed = self.hand_over(&event).await?;
+        if failed.is_empty() {
+            settle(transaction, place, &event).await?;
+            Ok(true)
+        } else {
+            retry_later(transaction, place, &event, keep, &failed).await?;
+            Ok(false)
+        }
+    }
+
+    /// Gives the event to each consumer that wants it, and returns those that failed. A consumer's connection is
+    /// taken here, so a pool with none to spare ends the pass rather than counting as the consumer's failure.
+    async fn hand_over(&self, event: &Event) -> Result<Vec<&dyn Consumer>, Error> {
         let mut failed = Vec::new();
         for consumer in self
             .consumers
             .iter()
             .filter(|consumer| consumer.wants(event))
         {
-            if let Err(error) = self.apply_once(consumer.as_ref(), event).await {
+            let mut client = self.pool.get().await?;
+            let applied = tokio::time::timeout(
+                self.apply_timeout,
+                apply_once(&mut client, consumer.as_ref(), event),
+            )
+            .await
+            .unwrap_or_else(|_| Err("the consumer did not answer in time".into()));
+            if let Err(error) = applied {
                 tracing::warn!(
                     event_id = event.id,
                     event_type = event.kind,
@@ -257,35 +323,10 @@ impl Dispatcher {
                     error = %error,
                     "event not applied"
                 );
-                failed.push(consumer.schema());
+                failed.push(consumer.as_ref());
             }
         }
-        failed
-    }
-
-    /// Applies an event in the consumer's own transaction, which also records it in the consumer's inbox, so an
-    /// event already applied is skipped.
-    async fn apply_once(&self, consumer: &dyn Consumer, event: &Event) -> Result<(), Error> {
-        let schema = consumer.schema();
-        let mut client = self.pool.get().await?;
-        let transaction = ModuleTransaction::begin(&mut client, schema).await?;
-        if let Some(tenant) = event.tenant {
-            let transaction = transaction.for_tenant(tenant).await?;
-            let inbox = format!(
-                r#"INSERT INTO "{schema}".inbox (tenant_id, id)
-                   VALUES ((SELECT nullif(current_setting('app.tenant_id', true), '')::bigint), $1::text::uuid)
-                   ON CONFLICT DO NOTHING"#
-            );
-            once(&transaction, &inbox, consumer, event).await?;
-            transaction.commit().await?;
-        } else {
-            let inbox = format!(
-                r#"INSERT INTO "{schema}".inbox_global (id) VALUES ($1::text::uuid) ON CONFLICT DO NOTHING"#
-            );
-            once(&transaction, &inbox, consumer, event).await?;
-            transaction.commit().await?;
-        }
-        Ok(())
+        Ok(failed)
     }
 
     /// Deletes events delivered more than `age` ago, and returns how many.
@@ -319,10 +360,10 @@ impl Dispatcher {
 /// never waited on.
 async fn due(
     transaction: &Transaction<'_>,
-    table: &str,
-    outbox: Outbox,
+    place: &Place<'_>,
 ) -> Result<Vec<tokio_postgres::Row>, tokio_postgres::Error> {
-    let tenant = match outbox {
+    let table = &place.table;
+    let tenant = match place.outbox {
         Outbox::Tenant => "tenant_id",
         Outbox::Global => "NULL::bigint",
     };
@@ -352,14 +393,48 @@ fn read_event(row: &tokio_postgres::Row, producer: &str) -> Result<(Event, bool)
     Ok((event, row.try_get(6)?))
 }
 
-/// Marks an event delivered to every consumer that wants it.
-async fn settle(transaction: &Transaction<'_>, table: &str, event: &Event) -> Result<(), Error> {
+/// Marks an event delivered to every consumer that wants it, at the moment it is, not when the pass began.
+async fn settle(
+    transaction: &Transaction<'_>,
+    place: &Place<'_>,
+    event: &Event,
+) -> Result<(), Error> {
     transaction
         .execute(
-            &format!("UPDATE {table} SET delivered_at = now() WHERE id = $1::text::uuid"),
-            &[&event.id],
+            &format!(
+                "UPDATE {} SET delivered_at = clock_timestamp() WHERE {}",
+                place.table,
+                place.outbox.row()
+            ),
+            &[&event.id, &event.tenant],
         )
         .await?;
+    Ok(())
+}
+
+/// Applies an event in the consumer's own transaction, for the event's tenant when it has one, which also records
+/// it in the consumer's inbox, so an event already applied is skipped.
+async fn apply_once(
+    client: &mut Object,
+    consumer: &dyn Consumer,
+    event: &Event,
+) -> Result<(), Error> {
+    let schema = consumer.schema();
+    let transaction = ModuleTransaction::begin(client, schema).await?;
+    if let Some(tenant) = event.tenant {
+        let transaction = transaction.for_tenant(tenant).await?;
+        let inbox = format!(
+            r#"INSERT INTO "{schema}".inbox (tenant_id, id) VALUES ($2, $1::text::uuid) ON CONFLICT DO NOTHING"#
+        );
+        once(&transaction, &inbox, &[&event.id, &tenant], consumer, event).await?;
+        transaction.commit().await?;
+    } else {
+        let inbox = format!(
+            r#"INSERT INTO "{schema}".inbox_global (id) VALUES ($1::text::uuid) ON CONFLICT DO NOTHING"#
+        );
+        once(&transaction, &inbox, &[&event.id], consumer, event).await?;
+        transaction.commit().await?;
+    }
     Ok(())
 }
 
@@ -367,44 +442,56 @@ async fn settle(transaction: &Transaction<'_>, table: &str, event: &Event) -> Re
 async fn once(
     transaction: &Transaction<'_>,
     inbox: &str,
+    values: &[&(dyn tokio_postgres::types::ToSql + Sync)],
     consumer: &dyn Consumer,
     event: &Event,
 ) -> Result<(), Error> {
-    if transaction.execute(inbox, &[&event.id]).await? == 1 {
+    if transaction.execute(inbox, values).await? == 1 {
         consumer.apply(transaction, event).await?;
     }
     Ok(())
 }
 
-/// Schedules the next attempt, with exponential backoff and jitter capped at an hour, and logs an error once an
-/// event that is not kept runs out of attempts.
+/// Schedules the next attempt, from the moment of the failure, with exponential backoff and jitter capped at an
+/// hour; the exponent stops growing well before the interval could overflow. An event a never-lose consumer failed
+/// is marked kept. Once an event has failed [`MAX_ATTEMPTS`] times, an error names it and each failing consumer:
+/// one that is not kept stops there, and a kept one goes on.
 async fn retry_later(
     transaction: &Transaction<'_>,
-    table: &str,
+    place: &Place<'_>,
     event: &Event,
     keep: bool,
-    failed: &[&str],
+    failed: &[&dyn Consumer],
 ) -> Result<(), Error> {
+    let keep = keep || failed.iter().any(|consumer| consumer.never_lose());
     let attempts: i64 = transaction
         .query_one(
             &format!(
-                "UPDATE {table} SET attempts = attempts + 1,
-                   due_at = now() + least(interval '1 hour', interval '1 second' * power(2, attempts))
-                                   * (0.5 + random() / 2)
-                 WHERE id = $1::text::uuid RETURNING attempts"
+                "UPDATE {} SET attempts = attempts + 1, keep = $3,
+                   due_at = clock_timestamp() + least(
+                     interval '1 hour',
+                     interval '1 second' * power(2, least(attempts, 13)) * (0.5 + random() / 2))
+                 WHERE {} RETURNING attempts",
+                place.table,
+                place.outbox.row()
             ),
-            &[&event.id],
+            &[&event.id, &event.tenant, &keep],
         )
         .await?
         .try_get(0)?;
-    if attempts >= MAX_ATTEMPTS && !keep {
+    if attempts == MAX_ATTEMPTS {
+        let what = if keep {
+            "event keeps failing"
+        } else {
+            "event stopped retrying"
+        };
         for consumer in failed {
             tracing::error!(
                 event_id = event.id,
                 event_type = event.kind,
-                consumer,
+                consumer = consumer.schema(),
                 attempts,
-                "event stopped retrying"
+                "{what}"
             );
         }
     }

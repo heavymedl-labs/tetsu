@@ -59,7 +59,11 @@ END $$;
 -- The delivery role works across tenants by design, on these tables alone.
 CREATE POLICY delivery ON outbox TO tetsu_delivery USING (TRUE);
 
-GRANT SELECT, UPDATE, DELETE ON outbox, outbox_global TO tetsu_delivery;
+-- It settles events, so it may change only when each is due and delivered,
+-- its attempts, and whether it is kept, never what an event says.
+GRANT SELECT, DELETE ON outbox, outbox_global TO tetsu_delivery;
+GRANT UPDATE (attempts, due_at, delivered_at, keep) ON outbox, outbox_global
+TO tetsu_delivery;
 
 -- What is due, oldest first, for the dispatcher's polls.
 CREATE INDEX outbox_due ON outbox (due_at) WHERE delivered_at IS NULL;

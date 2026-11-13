@@ -354,7 +354,31 @@ judged AS (
                             pg_catalog.format('%I.outbox', g.schema_name),
                             pg_catalog.format('%I.outbox_global', g.schema_name)
                         )
-                        AND g.privilege_type IN ('SELECT', 'UPDATE', 'DELETE')
+                        AND g.privilege_type IN ('SELECT', 'DELETE')
+                    )
+                    OR (
+                        g.kind = 'table'
+                        AND g.privilege_type = 'UPDATE'
+                        AND g.shown IN (
+                            SELECT
+                                pg_catalog.format(
+                                    '%I.%s (column %s)',
+                                    g.schema_name,
+                                    outbox.name,
+                                    settled.name
+                                )
+                            FROM
+                                unnest(ARRAY['outbox', 'outbox_global'])
+                                    AS outbox (name),
+                                unnest(
+                                    ARRAY[
+                                        'attempts',
+                                        'due_at',
+                                        'delivered_at',
+                                        'keep'
+                                    ]
+                                ) AS settled (name)
+                        )
                     )
                     OR (g.kind = 'schema' AND g.privilege_type = 'USAGE')
                 )
@@ -446,7 +470,9 @@ FROM tenant_owned AS t
 INNER JOIN pg_catalog.pg_policy AS p ON t.oid = p.polrelid
 CROSS JOIN tenant_rule AS tr
 WHERE
-    NOT (
+    -- A missing delivery role makes the comparison unknown, which must not
+    -- hide the policy, so it counts as no match.
+    NOT coalesce(
         t.relname = 'outbox'
         AND p.polroles = ARRAY[(
             SELECT r.oid FROM pg_catalog.pg_roles AS r
@@ -455,7 +481,8 @@ WHERE
         AND p.polpermissive
         AND p.polcmd = '*'
         AND p.polwithcheck IS NULL
-        AND pg_catalog.pg_get_expr(p.polqual, p.polrelid) = 'true'
+        AND pg_catalog.pg_get_expr(p.polqual, p.polrelid) = 'true',
+        FALSE
     )
     AND (
         p.polroles <> t.module_roles

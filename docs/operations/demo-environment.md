@@ -128,3 +128,17 @@ tenant a new slug and address as `tetsu_owner`, then deploy again:
 UPDATE tenancy.tenants SET slug = 'new-slug' WHERE slug = 'login';
 UPDATE tenancy.addresses SET address = '/new-slug' WHERE address = '/login';
 ```
+
+## When an event stops retrying
+
+An event that fails 10 times logs an `ERROR` line, `event stopped retrying`, with its ID, type, and each
+failing consumer ([ADR-0043](../adr/0043-domain-event-delivery.md)). A kept event logs `event keeps failing`
+instead and goes on retrying hourly. Once the consumer is fixed and deployed, replay a stopped event by making it
+due again, as `tetsu_owner`, with the schema of the module that recorded it:
+
+```sql
+UPDATE identity.outbox SET attempts = 0, due_at = now() WHERE id = '<event ID>';
+```
+
+Use `outbox_global` for an event that belongs to no business. Consumers skip what they already applied, so a
+replay repeats nothing.

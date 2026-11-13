@@ -61,6 +61,26 @@ mod support {
     pub struct Ledger {
         pub calls: AtomicUsize,
         pub failing: AtomicBool,
+        /// Never answers, as a consumer stuck on an outside call would.
+        pub hanging: AtomicBool,
+    }
+
+    /// A consumer that must never lose an event, as Audit must not, and that always fails.
+    pub struct Unready;
+
+    impl Consumer for Unready {
+        fn schema(&self) -> &'static str {
+            "ledger"
+        }
+        fn wants(&self, event: &Event) -> bool {
+            event.producer == "people"
+        }
+        fn never_lose(&self) -> bool {
+            true
+        }
+        fn apply<'a>(&'a self, _: &'a Transaction<'a>, _: &'a Event) -> Applied<'a> {
+            Box::pin(async { Err("not ready".into()) })
+        }
     }
 
     impl Consumer for Ledger {
@@ -75,6 +95,9 @@ mod support {
                 self.calls.fetch_add(1, Ordering::SeqCst);
                 if self.failing.load(Ordering::SeqCst) {
                     return Err("the ledger is down".into());
+                }
+                if self.hanging.load(Ordering::SeqCst) {
+                    std::future::pending::<()>().await;
                 }
                 let sql = match event.tenant {
                     Some(_) => "INSERT INTO ledger.effects (tenant_id, event_id)
@@ -515,23 +538,27 @@ async fn the_delivery_role_reaches_every_tenant_s_outbox_and_nothing_else() {
         .expect("a count");
     assert_eq!(seen, 2);
     transaction.commit().await.expect("commits");
-    for table in [
-        "people.people",
-        "people.notes",
-        "ledger.inbox",
-        "ledger.effects",
+    // It settles events and never rewrites one, and reaches no other table.
+    for statement in [
+        "UPDATE people.outbox SET payload = '{}'",
+        "UPDATE people.outbox SET tenant_id = 3",
+        "UPDATE people.outbox SET event_type = 'x'",
+        "SELECT count(*) FROM people.people",
+        "SELECT count(*) FROM people.notes",
+        "SELECT count(*) FROM ledger.inbox",
+        "SELECT count(*) FROM ledger.effects",
     ] {
         let transaction = DeliveryTransaction::begin(&mut client)
             .await
             .expect("begins");
         let refused = transaction
-            .query_one(&format!("SELECT count(*) FROM {table}"), &[])
+            .execute(statement, &[])
             .await
-            .expect_err("no rights here");
+            .expect_err("refused");
         assert_eq!(
             refused.code(),
             Some(&tokio_postgres::error::SqlState::INSUFFICIENT_PRIVILEGE),
-            "{table}"
+            "{statement}"
         );
     }
 }
@@ -597,5 +624,145 @@ async fn old_events_are_removed_at_start_then_hourly() {
             .await,
         1,
         "an old event waits for the next hourly removal"
+    );
+}
+
+/// The wait stops growing at an hour, however many times a kept event has failed, rather than overflowing.
+#[tokio::test]
+async fn a_kept_event_that_fails_for_days_still_waits_an_hour() {
+    let World {
+        pool,
+        ledger,
+        dispatcher,
+        database,
+    } = world().await;
+    ledger.failing.store(true, Ordering::SeqCst);
+    record(
+        &pool,
+        1,
+        &NewEvent {
+            keep: true,
+            ..JOINED
+        },
+        true,
+    )
+    .await;
+    for attempts in [13, 44, 60, 1000] {
+        run_as_owner(
+            &database,
+            &format!("UPDATE people.outbox SET attempts = {attempts}, due_at = now()"),
+        )
+        .await;
+        dispatcher.deliver_due().await.expect("tries");
+        let wait: f64 = read(
+            &database,
+            "SELECT extract(epoch FROM due_at - now())::float8 FROM people.outbox",
+        )
+        .await;
+        assert!((3599.0..=3601.0).contains(&wait), "{attempts}: {wait}");
+    }
+}
+
+/// A kept event never stops, but once it has failed as often as others may, it says so, so an alert can fire.
+#[tokio::test]
+async fn a_kept_event_that_keeps_failing_says_so_once() {
+    let World {
+        pool,
+        ledger,
+        dispatcher,
+        database,
+    } = world().await;
+    ledger.failing.store(true, Ordering::SeqCst);
+    let id = record(
+        &pool,
+        1,
+        &NewEvent {
+            keep: true,
+            ..JOINED
+        },
+        true,
+    )
+    .await;
+    let logs = Logs::default();
+    let _guard = tracing::subscriber::set_default(logs.subscriber());
+    for _ in 0..MAX_ATTEMPTS + 3 {
+        run_as_owner(&database, "UPDATE people.outbox SET due_at = now()").await;
+        dispatcher.deliver_due().await.expect("tries");
+    }
+    let failing: Vec<String> = logs
+        .lines()
+        .into_iter()
+        .filter(|line| line.contains("event keeps failing"))
+        .collect();
+    assert_eq!(failing.len(), 1, "{failing:?}");
+    for field in [id.as_str(), "people.joined", "ledger", "ERROR"] {
+        assert!(failing[0].contains(field), "{field} in {}", failing[0]);
+    }
+}
+
+/// When the pool has no connection to spare, the pass waits for the next one rather than charging the event an
+/// attempt its consumer never had.
+#[tokio::test]
+async fn a_busy_pool_costs_no_attempts() {
+    let World {
+        pool,
+        dispatcher,
+        database,
+        ..
+    } = world().await;
+    record(&pool, 1, &JOINED, true).await;
+    // Every connection but the one the dispatcher reads its outbox with.
+    let mut held = Vec::new();
+    for _ in 1..pool.status().max_size {
+        held.push(pool.get().await.expect("a connection"));
+    }
+    let _ = dispatcher.deliver_due().await;
+    drop(held);
+    assert_eq!(
+        read::<i64>(&database, "SELECT attempts FROM people.outbox").await,
+        0
+    );
+    assert_eq!(dispatcher.deliver_due().await.expect("delivers"), 1);
+}
+
+/// A consumer that never answers counts as a failure after its time, so delivery goes on.
+#[tokio::test]
+async fn a_consumer_that_never_answers_fails_after_its_time() {
+    let World {
+        pool,
+        ledger,
+        dispatcher,
+        database,
+    } = world().await;
+    ledger.hanging.store(true, Ordering::SeqCst);
+    record(&pool, 1, &JOINED, true).await;
+    let dispatcher = dispatcher.with_apply_timeout(Duration::from_millis(200));
+    let passed = tokio::time::timeout(Duration::from_secs(5), dispatcher.deliver_due())
+        .await
+        .expect("gives up on the consumer within its time");
+    assert_eq!(passed.expect("passes"), 0);
+    assert_eq!(
+        read::<i64>(&database, "SELECT attempts FROM people.outbox").await,
+        1
+    );
+}
+
+/// A consumer that must not lose events, as Audit must not, keeps an event it fails on retrying past the limit.
+#[tokio::test]
+async fn an_event_a_never_lose_consumer_fails_keeps_retrying() {
+    let World { pool, database, .. } = world().await;
+    let consumers: Vec<Arc<dyn Consumer>> = vec![Arc::new(support::Unready)];
+    let dispatcher = Dispatcher::new(pool.clone(), &["people"], consumers)
+        .await
+        .expect("a dispatcher");
+    record(&pool, 1, &JOINED, true).await;
+    for _ in 0..MAX_ATTEMPTS + 2 {
+        run_as_owner(&database, "UPDATE people.outbox SET due_at = now()").await;
+        dispatcher.deliver_due().await.expect("tries");
+    }
+    assert_eq!(
+        read::<i64>(&database, "SELECT attempts FROM people.outbox WHERE keep").await,
+        MAX_ATTEMPTS + 2,
+        "marked kept, and still tried"
     );
 }

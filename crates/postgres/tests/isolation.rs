@@ -938,47 +938,57 @@ async fn reach_logins_parameters_and_owners_that_can_skip_rls_are_caught() {
     }
 }
 
+/// The shared outbox migration, which grants the delivery role exactly what it needs, passes.
+#[tokio::test]
+async fn the_shared_outbox_passes() {
+    assert_eq!(
+        problems(tetsu_postgres::OUTBOX.to_string(), "").await,
+        Vec::<String>::new()
+    );
+}
+
 /// The delivery role reads and settles outboxes across tenants and nothing more, so anything wider is caught.
 #[tokio::test]
 async fn the_delivery_role_reaches_outboxes_alone() {
-    let outbox = tenant_owned("outbox");
-    let grant_elsewhere = format!(
-        "{}\nGRANT SELECT ON other TO tetsu_delivery",
-        tenant_owned("other")
-    );
-    let insert = format!("{outbox}\nGRANT INSERT ON outbox TO tetsu_delivery");
-    let grantable = format!("{outbox}\nGRANT SELECT ON outbox TO tetsu_delivery WITH GRANT OPTION");
-    let wide_policy = format!(
-        "{}\nCREATE POLICY delivery ON other TO tetsu_delivery USING (true)",
-        tenant_owned("other")
-    );
-    let narrow_policy = format!(
-        "{outbox}\nCREATE POLICY delivery ON outbox TO tetsu_delivery USING (tenant_id > 0)"
-    );
+    let outbox = tetsu_postgres::OUTBOX;
+    let with = |extra: &str| format!("{outbox}\n{extra}");
+    let other = tenant_owned("other");
     each_caught(&[
         (
-            &grant_elsewhere,
+            &format!("{other}\nGRANT SELECT ON other TO tetsu_delivery"),
             "",
             "tetsu_delivery holds SELECT on checked.other",
         ),
-        (&insert, "", "tetsu_delivery holds INSERT on checked.outbox"),
-        (&grantable, "", "with the right to grant it"),
         (
-            &wide_policy,
+            &with("GRANT INSERT ON outbox TO tetsu_delivery"),
+            "",
+            "tetsu_delivery holds INSERT on checked.outbox",
+        ),
+        (
+            &with("GRANT UPDATE ON outbox TO tetsu_delivery"),
+            "",
+            "tetsu_delivery holds UPDATE on checked.outbox",
+        ),
+        (
+            &with("GRANT UPDATE (tenant_id) ON outbox TO tetsu_delivery"),
+            "",
+            "tetsu_delivery holds UPDATE on checked.outbox (column tenant_id)",
+        ),
+        (
+            &with("GRANT SELECT ON outbox TO tetsu_delivery WITH GRANT OPTION"),
+            "",
+            "with the right to grant it",
+        ),
+        (
+            &format!("{other}\nCREATE POLICY delivery ON other TO tetsu_delivery USING (true)"),
             "",
             "checked.other has policy delivery that is not the tenant rule",
         ),
         (
-            &narrow_policy,
+            &with("CREATE POLICY narrow ON outbox TO tetsu_delivery USING (tenant_id > 0)"),
             "",
-            "checked.outbox has policy delivery that is not the tenant rule",
+            "checked.outbox has policy narrow that is not the tenant rule",
         ),
     ])
     .await;
-    let fitting = format!(
-        "{outbox}\nCREATE POLICY delivery ON outbox TO tetsu_delivery USING (true);
-         GRANT USAGE ON SCHEMA checked TO tetsu_delivery;
-         GRANT SELECT, UPDATE, DELETE ON outbox TO tetsu_delivery"
-    );
-    assert_eq!(problems(fitting, "").await, Vec::<String>::new());
 }
