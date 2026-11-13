@@ -457,7 +457,13 @@ async fn an_event_stops_after_ten_failures_and_says_so() {
         .filter(|line| line.contains("event stopped retrying"))
         .collect();
     assert_eq!(stopped.len(), 1, "{stopped:?}");
-    for field in [id.as_str(), "people.joined", "ledger", "ERROR"] {
+    for field in [
+        id.as_str(),
+        "people.joined",
+        "ledger",
+        "ERROR",
+        "\"alert\":\"event_stopped\"",
+    ] {
         assert!(stopped[0].contains(field), "{field} in {}", stopped[0]);
     }
 }
@@ -761,7 +767,13 @@ async fn a_kept_event_that_keeps_failing_says_so_once() {
         .filter(|line| line.contains("event keeps failing"))
         .collect();
     assert_eq!(failing.len(), 1, "{failing:?}");
-    for field in [id.as_str(), "people.joined", "ledger", "ERROR"] {
+    for field in [
+        id.as_str(),
+        "people.joined",
+        "ledger",
+        "ERROR",
+        "\"alert\":\"event_stopped\"",
+    ] {
         assert!(failing[0].contains(field), "{field} in {}", failing[0]);
     }
 }

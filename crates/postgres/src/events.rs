@@ -574,6 +574,7 @@ async fn retry_later(
                 event_type = event.kind,
                 consumer = consumer.schema(),
                 attempts,
+                alert = "event_stopped",
                 "{what}"
             );
         }

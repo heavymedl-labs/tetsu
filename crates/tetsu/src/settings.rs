@@ -1,5 +1,6 @@
 //! Settings from the environment.
 
+use std::collections::HashMap;
 use std::env::VarError;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::Path;
@@ -52,6 +53,178 @@ pub fn demo(var: impl Fn(&str) -> Result<String, VarError>) -> Result<bool, Stri
         Some("false") => Ok(false),
         _ => Err("TETSU_DEMO must be set to true or false".into()),
     }
+}
+
+/// Where logs are exported over OTLP (ADR-0049), read from OpenTelemetry's standard names.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Export {
+    /// The full address logs are sent to, ending in `/v1/logs` unless the logs endpoint was set itself.
+    pub endpoint: String,
+    /// Sent with every export, such as the backend's key: names in lowercase, values still percent-encoded, as
+    /// the exporter decodes them itself.
+    pub headers: HashMap<String, String>,
+    pub gzip: bool,
+    pub service_name: String,
+    /// Further attributes naming this process to the backend, such as its environment, decoded.
+    pub resource: Vec<(String, String)>,
+}
+
+/// Reads the export settings as the exporter does, the logs-only name over the shared one: the endpoint from
+/// `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`, or else `OTEL_EXPORTER_OTLP_ENDPOINT` with `/v1/logs` added; the headers
+/// from `OTEL_EXPORTER_OTLP_LOGS_HEADERS` or `OTEL_EXPORTER_OTLP_HEADERS`; compression, `gzip` or `none`, from
+/// `OTEL_EXPORTER_OTLP_LOGS_COMPRESSION` or `OTEL_EXPORTER_OTLP_COMPRESSION`; `OTEL_SERVICE_NAME`, default
+/// `tetsu`; and `OTEL_RESOURCE_ATTRIBUTES`. With no endpoint, logs are not exported. Errors name the variable and
+/// never repeat its value, since the headers hold a key.
+pub fn export(var: impl Fn(&str) -> Result<String, VarError>) -> Result<Option<Export>, String> {
+    let Some(endpoint) = endpoint(&var)? else {
+        return Ok(None);
+    };
+    Ok(Some(Export {
+        endpoint,
+        headers: headers(&var)?,
+        gzip: gzip(&var)?,
+        service_name: value(&var, "OTEL_SERVICE_NAME")?.unwrap_or_else(|| "tetsu".into()),
+        resource: decoded_pairs(&var, "OTEL_RESOURCE_ATTRIBUTES")?,
+    }))
+}
+
+/// The logs endpoint, which must be HTTPS, since the headers carry a key, or HTTP to this machine.
+fn endpoint(var: impl Fn(&str) -> Result<String, VarError>) -> Result<Option<String>, String> {
+    let (name, endpoint) = match (
+        value(&var, "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")?,
+        value(&var, "OTEL_EXPORTER_OTLP_ENDPOINT")?,
+    ) {
+        (Some(endpoint), _) => ("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", endpoint),
+        (None, Some(base)) => (
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+            format!("{}/v1/logs", base.trim_end_matches('/')),
+        ),
+        (None, None) => return Ok(None),
+    };
+    let wrong = || format!("{name} must be an https URL, or http to this machine");
+    let uri: axum::http::Uri = endpoint.parse().map_err(|_| wrong())?;
+    let local = matches!(uri.host(), Some("127.0.0.1" | "localhost" | "[::1]"));
+    match uri.scheme_str() {
+        Some("https") => Ok(Some(endpoint)),
+        Some("http") if local => Ok(Some(endpoint)),
+        _ => Err(format!(
+            "{name} must be an https URL, or http to this machine"
+        )),
+    }
+}
+
+fn gzip(var: impl Fn(&str) -> Result<String, VarError>) -> Result<bool, String> {
+    let (name, compression) = first(
+        &var,
+        "OTEL_EXPORTER_OTLP_LOGS_COMPRESSION",
+        "OTEL_EXPORTER_OTLP_COMPRESSION",
+    )?;
+    match compression.as_deref() {
+        None | Some("none") => Ok(false),
+        Some("gzip") => Ok(true),
+        Some(_) => Err(format!("{name} must be gzip or none")),
+    }
+}
+
+/// Headers whose names are HTTP tokens and whose values, decoded, hold no control characters, so none is dropped
+/// on the way out without a word.
+fn headers(
+    var: impl Fn(&str) -> Result<String, VarError>,
+) -> Result<HashMap<String, String>, String> {
+    let (name, _) = first(
+        &var,
+        "OTEL_EXPORTER_OTLP_LOGS_HEADERS",
+        "OTEL_EXPORTER_OTLP_HEADERS",
+    )?;
+    let wrong =
+        || format!("{name} must be key=value pairs, separated by commas and percent-encoded");
+    pairs(&var, name)?
+        .into_iter()
+        .map(|(key, raw)| {
+            let key = decoded(key).ok_or_else(wrong)?.to_ascii_lowercase();
+            let value = decoded(&raw).ok_or_else(wrong)?;
+            let token = key
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte));
+            let printable = !value.chars().any(|c| c.is_control() && c != '\t');
+            if !token || !printable {
+                return Err(wrong());
+            }
+            Ok((key, raw))
+        })
+        .collect()
+}
+
+/// The first of two variables that is set, by name, or the second's name when neither is.
+fn first(
+    var: impl Fn(&str) -> Result<String, VarError>,
+    preferred: &'static str,
+    shared: &'static str,
+) -> Result<(&'static str, Option<String>), String> {
+    match value(&var, preferred)? {
+        Some(found) => Ok((preferred, Some(found))),
+        None => Ok((shared, value(&var, shared)?)),
+    }
+}
+
+/// Pairs with both parts percent-decoded.
+fn decoded_pairs(
+    var: impl Fn(&str) -> Result<String, VarError>,
+    name: &str,
+) -> Result<Vec<(String, String)>, String> {
+    let wrong =
+        || format!("{name} must be key=value pairs, separated by commas and percent-encoded");
+    pairs(&var, name)?
+        .into_iter()
+        .map(|(key, value)| {
+            Ok((
+                decoded(key).ok_or_else(wrong)?,
+                decoded(value).ok_or_else(wrong)?,
+            ))
+        })
+        .collect()
+}
+
+/// Comma-separated `key=value` pairs, as OpenTelemetry writes headers and resource attributes, each part trimmed
+/// and still encoded. Empty pairs are skipped, as other OpenTelemetry readers skip them; an empty key is refused.
+fn pairs(
+    var: impl Fn(&str) -> Result<String, VarError>,
+    name: &str,
+) -> Result<Vec<(String, String)>, String> {
+    let Some(text) = value(&var, name)? else {
+        return Ok(Vec::new());
+    };
+    text.split(',')
+        .map(str::trim)
+        .filter(|pair| !pair.is_empty())
+        .map(|pair| match pair.split_once('=') {
+            Some((key, value)) if !key.trim().is_empty() => {
+                Ok((key.trim().to_string(), value.trim().to_string()))
+            }
+            _ => Err(format!(
+                "{name} must be key=value pairs, separated by commas and percent-encoded"
+            )),
+        })
+        .collect()
+}
+
+/// Percent-decodes text, or `None` if an escape is not two hex digits or the result is not UTF-8.
+fn decoded(text: impl AsRef<str>) -> Option<String> {
+    let mut bytes = Vec::new();
+    let mut rest = text.as_ref().as_bytes();
+    while let Some((&byte, after)) = rest.split_first() {
+        if byte == b'%' {
+            let hex = after
+                .get(..2)
+                .filter(|hex| hex.iter().all(u8::is_ascii_hexdigit))?;
+            bytes.push(u8::from_str_radix(std::str::from_utf8(hex).ok()?, 16).ok()?);
+            rest = &after[2..];
+        } else {
+            bytes.push(byte);
+            rest = after;
+        }
+    }
+    String::from_utf8(bytes).ok()
 }
 
 /// A missing or blank variable is `None`, and surrounding spaces are dropped. One that is not UTF-8 is an error,
@@ -257,5 +430,198 @@ mod tests {
         for url in [None, Some(""), Some("  ")] {
             assert_eq!(read(url, None).unwrap_err(), "DATABASE_URL must be set");
         }
+    }
+
+    fn exporting(set: &[(&str, &str)]) -> Result<Option<Export>, String> {
+        export(|name| {
+            set.iter()
+                .find(|(set, _)| *set == name)
+                .map(|(_, value)| (*value).to_string())
+                .ok_or(VarError::NotPresent)
+        })
+    }
+
+    #[test]
+    fn logs_are_exported_only_once_an_endpoint_is_set() {
+        assert_eq!(exporting(&[]), Ok(None));
+        assert_eq!(
+            exporting(&[("OTEL_EXPORTER_OTLP_HEADERS", "a=b")]),
+            Ok(None)
+        );
+        let export = exporting(&[("OTEL_EXPORTER_OTLP_ENDPOINT", "https://otlp.example/otlp/")])
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            export,
+            Export {
+                endpoint: "https://otlp.example/otlp/v1/logs".into(),
+                headers: HashMap::new(),
+                gzip: false,
+                service_name: "tetsu".into(),
+                resource: Vec::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn the_logs_endpoint_is_used_as_set_over_the_shared_one() {
+        let export = exporting(&[
+            ("OTEL_EXPORTER_OTLP_ENDPOINT", "https://shared.example"),
+            (
+                "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+                "https://logs.example/in",
+            ),
+        ])
+        .unwrap()
+        .unwrap();
+        assert_eq!(export.endpoint, "https://logs.example/in");
+    }
+
+    #[test]
+    fn headers_and_attributes_are_decoded_pairs() {
+        let export = exporting(&[
+            ("OTEL_EXPORTER_OTLP_ENDPOINT", "https://otlp.example"),
+            (
+                "OTEL_EXPORTER_OTLP_HEADERS",
+                "Authorization=Basic%20MTIzOmtleQ==, X-Scope = a%2Cb",
+            ),
+            ("OTEL_EXPORTER_OTLP_COMPRESSION", "gzip"),
+            ("OTEL_SERVICE_NAME", "tetsu-demo"),
+            (
+                "OTEL_RESOURCE_ATTRIBUTES",
+                "deployment.environment.name=demo",
+            ),
+        ])
+        .unwrap()
+        .unwrap();
+        assert_eq!(export.headers["authorization"], "Basic%20MTIzOmtleQ==");
+        assert_eq!(export.headers["x-scope"], "a%2Cb");
+        assert_eq!(export.headers.len(), 2);
+        assert!(export.gzip);
+        assert_eq!(export.service_name, "tetsu-demo");
+        assert_eq!(
+            export.resource,
+            vec![("deployment.environment.name".into(), "demo".into())]
+        );
+    }
+
+    #[test]
+    fn a_broken_pair_is_refused_without_repeating_it() {
+        let wrong = "OTEL_EXPORTER_OTLP_HEADERS must be key=value pairs, separated by commas and percent-encoded";
+        for bad in [
+            "Basic secret",
+            "=secret",
+            "a=%zz",
+            "a=%2",
+            "a=%+1",
+            "a=%ff",
+            "%ff=a",
+            "a b=c",
+            "a=line%0Abreak",
+        ] {
+            assert_eq!(
+                exporting(&[
+                    ("OTEL_EXPORTER_OTLP_ENDPOINT", "https://otlp.example"),
+                    ("OTEL_EXPORTER_OTLP_HEADERS", bad),
+                ]),
+                Err(wrong.into()),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_pairs_are_skipped() {
+        let export = exporting(&[
+            ("OTEL_EXPORTER_OTLP_ENDPOINT", "https://otlp.example"),
+            ("OTEL_EXPORTER_OTLP_HEADERS", "a=b,, "),
+            ("OTEL_RESOURCE_ATTRIBUTES", ",k=v%20w,"),
+        ])
+        .unwrap()
+        .unwrap();
+        assert_eq!(export.headers.len(), 1);
+        assert_eq!(export.resource, vec![("k".into(), "v w".into())]);
+    }
+
+    /// The logs-only names win over the shared ones, as they do in the exporter, so both read the same.
+    #[test]
+    fn logs_only_headers_and_compression_win_over_shared_ones() {
+        let export = exporting(&[
+            ("OTEL_EXPORTER_OTLP_ENDPOINT", "https://otlp.example"),
+            ("OTEL_EXPORTER_OTLP_HEADERS", "shared=1"),
+            ("OTEL_EXPORTER_OTLP_LOGS_HEADERS", "logs=1"),
+            ("OTEL_EXPORTER_OTLP_COMPRESSION", "none"),
+            ("OTEL_EXPORTER_OTLP_LOGS_COMPRESSION", "gzip"),
+        ])
+        .unwrap()
+        .unwrap();
+        assert_eq!(export.headers.keys().collect::<Vec<_>>(), ["logs"]);
+        assert!(export.gzip);
+        assert_eq!(
+            exporting(&[
+                ("OTEL_EXPORTER_OTLP_ENDPOINT", "https://otlp.example"),
+                ("OTEL_EXPORTER_OTLP_LOGS_HEADERS", "nothing"),
+            ]),
+            Err("OTEL_EXPORTER_OTLP_LOGS_HEADERS must be key=value pairs, separated by commas and percent-encoded".into())
+        );
+        assert_eq!(
+            exporting(&[
+                ("OTEL_EXPORTER_OTLP_ENDPOINT", "https://otlp.example"),
+                ("OTEL_EXPORTER_OTLP_LOGS_COMPRESSION", "zstd"),
+            ]),
+            Err("OTEL_EXPORTER_OTLP_LOGS_COMPRESSION must be gzip or none".into())
+        );
+    }
+
+    /// The headers carry a key, so the endpoint must be HTTPS, or HTTP that never leaves this machine.
+    #[test]
+    fn the_endpoint_must_be_https_or_local() {
+        let at =
+            |name, endpoint| exporting(&[(name, endpoint)]).map(|export| export.unwrap().endpoint);
+        for local in [
+            "http://127.0.0.1:4318",
+            "http://localhost:4318",
+            "http://[::1]:4318",
+        ] {
+            assert_eq!(
+                at("OTEL_EXPORTER_OTLP_ENDPOINT", local),
+                Ok(format!("{local}/v1/logs"))
+            );
+        }
+        let wrong = Err(
+            "OTEL_EXPORTER_OTLP_ENDPOINT must be an https URL, or http to this machine".to_string(),
+        );
+        for bad in [
+            "http://otlp.example",
+            "ftp://otlp.example",
+            "otlp.example",
+            "/v1/logs",
+        ] {
+            assert_eq!(at("OTEL_EXPORTER_OTLP_ENDPOINT", bad), wrong, "{bad}");
+        }
+        assert_eq!(
+            at("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "https://exa mple"),
+            Err(
+                "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT must be an https URL, or http to this machine"
+                    .into()
+            )
+        );
+    }
+
+    #[test]
+    fn compression_is_gzip_or_none() {
+        let compressed = |value| {
+            exporting(&[
+                ("OTEL_EXPORTER_OTLP_ENDPOINT", "https://otlp.example"),
+                ("OTEL_EXPORTER_OTLP_COMPRESSION", value),
+            ])
+            .map(|export| export.unwrap().gzip)
+        };
+        assert_eq!(compressed("none"), Ok(false));
+        assert_eq!(compressed("gzip"), Ok(true));
+        assert_eq!(
+            compressed("zstd"),
+            Err("OTEL_EXPORTER_OTLP_COMPRESSION must be gzip or none".into())
+        );
     }
 }

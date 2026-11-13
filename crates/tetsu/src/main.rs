@@ -121,10 +121,33 @@ async fn refuse_reserved_addresses<S: tetsu_tenancy::TenantStore>(
 }
 
 /// Serves the public site until asked to stop. Settings are checked and the database reached before it listens,
-/// so a bad setting fails at start rather than on the first request.
+/// so a bad setting fails at start rather than on the first request. A failure or panic while starting is logged
+/// as an alert, and the logs flushed, before the process exits. The alert's line says only that serving could not
+/// start, since the reason can name a tenant's address or quote the database; the reason goes to stderr.
 async fn run_serve() -> Result<(), String> {
     let stop = serve::stop_signal();
-    logs::start()?;
+    let logs = logs::start(settings::export(|name| std::env::var(name)))?;
+    let started = tokio::spawn(ready())
+        .await
+        .unwrap_or_else(|_| Err("serving panicked while starting".into()));
+    let served = match started {
+        Ok((listener, app)) => serve::run(listener, app, stop, serve::GRACE)
+            .await
+            .map_err(|error| format!("serving stopped: {error}")),
+        Err(why) => {
+            tracing::error!(alert = "start_failed", "could not start serving");
+            Err(why)
+        }
+    };
+    if served.is_ok() {
+        tracing::info!("stopped");
+    }
+    logs.stop();
+    served
+}
+
+/// Reads the settings, reaches the database, and binds the port: everything serving needs before it listens.
+async fn ready() -> Result<(tokio::net::TcpListener, axum::Router), String> {
     let demo = settings::demo(|name| std::env::var(name))?;
     let address = settings::listen(|name| std::env::var(name))?;
     let pool = connect().await?;
@@ -142,11 +165,7 @@ async fn run_serve() -> Result<(), String> {
         .local_addr()
         .map_err(|error| format!("could not read the listening address: {error}"))?;
     tracing::info!("serving on http://{bound}");
-    serve::run(listener, app, stop, serve::GRACE)
-        .await
-        .map_err(|error| format!("serving stopped: {error}"))?;
-    tracing::info!("stopped");
-    Ok(())
+    Ok((listener, app))
 }
 
 /// Logs what a module reports for the operator, as an error on the request it happened in.

@@ -23,14 +23,16 @@ Exit codes are 0 for success, 1 for a failure, and 2 for a command or arguments 
 
 ## Logs
 
-`serve` writes JSON lines to standard output ([ADR-0045](../../docs/adr/0045-operations-baseline.md)). Each
-request logs one `served` line with its status and milliseconds, and its `span` holds the request ID, realm,
-method (`OTHER` for one HTTP does not define), route pattern such as `/{address}`, and tenant ID once a module
-finds one. Tetsu's own crates log from info up, and other crates only warnings and errors, since no one has
-checked what they write. No line names the path, query,
-or body, since those could carry a name, an email, a code, or a token. What a module reports for the operator,
-such as a page that could not load, is an `ERROR` line in the request's span. Errors before serving starts, and
-every other command's output, stay plain text.
+`serve` writes JSON lines to standard output ([ADR-0045](../../docs/adr/0045-operations-baseline.md)), and
+exports the same lines over OTLP when an endpoint is set ([ADR-0049](../../docs/adr/0049-log-export.md);
+[settings](#settings)). Each request logs one `served` line with its status and milliseconds, and its `span` holds
+the request ID, realm, `http.request.method` (`OTHER` for one HTTP does not define), `http.route` such as
+`/{address}`, and tenant ID once a module finds one. Only those span fields are exported. Tetsu's own crates log
+from info up, and other crates only warnings and errors, since no one has checked what they write; the exporter's
+own crates are never exported, and their warnings, such as a refused key, stay on standard output. No line names
+the path, query, or body, since those could carry a name, an email, a code, or a token. What a module reports for
+the operator, such as a page that could not load, is an `ERROR` line in the request's span. A line that raises an
+alert has an `alert` field, with the values ADR-0049's table lists. Other commands' output stays plain text.
 
 ## Pages and styles
 
@@ -76,6 +78,15 @@ npm run watch                           # rebuilds as templates change; restart 
 | `DATABASE_CA_FILE` | `migrate`, `seed`, `serve` | Optional: a PEM file of certificate authorities, such as a provider's own, trusted instead of the public ones. Refused with `DATABASE_TLS=disable` |
 | `TETSU_DEMO` | `serve` | `true` or `false`, with no default: whether every page says its business is a demo and asks not to be indexed, and whether the root page shows its fictional customers ([ADR-0018](../../docs/adr/0018-demo-businesses-as-data.md), [ADR-0037](../../docs/adr/0037-fictional-customers-on-tetsus-page.md)) |
 | `PORT` | `serve` | The port a host such as Render sets, listened on at every interface. Without it, `serve` listens on `127.0.0.1:8080` |
+| `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`, or `OTEL_EXPORTER_OTLP_ENDPOINT` with `/v1/logs` added | `serve` | Optional: where logs are exported over OTLP ([ADR-0049](../../docs/adr/0049-log-export.md)). HTTPS, or HTTP to this machine. Without it, nothing is exported |
+| `OTEL_EXPORTER_OTLP_LOGS_HEADERS` or `OTEL_EXPORTER_OTLP_HEADERS` | `serve` | Optional: percent-encoded `name=value` pairs sent with each export, such as the backend's key |
+| `OTEL_EXPORTER_OTLP_LOGS_COMPRESSION` or `OTEL_EXPORTER_OTLP_COMPRESSION` | `serve` | `none` (the default) or `gzip` |
+| `OTEL_SERVICE_NAME` | `serve` | The service name the backend sees, `tetsu` by default. `OTEL_RESOURCE_ATTRIBUTES` cannot replace it |
+| `OTEL_RESOURCE_ATTRIBUTES` | `serve` | Optional: percent-encoded `name=value` pairs describing this process, such as `deployment.environment.name=demo` |
+
+The logs-only export names win over the shared ones, as in every OpenTelemetry exporter. A bad export setting is
+a warning, and `serve` runs without export. The exporter itself also reads OpenTelemetry's tuning names, such as
+`OTEL_EXPORTER_OTLP_TIMEOUT` and `OTEL_BLRP_SCHEDULE_DELAY`; their defaults are used unless they are set.
 
 TLS always verifies the certificate: it must chain to a public authority, or only to one in `DATABASE_CA_FILE` when
 that is set, and name the host in the URL. Settings are checked before any connection, so a missing or unusable CA file fails at

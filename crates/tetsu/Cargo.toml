@@ -9,6 +9,10 @@ publish.workspace = true
 [dependencies]
 askama.workspace = true
 axum.workspace = true
+opentelemetry.workspace = true
+opentelemetry-appender-tracing.workspace = true
+opentelemetry-otlp.workspace = true
+opentelemetry_sdk.workspace = true
 serde.workspace = true
 # The manifest reader build.rs shares is compiled here too, so its tests and mutants cover it; the binary uses none
 # of it.
@@ -30,6 +34,8 @@ serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+# Captures exported log records in memory, to check what leaves the host.
+opentelemetry_sdk = { workspace = true, features = ["testing"] }
 # Reading and writing sockets in its tests.
 tokio = { workspace = true, features = ["io-util"] }
 

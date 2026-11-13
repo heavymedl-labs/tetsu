@@ -109,12 +109,41 @@ Web service `tetsu-demo` (`srv-dbp542rbc2fs73962k4g`) in Ohio, on the free insta
 
 - **Command:** `/usr/local/bin/tetsu serve`. Render's command replaces the image's entrypoint too, so `serve`
   alone exits with status 128.
-- **Environment:** `TETSU_DEMO=true` and `DATABASE_URL`. Render sets `PORT`.
+- **Environment:** `TETSU_DEMO=true` and `DATABASE_URL`, and the export settings under
+  [Logs and alerts](#logs-and-alerts). Render sets `PORT`.
 - **Health check:** `/`.
 - **Free instance:** sleeps after 15 minutes without traffic. Waking takes about 12 seconds, Neon's included, and
   once in 50 tries took 8 minutes ([test 9](../research/hosting.md#first-deploy-2026-11-09)).
 
 The GitHub repository variable `RENDER_SERVICE_ID` names the service for `deploy.yml`.
+
+## Logs and alerts
+
+Render keeps standard output, and Grafana Cloud's free stack receives the same lines over OTLP
+([ADR-0049](../adr/0049-log-export.md)). Export is set on the Render service, with the
+[settings](../../crates/tetsu/README.md#settings) the stack's OpenTelemetry tile gives:
+
+- `OTEL_EXPORTER_OTLP_ENDPOINT`: the stack's OTLP endpoint, such as
+  `https://otlp-gateway-prod-us-east-0.grafana.net/otlp`.
+- `OTEL_EXPORTER_OTLP_HEADERS`: `Authorization=Basic%20<instance ID and token, base64>`, as a secret
+  ([secrets.md](secrets.md)).
+- `OTEL_RESOURCE_ATTRIBUTES`: `deployment.environment.name=demo`.
+
+A bad value logs `logs are not exported` as a warning on Render, and the site serves without export. A refused key
+or an unreachable stack logs `BatchLogProcessor.ExportError` on Render, and those lines are lost to the stack. After
+setting them, visit the site and check a `served` line arrives in Grafana's Explore view.
+
+The alerts are ADR-0049's table, written as Grafana alert rules on the Loki data source. Each evaluates every
+minute, sets **no data** to Normal, since the free instance sleeps, sets **error or timeout** to Error, so a broken
+query emails too, and sends to a contact point that emails the maintainer:
+
+| Rule | Query | Fires when |
+| --- | --- | --- |
+| Event stopped | `sum(count_over_time({service_name="tetsu"} \| alert="event_stopped" [5m]))` | above 0 |
+| Server errors | `sum(count_over_time({service_name="tetsu"} \| alert="server_error" [5m]))` | 10 or more |
+| Start failed | `sum(count_over_time({service_name="tetsu"} \| alert="start_failed" [5m]))` | above 0 |
+
+Another backend takes the same three rules, in its own query language, from ADR-0049's table.
 
 ## When `serve` refuses to start
 
@@ -131,9 +160,9 @@ UPDATE tenancy.addresses SET address = '/new-slug' WHERE address = '/login';
 
 ## When an event stops retrying
 
-An event that fails 10 times logs an `ERROR` line, `event stopped retrying`, with its ID, type, and each
-failing consumer ([ADR-0043](../adr/0043-domain-event-delivery.md)). A kept event logs `event keeps failing`
-instead and goes on retrying hourly. Once the consumer is fixed and deployed, replay a stopped event by making it
+An event that fails 10 times logs an `ERROR` line, `event stopped retrying`, with its ID, type, each failing
+consumer, and `alert` set to `event_stopped`, which raises the [alert](#logs-and-alerts) ([ADR-0043](../adr/0043-domain-event-delivery.md)). A kept event logs `event keeps failing`
+instead, with the same `alert`, and goes on retrying hourly. Once the consumer is fixed and deployed, replay a stopped event by making it
 due again, with the schema of the module that recorded it. A business's events are in `outbox`, which row-level
 security hides from `tetsu_owner`, so act as the delivery role, which may settle every tenant's events, through
 the service's own connection. Paste `DATABASE_URL` at the prompt, as for seeding, so it is never shown or saved:
