@@ -1,4 +1,4 @@
-//! Settings from the environment.
+//! Settings from the environment, or from a local `.env` file for any the environment leaves unset (ADR-0050).
 
 use std::collections::HashMap;
 use std::env::VarError;
@@ -6,6 +6,66 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::path::Path;
 
 use tetsu_postgres::{Settings, Tls};
+
+/// Settings a local `.env` file holds (ADR-0050). The environment always wins over them.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Local(HashMap<String, String>);
+
+impl Local {
+    /// Reads `.env` in `folder`, or nothing when there is none.
+    ///
+    /// # Errors
+    /// Fails when the file cannot be read, or a line is not a setting.
+    pub fn load(folder: &Path) -> Result<Self, String> {
+        match std::fs::read_to_string(folder.join(".env")) {
+            Ok(text) => parse(&text).map(Self),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
+            Err(error) => Err(format!(".env could not be read: {error}")),
+        }
+    }
+
+    /// A variable from the environment, or from the file when the environment leaves it unset.
+    pub fn var(&self, name: &str) -> Result<String, VarError> {
+        self.or(std::env::var(name), name)
+    }
+
+    fn or(&self, environment: Result<String, VarError>, name: &str) -> Result<String, VarError> {
+        match environment {
+            Err(VarError::NotPresent) => self.0.get(name).cloned().ok_or(VarError::NotPresent),
+            found => found,
+        }
+    }
+}
+
+/// `NAME=value` lines, `#` comments, and blank lines. Values are taken as written, trimmed, with no quotes or
+/// expansion. An error names the line and never its text, since a value may be a password.
+fn parse(text: &str) -> Result<HashMap<String, String>, String> {
+    let mut settings = HashMap::new();
+    for (index, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let setting = line
+            .split_once('=')
+            .map(|(name, value)| (name.trim(), value.trim()));
+        match setting {
+            Some((name, value)) if is_name(name) => {
+                settings.insert(name.to_string(), value.to_string());
+            }
+            _ => return Err(format!(".env line {} is not NAME=value", index + 1)),
+        }
+    }
+    Ok(settings)
+}
+
+/// A variable's name: letters, digits, and underscores, not starting with a digit.
+fn is_name(name: &str) -> bool {
+    name.chars()
+        .next()
+        .is_some_and(|first| !first.is_ascii_digit())
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
 
 /// Reads `DATABASE_URL`, `DATABASE_TLS`, and `DATABASE_CA_FILE`, through `var` so tests need not touch the real
 /// environment. TLS stays required unless `DATABASE_TLS` is `disable`, and any other value is refused rather than
@@ -682,5 +742,75 @@ mod tests {
             compressed("zstd"),
             Err("OTEL_EXPORTER_OTLP_COMPRESSION must be gzip or none".into())
         );
+    }
+
+    #[test]
+    fn a_local_file_holds_settings_comments_and_blank_lines() {
+        let local = Local(
+            parse("# Local defaults\n\nDATABASE_URL = postgres://localhost/tetsu_local\nTETSU_DEMO=true\nEMPTY=\nA_1=x=y\n")
+                .unwrap(),
+        );
+        let missing = || Err(VarError::NotPresent);
+        assert_eq!(
+            local.or(missing(), "DATABASE_URL"),
+            Ok("postgres://localhost/tetsu_local".into())
+        );
+        assert_eq!(local.or(missing(), "TETSU_DEMO"), Ok("true".into()));
+        assert_eq!(local.or(missing(), "EMPTY"), Ok(String::new()));
+        assert_eq!(local.or(missing(), "A_1"), Ok("x=y".into()));
+        assert_eq!(local.or(missing(), "PORT"), Err(VarError::NotPresent));
+    }
+
+    /// The environment wins, whether it holds a value or one that is not UTF-8.
+    #[test]
+    fn the_environment_wins_over_the_file() {
+        let local = Local(parse("PORT=9000").unwrap());
+        assert_eq!(local.or(Ok("8080".into()), "PORT"), Ok("8080".into()));
+        assert_eq!(
+            local.or(Err(VarError::NotUnicode("x".into())), "PORT"),
+            Err(VarError::NotUnicode("x".into()))
+        );
+    }
+
+    /// A value may be a password, so an error names the line and not its text.
+    #[test]
+    fn a_line_that_is_not_a_setting_is_named_by_number() {
+        for (text, line) in [
+            ("A=1\nexport B=2", 2),
+            ("pass word=s3cret", 1),
+            ("=value", 1),
+            ("1A=x", 1),
+            ("A B=x", 1),
+        ] {
+            assert_eq!(
+                parse(text),
+                Err(format!(".env line {line} is not NAME=value")),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_folder_without_a_file_has_no_local_settings() {
+        let folder = std::env::temp_dir().join(format!("tetsu-no-env-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        assert_eq!(Local::load(&folder), Ok(Local::default()));
+        std::fs::write(folder.join(".env"), "TETSU_DEMO=false\n").unwrap();
+        assert_eq!(
+            Local::load(&folder)
+                .unwrap()
+                .or(Err(VarError::NotPresent), "TETSU_DEMO"),
+            Ok("false".into())
+        );
+        std::fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
+    fn a_file_that_cannot_be_read_is_an_error() {
+        let folder = std::env::temp_dir().join(format!("tetsu-bad-env-{}", std::process::id()));
+        std::fs::create_dir_all(folder.join(".env")).unwrap();
+        let error = Local::load(&folder).unwrap_err();
+        assert!(error.starts_with(".env could not be read: "), "{error}");
+        std::fs::remove_dir_all(&folder).unwrap();
     }
 }

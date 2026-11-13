@@ -8,3 +8,4 @@ docs
 !docs/brand
 node_modules
 crates/tetsu/assets/build
+.env

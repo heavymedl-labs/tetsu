@@ -69,6 +69,21 @@ npm run build                           # before cargo build or cargo run
 npm run watch                           # rebuilds as templates change; restart it after adding one
 ```
 
+## Run locally
+
+Once, with the test Postgres from [AGENTS.md](../../AGENTS.md#checks) running:
+
+```bash
+cp .env.example .env
+psql postgres://postgres@localhost:54329/postgres -c 'CREATE DATABASE tetsu_local'
+cargo run -- migrate
+cargo run -- seed crates/tetsu/tests/fixtures/sample.toml
+```
+
+Then `cargo run -- serve` serves <http://localhost:8080> until Ctrl+C. Settings come from `.env` for any the
+environment leaves unset ([ADR-0050](../../docs/adr/0050-local-settings-file.md)), so no command needs them typed.
+Stop the server when you are done.
+
 ## Settings
 
 | Variable | Used by | Meaning |
@@ -84,7 +99,7 @@ npm run watch                           # rebuilds as templates change; restart 
 | `OTEL_SERVICE_NAME` | `serve` | The service name the backend sees, `tetsu` by default. `OTEL_RESOURCE_ATTRIBUTES` cannot replace it |
 | `OTEL_RESOURCE_ATTRIBUTES` | `serve` | Optional: percent-encoded `name=value` pairs describing this process, such as `deployment.environment.name=demo` |
 
-The logs-only export names win over the shared ones, as in every OpenTelemetry exporter. A bad export setting is
+Any of these can also live in a local `.env` ([Run locally](#run-locally)). The logs-only export names win over the shared ones, as in every OpenTelemetry exporter. A bad export setting is
 a warning, and `serve` runs without export. The exporter itself also reads OpenTelemetry's tuning names, such as
 `OTEL_EXPORTER_OTLP_TIMEOUT` and `OTEL_BLRP_SCHEDULE_DELAY`; their defaults are used unless they are set.
 

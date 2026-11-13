@@ -4,3 +4,4 @@ __pycache__/
 /mutants.out*
 /node_modules
 /crates/tetsu/assets/build
+/.env

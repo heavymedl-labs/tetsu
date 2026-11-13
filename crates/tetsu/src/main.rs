@@ -89,17 +89,21 @@ async fn main() -> ExitCode {
 async fn run(command: Command) -> Result<(), String> {
     match command {
         Command::Summary => say(&summary(MODULES))?,
-        Command::Migrate => {
-            let settings = settings::database(|name| std::env::var(name))?;
-            tetsu_postgres::migrate(&settings, MODULES)
-                .await
-                .map_err(|error| explain(&*error))?;
-            say(&format!("migrated: {}", names(MODULES)))?;
-        }
+        Command::Migrate => run_migrate().await?,
         Command::Seed { path, check_only } => run_seed(&path, check_only).await?,
         Command::Serve => run_serve().await?,
     }
     Ok(())
+}
+
+/// Runs each module's new migrations.
+async fn run_migrate() -> Result<(), String> {
+    let local = local()?;
+    let settings = settings::database(|name| local.var(name))?;
+    tetsu_postgres::migrate(&settings, MODULES)
+        .await
+        .map_err(|error| explain(&*error))?;
+    say(&format!("migrated: {}", names(MODULES)))
 }
 
 /// Refuses to serve while a tenant holds an address a reserved name now claims, since a site route would hide
@@ -126,8 +130,9 @@ async fn refuse_reserved_addresses<S: tetsu_tenancy::TenantStore>(
 /// start, since the reason can name a tenant's address or quote the database; the reason goes to stderr.
 async fn run_serve() -> Result<(), String> {
     let stop = serve::stop_signal();
-    let logs = logs::start(settings::export(|name| std::env::var(name)))?;
-    let started = tokio::spawn(ready())
+    let local = local()?;
+    let logs = logs::start(settings::export(|name| local.var(name)))?;
+    let started = tokio::spawn(async move { ready(&local).await })
         .await
         .unwrap_or_else(|_| Err("serving panicked while starting".into()));
     let served = match started {
@@ -147,10 +152,10 @@ async fn run_serve() -> Result<(), String> {
 }
 
 /// Reads the settings, reaches the database, and binds the port: everything serving needs before it listens.
-async fn ready() -> Result<(tokio::net::TcpListener, axum::Router), String> {
-    let demo = settings::demo(|name| std::env::var(name))?;
-    let address = settings::listen(|name| std::env::var(name))?;
-    let pool = connect().await?;
+async fn ready(local: &settings::Local) -> Result<(tokio::net::TcpListener, axum::Router), String> {
+    let demo = settings::demo(|name| local.var(name))?;
+    let address = settings::listen(|name| local.var(name))?;
+    let pool = connect(local).await?;
     let tenants = tetsu_tenancy::postgres_store(pool);
     refuse_reserved_addresses(&tenants).await?;
     let app = serve::app(
@@ -186,13 +191,18 @@ async fn run_seed(path: &std::path::Path, check_only: bool) -> Result<(), String
         }
         return Ok(());
     }
-    let pool = connect().await?;
+    let pool = connect(&local()?).await?;
     seed::apply(&tetsu_tenancy::postgres_store(pool), &seeds, say).await
 }
 
+/// The settings in `.env` where the command runs, for any the environment leaves unset (ADR-0050).
+fn local() -> Result<settings::Local, String> {
+    settings::Local::load(std::path::Path::new("."))
+}
+
 /// Reads the database settings, checks the server is new enough and stores text as UTF-8, and opens a pool to it.
-async fn connect() -> Result<tetsu_postgres::Pool, String> {
-    let settings = settings::database(|name| std::env::var(name))?;
+async fn connect(local: &settings::Local) -> Result<tetsu_postgres::Pool, String> {
+    let settings = settings::database(|name| local.var(name))?;
     tetsu_postgres::require_supported_server(&settings)
         .await
         .map_err(|error| explain(&*error))?;

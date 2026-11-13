@@ -121,3 +121,48 @@ async fn every_module_follows_the_isolation_rules() {
         .expect("checks");
     assert_eq!(problems, Vec::<String>::new());
 }
+
+/// A local `.env` where the command runs supplies settings the environment leaves unset, and the environment wins
+/// over it (ADR-0050).
+#[tokio::test]
+async fn a_local_env_file_supplies_settings_and_the_environment_wins() {
+    let settings = fresh_database().await.expect("a test database");
+    let folder = std::env::temp_dir().join(format!("tetsu-env-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).expect("a folder");
+    let run = |env_file: &str, url: Option<&str>| {
+        std::fs::write(folder.join(".env"), env_file).expect("writes .env");
+        let mut command = Command::new(env!("CARGO_BIN_EXE_tetsu"));
+        command
+            .arg("migrate")
+            .current_dir(&folder)
+            .env_remove("DATABASE_URL")
+            .env_remove("DATABASE_TLS");
+        if let Some(url) = url {
+            command.env("DATABASE_URL", url);
+        }
+        command.output().expect("the binary runs")
+    };
+
+    let from_file = run(
+        &format!(
+            "# local\nDATABASE_URL={}\nDATABASE_TLS=disable\n",
+            settings.url()
+        ),
+        None,
+    );
+    assert!(from_file.status.success(), "{from_file:?}");
+    assert_eq!(applied_tenancy_migrations(&settings).await, 2);
+
+    let overridden = run(
+        "DATABASE_URL=postgres://nobody@127.0.0.1:1/none\nDATABASE_TLS=disable\n",
+        Some(settings.url()),
+    );
+    assert!(overridden.status.success(), "{overridden:?}");
+
+    let broken = run("DATABASE_TLS=disable\npass word=s3cret\n", None);
+    assert_eq!(broken.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&broken.stderr);
+    assert!(stderr.contains(".env line 2 is not NAME=value"), "{stderr}");
+    assert!(!stderr.contains("s3cret"), "{stderr}");
+    std::fs::remove_dir_all(&folder).expect("removes the folder");
+}
