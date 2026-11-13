@@ -69,9 +69,11 @@ pub fn app(modules: Router, demo: bool, not_found: fn(bool) -> Response) -> Rout
         .into_iter()
         .fold(Router::new(), |site, (path, route)| site.route(path, route))
         .merge(modules)
+        .route_layer(axum::middleware::from_fn(crate::logs::route))
         .fallback(move || std::future::ready(not_found(demo)))
         .layer(axum::middleware::map_response_with_state(demo, secure))
         .layer(compression())
+        .layer(axum::middleware::from_fn(crate::logs::request))
 }
 
 /// Brotli or gzip, as the browser asks (ADR-0039). Fonts are already compressed, so they go as they are. Quality 4

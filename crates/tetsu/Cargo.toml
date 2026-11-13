@@ -20,6 +20,8 @@ tower-http.workspace = true
 # Signals to stop serving, and a channel to bound the drain once stopping.
 tokio = { workspace = true, features = ["signal", "sync"] }
 toml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
 
 [build-dependencies]
 # Reads Vite's manifest, to embed the front-end build (ADR-0034).

@@ -21,6 +21,15 @@ and a rerun skips them.
 
 Exit codes are 0 for success, 1 for a failure, and 2 for a command or arguments it does not understand.
 
+## Logs
+
+`serve` writes JSON lines to standard output ([ADR-0045](../../docs/adr/0045-operations-baseline.md)). Each
+request logs one `served` line with its status and milliseconds, and its `span` holds the request ID, realm,
+method, route pattern such as `/{address}`, and tenant ID once a module finds one. No line names the path, query,
+or body, since those could carry a name, an email, a code, or a token. What a module reports for the operator,
+such as a page that could not load, is an `ERROR` line in the request's span. Errors before serving starts, and
+every other command's output, stay plain text.
+
 ## Pages and styles
 
 Pages are Askama templates: the site's in `templates/`, each module's in its own crate, and the shell and shared

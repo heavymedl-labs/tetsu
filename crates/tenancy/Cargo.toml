@@ -18,6 +18,7 @@ tetsu-kernel.workspace = true
 tetsu-postgres.workspace = true
 tokio.workspace = true
 tokio-postgres.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 # Reading and writing sockets in its HTTP tests.

@@ -158,13 +158,17 @@ async fn lookup<S: TenantStore>(
     let address = format!("/{segment}");
     let failure = match tokio::time::timeout(served.timeout, served.tenants.resolve(&address)).await
     {
-        Ok(Ok(tenant)) => return Ok(tenant),
+        Ok(Ok(tenant)) => {
+            // The composition root's request span carries the tenant into every line the request logs (ADR-0045).
+            tracing::Span::current().record("tenant_id", tenant.id().get());
+            return Ok(tenant);
+        }
         Ok(Err(Error::NotFound)) => return Err(Box::new(not_found(served))),
         Ok(Err(error)) => error.to_string(),
         Err(_) => format!("no answer within {} seconds", served.timeout.as_secs_f32()),
     };
     // The page says only that it is unavailable, since the detail could name the database. The operator gets
-    // the detail on stderr; where logs go is #27's decision.
+    // the detail through `report`.
     (served.report)(&failure_line(&address, &failure));
     Err(Box::new(html(
         StatusCode::SERVICE_UNAVAILABLE,

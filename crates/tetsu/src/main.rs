@@ -1,6 +1,7 @@
 //! The composition root (ADR-0003).
 
 mod assets;
+mod logs;
 // build.rs embeds the front-end build with it. Compiled here too, its tests and mutants cover it.
 #[cfg_attr(
     not(test),
@@ -122,13 +123,14 @@ async fn refuse_reserved_addresses<S: tetsu_tenancy::TenantStore>(
 /// so a bad setting fails at start rather than on the first request.
 async fn run_serve() -> Result<(), String> {
     let stop = serve::stop_signal();
+    logs::start()?;
     let demo = settings::demo(|name| std::env::var(name))?;
     let address = settings::listen(|name| std::env::var(name))?;
     let pool = connect().await?;
     let tenants = tetsu_tenancy::postgres_store(pool);
     refuse_reserved_addresses(&tenants).await?;
     let app = serve::app(
-        tetsu_tenancy::router(tenants, demo, assets::STYLESHEET, complain),
+        tetsu_tenancy::router(tenants, demo, assets::STYLESHEET, report),
         demo,
         serve::not_found,
     );
@@ -138,11 +140,17 @@ async fn run_serve() -> Result<(), String> {
     let bound = listener
         .local_addr()
         .map_err(|error| format!("could not read the listening address: {error}"))?;
-    say(&format!("serving on http://{bound}"))?;
+    tracing::info!("serving on http://{bound}");
     serve::run(listener, app, stop, serve::GRACE)
         .await
         .map_err(|error| format!("serving stopped: {error}"))?;
-    say("stopped")
+    tracing::info!("stopped");
+    Ok(())
+}
+
+/// Logs what a module reports for the operator, as an error on the request it happened in.
+fn report(line: &str) {
+    tracing::error!("{line}");
 }
 
 /// Checks every file before anything is written, and writes only through Tenancy's use cases (ADR-0018).

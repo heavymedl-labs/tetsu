@@ -5,7 +5,7 @@ mod support {
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::{TcpListener, TcpStream};
     use std::path::Path;
-    use std::process::{Child, ChildStderr, ChildStdout, Command, Stdio};
+    use std::process::{Child, ChildStdout, Command, Stdio};
 
     use tetsu_postgres::Settings;
 
@@ -13,7 +13,6 @@ mod support {
     pub struct Server {
         pub child: Child,
         pub stdout: BufReader<ChildStdout>,
-        pub stderr: ChildStderr,
         port: u16,
     }
 
@@ -60,20 +59,33 @@ mod support {
             .env("PORT", port.to_string())
             .env("TETSU_DEMO", demo)
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
             .spawn()
             .expect("the binary runs");
-        let mut stdout = BufReader::new(child.stdout.take().unwrap());
-        let stderr = child.stderr.take().unwrap();
-        let mut line = String::new();
-        stdout.read_line(&mut line).unwrap();
-        assert_eq!(line.trim(), format!("serving on http://0.0.0.0:{port}"));
+        let (stdout, line) = first_line(BufReader::new(child.stdout.take().unwrap()));
+        assert_eq!(
+            message(&line),
+            Some(format!("serving on http://0.0.0.0:{port}")),
+            "{line}"
+        );
         Server {
             child,
             stdout,
-            stderr,
             port,
         }
+    }
+
+    /// The first line the server writes, or a failure after 10 seconds, so a server that never says it is
+    /// listening fails the test rather than hanging it.
+    fn first_line(mut stdout: BufReader<ChildStdout>) -> (BufReader<ChildStdout>, String) {
+        let (send, receive) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut line = String::new();
+            let _ = stdout.read_line(&mut line);
+            let _ = send.send((stdout, line));
+        });
+        receive
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the server says it is listening within 10 seconds")
     }
 
     /// Runs `serve` expecting it to refuse to start, and gives up after 10 seconds, so a server that starts
@@ -95,6 +107,31 @@ mod support {
         child.wait_with_output().expect("collects its output")
     }
 
+    /// A log line's message, if the line is a JSON log line with one.
+    pub fn message(line: &str) -> Option<String> {
+        let line: serde_json::Value = serde_json::from_str(line).ok()?;
+        line["message"].as_str().map(ToString::to_string)
+    }
+
+    /// Stops the server and returns every log line it wrote after starting, each checked to be JSON.
+    pub fn logged(mut server: Server) -> Vec<serde_json::Value> {
+        server.child.kill().unwrap();
+        server.child.wait().unwrap();
+        let mut rest = String::new();
+        server.stdout.read_to_string(&mut rest).unwrap();
+        rest.lines()
+            .map(|line| serde_json::from_str(line).unwrap_or_else(|_| panic!("not JSON: {line}")))
+            .collect()
+    }
+
+    /// The line logged for each request served, in order.
+    pub fn served(lines: &[serde_json::Value]) -> Vec<&serde_json::Value> {
+        lines
+            .iter()
+            .filter(|line| line["message"] == "served")
+            .collect()
+    }
+
     pub fn get(server: &Server, path: &str) -> String {
         let mut stream = TcpStream::connect(("127.0.0.1", server.port)).unwrap();
         write!(
@@ -111,7 +148,7 @@ mod support {
 use std::io::Read;
 use std::process::Command;
 
-use support::{get, ready, refused, start, start_marked, tetsu};
+use support::{get, logged, message, ready, refused, served, start, start_marked, tetsu};
 use tetsu_postgres::test_support::fresh_database;
 
 #[tokio::test]
@@ -164,6 +201,69 @@ async fn a_visitor_sees_a_tenants_page_tetsus_page_and_not_found_elsewhere() {
     assert!(!deeper.contains("Sample Studio"), "{deeper}");
 }
 
+/// A request's line carries the request's context and timing, and nothing from its path or query.
+fn names_no_path(line: &serde_json::Value) {
+    let text = line.to_string();
+    for private in [
+        "lee.park",
+        "email",
+        "sample-studio",
+        "another-studio",
+        "secret-token",
+    ] {
+        assert!(!text.contains(private), "{text}");
+    }
+    assert_eq!(line["level"], "INFO", "{text}");
+    assert_eq!(line["span"]["realm"], "customer", "{text}");
+    assert_eq!(line["span"]["method"], "GET", "{text}");
+    assert!(line["ms"].is_u64(), "{text}");
+    assert!(line["timestamp"].is_string(), "{text}");
+}
+
+/// Each request logs one JSON line with its request ID, realm, route, and tenant, and never its path or query,
+/// which could carry a token or an email (ADR-0045).
+#[tokio::test]
+async fn each_request_logs_one_line_that_names_no_path() {
+    let database = fresh_database().await.expect("a test database");
+    ready(&database);
+    let server = start(&database);
+    for path in [
+        "/sample-studio?email=lee.park@example.com",
+        "/another-studio",
+        "/sample-studio/secret-token",
+    ] {
+        get(&server, path);
+    }
+    let lines = logged(server);
+    let requests = served(&lines);
+    assert_eq!(requests.len(), 3, "{lines:?}");
+    for line in &requests {
+        names_no_path(line);
+    }
+    let field = |index: usize, name: &str| requests[index]["span"][name].clone();
+    assert_eq!(requests[0]["status"], 200);
+    assert_eq!(field(0, "route"), "/{address}");
+    assert!(field(0, "tenant_id").is_i64(), "{:?}", requests[0]);
+    assert_eq!(requests[1]["status"], 404);
+    assert_eq!(field(1, "route"), "/{address}");
+    assert!(
+        field(1, "tenant_id").is_null(),
+        "an address no tenant holds"
+    );
+    assert_eq!(requests[2]["status"], 404);
+    assert!(field(2, "route").is_null(), "no route answered");
+    let ids: std::collections::HashSet<String> = requests
+        .iter()
+        .map(|line| {
+            line["span"]["request_id"]
+                .as_str()
+                .expect("an ID")
+                .to_string()
+        })
+        .collect();
+    assert_eq!(ids.len(), 3, "each request has its own ID");
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn it_stops_cleanly_when_the_host_sends_sigterm() {
@@ -177,7 +277,7 @@ async fn it_stops_cleanly_when_the_host_sends_sigterm() {
     assert!(status.success(), "{status}");
     let mut rest = String::new();
     server.stdout.read_to_string(&mut rest).unwrap();
-    assert_eq!(rest.trim(), "stopped");
+    assert_eq!(message(rest.trim()), Some("stopped".into()), "{rest}");
 }
 
 /// Serving checks tenants' addresses before it listens, so a database never migrated stops it at start.
@@ -271,7 +371,7 @@ async fn a_page_that_cannot_load_tells_the_operator_why_but_not_the_visitor() {
     // Tenancy's tables go once it is serving, so every lookup fails.
     let database = fresh_database().await.expect("a test database");
     ready(&database);
-    let mut server = start(&database);
+    let server = start(&database);
     tetsu_postgres::connect(&database)
         .await
         .expect("connects")
@@ -281,12 +381,16 @@ async fn a_page_that_cannot_load_tells_the_operator_why_but_not_the_visitor() {
     let page = get(&server, "/sample-studio");
     assert!(page.starts_with("HTTP/1.1 503"), "{page}");
     assert!(!page.contains("relation"), "{page}");
-    server.child.kill().unwrap();
-    server.child.wait().unwrap();
-    let mut stderr = String::new();
-    server.stderr.read_to_string(&mut stderr).unwrap();
+    let lines = logged(server);
+    let reported = lines
+        .iter()
+        .find(|line| line["level"] == "ERROR")
+        .unwrap_or_else(|| panic!("an error line in {lines:?}"));
     assert!(
-        stderr.contains("tenancy: could not load /sample-studio: "),
-        "{stderr}"
+        reported["message"]
+            .as_str()
+            .is_some_and(|text| text.starts_with("tenancy: could not load /sample-studio: ")),
+        "{reported}"
     );
+    assert!(reported["span"]["request_id"].is_string(), "{reported}");
 }

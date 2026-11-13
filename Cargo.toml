@@ -14,8 +14,8 @@ publish = false
 # HTML templates (ADR-0007). Without the default config feature, which reads askama.toml and pulls in an
 # unmaintained crate (ADR-0028).
 askama = { version = "0.16", default-features = false, features = ["derive", "std"] }
-# HTTP (ADR-0007): HTTP/1 serving on Tokio, and nothing else.
-axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+# HTTP (ADR-0007): HTTP/1 serving on Tokio, and the matched route, which logs record in place of the path (ADR-0045).
+axum = { version = "0.8", default-features = false, features = ["http1", "matched-path", "tokio"] }
 deadpool-postgres = "0.14"
 rustls = "0.23.46"
 # Seed files only; derives stay on file types in crates/tetsu (ADR-0018).
@@ -26,6 +26,9 @@ tetsu-kernel = { path = "crates/kernel" }
 tetsu-postgres = { path = "crates/postgres" }
 tetsu-tenancy = { path = "crates/tenancy" }
 # Compresses responses with brotli or gzip, as the browser asks, and nothing else (ADR-0039).
+# Structured logs (ADR-0045): JSON lines, with no filter syntax, colors, or log-crate bridge.
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "json", "std"] }
 tower-http = { version = "0.7", default-features = false, features = ["compression-br", "compression-gzip"] }
 tokio = { version = "1.54", features = ["macros", "net", "rt-multi-thread", "time"] }
 tokio-postgres = "0.7"
