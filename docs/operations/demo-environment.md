@@ -119,30 +119,40 @@ The GitHub repository variable `RENDER_SERVICE_ID` names the service for `deploy
 
 ## Logs and alerts
 
-Render keeps standard output, and Grafana Cloud's free stack receives the same lines over OTLP
-([ADR-0049](../adr/0049-log-export.md)). Export is set on the Render service, with the
-[settings](../../crates/tetsu/README.md#settings) the stack's OpenTelemetry tile gives:
+Render keeps standard output, and Grafana Cloud's free stack `regalchicken947` (`prod-us-west-0`, instance
+`1922014`, set up 2026-11-13) receives the same lines over OTLP ([ADR-0049](../adr/0049-log-export.md)). Its trial
+runs to 2026-11-27; with no card on file it then stays on the free plan. Export is set on the Render service, with these
+[settings](../../crates/tetsu/README.md#settings):
 
-- `OTEL_EXPORTER_OTLP_ENDPOINT`: the stack's OTLP endpoint, such as
-  `https://otlp-gateway-prod-us-east-0.grafana.net/otlp`.
-- `OTEL_EXPORTER_OTLP_HEADERS`: `Authorization=Basic%20<instance ID and token, base64>`, as a secret
-  ([secrets.md](secrets.md)). Make the token from an access policy with only the `logs:write` scope and an
-  expiry, rather than the tile's default, so a leaked key can write logs and nothing else, and record the expiry
-  in secrets.md.
+- `OTEL_EXPORTER_OTLP_ENDPOINT`: `https://otlp-gateway-prod-us-west-0.grafana.net/otlp`, from the stack's
+  OpenTelemetry tile.
+- `OTEL_EXPORTER_OTLP_HEADERS`: `Authorization=Basic%20<base64 of 1922014:token>`, as a secret
+  ([secrets.md](secrets.md)). The token is `render-tetsu-demo`, on access policy `tetsu-demo-logs`, which holds
+  only `logs:write` on this stack, so a leaked key can write logs and nothing else. Build the value without the
+  token touching history or chat:
+
+  ```bash
+   export GC_TOKEN='<token>'
+  printf 'Authorization=Basic%%20%s\n' "$(printf '1922014:%s' "$GC_TOKEN" | base64 -w0)"; unset GC_TOKEN
+  ```
+
 - `OTEL_RESOURCE_ATTRIBUTES`: `deployment.environment.name=demo`.
 
-A bad value logs `logs are not exported` as a warning on Render, and the site serves without export. A refused key
-or an unreachable stack logs `BatchLogProcessor.ExportError` on Render, and those lines are lost to the stack. After
-setting them, visit the site and check a `served` line arrives in Grafana's Explore view.
+**Render applies a changed setting only with a deploy,** not on save or restart, so run the Deploy workflow after
+changing one. A bad value logs `logs are not exported` as a warning on Render, and the site serves without export.
+A refused key or an unreachable stack logs `BatchLogProcessor.ExportError` on Render. Check a `served` line arrives
+in Grafana's Explore view with `{service_name="tetsu"}`. Grafana stores dotted field names with underscores, so
+`http.route` reads `http_route` there.
 
-The alerts are ADR-0049's table, written as Grafana alert rules on the Loki data source. Each evaluates every
-minute, sets **no data** to Normal, since the free instance sleeps, sets **error or timeout** to Error, so a broken
-query emails too, and sends to a contact point that emails the maintainer:
+The alerts are ADR-0049's table, written as Grafana alert rules on the Loki data source, in folder `tetsu`, group
+`tetsu-demo`. Each evaluates every minute with no pending period, sets **no data** to Normal, since the free
+instance sleeps, sets **error or timeout** to Error, so a broken query emails too, and sends to contact point
+`maintainer-email`. Each rule's summary says what to do.
 
 | Rule | Query | Fires when |
 | --- | --- | --- |
 | Event stopped | `sum(count_over_time({service_name="tetsu"} \| alert="event_stopped" [5m]))` | above 0 |
-| Server errors | `sum(count_over_time({service_name="tetsu"} \| alert="server_error" [5m]))` | 10 or more |
+| Server errors | `sum(count_over_time({service_name="tetsu"} \| alert="server_error" [5m]))` | above 9 |
 | Start failed | `sum(count_over_time({service_name="tetsu"} \| alert="start_failed" [5m]))` | above 0 |
 
 Another backend takes the same three rules, in its own query language, from ADR-0049's table.

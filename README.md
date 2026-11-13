@@ -49,7 +49,7 @@ Free tiers for now, each behind a setting or a port so it can be swapped
 | App | [Render](https://render.com) ([ADR-0012](docs/adr/0012-first-hosting-and-deploys.md)) | Live |
 | Database | [Neon](https://neon.com), Postgres 18 ([ADR-0012](docs/adr/0012-first-hosting-and-deploys.md)) | Live |
 | Code, CI, images | [GitHub](https://github.com/heavymedl-labs/tetsu) ([ADR-0023](docs/adr/0023-ci-on-demand.md), [ADR-0033](docs/adr/0033-deploys-on-demand.md)) | Live |
-| Logs and alerts | [Grafana Cloud](https://grafana.com/products/cloud/) ([ADR-0049](docs/adr/0049-log-export.md)) | Being set up |
+| Logs and alerts | [Grafana Cloud](https://grafana.com/products/cloud/) ([ADR-0049](docs/adr/0049-log-export.md)) | Live |
 | Email | [Resend](https://resend.com) ([ADR-0044](docs/adr/0044-email-delivery.md)) | With sign-in |
 
 [Architecture](ARCHITECTURE.md) · [Decisions](docs/adr/README.md) · [Quality bar](CONSTRAINTS.md) · [Glossary](docs/glossary.md) · [Contributing](CONTRIBUTING.md) · [Agents](AGENTS.md) · [Roadmap](https://github.com/heavymedl-labs/tetsu/milestones) · [Board](https://github.com/orgs/heavymedl-labs/projects/1)
