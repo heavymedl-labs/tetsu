@@ -16,9 +16,11 @@
 </div>
 {% endmacro %}
 
-{#- A panel's title bar: what it shows and where, with whatever the caller sets at its right. -#}
+{#- A panel's title bar: what it shows and where, with whatever the caller sets at its right. The meta's parts,
+    given as "· a · b", wrap whole. Each part carries the dot before it in the space it leaves, and the line's start
+    clips that space, so a dot shows only between parts on one line, never at either end. -#}
 {% macro bar(title, meta) %}
-<div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-line px-4 py-3 text-sm @xl:px-6"><p class="font-medium text-ink">{{ title }} <span class="font-normal text-muted">{{ meta }}</span></p>{{ caller() }}</div>
+<div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-line px-4 py-3 text-sm @xl:px-6"><p class="flex flex-wrap overflow-hidden"><span class="mr-[1em] font-medium text-ink">{{ title }}</span>{% for part in meta.trim_start_matches("· ").split(" · ") %}<span class="-ml-[1em] mr-[1em] whitespace-nowrap text-muted"><span class="inline-block w-[1em] text-center">·</span>{{ part }}</span>{% endfor %}</p>{{ caller() }}</div>
 {% endmacro %}
 
 {#- A person's initials in a circle. `raised` sets it on a surface, for a row that stands out. -#}
