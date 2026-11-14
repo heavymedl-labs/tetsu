@@ -6,12 +6,12 @@
 {% call fig::separator(false) %}{% endcall %}
 {% call ui::head("paid-title", "Get paid", "Memberships, packs, and payments on the processor you choose, reconciled line by line.") %}{% endcall %}
 {% call ui::tabs("paid", "Get paid", tabs) %}{% endcall %}
-<div class="tetsu-film mt-10">
+<div class="tetsu-film md:mt-10">
 <div class="tetsu-strip">
-{% call tour::slide(tabs[0], ["Monthly plans", "Class packs", "Freezes", "Shared across locations", "Self-serve changes", "Automatic renewals"]) %}
+{% call tour::slide(tabs[0]) %}
 {% include "panels/memberships.html" %}
 {% endcall %}
-{% call tour::slide(tabs[1], ["Your choice of processor", "Cards and wallets", "Refunds and credits", "Sales tax", "Payout reports", "Tips"]) %}
+{% call tour::slide(tabs[1]) %}
 {% include "panels/payments.html" %}
 {% endcall %}
 </div>

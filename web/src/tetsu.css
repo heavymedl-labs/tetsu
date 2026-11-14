@@ -29,7 +29,9 @@
   --color-fill: var(--tetsu-color-fill);
   --color-line: var(--tetsu-color-line);
   --color-ink: var(--tetsu-color-ink);
+  --color-soft: var(--tetsu-color-soft);
   --color-muted: var(--tetsu-color-muted);
+  --color-faint: var(--tetsu-color-faint);
   /* Brand colors, which a tenant's theme sheet sets. */
   --color-primary: var(--tetsu-color-primary);
   --color-on-primary: var(--tetsu-color-on-primary);
@@ -54,14 +56,18 @@
 
 :root {
   /* Light is Tailwind CSS's taupe palette (MIT): a tinted page under lighter panels, after Tailwind Plus's Oatmeal
-     kit. Dark is Radix Colors' sand scale (MIT). By role: the page, a panel, a component inside one, a border,
-     secondary text, and text. */
+     kit. Dark is Radix Colors' sand scale (MIT). By role: the page, a panel, a component inside one, a border, and
+     text in four tiers, as Linear's page uses them: ink for headings and what matters most, soft for leads, muted
+     for descriptions, and faint for labels, dates, and fine print. Faint passes WCAG AA's
+     4.5:1 on the page and on panels, unlike Linear's lowest tier. */
   --tetsu-color-canvas: #f3f1f1;
   --tetsu-color-surface: #fbfaf9;
   --tetsu-color-fill: #e8e4e3;
   --tetsu-color-line: #d8d2d0;
   --tetsu-color-ink: #0c0a09;
+  --tetsu-color-soft: #342d2a;
   --tetsu-color-muted: #5b4f4b;
+  --tetsu-color-faint: #736965;
   --tetsu-color-primary: #0c0a09;
   --tetsu-color-on-primary: #ffffff;
   /* Dark enough for small text on the page and on panels: 4.8:1 or more in light, past WCAG AA's 4.5:1, until
@@ -76,7 +82,9 @@
     --tetsu-color-fill: #222221;
     --tetsu-color-line: #3b3a37;
     --tetsu-color-ink: #eeeeec;
+    --tetsu-color-soft: #cfceca;
     --tetsu-color-muted: #b5b3ad;
+    --tetsu-color-faint: #84837e;
     --tetsu-color-primary: #eeeeec;
     --tetsu-color-on-primary: #111110;
     --tetsu-color-accent: #f2783f;

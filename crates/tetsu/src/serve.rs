@@ -545,6 +545,8 @@ mod tests {
     #[tokio::test]
     async fn the_root_page_says_when_the_site_shows_demos() {
         assert!(get_path("/").await.contains("<strong>Demo.</strong>"));
+        // ADR-0037: the note says what is fictional, not only that this is a demo.
+        assert!(get_path("/").await.contains("here are fictional"));
         assert!(!send_to(false, &get_request("/")).await.contains("Demo"));
     }
 
@@ -553,7 +555,7 @@ mod tests {
         for demo in [true, false] {
             let raw = send_to(demo, &get_request("/")).await;
             assert!(
-                raw.contains("<title>Tetsu: booking software, built like iron</title>"),
+                raw.contains("<title>Tetsu – booking software, built like iron</title>"),
                 "{raw}"
             );
             assert!(

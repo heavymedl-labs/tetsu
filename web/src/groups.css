@@ -1,3 +1,7 @@
+/* A group's chosen tab (components.html): an open one, or the first when none is open, as after Enter on the
+   open tab. Where a browser lets several open, each is marked, and the strip below shows the highest. */
+@custom-variant chosen (&:where([open], .tetsu-tabs:not(:has(details[open])) details:first-child));
+
 @layer components {
   /* A group of features (home.html). On phones, its slides stack at full width, each under its own title, since
      the panels are too dense to share the screen. */

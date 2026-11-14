@@ -6,12 +6,12 @@
 {% call fig::separator(true) %}{% endcall %}
 {% call ui::head("book-title", "Book people and places", "Appointments with your staff, and rentals of your courts, rooms, and sites, on one calendar.") %}{% endcall %}
 {% call ui::tabs("book", "Book people and places", tabs) %}{% endcall %}
-<div class="tetsu-film mt-10">
+<div class="tetsu-film md:mt-10">
 <div class="tetsu-strip">
-{% call tour::slide(tabs[0], ["Services and add-ons", "Staff hours", "Cleanup buffers", "Chairs and rooms", "Deposits", "Rebooking"]) %}
+{% call tour::slide(tabs[0]) %}
 {% include "panels/appointments.html" %}
 {% endcall %}
-{% call tour::slide(tabs[1], ["Hourly rentals", "Nightly stays", "Minimum stays", "Check-in times", "Equipment", "Holds and deposits"]) %}
+{% call tour::slide(tabs[1]) %}
 {% include "panels/rentals.html" %}
 {% endcall %}
 </div>
