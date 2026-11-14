@@ -1,6 +1,6 @@
 # 0052. Grafana from agent sessions
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-13
 
 ## Context
