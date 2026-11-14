@@ -22,7 +22,7 @@ covered the options and community practice.
 
 | Need | Crate | Read on crates.io, 2026-11-11 |
 | --- | --- | --- |
-| Passkeys | `webauthn-rs` 0.6, with no optional features | 0.6.2, 2026-10-31; 3.4 million downloads in 90 days; MPL-2.0; Rust 1.89 |
+| Passkeys | `webauthn-rs` 0.6, with `conditional-ui` alone for customers' discoverable sign-in | 0.6.2, 2026-10-31; 3.4 million downloads in 90 days; MPL-2.0; Rust 1.89 |
 | Google sign-in | `openidconnect` 4 | 4.1.0, 2026-10-31; 5.7 million; MIT; Rust 1.88 |
 | Random tokens and codes | `getrandom` 0.4 | 0.4.3; 795 million; MIT or Apache-2.0 |
 | Hashing tokens and codes | `sha2` 0.11 | 0.11.1; 375 million; MIT or Apache-2.0 |
@@ -39,13 +39,20 @@ covered the options and community practice.
 - **`.config/deny.toml` allows MPL-2.0.** It is file-level copyleft: Tetsu may ship the crate unmodified in a closed
   binary, and only changes to its own files would have to be shared. This is the one licence change, and the
   maintainer approves it with this ADR.
-- **The failure tests run before acceptance,** in a spike, step 6 of ADR-0010:
-  - a response without user verification is refused
-  - a response from a near-miss origin, such as another port or a subdomain, is refused
-  - a replayed authentication, and a signature counter that goes backwards, are handled as the ADR says
-  - a credential registered for one account cannot sign in to another, including the same person's account at a
-    second business
-  - Google tokens with a wrong audience, nonce, or issuer, or an expired one, are refused
+- **The failure tests ran before acceptance** ([results](../research/identity/library-failure-tests.md), step 6 of
+  ADR-0010). Responses without user verification, from near-miss origins, or for another account were refused,
+  as were Google tokens with a wrong audience, nonce, or issuer, expired, or forged, and no OpenSSL entered the
+  tree. They also showed what the libraries leave to Tetsu:
+  - **Each challenge is used once.** webauthn-rs accepts a sign-in replayed against a challenge the server still
+    holds, so Tetsu stores each with its attempt, deletes it on first use, and expires it.
+  - **A signature counter that goes backwards** is refused, as webauthn-rs does, and recorded in the audit log;
+    Tetsu stores the counter after each sign-in. Synced passkeys, whose counter stays at zero, are unaffected.
+  - **A discoverable sign-in finds its credential within the realm and business** before webauthn-rs sees it,
+    since the library accepts whichever key it is given. Tetsu calls `finish_discoverable_authentication_v2`.
+  - **Google's bare issuer,** `accounts.google.com`, which Google documents beside the URL form, does not parse in
+    openidconnect, so such a token fails closed. Slice 10 confirms which form Google sends to a code flow.
+  - Keeping a sign-in's state in Postgres between requests needs webauthn-rs's `danger-allow-state-serialisation`;
+    slice 5 decides between that and memory.
 
 ## Alternatives considered
 
@@ -60,8 +67,9 @@ covered the options and community practice.
 
 - The weakest evidence is `webauthn-rs`'s audit: its README cites a SUSE review, but no public report was found.
   The failure tests and Tetsu's own Tier 1 tests carry more weight for that reason.
-- `webauthn-rs` 0.6 replaced OpenSSL with pure Rust cryptography through `crypto-glue`, which the spike confirms by
-  checking the dependency tree.
+- `webauthn-rs` 0.6 replaced OpenSSL with pure Rust cryptography through `crypto-glue`; the spike's dependency tree
+  had no OpenSSL.
+- The spike used a software authenticator, not a phone or security key; slice 9's device test covers those.
 - Revisit if `webauthn-rs` stops releasing for a year, or an advisory goes unfixed for 30 days.
 
 ## Sources
@@ -72,3 +80,4 @@ covered the options and community practice.
 - W3C, [Web Authentication Level 3](https://www.w3.org/TR/webauthn-3/), Recommendation, 25 August 2026.
 - Mozilla, [MPL 2.0 FAQ](https://www.mozilla.org/en-US/MPL/2.0/FAQ/).
 - [Identity research: building in Rust](../research/identity/build-vs-buy.md).
+- [Sign-in libraries: failure tests](../research/identity/library-failure-tests.md), 2026-11-14.
