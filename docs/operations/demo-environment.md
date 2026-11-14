@@ -157,6 +157,17 @@ instance sleeps, sets **error or timeout** to Error, so a broken query emails to
 
 Another backend takes the same three rules, in its own query language, from ADR-0049's table.
 
+Sessions read the stack through Grafana's MCP server, read-only ([ADR-0052](../adr/0052-grafana-from-agent-sessions.md)).
+To set it up once, make service account `claude-mcp` with the **Viewer** role under **Administration → Users and
+access → Service accounts**, add it a token, and register the server yourself, so the token stays out of sessions:
+
+```bash
+ claude mcp add grafana -e GRAFANA_URL=https://regalchicken947.grafana.net \
+  -e GRAFANA_SERVICE_ACCOUNT_TOKEN='<token>' -- uvx mcp-grafana@2.2.0 --disable-write
+```
+
+The leading space keeps the command out of shell history.
+
 ## When `serve` refuses to start
 
 `tetsu serve` will not start while a stored tenant holds an address a release has since reserved for Tetsu's own

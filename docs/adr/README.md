@@ -57,6 +57,7 @@ number, and add a row below. Never renumber.
 | [0049](0049-log-export.md) | Log export | Exporting logs, or changing what a log line carries off the host | Accepted |
 | [0050](0050-local-settings-file.md) | Local settings file | Running `tetsu` locally, or adding a setting | Accepted |
 | [0051](0051-coverage-reporting.md) | Coverage reporting | Reporting or showing test coverage | Proposed |
+| [0052](0052-grafana-from-agent-sessions.md) | Grafana from agent sessions | Reading logs or alerts from a session, or changing Grafana | Proposed |
 
 ## Open decisions
 
