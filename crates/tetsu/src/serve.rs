@@ -886,6 +886,35 @@ mod tests {
     }
 
     #[test]
+    fn a_groups_tabs_leave_the_arrow_keys_to_scrolling() {
+        // Radios take all four arrow keys, so a reader in a group could not scroll past it with them. Details that
+        // share a name are exclusive without script, and leave the arrow keys alone.
+        let page = home_page(true);
+        for group in ["fill", "book", "paid"] {
+            assert!(
+                !page.contains(&format!("type=\"radio\" name=\"{group}\"")),
+                "{group}"
+            );
+            let tabs: Vec<&str> = page
+                .split(&format!("<details name=\"{group}\""))
+                .skip(1)
+                .map(|rest| &rest[..rest.find("</summary>").unwrap()])
+                .collect();
+            assert!(tabs.len() >= 2, "{group}: {tabs:?}");
+            let open = tabs
+                .iter()
+                .filter(|tab| tab[..tab.find('>').unwrap()].ends_with(" open"));
+            assert_eq!(open.count(), 1, "{group}: {tabs:?}");
+            for tab in &tabs {
+                assert!(tab.contains("<summary aria-controls="), "{group}: {tab}");
+            }
+        }
+        let css = stylesheet();
+        assert!(rule(".tetsu-tabs:has(.tetsu-tab-2[open]) .tetsu-strip").starts_with("translate:"));
+        assert!(!css.contains("tetsu-tab-2:checked"), "{css}");
+    }
+
+    #[test]
     fn the_phone_menu_is_a_popover_that_its_button_opens() {
         // A popover, so Escape and a tap outside close it without script (site.html).
         let page = home_page(true);

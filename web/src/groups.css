@@ -29,17 +29,19 @@
       width: 92%;
     }
 
-    .tetsu-tabs:has(.tetsu-tab-2:checked) .tetsu-strip {
+    .tetsu-tabs:has(.tetsu-tab-2[open]) .tetsu-strip {
       translate: calc(-92% - 1.5rem) 0;
     }
 
-    .tetsu-tabs:has(.tetsu-tab-3:checked) .tetsu-strip {
+    .tetsu-tabs:has(.tetsu-tab-3[open]) .tetsu-strip {
       translate: calc(-184% - 3rem) 0;
     }
 
-    .tetsu-tabs:has(.tetsu-tab-1:checked) .tetsu-slide:not(:nth-child(1)) > *,
-    .tetsu-tabs:has(.tetsu-tab-2:checked) .tetsu-slide:not(:nth-child(2)) > *,
-    .tetsu-tabs:has(.tetsu-tab-3:checked) .tetsu-slide:not(:nth-child(3)) > * {
+    /* The highest open tab is the chosen one, as for the strip, so a browser that lets several open still shows
+       one slide. With none open, as after Enter on the open tab, the first is chosen. */
+    .tetsu-tabs:has(.tetsu-tab-3[open]) .tetsu-slide:not(:nth-child(3)) > *,
+    .tetsu-tabs:not(:has(.tetsu-tab-2[open], .tetsu-tab-3[open])) .tetsu-slide:not(:nth-child(1)) > *,
+    .tetsu-tabs:has(.tetsu-tab-2[open]):not(:has(.tetsu-tab-3[open])) .tetsu-slide:not(:nth-child(2)) > * {
       --tetsu-shown: 0;
       opacity: 0.35;
     }

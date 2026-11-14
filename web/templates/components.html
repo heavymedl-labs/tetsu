@@ -55,15 +55,16 @@
 </div>
 {% endmacro %}
 
-{#- A group's tabs, from tablets up: radios that choose a slide without script (groups.css). Each tab is
+{#- A group's tabs, from tablets up, which choose a slide without script (groups.css). Each is a details sharing the
+    group's name, so opening one closes the rest. Enter or Space chooses, and the arrow keys still scroll, as they
+    would not with radios. A click on the open tab does nothing, and with none open the first shows. Each tab is
     (slide id, title, line). -#}
 {% macro tabs(group, legend, tabs) %}
-<fieldset class="mt-12 hidden gap-6 sm:mt-16 md:grid lg:mt-20 lg:gap-8 {% if tabs.len() == 3 %}md:grid-cols-3{% else %}md:grid-cols-2{% endif %}">
-<legend class="sr-only">{{ legend }}: show</legend>
+<div role="group" aria-label="{{ legend }}: show" class="mt-12 hidden gap-6 sm:mt-16 md:grid lg:mt-20 lg:gap-8 {% if tabs.len() == 3 %}md:grid-cols-3{% else %}md:grid-cols-2{% endif %}">
 {%- for (k, tab) in tabs.iter().enumerate() %}
-<label class="block cursor-pointer border-t-2 border-line pt-4 text-left transition-colors hover:border-muted has-checked:border-ink has-focus-visible:outline-2 has-focus-visible:outline-offset-4 has-focus-visible:outline-accent"><input type="radio" name="{{ group }}" class="{% if k == 0 %}tetsu-tab-1{% else if k == 1 %}tetsu-tab-2{% else %}tetsu-tab-3{% endif %} sr-only"{% if k == 0 %} checked{% endif %}><span class="block font-medium text-ink">{{ tab.1 }}</span><span class="mt-1 block text-sm text-muted">{{ tab.2 }}</span></label>
+<details name="{{ group }}" class="{% if k == 0 %}[.tetsu-tabs:not(:has([open]))_&]:border-ink{% else if k == 1 %}tetsu-tab-2{% else %}tetsu-tab-3{% endif %} border-t-2 border-line pt-4 text-left transition-colors not-open:hover:border-muted open:border-ink"{% if k == 0 %} open{% endif %}><summary aria-controls="{{ tab.0 }}" class="block cursor-pointer list-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent in-open:pointer-events-none [&::-webkit-details-marker]:hidden"><span class="block font-medium text-ink">{{ tab.1 }}</span><span class="mt-1 block text-sm text-muted">{{ tab.2 }}</span></summary></details>
 {%- endfor %}
-</fieldset>
+</div>
 {% endmacro %}
 
 {#- A column of the footer: its heading and items, each (link, text), a link only if it has one. -#}
