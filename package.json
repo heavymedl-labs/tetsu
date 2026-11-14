@@ -30,6 +30,8 @@
   },
   "overrides": {
     "katex": "0.18.2",
+    "minimatch": "11.0.8",
+    "qs": "6.17.1",
     "re2js": "2.8.7"
   },
   "allowScripts": {

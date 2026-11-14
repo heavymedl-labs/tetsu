@@ -37,6 +37,8 @@ ignore = [
 entries = [
     { id = "katex", reason = "markdownlint-cli2 0.24.0 brings 0.16.47, which has GHSA-238p-pmpm-9mq7. Tracked in #95. Review by 2026-12-10." },
     { id = "re2js", reason = "markdownlint-cli2 0.24.0 brings 2.8.6, which has GHSA-gg6h-894w-4m9c. Tracked in #95. Review by 2026-12-10." },
+    { id = "minimatch", reason = "StrykerJS 10.1.1 pins ~10.2.4, which has GHSA-g3hv-75wg-m249; 11.0.8 passes its tests and ours. Tracked in #132. Review by 2026-12-13." },
+    { id = "qs", reason = "StrykerJS 10.1.1's typed-rest-client pins 6.15.1, which has four DoS advisories fixed by 6.17.1. Tracked in #132. Review by 2026-12-13." },
 ]
 
 [install-scripts]
