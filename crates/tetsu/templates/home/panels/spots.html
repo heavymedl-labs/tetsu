@@ -1,7 +1,7 @@
 {% import "art/app.html" as app %}
 {% import "art/spots.html" as sp %}
 {% call app::panel("Two spot maps. In a cycling studio, a member takes their usual bike, 14, picks bike 15 for a guest, and another bike is taken. At a campground filtered for a 32 foot RV, an RV site is held while someone pays, with its details shown.") %}
-<div class="grid grid-cols-1 lg:grid-cols-2">
+<div class="tetsu-fill grid grid-cols-1 grid-rows-[auto_1fr] md:grid-cols-2 md:grid-rows-none">
 <div>
 {% call app::bar("Ride45", "· Sun, Nov 15 · 10:30 am · Studio 1") %}<p class="font-mono text-xs text-muted">Your usual: bike 14</p>{% endcall %}
 <div class="p-4 sm:p-6"><svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 260" class="w-full">
@@ -18,7 +18,7 @@
 <p class="grid shrink-0 font-medium *:col-start-1 *:row-start-1"><span class="tetsu-out rounded-md border border-line px-3 py-1.5 text-muted [--at:0.66]">Reserve</span><span class="tetsu-in rounded-md bg-ink px-3 py-1.5 text-canvas [--at:0.66]">Reserved</span></p>
 </div></div>
 </div>
-<div class="border-t border-line lg:border-t-0 lg:border-l">
+<div class="border-t border-line md:border-t-0 md:border-l">
 {% call app::bar("Pinewake Campground", "· Fri, Nov 13 to Sun, Nov 15") %}<p class="grid font-mono text-xs *:col-start-1 *:row-start-1"><span class="tetsu-out text-muted [--at:0.6]">3 RV sites fit</span><span class="tetsu-in text-ink [--at:0.6]">B3 held · 9:58 left</span></p>{% endcall %}
 <div class="p-4 sm:p-6"><div class="flex flex-wrap gap-1.5 font-mono text-[11px]"><span class="rounded-full border border-line px-2 py-0.5 text-muted">Tent</span><span class="rounded-full border border-ink bg-ink px-2 py-0.5 text-canvas">RV · fits 32 ft</span><span class="rounded-full border border-line px-2 py-0.5 text-muted">Cabin</span></div><svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 260" class="w-full"><rect x="60" y="62" width="240" height="136" rx="60" fill="none" stroke-width="18" class="stroke-fill"/><text x="20" y="140" class="fill-muted font-mono text-[9px]">Entrance</text>
 {%- for (x, y, w, h, label, state, dim, accessible) in [

@@ -51,9 +51,9 @@
     }
   }
 
-  /* Side by side, a group's panels grow to the tallest, and the part of each marked .tetsu-fill takes the spare
-     height. Stacked on smaller screens, each keeps its own height. */
-  @media (width >= 64rem) {
+  /* Side by side, from tablets as the strip is, a group's panels grow to the tallest, and the part of each marked
+     .tetsu-fill takes the spare height. Stacked on phones, each keeps its own height. */
+  @media (width >= 48rem) {
     .tetsu-slide > [role="img"] {
       flex: 1;
       display: flex;

@@ -5,7 +5,7 @@
 {%- let services = [(2, 2, 2, "Cut and style", "Hana Sato", "Arrived"), (2, 5, 4, "Balayage", "Claire Dubois", "In chair"), (3, 3, 2, "Facial", "Jamal Reed", "Confirmed"), (3, 9, 2, "Brow shaping", "Tom Avery", "Confirmed"), (4, 7, 2, "Gloss", "Mila Novak", "Confirmed")] %}
 {% call app::panel("A salon's day by stylist: each service shows its client and status, cleanup time follows each one, and a client books the open hour online", small = true) %}
 {% call app::bar("Willow & Ash Spa", "· Thursday, November 12") %}<p class="flex rounded-md border border-line p-0.5 font-mono text-[11px] text-muted"><span class="rounded bg-fill px-2 py-0.5 text-ink">Day</span><span class="px-2 py-0.5">Week</span></p>{% endcall %}
-<div class="p-4 sm:p-6">
+<div class="tetsu-fill p-4 sm:p-6">
 <div class="relative grid grid-cols-[2.5rem_repeat(3,minmax(0,1fr))] grid-rows-[auto_repeat(10,2.75rem)] gap-x-2 sm:grid-cols-[3rem_repeat(3,minmax(0,1fr))] sm:gap-x-3">
 {%- for (k, (initials, name, role)) in staff.iter().enumerate() %}
 <div class="{% call app::at(k + 2, 1) %}{% endcall %} flex items-center gap-2 pb-3">{% call app::avatar(initials) %}{% endcall %}<span><span class="block font-medium text-ink">{{ name }}</span><span class="hidden text-muted sm:block">{{ role }}</span></span></div>

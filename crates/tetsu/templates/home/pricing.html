@@ -1,7 +1,7 @@
 {% import "../../../web/templates/components.html" as ui %}
 {% import "art/figures.html" as fig %}
 {% call ui::section("pricing", "plans") %}
-{% call fig::separator(false) %}{% endcall %}
+{% call fig::separator(true) %}{% endcall %}
 {% call ui::head("plans", "Simple pricing, per location.", "Unlimited staff and customers, and no contract.", joined = true) %}{% endcall %}
 <div class="tetsu-reveal grid gap-4 md:grid-cols-3 lg:gap-6">
 {%- for (name, price, per, line, items, popular) in [

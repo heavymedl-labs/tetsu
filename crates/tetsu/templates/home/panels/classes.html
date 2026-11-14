@@ -11,7 +11,7 @@
 <div class="{% if k == 0 %}rounded-lg border border-forge/50 bg-forge/10 px-3 py-2{% else if k == 4 %}rounded-lg bg-fill px-3 py-2 hidden sm:block{% else %}rounded-lg bg-fill px-3 py-2{% endif %}"><p class="font-mono text-muted">{{ time }}</p><p class="font-medium text-ink">{{ name }}</p><p class="mt-1 font-mono text-[11px] text-muted">{{ booked }}</p></div>
 {%- endfor %}
 </div>
-<div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+<div class="tetsu-fill grid grid-cols-1 grid-rows-[auto_1fr] md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)] md:grid-rows-none">
 <div class="p-4 sm:p-6">
 {% call app::label("Roster") %}{% endcall %}
 <ul class="mt-2 divide-y divide-line">
@@ -23,7 +23,7 @@
 <li class="grid py-2.5 *:col-start-1 *:row-start-1"><span class="tetsu-out flex items-center gap-3 rounded-md border border-dashed border-line px-2 py-1.5 text-muted [--at:0.3]"><span class="w-7"></span>Spot 12 open</span><span class="tetsu-in flex items-center gap-3 rounded-md border border-forge/50 bg-forge/10 px-2 py-1.5 [--at:0.32] [--len:0.06]">{% call app::avatar("MR", raised = true) %}{% endcall %}<span class="min-w-0 flex-1 text-ink">Maya Ruiz<span class="block font-mono text-[11px] text-muted">Unlimited · spot 12</span></span><span class="font-mono text-[11px] text-ink">from waitlist</span></span></li>
 </ul>
 </div>
-<div class="flex flex-col border-t border-line bg-fill/40 p-4 sm:p-6 lg:border-t-0 lg:border-l">
+<div class="flex flex-col border-t border-line bg-fill/40 p-4 sm:p-6 md:border-t-0 md:border-l">
 {% call app::label("Waitlist · 4") %}{% endcall %}
 <ol class="mt-2 divide-y divide-line"><li class="flex items-center gap-3 py-2.5"><span class="w-4 font-mono text-[11px] text-muted">1</span>{% call app::avatar("MR") %}{% endcall %}<span class="grid min-w-0 flex-1 *:col-start-1 *:row-start-1"><span class="tetsu-out truncate text-ink [--at:0.3]">Maya Ruiz</span><span class="tetsu-in truncate text-muted line-through [--at:0.3]">Maya Ruiz</span></span><span class="grid justify-items-end font-mono text-[11px] *:col-start-1 *:row-start-1"><span class="tetsu-out text-muted [--at:0.3]">joined 5:12 am</span><span class="tetsu-in text-ink [--at:0.3]">moved in, spot 12</span></span></li>
 {%- for (n, initials, name, joined) in waitlist %}
