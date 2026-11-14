@@ -56,11 +56,22 @@ features, its defaults, or `reqwest` with `rustls-tls`.
   `danger-allow-state-serialisation`; keeping it in memory does not, but loses sign-ins in progress on restart.
   Slice 5 decides.
 
+## Follow-up checks
+
+- **Google's issuer, for a code flow:** Google's discovery document declares `https://accounts.google.com`, signed
+  with RS256 (read 2026-11-14), and a code flow verifies against the discovery document's issuer. The bare form
+  belongs to Google's older Sign-In flows, so Tetsu should not meet it; if it did, the sign-in fails closed.
+- **Advisories:** openidconnect has none in OSV. webauthn-rs has one, GHSA-22w3-693w-x895, rated low: with subdomains
+  allowed, an origin was matched to the relying party ID by suffix without a dot, so `hermit-crab.example` could
+  pass for `crab.example`. Tetsu never allows subdomains (ADR-0040), and 0.5.5 and the 0.6 line carry the fix. The
+  maintainers published it themselves, a week after the report, and openSUSE shipped it in its Kanidm packages.
+- **The SUSE audit** the README cites is still unpublished; Kanidm's maintainers describe it as covering the
+  security-critical and cryptographic parts.
+
 ## Weakest evidence
 
 - The software authenticator is not a phone or a security key. Platform quirks wait for the device test in slice 9.
-- The Google tokens were signed locally. Whether Google ever sends the bare issuer to an OpenID Connect code flow
-  is untested against Google; if it did, those sign-ins would fail closed. Slice 10 checks against Google itself.
+- The Google tokens were signed locally; slice 10 signs in against Google itself.
 
 ## Sources
 
@@ -68,6 +79,10 @@ features, its defaults, or `reqwest` with `rustls-tls`.
   2026-11-14.
 - [passkey-rs 0.6.0](https://github.com/1Password/passkey-rs), README and source, read 2026-11-14.
 - [openidconnect 4.1.0](https://docs.rs/openidconnect/4.1.0), read 2026-11-14.
+- Google, [OpenID configuration](https://accounts.google.com/.well-known/openid-configuration), read 2026-11-14.
+- [GHSA-22w3-693w-x895](https://github.com/kanidm/webauthn-rs/security/advisories/GHSA-22w3-693w-x895), and
+  [OSV](https://osv.dev) for webauthn-rs, webauthn-rs-core, webauthn-rs-proto, and openidconnect, read 2026-11-14.
+- [Is Kanidm audited and used in prod?](https://github.com/kanidm/kanidm/discussions/2584), Kanidm discussion #2584.
 - W3C, [Web Authentication Level 3](https://www.w3.org/TR/webauthn-3/), sections 7.2 (assertions) and 6.1.1
   (signature counter).
 - Google, [Verify the Google ID token on your server side](https://developers.google.com/identity/gsi/web/guides/verify-google-id-token):

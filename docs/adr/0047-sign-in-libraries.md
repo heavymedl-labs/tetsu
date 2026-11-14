@@ -50,7 +50,8 @@ covered the options and community practice.
   - **A discoverable sign-in finds its credential within the realm and business** before webauthn-rs sees it,
     since the library accepts whichever key it is given. Tetsu calls `finish_discoverable_authentication_v2`.
   - **Google's bare issuer,** `accounts.google.com`, which Google documents beside the URL form, does not parse in
-    openidconnect, so such a token fails closed. Slice 10 confirms which form Google sends to a code flow.
+    openidconnect. A code flow uses the discovery document's issuer, `https://accounts.google.com`, so Tetsu should
+    not meet it, and such a token fails closed.
   - Keeping a sign-in's state in Postgres between requests needs webauthn-rs's `danger-allow-state-serialisation`;
     slice 5 decides between that and memory.
 
@@ -66,7 +67,9 @@ covered the options and community practice.
 ## Consequences
 
 - The weakest evidence is `webauthn-rs`'s audit: its README cites a SUSE review, but no public report was found.
-  The failure tests and Tetsu's own Tier 1 tests carry more weight for that reason.
+  The failure tests and Tetsu's own Tier 1 tests carry more weight for that reason. Its one advisory, rated low,
+  affects only relying parties that allow subdomains, which Tetsu does not, and was fixed and disclosed by its
+  maintainers within a week.
 - `webauthn-rs` 0.6 replaced OpenSSL with pure Rust cryptography through `crypto-glue`; the spike's dependency tree
   had no OpenSSL.
 - The spike used a software authenticator, not a phone or security key; slice 9's device test covers those.
