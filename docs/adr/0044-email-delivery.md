@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-11-11
+- The SMTP adapter and the choice of its library moved from #110 to the first slice that emails a real person by
+  [ADR-0057](0057-operator-passkeys-before-level-2.md)
 
 ## Context
 

@@ -6,6 +6,8 @@
   when staff grant it, and that staff merge a walk-in's profile, both of which now follow the relink below; that
   staff remove such a link, which the account may now do too; and that adding or removing a passkey needs a fresh
   passkey sign-in, which a recovery does without
+- The rule for an operator who loses both hardware keys superseded by
+  [ADR-0057](0057-operator-passkeys-before-level-2.md) until the Level 2 review
 
 ## Context
 

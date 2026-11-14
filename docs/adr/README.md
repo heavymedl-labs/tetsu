@@ -62,6 +62,8 @@ number, and add a row below. Never renumber.
 | [0054](0054-browser-tests.md) | Browser tests | Changing pages, styles, or interactions, or testing in a browser | Proposed |
 | [0055](0055-fault-injection-tests.md) | Fault injection tests | Testing how Tetsu handles Postgres or network failures | Proposed |
 | [0056](0056-typescript-tests.md) | TypeScript tests | Writing or testing TypeScript in `web/` | Accepted |
+| [0057](0057-operator-passkeys-before-level-2.md) | Operator passkeys and email before the Level 2 review | Building operator sign-in, or sending email before #111 | Accepted |
+| [0058](0058-test-authenticator.md) | A virtual authenticator for sign-in tests | Testing passkey enrollment or sign-in | Accepted |
 
 ## Open decisions
 

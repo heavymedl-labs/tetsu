@@ -8,6 +8,8 @@
   [ADR-0041](0041-account-recovery.md)
 - The rule that the demo's hosts sit under a domain of its own superseded by
   [ADR-0042](0042-tenant-isolation.md) until Tetsu has domains
+- The rule that operators sign in with attested hardware keys, at least two each, superseded by
+  [ADR-0057](0057-operator-passkeys-before-level-2.md) until the Level 2 review
 
 ## Context
 
