@@ -1,6 +1,6 @@
 # 0047. Sign-in libraries
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-11
 
 ## Context
@@ -22,7 +22,7 @@ covered the options and community practice.
 
 | Need | Crate | Read on crates.io, 2026-11-11 |
 | --- | --- | --- |
-| Passkeys | `webauthn-rs` 0.6, with `conditional-ui` alone for customers' discoverable sign-in | 0.6.2, 2026-10-31; 3.4 million downloads in 90 days; MPL-2.0; Rust 1.89 |
+| Passkeys | `webauthn-rs` 0.6, with `conditional-ui` for customers' discoverable sign-in and `danger-allow-state-serialisation` to keep sign-in state in Postgres | 0.6.2, 2026-10-31; 3.4 million downloads in 90 days; MPL-2.0; Rust 1.89 |
 | Google sign-in | `openidconnect` 4 | 4.1.0, 2026-10-31; 5.7 million; MIT; Rust 1.88 |
 | Random tokens and codes | `getrandom` 0.4 | 0.4.3; 795 million; MIT or Apache-2.0 |
 | Hashing tokens and codes | `sha2` 0.11 | 0.11.1; 375 million; MIT or Apache-2.0 |
@@ -52,8 +52,9 @@ covered the options and community practice.
   - **Google's bare issuer,** `accounts.google.com`, which Google documents beside the URL form, does not parse in
     openidconnect. A code flow uses the discovery document's issuer, `https://accounts.google.com`, so Tetsu should
     not meet it, and such a token fails closed.
-  - Keeping a sign-in's state in Postgres between requests needs webauthn-rs's `danger-allow-state-serialisation`;
-    slice 5 decides between that and memory.
+  - **A sign-in's state is kept in Postgres,** with its attempt, single use, and expiring, never in memory, where a
+    deploy or restart would lose sign-ins in progress. That needs webauthn-rs's `danger-allow-state-serialisation`,
+    whose risk is state a client could alter; the state never leaves the server, and is never sent to the browser.
 
 ## Alternatives considered
 

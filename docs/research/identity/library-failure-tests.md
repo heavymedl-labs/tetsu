@@ -54,7 +54,7 @@ features, its defaults, or `reqwest` with `rustls-tls`.
   ADR-0047's "no optional features".
 - **Storing a sign-in's state between requests** in Postgres needs webauthn-rs's
   `danger-allow-state-serialisation`; keeping it in memory does not, but loses sign-ins in progress on restart.
-  Slice 5 decides.
+  Slice 5 decides. (Note: ADR-0047, accepted on 2026-11-14, chose Postgres.)
 
 ## Follow-up checks
 
