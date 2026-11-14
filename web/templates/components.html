@@ -40,7 +40,7 @@
 {#- A section of a page, at the page's width. A `group` section holds tabs (groups.css) and stories
     (stories.css). A band or other backdrop the caller draws absolutely sits behind it, across the full width. -#}
 {% macro section(id, labelledby, group = false) %}
-<section{% if !id.is_empty() %} id="{{ id }}"{% endif %} aria-labelledby="{{ labelledby }}" class="relative py-22 sm:py-32 lg:py-44{% if group %} tetsu-clock tetsu-tabs{% endif %}">
+<section{% if !id.is_empty() %} id="{{ id }}"{% endif %} aria-labelledby="{{ labelledby }}" class="relative py-22 sm:py-32 lg:py-44{% if group %} tetsu-tabs{% endif %}">
 <div class="mx-auto max-w-page px-6 lg:px-10">
 {{ caller() }}
 </div>

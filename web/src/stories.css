@@ -67,14 +67,26 @@
         animation-range: cover 18% cover 28%;
       }
 
-      .tetsu-rise.tetsu-clock {
+      .tetsu-rise-clear.tetsu-clock {
         animation:
-          tetsu-rise 900ms var(--ease-tetsu) 1000ms both,
+          tetsu-rise-clear 900ms var(--ease-tetsu) 1000ms both,
           tetsu-on linear both;
         animation-timeline: auto, view();
         animation-range:
           normal,
           entry 30% entry 60%;
+      }
+
+      /* A panel (app.html) rises as it scrolls in, without the blur, as for the week. Its story plays once all of it
+         is on screen, or three quarters of the screen for a tall one, so no step plays out of sight below. */
+      .tetsu-reveal.tetsu-clock {
+        animation:
+          tetsu-rise-clear linear both,
+          tetsu-on linear both;
+        animation-timeline: view(), view();
+        animation-range:
+          entry 0% entry 12rem,
+          entry calc(min(100%, 75vh) - 2rem) entry min(100%, 75vh);
       }
 
       .tetsu-in,

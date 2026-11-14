@@ -6,10 +6,11 @@
 <div class="{% if edge %}hidden sm:block {% endif %}relative overflow-hidden rounded-md border-l-2 px-2 py-2 text-[11px]/4 sm:text-xs border-ink/25 bg-fill"><span class="relative block text-ink"><span class="font-mono text-muted">{{ time }}</span> {{ name }}</span><span class="relative mt-0.5 block text-muted">{% if booked == capacity %}Full{% else %}{{ booked }} of {{ capacity }}{% endif %}</span><meter class="tetsu-meter{% if booked == capacity %} tetsu-meter-full{% endif %} relative mt-2" value="{{ booked }}" max="{{ capacity }}"></meter></div>
 {% endmacro %}
 
-{#- A product picture's frame: one image to assistive technology, described by `label`, that rises into view.
-    `small` sets its text a size down, for a dense panel. -#}
+{#- A product picture's frame: one image to assistive technology, described by `label`, that rises into view and
+    plays its own story, so a panel low on the page waits for its reader. `small` sets its text a size down, for a
+    dense panel. -#}
 {% macro panel(label, small = false) %}
-<div role="img" aria-label="{{ label }}" class="tetsu-reveal mt-4 overflow-hidden rounded-2xl border border-line bg-surface lg:mt-0 {% if small %}text-xs{% else %}text-sm{% endif %}">
+<div role="img" aria-label="{{ label }}" class="tetsu-reveal tetsu-clock mt-4 overflow-hidden rounded-2xl border border-line bg-surface lg:mt-0 {% if small %}text-xs{% else %}text-sm{% endif %}">
 {{ caller() }}
 </div>
 {% endmacro %}

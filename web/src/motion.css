@@ -42,6 +42,15 @@
   }
 }
 
+/* The rise without the blur, for a bordered surface: a blur erases a thin border until it clears, and WebKit clips
+   a blurred layer's edges while it animates, so the top edge of the week (week.html) went missing as it loaded. */
+@keyframes tetsu-rise-clear {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+}
+
 /* The headline's rise: movement only, so it is on screen, and counted as painted, from the first frame. */
 @keyframes tetsu-lift {
   from {
@@ -69,6 +78,10 @@
 
     .tetsu-rise {
       animation: tetsu-rise 900ms var(--ease-tetsu) both;
+    }
+
+    .tetsu-rise-clear {
+      animation: tetsu-rise-clear 900ms var(--ease-tetsu) both;
     }
 
     .tetsu-lift {

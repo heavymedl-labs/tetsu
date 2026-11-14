@@ -806,6 +806,13 @@ mod tests {
     // These tests write markup in escaped strings, not raw ones: lizard (scripts/check.sh) misreads a raw string
     // with a quote inside, and then measures every test after it as one long function.
 
+    /// The keyframes rule `name` in the built stylesheet, up to its first double brace.
+    fn keyframes(name: &str) -> String {
+        let css = stylesheet();
+        let rule = &css[css.find(&format!("@keyframes {name}{{")).unwrap()..];
+        rule[..rule.find("}}").unwrap()].to_owned()
+    }
+
     /// The built stylesheet.
     fn stylesheet() -> String {
         String::from_utf8_lossy(assets::find(assets::STYLESHEET).unwrap().bytes).into_owned()
@@ -816,6 +823,53 @@ mod tests {
         let css = stylesheet();
         let body = &css[css.find(&format!("{selector}{{")).unwrap() + selector.len() + 1..];
         body[..body.find('}').unwrap()].to_owned()
+    }
+
+    #[test]
+    fn the_week_and_the_panels_rise_without_a_blur() {
+        // A blur erases a panel's thin border until it clears, and WebKit clips a blurred layer's edges.
+        assert!(!keyframes("tetsu-rise-clear").contains("filter"));
+        let page = home_page(true);
+        assert!(
+            page.contains("class=\"tetsu-clock tetsu-rise-clear "),
+            "{page}"
+        );
+        for selector in [
+            ".tetsu-rise-clear",
+            ".tetsu-rise-clear.tetsu-clock",
+            ".tetsu-reveal.tetsu-clock",
+        ] {
+            let animation = rule(selector);
+            assert!(
+                animation.contains("tetsu-rise-clear"),
+                "{selector}: {animation}"
+            );
+            assert!(
+                !animation.contains("tetsu-rise "),
+                "{selector}: {animation}"
+            );
+        }
+    }
+
+    #[test]
+    fn each_panel_plays_its_own_story_once_it_is_on_screen() {
+        // A section's clock started every panel in it at once, so a panel low on a phone played out of sight.
+        let page = home_page(true);
+        assert!(
+            page.contains("class=\"tetsu-reveal tetsu-clock mt-4 "),
+            "{page}"
+        );
+        assert!(!page.contains("class=\"tetsu-reveal mt-4 "), "{page}");
+        let sections = page
+            .split("<section")
+            .skip(1)
+            .map(|rest| &rest[..rest.find('>').unwrap()]);
+        assert!(sections.clone().count() > 0);
+        for tag in sections {
+            assert!(!tag.contains("tetsu-clock"), "{tag}");
+        }
+        let panel = rule(".tetsu-reveal.tetsu-clock");
+        assert!(panel.contains("entry min(100%,75vh)"), "{panel}");
     }
 
     #[test]
