@@ -6,7 +6,9 @@
 # ADR-0028's list, and four more. MPL-2.0 is Lightning CSS, which Vite and Tailwind use to write our CSS; it asks
 # only that changes to its own files be shared, and we change none. 0BSD is tslib, and Python-2.0 and PSF-2.0
 # are argparse, which markdownlint-cli2 uses. OFL-1.1 is Inter, the typeface Tetsu serves (ADR-0035), whose
-# notice is in THIRD-PARTY-NOTICES.md.
+# notice is in THIRD-PARTY-NOTICES.md. BlueOak-1.0.0 is lru-cache and minimatch, which jsdom and StrykerJS use; it
+# is permissive like MIT. CC-BY-4.0 is caniuse-lite, browser data StrykerJS's Babel reads; it asks for attribution
+# only when shared, and test tools ship nothing (ADR-0056).
 allow = [
     "MIT",
     "Apache-2.0",
@@ -21,6 +23,8 @@ allow = [
     "Python-2.0",
     "PSF-2.0",
     "OFL-1.1",
+    "BlueOak-1.0.0",
+    "CC-BY-4.0",
 ]
 
 [advisories]

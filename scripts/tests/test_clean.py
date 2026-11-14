@@ -150,6 +150,16 @@ class CleanTest(unittest.TestCase):
         self.assertEqual(found, [Path(f"nightly/x86_64-unknown-linux-gnu/debug/deps/tetsu-{HASHES[3]}")])
         self.assertEqual(list(clean.superseded_builds(self.root / "missing", NOW)), [])
 
+    def test_routine_removes_what_a_killed_mutation_or_coverage_run_left(self):
+        left = ["target/mutants-tmp/x", ".tools/stryker-tmp/sandbox-1/x", ".tools/coverage-web/.tmp/x"]
+        for path in left:
+            (self.root / path).parent.mkdir(parents=True, exist_ok=True)
+            (self.root / path).write_text("")
+        (self.root / ".tools" / "bin").mkdir()
+        clean.main(["--routine"], self.host)
+        self.assertEqual(sorted(p.name for p in (self.root / ".tools").iterdir()), ["bin"])
+        self.assertFalse((self.root / "target" / "mutants-tmp").exists())
+
     def test_a_process_that_ends_while_read_is_skipped(self):
         self.process(30, "tetsu", "/work/tetsu/target/debug/tetsu", environ(TEST_URL))
         (self.proc / "30" / "environ").unlink()

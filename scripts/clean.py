@@ -6,7 +6,8 @@ With --routine, which scripts/check.sh runs on the way out, it removes only what
   DATABASE_URL names a test database, t_<seconds>_<process>_<count>. A server started by hand keeps running.
 - temporary files a test process left once that process is gone: `tetsu-<process>-*` and
   `t_<seconds>_<process>_<count>.pem`.
-- cargo-mutants' copies of the workspace, dangling container images, and build cache unused for 7 days.
+- the copies and output mutation and coverage runs keep while they run (cargo-mutants', StrykerJS's, and
+  Vitest's), dangling container images, and build cache unused for 7 days.
 - superseded build artifacts under target/. Cargo names each `<unit>-<hash>` and never removes the copies a
   change replaces, so target/ only grows. Of each unit's copies it keeps the newest three, and removes older
   ones a day after they were written; one still needed is rebuilt.
@@ -39,6 +40,8 @@ KEPT_COPIES = 3
 # Build output folders sit in a profile folder, such as target/debug or target/nightly/<triple>/debug.
 PROFILE_DEPTH = 3
 SETTLE = 24 * 3600
+# Each is removed when its run ends, unless the run was killed.
+RUN_LEFTOVERS = ["target/mutants-tmp", ".tools/stryker-tmp", ".tools/coverage-web"]
 REPORTS = ["target/mutants.out", "target/mutants.out.old", "mutants.out", "mutants.out.old"]
 
 
@@ -147,7 +150,7 @@ def main(args, host=None):
     for leftover in left_by_gone_tests(host.temporary, host.alive):
         remove(leftover)
     superseded = list(superseded_builds(host.root / "target", host.now))
-    for leftover in [*superseded, host.root / "target" / "mutants-tmp"]:
+    for leftover in [*superseded, *(host.root / path for path in RUN_LEFTOVERS)]:
         remove(leftover)
     if superseded:
         print(f"removed {len(superseded)} superseded build outputs")

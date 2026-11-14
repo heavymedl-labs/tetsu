@@ -235,6 +235,10 @@ if [[ "$reuse" == false ]]; then
     --output-path "$work/branches.json"
   python3 scripts/check_coverage.py --branches "$work/metadata.json" "$work/branches.json"
 fi
+# TypeScript in web/ (ADR-0056): unit tests under coverage limits, then mutation testing, where a surviving mutant
+# fails. Both take seconds, so they always run.
+npx --no-install vitest run --coverage --config web/vitest.config.ts
+npx --no-install stryker run .config/stryker.config.json
 .tools/bin/lizard -l rust -C 10 -L 50 -a 5 -w crates
 .tools/bin/lizard -l typescript -C 10 -L 50 -a 5 -w web
 npx --no-install jscpd crates web --threshold 0 --ignore "**/tests/**,**/assets/build/**" --reporters console

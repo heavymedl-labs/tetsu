@@ -38,7 +38,8 @@ on every push.
 | Bash | shfmt, ShellCheck | `unittest`, from Python | E2 | E2 | E2 | E2 |
 | Python | Ruff | `unittest` | E2 | E2 | Ruff | E2 |
 | Askama templates | `scripts/check_templates.py`: classes the built stylesheet defines, no inline styles ([ADR-0032](docs/adr/0032-styling-engine.md)) | The Rust tests that render each page | Gap | jscpd | Gap | Gap |
-| TypeScript and CSS | Biome, and `tsc --noEmit` for types ([ADR-0034](docs/adr/0034-front-end-build.md)) | E5 | E5 | jscpd | lizard | E5 |
+| TypeScript | Biome, and `tsc --noEmit` for types ([ADR-0034](docs/adr/0034-front-end-build.md)) | StrykerJS ([ADR-0056](docs/adr/0056-typescript-tests.md)) | Vitest's V8 provider: 100% at Tier 1, 90% elsewhere | jscpd | lizard | Biome's import rules |
+| CSS | Biome | E5 | Gap | jscpd | Gap | Gap |
 
 Docs and workflows have no row, because tests and complexity do not apply. What runs on them today
 is in [AGENTS.md](AGENTS.md#checks), and docs also get the
@@ -57,4 +58,4 @@ is in [AGENTS.md](AGENTS.md#checks), and docs also get the
 | E1 | Scripts need tests | `scripts/generate_brand.py` | One-off generator, and its output is checked by eye | Maintainer | 2027-02-04 |
 | E2 | Bash and Python coverage, duplication, and boundaries, and Bash complexity | `scripts/` | Tooling only, with no numeric limit, and too small to justify more tools yet, so the fresh review covers these | Maintainer | 2027-02-04 |
 | E4 | SQL coverage, duplication, and complexity | `crates/` | No good tool fits: module tests run every query against Postgres, and the fresh review covers the rest | Maintainer | 2027-02-04 |
-| E5 | TypeScript and CSS tests, coverage, and boundaries | `web/` | Only build configuration and the shared stylesheet exist; the first island ([#88](https://github.com/heavymedl-labs/tetsu/issues/88)) fills these | Maintainer | 2027-02-10 |
+| E5 | CSS tests | `web/src/` | What CSS does shows only in a browser, and the browser tests ([ADR-0054](docs/adr/0054-browser-tests.md), [#129](https://github.com/heavymedl-labs/tetsu/issues/129)) fill this | Maintainer | 2027-02-10 |

@@ -33,7 +33,7 @@
   },
   "overrides": [
     {
-      "includes": ["web/vite.config.ts"],
+      "includes": ["web/vite.config.ts", "web/vitest.config.ts", "web/src/**/*.test.ts"],
       "linter": {
         "rules": {
           "correctness": {
@@ -41,6 +41,33 @@
               "level": "error",
               "options": {
                 "devDependencies": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["web/src/**"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noNodejsModules": "error",
+            "noPrivateImports": "error"
+          },
+          "suspicious": {
+            "noImportCycles": "error"
+          },
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["/**", "**/..", "**/../**", "!../shared/*"],
+                    "message": "Modules in web/src/ are flat folders that import only their own files and one level into web/src/shared/ (ADR-0056)."
+                  }
+                ]
               }
             }
           }
