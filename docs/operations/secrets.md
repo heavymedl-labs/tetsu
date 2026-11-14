@@ -19,6 +19,7 @@ tool that made it into its store, never shown.
 | `DATABASE_URL` | Render, environment of service `tetsu-demo` | Role `tetsu_app`, which acts only as module roles, one transaction at a time | `tetsu serve` | 2026-11-09 |
 | `OTEL_EXPORTER_OTLP_HEADERS` | Render, environment of service `tetsu-demo` | Grafana Cloud token `render-tetsu-demo` on access policy `tetsu-demo-logs`: only `logs:write` on stack `regalchicken947`; it never expires, so it rotates yearly ([runbook](demo-environment.md#logs-and-alerts)) | `tetsu serve`'s log export | 2026-11-13 |
 | `ghcr-tetsu` | Render, registry credential | A GitHub classic token with only `read:packages`, expiring 2027-11-09 | Render pulling the private image | 2026-11-09 |
+| Grafana service account token | Claude Code's local MCP settings on the maintainer's machine | Service account `claude-mcp` on stack `regalchicken947`, **Viewer** role, used by `mcp-grafana --disable-write` ([ADR-0052](../adr/0052-grafana-from-agent-sessions.md)) | Sessions reading logs and alert state | 2026-11-13 |
 | Render CLI token | `~/.render/cli.yaml` on the maintainer's machine, mode 600 | The maintainer's Render account, refreshed by `render login` | Setting up and inspecting the service | 2026-11-09 |
 | Neon CLI token | `~/.config/neon/credentials.json` on the maintainer's machine, mode 600 | The maintainer's Neon account, refreshed by `neonctl auth` | Setting up and inspecting the database | 2026-11-09 |
 
