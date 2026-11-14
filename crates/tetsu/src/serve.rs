@@ -803,6 +803,34 @@ mod tests {
         assert!(!lift.contains("filter"), "{lift}");
     }
 
+    // These tests write markup in escaped strings, not raw ones: lizard (scripts/check.sh) misreads a raw string
+    // with a quote inside, and then measures every test after it as one long function.
+
+    /// The built stylesheet.
+    fn stylesheet() -> String {
+        String::from_utf8_lossy(assets::find(assets::STYLESHEET).unwrap().bytes).into_owned()
+    }
+
+    /// The declarations of the rule whose selector is `selector`, as the build writes it.
+    fn rule(selector: &str) -> String {
+        let css = stylesheet();
+        let body = &css[css.find(&format!("{selector}{{")).unwrap() + selector.len() + 1..];
+        body[..body.find('}').unwrap()].to_owned()
+    }
+
+    #[test]
+    fn tabbing_to_the_header_does_not_scroll_the_page() {
+        // A scroll padding on the page counted the sticky header's own controls as hidden behind it, so jumps and
+        // focus inside the page keep clear of the header with a margin instead.
+        let page = home_page(true);
+        let html = &page[page.find("<html").unwrap()..];
+        assert!(
+            !html[..html.find('>').unwrap()].contains("scroll-p"),
+            "{html}"
+        );
+        assert_eq!(rule("main [id],main :focus"), "scroll-margin-top:5rem");
+    }
+
     #[test]
     fn the_phone_menu_is_a_popover_that_its_button_opens() {
         // A popover, so Escape and a tap outside close it without script (site.html).

@@ -93,4 +93,11 @@
       color-scheme: dark;
     }
   }
+
+  /* Anchor jumps and focus stop below the sticky header (site.html), not under it. A scroll padding on the page
+     would do the same, but would also count the header's own controls as hidden, so tabbing to one scrolled. */
+  main [id],
+  main :focus {
+    scroll-margin-top: 5rem;
+  }
 }
