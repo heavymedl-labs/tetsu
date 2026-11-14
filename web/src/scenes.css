@@ -1,0 +1,162 @@
+@layer components {
+  /* A feature section's picture (home.html), set as Linear sets its product: a view behind and a panel in front.
+     Panels come in fixed sizes, so each one has the same look at every screen width: a card (30rem), a wide card
+     (48rem), or a view (68rem), each laid out by its own width (app.html). Two arrangements, card and layer,
+     alternate down the page so neighbouring sections differ. The stage they sit on spans the text's
+     width and is 38rem tall, with panels placed in rem from its edges, and smaller screens zoom the whole stage
+     down rather than reflow it. On phones, the panel in front alone, cut short and faded out. The fades, halo, and
+     lit corners show only in a browser, so the browser tests ADR-0054 proposes will check them; the page tests check the rest. */
+  .tetsu-scene {
+    position: relative;
+  }
+
+  .tetsu-scene-back {
+    display: none;
+  }
+
+  /* The panel in front stands out by tone, a halo, and a lit corner facing the text, not by dimming the view
+     behind. The view behind takes a tone between the page and a panel. */
+  .tetsu-scene-front {
+    position: relative;
+
+    /* Drawn on the wrapper, which the panel fills, since the panel clips whatever lies on its own border. */
+    &::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border: 1px solid color-mix(in oklab, var(--color-line), var(--color-ink) 35%);
+      border-radius: var(--radius-2xl);
+      pointer-events: none;
+      mask-image: radial-gradient(
+        12.5rem 12.5rem at var(--tetsu-lit, 100% 0%),
+        black,
+        rgb(0 0 0 / 0.6) 30%,
+        rgb(0 0 0 / 0.2) 50%,
+        transparent 70%
+      );
+
+      @variant dark {
+        border-color: rgb(255 255 255 / 0.16);
+      }
+    }
+  }
+
+  /* The halo: a tight shadow that edges the card all round, over the view behind as much as the page, and a soft
+     one that lifts it. */
+  .tetsu-scene-front > [role="img"] {
+    box-shadow:
+      0 0 0 1px rgb(0 0 0 / 0.03),
+      0 1px 3px rgb(0 0 0 / 0.08),
+      0 0 32px rgb(0 0 0 / 0.14);
+
+    @variant dark {
+      box-shadow:
+        0 0 0 1px rgb(0 0 0 / 0.4),
+        0 1px 3px rgb(0 0 0 / 0.5),
+        0 0 32px rgb(0 0 0 / 0.75);
+    }
+  }
+
+  .tetsu-scene-back > [role="img"] {
+    --tetsu-panel: color-mix(in oklab, var(--color-canvas), var(--color-surface));
+  }
+
+  /* On phones, the panel in front is cut short and fades out at the bottom, as Linear ends its phone card. The
+     panel cuts itself, as it already hides its own overflow, and its fade reaches 2rem past its top and sides, so
+     the halo around it shows there and fades with it at the foot. */
+  @media (width < 48rem) {
+    .tetsu-scene-front > [role="img"] {
+      max-height: 26rem;
+      mask-image: linear-gradient(to top, transparent, black 10rem);
+      mask-clip: no-clip;
+      mask-position: -2rem -2rem;
+      mask-size: calc(100% + 4rem) calc(100% + 2rem);
+      mask-repeat: no-repeat;
+    }
+  }
+
+  @media (width >= 48rem) {
+    /* The stage reaches 2rem past the text on three sides, so its fades and the front panel's halo have room. */
+    .tetsu-scene {
+      height: 38rem;
+      margin: -2rem -2rem 0;
+      zoom: 0.62;
+    }
+
+    .tetsu-scene-front,
+    .tetsu-scene-back {
+      position: absolute;
+    }
+
+    .tetsu-scene-front {
+      z-index: 1;
+    }
+
+    .tetsu-scene-back {
+      display: block;
+      bottom: 0;
+      width: 68rem;
+      overflow: clip;
+    }
+
+    /* The view behind runs to the fade, however short its panel, so no bottom edge shows. */
+    .tetsu-scene-back > [role="img"] {
+      min-height: 100%;
+    }
+
+    /* Card: a card at the left, lit at its top right, over a view that starts behind it and fades out at the
+       right, clear of the screen's edge. */
+    .tetsu-scene-card .tetsu-scene-front {
+      top: 2rem;
+      left: 2rem;
+      width: 30rem;
+    }
+
+    /* A card taller than the stage stops at its foot, under the stage's fade. The panel cuts itself, as it already
+       hides its own overflow, so nothing clips the halo around it. */
+    .tetsu-scene-card .tetsu-scene-front > [role="img"] {
+      max-height: 36rem;
+    }
+
+    /* The view runs to the stage's right edge, so the picture fills the text's width as a layer's does. */
+    .tetsu-scene-card .tetsu-scene-back {
+      top: 4.5rem;
+      right: 0;
+      left: 6rem;
+      width: auto;
+      mask-image: linear-gradient(to left, transparent 3rem, black 11rem);
+    }
+
+    /* Card and layer: the whole stage fades at the bottom, panels and all. */
+    .tetsu-scene-card,
+    .tetsu-scene-layer {
+      mask-image: linear-gradient(to top, transparent, black 14rem);
+    }
+
+    /* Layer: a list across the stage behind a wide card at the text's right edge, lit at its top left. */
+    .tetsu-scene-layer .tetsu-scene-back {
+      top: 5rem;
+      left: 2rem;
+    }
+
+    .tetsu-scene-layer .tetsu-scene-front {
+      --tetsu-lit: 0% 0%;
+      top: 2rem;
+      right: 2rem;
+      width: 48rem;
+    }
+  }
+
+  /* Zoomed so the panels fit the text's width: 45 to 61rem on a tablet, 59 to 75rem on a small laptop. */
+  @media (width >= 64rem) {
+    .tetsu-scene {
+      zoom: 0.8;
+    }
+  }
+
+  @media (width >= 80rem) {
+    .tetsu-scene {
+      zoom: 1;
+    }
+  }
+}

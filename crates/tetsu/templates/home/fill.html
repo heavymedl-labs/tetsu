@@ -1,23 +1,12 @@
 {% import "../../../web/templates/components.html" as ui %}
 {% import "art/figures.html" as fig %}
-{% import "home/tour.html" as tour %}
-{#- Each capability: a title and a line, and a wide picture that moves on hover. #}
-{%- let tabs = [("classes", "Classes and waitlists", "Waitlists that fill open spots on their own."), ("spots", "Pick your spot, anywhere", "Customers pick their own bike, mat, or site."), ("layouts", "Build your layout", "Draw rooms, rows, and sites, and publish when ready.")] %}
-{% call ui::section("fill", "fill-title", group = true) %}
+{#- Fill every class: a class's roster and waitlist in front of the week's classes, and what it covers. #}
+{% call ui::section("fill", "fill-title") %}
 {% call fig::separator(false) %}{% endcall %}
-{% call ui::head("fill-title", "Fill every class", "Classes, waitlists, and spot maps keep every session full, with no one working the desk.") %}{% endcall %}
-{% call ui::tabs("fill", "Fill every class", tabs) %}{% endcall %}
-<div class="tetsu-film md:mt-10">
-<div class="tetsu-strip">
-{% call tour::slide(tabs[0]) %}
-{% include "panels/classes.html" %}
-{% endcall %}
-{% call tour::slide(tabs[1]) %}
-{% include "panels/spots.html" %}
-{% endcall %}
-{% call tour::slide(tabs[2]) %}
-{% include "panels/layouts.html" %}
-{% endcall %}
+{% call ui::head("fill-title", "Fill every class", "Classes and waitlists keep every session full, with no one working the desk.") %}{% endcall %}
+<div class="tetsu-scene tetsu-scene-card">
+<div class="tetsu-scene-back">{% include "panels/schedule.html" %}</div>
+<div class="tetsu-scene-front tetsu-stories">{% include "panels/classes.html" %}</div>
 </div>
-</div>
+{% call ui::features(["Waitlists", "Late-cancel rules", "Recurring classes", "Check-in", "Booking windows", "Attendance reports"]) %}{% endcall %}
 {% endcall %}

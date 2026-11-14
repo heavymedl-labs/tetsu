@@ -51,7 +51,8 @@ iOS 18; and newer CSS stays usable as an enhancement. Evidence is in the
 - The work is [#128](https://github.com/heavymedl-labs/tetsu/issues/128): a small bridge in `web/vite.config.ts` and a `.browserslistrc`, and a check that the built CSS targets match it.
   Whether `@tailwindcss/vite` honors Vite's CSS target is unchecked and must be confirmed.
 - Exclusive `details` (Safari 17.2) and popover (iOS 18.3) are Newly available, so pages using them must still work
-  where they are missing. The group tabs do: without `name`, several tabs may open, and the highest open one shows.
+  where they are missing, as the feature panels planned in [#133](https://github.com/heavymedl-labs/tetsu/issues/133)
+  must.
 - Customers on a phone below the floor may see a broken page. In October 2026 iOS Safari below 16.4 was about 0.3%
   of global traffic.
 - Revisit if analytics from real tenants show a different mix, or a needed feature has no fallback.

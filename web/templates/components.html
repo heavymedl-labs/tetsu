@@ -39,10 +39,10 @@
 </main>
 {% endmacro %}
 
-{#- A section of a page, at the page's width. A `group` section holds tabs (groups.css) and stories
-    (stories.css). A band or other backdrop the caller draws absolutely sits behind it, across the full width. -#}
-{% macro section(id, labelledby, group = false) %}
-<section{% if !id.is_empty() %} id="{{ id }}"{% endif %} aria-labelledby="{{ labelledby }}" class="relative py-22 sm:py-32 lg:py-44{% if group %} tetsu-tabs{% endif %}">
+{#- A section of a page, at the page's width. A band or other backdrop the caller draws absolutely sits behind it,
+    across the full width. -#}
+{% macro section(id, labelledby) %}
+<section{% if !id.is_empty() %} id="{{ id }}"{% endif %} aria-labelledby="{{ labelledby }}" class="relative py-22 sm:py-32 lg:py-44">
 <div class="mx-auto max-w-page px-6 lg:px-10">
 {{ caller() }}
 </div>
@@ -61,15 +61,12 @@
 </div>
 {% endmacro %}
 
-{#- A group's tabs, from tablets up, which choose a slide without script (groups.css). Each is a details sharing the
-    group's name, so opening one closes the rest. Enter or Space chooses, and the arrow keys still scroll, as they
-    would not with radios. A click on the open tab does nothing, and with none open the first shows. Each tab is
-    (slide id, title, line), under a line the chosen one darkens. -#}
-{% macro tabs(group, legend, tabs) %}
-<div role="group" aria-label="{{ legend }}: show" class="hidden gap-6 md:grid lg:gap-8 {% if tabs.len() == 3 %}md:grid-cols-3{% else %}md:grid-cols-2{% endif %}">
-{%- for (k, tab) in tabs.iter().enumerate() %}
-<details name="{{ group }}" class="{% if k == 1 %}tetsu-tab-2 {% else if k == 2 %}tetsu-tab-3 {% endif %}border-t-2 border-line pt-4 text-left transition-colors not-open:hover:border-muted chosen:border-ink"{% if k == 0 %} open{% endif %}><summary aria-controls="{{ tab.0 }}" class="block cursor-pointer list-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent in-open:pointer-events-none [&::-webkit-details-marker]:hidden"><span class="block font-medium text-ink">{{ tab.1 }}</span><span class="mt-1 block text-sm text-muted">{{ tab.2 }}</span></summary></details>
-{%- endfor %}
+{#- What a feature section covers, under its picture: a label beside two columns of items, as Linear ends its
+    feature sections. -#}
+{% macro features(items) %}
+<div class="tetsu-reveal mt-16 grid gap-6 text-sm sm:mt-20 lg:grid-cols-2 lg:gap-16">
+<p class="text-faint">Features</p>
+<ul class="grid grid-cols-2 gap-x-8 gap-y-2 text-muted">{% for item in items %}<li class="flex"><span aria-hidden="true" class="mr-2 text-faint">+</span>{{ item }}</li>{% endfor %}</ul>
 </div>
 {% endmacro %}
 

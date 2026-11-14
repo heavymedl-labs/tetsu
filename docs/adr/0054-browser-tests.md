@@ -22,7 +22,7 @@ no `script-src`; deterministic enough to block a pull request; and the fewest ne
   pinned to an exact version, with **[axe-core](https://github.com/dequelabs/axe-core)** through
   `@axe-core/playwright` (MPL-2.0) for accessibility.
 - **Every check run,** in Chromium:
-  - keyboard and state specs for each page's controls (header, menus, tab groups, popovers), under reduced motion;
+  - keyboard and state specs for each page's controls (header, menus, popovers), under reduced motion;
   - axe on each page, with each `details` and popover open, in light, dark, and forced colors;
   - a shared fixture that fails a test on a console error, a page error, a failed request, or a CSP violation;
   - no sideways scrolling at 320 CSS px;

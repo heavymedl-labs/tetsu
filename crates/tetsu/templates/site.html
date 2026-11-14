@@ -60,7 +60,7 @@ nothing can be booked or bought.{% endblock %}
 <p class="mt-4 max-w-xs text-muted">Scheduling, memberships, and payments for the businesses people book with.</p>
 </div>
 {% if demo %}
-{% call ui::footer_column("Product", [("/#fill", "Classes and spot maps"), ("/#book", "Appointments and rentals"), ("/#paid", "Memberships and payments")]) %}{% endcall %}
+{% call ui::footer_column("Product", [("/#fill", "Classes and waitlists"), ("/#spots", "Spot maps"), ("/#book", "Appointments and rentals"), ("/#paid", "Memberships and payments")]) %}{% endcall %}
 {% call ui::footer_column("Built for", [("", "Gyms and studios"), ("", "Salons and spas"), ("", "Courts and rentals"), ("", "Campgrounds and stays"), ("", "Multi-location brands")]) %}{% endcall %}
 {% call ui::footer_column("Company", [("/#customers", "Customers"), ("/#why", "Why Tetsu"), ("/#pricing", "Pricing")]) %}{% endcall %}
 {%- endif %}

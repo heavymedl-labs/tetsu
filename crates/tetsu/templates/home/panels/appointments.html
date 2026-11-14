@@ -5,10 +5,10 @@
 {%- let services = [(2, 2, 2, "Cut and style", "Hana Sato", "Arrived"), (2, 5, 4, "Balayage", "Claire Dubois", "In chair"), (3, 3, 2, "Facial", "Jamal Reed", "Confirmed"), (3, 9, 2, "Brow shaping", "Tom Avery", "Confirmed"), (4, 7, 2, "Gloss", "Mila Novak", "Confirmed")] %}
 {% call app::panel("A salon's day by stylist: each service shows its client and status, cleanup time follows each one, and a client books the open hour online", small = true) %}
 {% call app::bar("Willow & Ash Spa", "· Thursday, November 12") %}<p class="flex rounded-md border border-line p-0.5 font-mono text-[11px] text-muted"><span class="rounded bg-fill px-2 py-0.5 text-ink">Day</span><span class="px-2 py-0.5">Week</span></p>{% endcall %}
-<div class="tetsu-fill p-4 sm:p-6">
-<div class="relative grid grid-cols-[2.5rem_repeat(3,minmax(0,1fr))] grid-rows-[auto_repeat(10,2.75rem)] gap-x-2 sm:grid-cols-[3rem_repeat(3,minmax(0,1fr))] sm:gap-x-3">
+<div class="p-4 @xl:p-6">
+<div class="relative grid grid-cols-[2.5rem_repeat(3,minmax(0,1fr))] grid-rows-[auto_repeat(10,2.75rem)] gap-x-2 @xl:grid-cols-[3rem_repeat(3,minmax(0,1fr))] @xl:gap-x-3">
 {%- for (k, (initials, name, role)) in staff.iter().enumerate() %}
-<div class="{% call app::at(k + 2, 1) %}{% endcall %} flex items-center gap-2 pb-3">{% call app::avatar(initials) %}{% endcall %}<span><span class="block font-medium text-ink">{{ name }}</span><span class="hidden text-muted sm:block">{{ role }}</span></span></div>
+<div class="{% call app::at(k + 2, 1) %}{% endcall %} flex items-center gap-2 pb-3">{% call app::avatar(initials) %}{% endcall %}<span><span class="block font-medium text-ink">{{ name }}</span><span class="hidden text-muted @xl:block">{{ role }}</span></span></div>
 {%- endfor %}
 {%- for (k, hour) in ["9 am", "10", "11", "12 pm", "1"].iter().enumerate() %}
 <p class="{% call app::at(1, 2 * k + 2) %}{% endcall %} -mt-1.5 font-mono text-muted">{{ hour }}</p><div class="col-span-3 {% call app::at(2, 2 * k + 2) %}{% endcall %} border-t border-line/60"></div>
@@ -26,7 +26,7 @@
 <div class="tetsu-out absolute inset-0 rounded-md border border-dashed border-line p-2 text-muted [--at:0.5]">Open<br>60 min</div>
 <div class="tetsu-in absolute inset-0 overflow-hidden rounded-md border-l-2 border-forge bg-forge/10 p-2 [--at:0.52] [--len:0.06]"><p class="truncate font-medium text-ink">Brow and lash tint</p><p class="truncate text-muted">Leila Aziz</p><span class="mt-1 block truncate font-mono text-[10px] text-muted">New · booked online</span></div>
 </div>
-<div aria-hidden="true" class="pointer-events-none col-span-4 col-start-1 row-start-5 flex items-center"><span class="w-10 text-right font-mono text-[10px] text-forge sm:w-12">10:40</span><span class="ml-1 size-1.5 rounded-full bg-forge"></span><span class="h-px flex-1 bg-forge/60"></span></div>
+<div aria-hidden="true" class="pointer-events-none col-span-4 col-start-1 row-start-5 flex items-center"><span class="w-10 text-right font-mono text-[10px] text-forge @xl:w-12">10:40</span><span class="ml-1 size-1.5 rounded-full bg-forge"></span><span class="h-px flex-1 bg-forge/60"></span></div>
 </div>
 </div>
 {% endcall %}

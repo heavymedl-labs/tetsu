@@ -1,19 +1,12 @@
 {% import "../../../web/templates/components.html" as ui %}
 {% import "art/figures.html" as fig %}
-{% import "home/tour.html" as tour %}
-{%- let tabs = [("memberships", "Memberships and packs", "Plans members manage, and renewals that land."), ("payments", "Payments and payouts", "Your processor, and payouts that reconcile.")] %}
-{% call ui::section("paid", "paid-title", group = true) %}
-{% call fig::separator(false) %}{% endcall %}
+{#- Get paid: today's payments behind, the membership plans over their right part, and what it covers. #}
+{% call ui::section("paid", "paid-title") %}
+{% call fig::separator(true) %}{% endcall %}
 {% call ui::head("paid-title", "Get paid", "Memberships, packs, and payments on the processor you choose, reconciled line by line.") %}{% endcall %}
-{% call ui::tabs("paid", "Get paid", tabs) %}{% endcall %}
-<div class="tetsu-film md:mt-10">
-<div class="tetsu-strip">
-{% call tour::slide(tabs[0]) %}
-{% include "panels/memberships.html" %}
-{% endcall %}
-{% call tour::slide(tabs[1]) %}
-{% include "panels/payments.html" %}
-{% endcall %}
+<div class="tetsu-scene tetsu-scene-layer">
+<div class="tetsu-scene-back">{% include "panels/payments.html" %}</div>
+<div class="tetsu-scene-front tetsu-stories">{% include "panels/memberships.html" %}</div>
 </div>
-</div>
+{% call ui::features(["Monthly plans", "Class packs", "Freezes", "Shared across locations", "Your choice of processor", "Cards and wallets", "Refunds and credits", "Payout reports"]) %}{% endcall %}
 {% endcall %}

@@ -1,0 +1,12 @@
+{% import "../../../web/templates/components.html" as ui %}
+{% import "art/figures.html" as fig %}
+{#- Spot maps: the layout editor behind, the bike and campground maps over its right part, and what it covers. #}
+{% call ui::section("spots", "spots-title") %}
+{% call fig::separator(true) %}{% endcall %}
+{% call ui::head("spots-title", "Map your space", "Draw your studio, courts, or campground once. Customers pick their bike, mat, or site as they book, and pay what each one costs.") %}{% endcall %}
+<div class="tetsu-scene tetsu-scene-layer">
+<div class="tetsu-scene-back">{% include "panels/layouts.html" %}</div>
+<div class="tetsu-scene-front tetsu-stories">{% include "panels/spots.html" %}</div>
+</div>
+{% call ui::features(["Spot types and prices", "Guest spots", "Accessible spots", "Holds at checkout", "Filters by size", "Layout editor"]) %}{% endcall %}
+{% endcall %}

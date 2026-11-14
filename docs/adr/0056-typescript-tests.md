@@ -8,8 +8,8 @@
 TypeScript in `web/` has formatting, linting, and type checks, but no tests, coverage, or boundaries: CONSTRAINTS.md's
 exception E5. The passkey script is Tier 1 ([ADR-0005](0005-testing-and-performance.md)), and
 [ADR-0040](0040-identity-and-sign-in.md) lets it land only once E5 closes
-([#108](https://github.com/heavymedl-labs/tetsu/issues/108)). Islands follow, such as the group tabs
-([#131](https://github.com/heavymedl-labs/tetsu/issues/131)).
+([#108](https://github.com/heavymedl-labs/tetsu/issues/108)). Islands follow, such as the class schedule
+([#88](https://github.com/heavymedl-labs/tetsu/issues/88)).
 
 Criteria, before looking at options: unit tests, branch coverage, and mutation testing work on the same tests; they
 build on Vite, TypeScript, Biome, and Node as they are; no install scripts; they fit a later Storybook (#86) and the

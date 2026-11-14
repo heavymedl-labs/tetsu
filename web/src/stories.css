@@ -8,13 +8,6 @@
   initial-value: 0;
 }
 
-/* A story inside a tab that is not shown waits, so it plays when its tab is chosen. */
-@property --tetsu-shown {
-  syntax: "<integer>";
-  inherits: true;
-  initial-value: 1;
-}
-
 @property --tetsu-n {
   syntax: "<integer>";
   inherits: false;
@@ -89,64 +82,69 @@
           entry calc(min(100%, 75vh) - 2rem) entry min(100%, 75vh);
       }
 
-      .tetsu-in,
-      .tetsu-out,
-      .tetsu-grow,
-      .tetsu-grow-y,
-      .tetsu-draw,
-      .tetsu-count {
-        transition-property: opacity, translate, scale, stroke-dashoffset, --tetsu-n;
-        transition-timing-function: ease-out;
-        transition-duration: calc(var(--len, 0.05) * var(--story, 6s) + 200ms);
-        transition-delay: calc(var(--at, 0) * var(--story, 6s));
-      }
+      /* The steps play only inside .tetsu-stories, which the root page sets on its week and on each picture's
+         panel in front. A panel behind shows its finished state, as the base rules above draw it, so only one
+         story plays at a time. */
+      .tetsu-stories {
+        .tetsu-in,
+        .tetsu-out,
+        .tetsu-grow,
+        .tetsu-grow-y,
+        .tetsu-draw,
+        .tetsu-count {
+          transition-property: opacity, translate, scale, stroke-dashoffset, --tetsu-n;
+          transition-timing-function: ease-out;
+          transition-duration: calc(var(--len, 0.05) * var(--story, 6s) + 200ms);
+          transition-delay: calc(var(--at, 0) * var(--story, 6s));
+        }
 
-      .tetsu-in {
-        opacity: 0;
-        translate: 0 6px;
-      }
-
-      .tetsu-out {
-        opacity: 1;
-      }
-
-      .tetsu-grow {
-        scale: var(--from) 1;
-      }
-
-      .tetsu-grow-y {
-        scale: 1 var(--from);
-      }
-
-      .tetsu-draw {
-        stroke-dashoffset: 1;
-      }
-
-      .tetsu-count {
-        --tetsu-n: var(--from);
-      }
-
-      @container style(--tetsu-on: 1) and style(--tetsu-shown: 1) {
         .tetsu-in {
-          opacity: 1;
-          translate: none;
+          opacity: 0;
+          translate: 0 6px;
         }
 
         .tetsu-out {
-          opacity: 0;
+          opacity: 1;
         }
 
-        .tetsu-grow,
+        .tetsu-grow {
+          scale: var(--from) 1;
+        }
+
         .tetsu-grow-y {
-          scale: 1;
+          scale: 1 var(--from);
         }
 
         .tetsu-draw {
-          stroke-dashoffset: 0;
+          stroke-dashoffset: 1;
         }
 
         .tetsu-count {
-          --tetsu-n: var(--to);
+          --tetsu-n: var(--from);
+        }
+
+        @container style(--tetsu-on: 1) {
+          .tetsu-in {
+            opacity: 1;
+            translate: none;
+          }
+
+          .tetsu-out {
+            opacity: 0;
+          }
+
+          .tetsu-grow,
+          .tetsu-grow-y {
+            scale: 1;
+          }
+
+          .tetsu-draw {
+            stroke-dashoffset: 0;
+          }
+
+          .tetsu-count {
+            --tetsu-n: var(--to);
+          }
         }
       }
     }

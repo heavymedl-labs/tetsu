@@ -53,15 +53,14 @@ The site's templates:
 | `site.html` | The head tags, header, and footer of Tetsu's own pages |
 | `home.html`, `home/` | The root page, which lists its sections, one file each |
 | `home/panels/` | Each product picture on the root page |
-| `home/tour.html` | A slide of the root page's product tour |
 | `art/` | The wordmark and its booked slots (`brand.html`, shared with the hero board), the hero board, the figures, bands, and spot maps, drawn from rows of data where they can be, and the parts of the product pictures (`app.html`) |
 
-Every component, such as a button, a section, its heading, a group's tabs, or a footer column, is a macro in
+Every component, such as a button, a section, its heading, a features list, or a footer column, is a macro in
 `web/templates/components.html`, which every crate imports ([ADR-0035](../../docs/adr/0035-component-sources-and-look.md)).
 What stays here only draws or tells Tetsu's own story.
 
 `web/src/tetsu.css` holds the tokens and imports one file per feature, with any motion beside its feature:
-`motion.css`, `figures.css`, `app.css`, `stories.css`, and `groups.css`.
+`motion.css`, `figures.css`, `app.css`, `stories.css`, and `scenes.css`.
 
 ```bash
 npm ci --ignore-scripts --include=dev   # once, and after the lockfile changes

@@ -3,21 +3,22 @@
 {#- A class in the week: its time and name, how many are booked of how many, and a bar. `edge` hides it on phones,
     which show only the middle days. -#}
 {% macro cell(time, name, booked, capacity, edge) %}
-<div class="{% if edge %}hidden sm:block {% endif %}relative overflow-hidden rounded-md border-l-2 px-2 py-2 text-[11px]/4 sm:text-xs border-ink/25 bg-fill"><span class="relative block text-ink"><span class="font-mono text-muted">{{ time }}</span> {{ name }}</span><span class="relative mt-0.5 block text-muted">{% if booked == capacity %}Full{% else %}{{ booked }} of {{ capacity }}{% endif %}</span><meter class="tetsu-meter{% if booked == capacity %} tetsu-meter-full{% endif %} relative mt-2" value="{{ booked }}" max="{{ capacity }}"></meter></div>
+<div class="{% if edge %}hidden @xl:block {% endif %}relative overflow-hidden rounded-md border-l-2 px-2 py-2 text-[11px]/4 @xl:text-xs border-ink/25 bg-fill"><span class="relative block text-ink"><span class="font-mono text-muted">{{ time }}</span> {{ name }}</span><span class="relative mt-0.5 block text-muted">{% if booked == capacity %}Full{% else %}{{ booked }} of {{ capacity }}{% endif %}</span><meter class="tetsu-meter{% if booked == capacity %} tetsu-meter-full{% endif %} relative mt-2" value="{{ booked }}" max="{{ capacity }}"></meter></div>
 {% endmacro %}
 
 {#- A product picture's frame: one image to assistive technology, described by `label`, that rises into view and
-    plays its own story, so a panel low on the page waits for its reader. `small` sets its text a size down, for a
+    plays its own story, so a panel low on the page waits for its reader. Its parts lay out by its own width, not
+    the screen's, so one panel serves as a narrow card or a wide view. `small` sets its text a size down, for a
     dense panel. -#}
 {% macro panel(label, small = false) %}
-<div role="img" aria-label="{{ label }}" class="tetsu-reveal tetsu-clock mt-4 overflow-hidden rounded-2xl border border-line bg-surface lg:mt-0 {% if small %}text-xs{% else %}text-sm{% endif %}">
+<div role="img" aria-label="{{ label }}" class="tetsu-reveal tetsu-clock @container overflow-hidden rounded-2xl border border-line bg-(--tetsu-panel,var(--color-surface)) {% if small %}text-xs{% else %}text-sm{% endif %}">
 {{ caller() }}
 </div>
 {% endmacro %}
 
 {#- A panel's title bar: what it shows and where, with whatever the caller sets at its right. -#}
 {% macro bar(title, meta) %}
-<div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-line px-4 py-3 text-sm sm:px-6"><p class="font-medium text-ink">{{ title }} <span class="font-normal text-muted">{{ meta }}</span></p>{{ caller() }}</div>
+<div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-line px-4 py-3 text-sm @xl:px-6"><p class="font-medium text-ink">{{ title }} <span class="font-normal text-muted">{{ meta }}</span></p>{{ caller() }}</div>
 {% endmacro %}
 
 {#- A person's initials in a circle. `raised` sets it on a surface, for a row that stands out. -#}

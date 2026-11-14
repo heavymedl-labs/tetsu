@@ -1,0 +1,32 @@
+{% import "art/app.html" as app %}
+{#- The week's classes (day, time, name, room, teacher, booked, capacity, waiting, late cancels, today) as a table,
+    and how full the week ran. A wide panel puts the summary at its left, so a card set over that part leaves the
+    table in view. -#}
+{%- let classes = [("Mon", "6 am", "Hot flow", "Studio A", "Bea Lawson", 24, 24, 3, 1, false), ("Mon", "5:30 pm", "Vinyasa", "Studio A", "Tomás Reyes", 22, 24, 0, 0, false), ("Tue", "9:30 am", "Barre", "Studio B", "Hana Ito", 16, 18, 0, 0, false), ("Wed", "12 pm", "Express", "Studio A", "Bea Lawson", 18, 20, 0, 0, false), ("Wed", "7 pm", "Sculpt", "Studio B", "Priya Nair", 18, 18, 1, 1, false), ("Thu", "6 am", "Hot flow", "Studio A", "Bea Lawson", 24, 24, 2, 1, true), ("Thu", "5:30 pm", "Vinyasa", "Studio A", "Tomás Reyes", 21, 24, 0, 0, false), ("Fri", "6 am", "Hot flow", "Studio A", "Bea Lawson", 24, 24, 4, 1, false)] %}
+{% call app::panel("The week's classes at a yoga studio, each with how full it is, its waitlist, and its teacher, and how full the week ran: 92 percent, with 10 people waiting and 4 late cancels") %}
+{% call app::bar("Classes", "· Northbound Yoga · Week of November 9") %}<p class="font-mono text-xs text-muted">Eastside</p>{% endcall %}
+<div class="grid grid-cols-1 @2xl:grid-cols-[26rem_minmax(0,1fr)]">
+<div class="p-4 @xl:p-6">
+<ul class="divide-y divide-line">
+<li class="grid grid-cols-[5.5rem_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.3fr)_5rem_5.5rem] items-center gap-x-4 pb-2 font-mono text-[11px] text-muted"><span>When</span><span>Class</span><span>Teacher</span><span>Booked</span><span class="text-right">Waitlist</span><span class="text-right">Late cancels</span></li>
+{%- for (day, time, name, room, teacher, booked, capacity, waiting, late, today) in classes %}
+<li class="grid grid-cols-[5.5rem_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.3fr)_5rem_5.5rem] items-center gap-x-4 py-2.5{% if *today %} -mx-2 rounded-md bg-forge/10 px-2{% endif %}"><span class="font-mono text-[11px] whitespace-nowrap text-muted">{{ day }} {{ time }}</span><span class="min-w-0"><span class="block truncate text-ink">{{ name }}</span><span class="block truncate font-mono text-[11px] text-muted">{{ room }}</span></span><span class="truncate text-muted">{{ teacher }}</span><span class="flex items-center gap-3"><meter class="tetsu-meter{% if booked == capacity %} tetsu-meter-full{% endif %} min-w-0 flex-1" value="{{ booked }}" max="{{ capacity }}"></meter><span class="w-14 text-right font-mono text-[11px] whitespace-nowrap {% if booked == capacity %}text-ink{% else %}text-muted{% endif %}">{% if booked == capacity %}Full{% else %}{{ booked }} of {{ capacity }}{% endif %}</span></span><span class="text-right font-mono text-[11px] {% if *waiting > 0 %}text-ink{% else %}text-muted{% endif %}">{% if *waiting > 0 %}{{ waiting }} waiting{% else %}None{% endif %}</span><span class="text-right font-mono text-[11px] text-muted">{% if *late > 0 %}{{ late }} · $15{% else %}None{% endif %}</span></li>
+{%- endfor %}
+</ul>
+</div>
+<div class="order-last flex flex-col border-t border-line bg-fill/40 p-4 @xl:p-6 @2xl:order-first @2xl:border-t-0 @2xl:border-r">
+{% call app::label("This week") %}{% endcall %}
+<p class="mt-1 text-2xl font-semibold tracking-tight text-ink">92% full</p>
+<p class="text-xs text-muted">38 classes · 10 waiting · 4 late cancels</p>
+<div class="mt-6 flex h-28 items-end gap-1.5 *:flex-1 *:rounded-t-sm *:bg-ink/25">
+<div class="h-[88%]"></div><div class="h-[74%]"></div><div class="h-[91%]"></div><div class="h-[95%] bg-forge!"></div><div class="h-[86%]"></div><div class="h-[97%]"></div><div class="h-[69%]"></div>
+</div>
+<div class="mt-1.5 flex gap-1.5 font-mono text-[10px] text-muted *:flex-1 *:text-center"><p>Mon</p><p>Tue</p><p>Wed</p><p class="text-ink">Thu</p><p>Fri</p><p>Sat</p><p>Sun</p></div>
+<ul class="mt-6 divide-y divide-line text-xs">
+<li class="flex justify-between py-2"><span class="text-muted">Moved up from a waitlist</span><span class="font-mono text-ink">14</span></li>
+<li class="flex justify-between py-2"><span class="text-muted">Late-cancel fees</span><span class="font-mono text-ink">$60.00</span></li>
+<li class="flex justify-between py-2"><span class="text-muted">Checked in</span><span class="font-mono text-ink">96%</span></li>
+</ul>
+</div>
+</div>
+{% endcall %}

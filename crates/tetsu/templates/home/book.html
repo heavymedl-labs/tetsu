@@ -1,19 +1,12 @@
 {% import "../../../web/templates/components.html" as ui %}
 {% import "art/figures.html" as fig %}
-{% import "home/tour.html" as tour %}
-{%- let tabs = [("appointments", "Appointments and staff", "Every service with the right person, for the right length."), ("rentals", "Rentals and stays", "Courts by the hour, sites by the night.")] %}
-{% call ui::section("book", "book-title", group = true) %}
-{% call fig::separator(true) %}{% endcall %}
+{#- Book people and places: a salon's day by stylist in front of the courts and campsites, and what it covers. #}
+{% call ui::section("book", "book-title") %}
+{% call fig::separator(false) %}{% endcall %}
 {% call ui::head("book-title", "Book people and places", "Appointments with your staff, and rentals of your courts, rooms, and sites, on one calendar.") %}{% endcall %}
-{% call ui::tabs("book", "Book people and places", tabs) %}{% endcall %}
-<div class="tetsu-film md:mt-10">
-<div class="tetsu-strip">
-{% call tour::slide(tabs[0]) %}
-{% include "panels/appointments.html" %}
-{% endcall %}
-{% call tour::slide(tabs[1]) %}
-{% include "panels/rentals.html" %}
-{% endcall %}
+<div class="tetsu-scene tetsu-scene-card">
+<div class="tetsu-scene-back">{% include "panels/rentals.html" %}</div>
+<div class="tetsu-scene-front tetsu-stories">{% include "panels/appointments.html" %}</div>
 </div>
-</div>
+{% call ui::features(["Services and add-ons", "Staff hours", "Cleanup buffers", "Deposits", "Hourly rentals", "Nightly stays", "Minimum stays", "Equipment"]) %}{% endcall %}
 {% endcall %}

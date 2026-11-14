@@ -858,10 +858,10 @@ mod tests {
         // A section's clock started every panel in it at once, so a panel low on a phone played out of sight.
         let page = home_page(true);
         assert!(
-            page.contains("class=\"tetsu-reveal tetsu-clock mt-4 "),
+            page.contains("class=\"tetsu-reveal tetsu-clock @container "),
             "{page}"
         );
-        assert!(!page.contains("class=\"tetsu-reveal mt-4 "), "{page}");
+        assert!(!page.contains("class=\"tetsu-reveal @container "), "{page}");
         let sections = page
             .split("<section")
             .skip(1)
@@ -888,32 +888,66 @@ mod tests {
     }
 
     #[test]
-    fn a_groups_tabs_leave_the_arrow_keys_to_scrolling() {
-        // Radios take all four arrow keys, so a reader in a group could not scroll past it with them. Details that
-        // share a name are exclusive without script, and leave the arrow keys alone.
+    fn each_feature_section_shows_its_panels_in_its_own_arrangement() {
+        // As Linear sets its product: panels arranged in a picture, with no tabs to choose between, and each
+        // section in its own arrangement. Every panel appears somewhere on the page, in the order given.
         let page = home_page(true);
-        for group in ["fill", "book", "paid"] {
-            assert!(
-                !page.contains(&format!("type=\"radio\" name=\"{group}\"")),
-                "{group}"
-            );
-            let tabs: Vec<&str> = page
-                .split(&format!("<details name=\"{group}\""))
-                .skip(1)
-                .map(|rest| &rest[..rest.find("</summary>").unwrap()])
-                .collect();
-            assert!(tabs.len() >= 2, "{group}: {tabs:?}");
-            let open = tabs
-                .iter()
-                .filter(|tab| tab[..tab.find('>').unwrap()].ends_with(" open"));
-            assert_eq!(open.count(), 1, "{group}: {tabs:?}");
-            for tab in &tabs {
-                assert!(tab.contains("<summary aria-controls="), "{group}: {tab}");
+        for (id, arrangement, panels) in [
+            (
+                "fill",
+                "card",
+                &["classes at a yoga studio", "A 6 am class"][..],
+            ),
+            (
+                "spots",
+                "layer",
+                &["The layout editor", "Two spot maps"][..],
+            ),
+            ("book", "card", &["Courts booked", "day by stylist"][..]),
+            (
+                "paid",
+                "layer",
+                &["payments arriving", "Three membership plans"][..],
+            ),
+        ] {
+            let section = &page[page.find(&format!("<section id=\"{id}\"")).unwrap()..];
+            let section = &section[..section.find("</section>").unwrap()];
+            let scene = format!("class=\"tetsu-scene tetsu-scene-{arrangement}\"");
+            assert!(section.contains(&scene), "{id}");
+            let mut rest = section;
+            for panel in panels {
+                let at = rest.find(panel).unwrap_or_else(|| panic!("{id}: {panel}"));
+                rest = &rest[at..];
             }
+            assert!(section.contains(">Features</p>"), "{id}");
+            assert!(!section.contains("<details"), "{id}");
         }
+        // The stories play inside .tetsu-stories: the week, and each picture's panel in front. A panel behind shows
+        // its finished state.
+        assert!(page.contains("class=\"tetsu-stories mx-auto"), "{page}");
+        assert_eq!(
+            page.matches("tetsu-scene-front tetsu-stories").count(),
+            page.matches("tetsu-scene-front").count()
+        );
+        assert!(!page.contains("tetsu-scene-back tetsu-stories"), "{page}");
+        assert!(rule(".tetsu-stories .tetsu-in").contains("opacity:0"));
+        assert!(!stylesheet().contains("}.tetsu-in{opacity:0"));
+    }
+
+    #[test]
+    fn phones_show_only_the_panel_in_front() {
+        // Below 48rem each section shows its front panel alone: the view behind is hidden, and only the stage
+        // for wider screens, which also zooms the panels to fit, shows it.
+        assert_eq!(rule(".tetsu-scene-back"), "display:none");
         let css = stylesheet();
-        assert!(rule(".tetsu-tabs:has(.tetsu-tab-2[open]) .tetsu-strip").starts_with("translate:"));
-        assert!(!css.contains("tetsu-tab-2:checked"), "{css}");
+        let wide = &css[css
+            .find("@media (width>=48rem){.tetsu-scene{zoom:")
+            .unwrap()..];
+        let wide = &wide[..wide[1..].find("@media").unwrap()];
+        assert!(
+            wide.contains(".tetsu-scene-back{width:68rem;display:block"),
+            "{wide}"
+        );
     }
 
     #[test]

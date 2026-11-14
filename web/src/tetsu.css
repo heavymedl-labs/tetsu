@@ -3,12 +3,12 @@
 @import "tailwindcss" source(none);
 @import "@fontsource-variable/inter/wght.css";
 /* Tetsu's own parts, one file each, with any motion beside its part: the brand's motion, the figures, the product
-   pictures' parts and stories, and the tabbed groups. */
+   pictures' parts and stories, and the feature sections' pictures. */
 @import "./motion.css";
 @import "./figures.css";
 @import "./app.css";
 @import "./stories.css";
-@import "./groups.css";
+@import "./scenes.css";
 
 @source "../../crates/*/templates/**/*.html";
 @source "../templates/**/*.html";
