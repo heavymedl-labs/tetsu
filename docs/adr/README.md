@@ -61,7 +61,7 @@ number, and add a row below. Never renumber.
 | [0053](0053-supported-browsers.md) | Supported browsers | Using newer CSS or HTML, or setting build targets | Proposed |
 | [0054](0054-browser-tests.md) | Browser tests | Changing pages, styles, or interactions, or testing in a browser | Proposed |
 | [0055](0055-fault-injection-tests.md) | Fault injection tests | Testing how Tetsu handles Postgres or network failures | Proposed |
-| [0056](0056-typescript-tests.md) | TypeScript tests | Writing or testing TypeScript in `web/` | Proposed |
+| [0056](0056-typescript-tests.md) | TypeScript tests | Writing or testing TypeScript in `web/` | Accepted |
 
 ## Open decisions
 
