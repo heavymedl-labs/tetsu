@@ -15,6 +15,10 @@ payment processor.
 **ADR.** Architecture Decision Record: a short document in `docs/adr` that
 records one significant decision, its alternatives, and its sources.
 
+**Browser floor.** The oldest browsers Tetsu still works in, stated once in `.browserslistrc`. Above it pages are
+functional; the current and previous versions are fully supported, with every enhancement
+([ADR-0053](adr/0053-supported-browsers.md)).
+
 **Cell.** One complete, independent deployment of Tetsu serving some of its
 tenants, so a failure in one cell does not reach the others. Whether Tetsu uses
 cells is [undecided](https://github.com/heavymedl-labs/tetsu/issues/8).
