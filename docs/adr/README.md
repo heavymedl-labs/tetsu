@@ -60,6 +60,7 @@ number, and add a row below. Never renumber.
 | [0052](0052-grafana-from-agent-sessions.md) | Grafana from agent sessions | Reading logs or alerts from a session, or changing Grafana | Accepted |
 | [0053](0053-supported-browsers.md) | Supported browsers | Using newer CSS or HTML, or setting build targets | Proposed |
 | [0054](0054-browser-tests.md) | Browser tests | Changing pages, styles, or interactions, or testing in a browser | Proposed |
+| [0055](0055-fault-injection-tests.md) | Fault injection tests | Testing how Tetsu handles Postgres or network failures | Proposed |
 
 ## Open decisions
 
@@ -81,7 +82,7 @@ option for most of them.
 - [Support access to tenant accounts](https://github.com/heavymedl-labs/tetsu/issues/24)
 - [Money: currencies, rounding, and tax](https://github.com/heavymedl-labs/tetsu/issues/26)
 - [Load test tools, latency budgets, and memory measurement](https://github.com/heavymedl-labs/tetsu/issues/37)
-- [Fault injection tests](https://github.com/heavymedl-labs/tetsu/issues/130)
+- [Fault injection tests, proposed as ADR-0055](https://github.com/heavymedl-labs/tetsu/issues/130)
 - [The benchmark image tag rule, proposed as ADR-0022](https://github.com/heavymedl-labs/tetsu/issues/75)
 - [Whether the benchmark harness keeps monoio](https://github.com/heavymedl-labs/tetsu/issues/94)
 - [How long to override markdownlint-cli2's vulnerable dependencies](https://github.com/heavymedl-labs/tetsu/issues/95)

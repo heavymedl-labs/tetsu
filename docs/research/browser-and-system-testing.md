@@ -1,7 +1,7 @@
 # Browser and system testing
 
-Research for [ADR-0053](../adr/0053-supported-browsers.md), [ADR-0054](../adr/0054-browser-tests.md), and
-[#37](https://github.com/heavymedl-labs/tetsu/issues/37), 2026-11-13: how to catch, before they ship, the kind of
+Research for [ADR-0053](../adr/0053-supported-browsers.md), [ADR-0054](../adr/0054-browser-tests.md),
+[ADR-0055](../adr/0055-fault-injection-tests.md), and [#37](https://github.com/heavymedl-labs/tetsu/issues/37), 2026-11-13: how to catch, before they ship, the kind of
 UI bugs fixed that day (a header that jolted on Tab, tabs that trapped the arrow keys, stories that played out of
 sight, and a border clipped only on iPhones), and, as a separate track, how to test the server under load and
 faults. It follows [ADR-0010](../adr/0010-evaluating-technology.md) steps 1, 2, 4, 5, and 7. Benchmarks are
