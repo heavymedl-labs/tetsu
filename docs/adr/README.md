@@ -64,7 +64,7 @@ number, and add a row below. Never renumber.
 | [0056](0056-typescript-tests.md) | TypeScript tests | Writing or testing TypeScript in `web/` | Accepted |
 | [0057](0057-operator-passkeys-before-level-2.md) | Operator passkeys and email before the Level 2 review | Building operator sign-in, or sending email before #111 | Accepted |
 | [0058](0058-test-authenticator.md) | A virtual authenticator for sign-in tests | Testing passkey enrollment or sign-in | Accepted |
-| [0059](0059-session-controls-and-request-checks.md) | Session controls and cross-site request checks | Building sessions, sign-out, session lists, or checks on state-changing requests | Proposed |
+| [0059](0059-session-controls-and-request-checks.md) | Session controls and cross-site request checks | Building sessions, sign-out, session lists, or checks on state-changing requests | Accepted |
 
 ## Open decisions
 

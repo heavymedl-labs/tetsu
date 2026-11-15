@@ -1,6 +1,6 @@
 # 0059. Session controls and cross-site request checks
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-14
 - Amends [ADR-0048](0048-sign-in-design.md): its "Sessions" and "Forms and pages" sections, and replaces its
   pre-session record

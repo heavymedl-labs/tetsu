@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-11-11
+- Session controls, the checks on state-changing requests, and the pre-session record are amended by
+  [ADR-0059](0059-session-controls-and-request-checks.md)
 
 ## Context
 
