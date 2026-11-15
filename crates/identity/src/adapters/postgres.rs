@@ -1,7 +1,5 @@
 //! Identity's Postgres adapter. Driver types stay in this file (ADR-0007).
 
-use std::time::SystemTime;
-
 use tetsu_kernel::Migration;
 use tetsu_postgres::{Failure, ModuleTransaction, Pool};
 use tokio_postgres::Row;
@@ -20,8 +18,7 @@ const SCHEMA: &str = "identity";
 
 const INSERT_OPERATOR: &str = include_str!("../../sql/insert_operator.sql");
 const START_SESSION: &str = include_str!("../../sql/start_session.sql");
-const SESSION_FOR: &str = include_str!("../../sql/session_for.sql");
-const TOUCH_SESSION: &str = include_str!("../../sql/touch_session.sql");
+const USE_SESSION: &str = include_str!("../../sql/use_session.sql");
 const END_SESSION: &str = include_str!("../../sql/end_session.sql");
 
 /// Identity's operator realm over Postgres, for the composition root. It returns the use cases, never the store
@@ -31,7 +28,7 @@ const END_SESSION: &str = include_str!("../../sql/end_session.sql");
 ///
 /// ```no_run
 /// # async fn reach(pool: tetsu_postgres::Pool) {
-/// let _ = tetsu_identity::postgres_store(pool).end_session("x").await;
+/// let _ = tetsu_identity::postgres_store(pool).session(["x"]).await;
 /// # }
 /// ```
 ///
@@ -141,32 +138,29 @@ impl OperatorStore for PostgresOperators {
         Ok(OperatorId::new(column(row, "id")?))
     }
 
-    async fn insert_session(&self, hash: &[u8; 32], session: &Session) -> Result<(), Error> {
-        let parameters: [&(dyn ToSql + Sync); 5] = [
-            &hash.as_slice(),
-            &session.realm.as_str(),
-            &session.operator.get(),
-            &session.started_at,
-            &session.ends_at,
-        ];
+    async fn insert_session(
+        &self,
+        hash: &[u8; 32],
+        realm: Realm,
+        operator: OperatorId,
+    ) -> Result<(), Error> {
+        let parameters: [&(dyn ToSql + Sync); 3] =
+            [&hash.as_slice(), &realm.as_str(), &operator.get()];
         self.query(START_SESSION, &parameters).await.map(drop)
     }
 
-    async fn find_session(&self, hash: &[u8; 32], realm: Realm) -> Result<Option<Session>, Error> {
+    async fn use_session(&self, hash: &[u8; 32], realm: Realm) -> Result<Option<Session>, Error> {
         let rows = self
-            .query(SESSION_FOR, &[&hash.as_slice(), &realm.as_str()])
+            .query(USE_SESSION, &[&hash.as_slice(), &realm.as_str()])
             .await?;
         rows.first().map(session_from).transpose()
     }
 
-    async fn touch_session(&self, hash: &[u8; 32], seen: SystemTime) -> Result<(), Error> {
-        self.query(TOUCH_SESSION, &[&hash.as_slice(), &seen])
-            .await
-            .map(drop)
-    }
-
-    async fn delete_session(&self, hash: &[u8; 32]) -> Result<(), Error> {
-        self.query(END_SESSION, &[&hash.as_slice()]).await.map(drop)
+    async fn delete_session(&self, hash: &[u8; 32], realm: Realm) -> Result<bool, Error> {
+        let rows = self
+            .query(END_SESSION, &[&hash.as_slice(), &realm.as_str()])
+            .await?;
+        rows.first().map_or(Ok(false), |row| column(row, "ended"))
     }
 }
 
@@ -221,7 +215,7 @@ mod tests {
             .await
             .expect("creates");
         assert_eq!(
-            operators.start_session(kurt, SystemTime::now()).await,
+            operators.start_session(kurt).await,
             Err(Error::Unavailable(format!(
                 "no secure random source: {}",
                 getrandom::Error::UNSUPPORTED
@@ -230,10 +224,10 @@ mod tests {
         // The same build, with the operating system's source, starts one: llvm-cov scores each build of a
         // function on its own, so this one must take both paths.
         let working = Operators::with_fill(PostgresOperators { pool }, getrandom::fill);
-        assert!(working.start_session(kurt, SystemTime::now()).await.is_ok());
+        assert!(working.start_session(kurt).await.is_ok());
         assert_eq!(
             working
-                .start_session(OperatorId::new(i64::MAX), SystemTime::now())
+                .start_session(OperatorId::new(i64::MAX))
                 .await,
             Err(Error::Storage(
                 "insert or update on table \"sessions\" violates foreign key constraint \"sessions_operator_id_fkey\""

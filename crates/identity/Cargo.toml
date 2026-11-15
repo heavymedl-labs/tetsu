@@ -14,6 +14,7 @@ tier = 1
 deadpool-postgres.workspace = true
 getrandom.workspace = true
 sha2.workspace = true
+subtle.workspace = true
 tetsu-kernel.workspace = true
 tetsu-postgres.workspace = true
 tokio-postgres.workspace = true

@@ -5,11 +5,13 @@
 //! module's registration, and the adapter constructor, which returns an [`Operators`].
 
 mod adapters;
+mod browser;
 mod domain;
 mod ports;
 mod use_cases;
 
 pub use adapters::postgres::postgres_store;
+pub use browser::{Change, ForChange, Origins, SignOut};
 pub use domain::{Error, Limits, OperatorId, OperatorName, Realm, Session, SessionToken};
 pub use ports::OperatorStore;
 pub use use_cases::Operators;

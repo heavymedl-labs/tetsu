@@ -1,7 +1,6 @@
 //! Use cases, reached only through [`Operators`] (ADR-0021).
 
-use std::time::SystemTime;
-
+use crate::browser::{Change, ForChange, Origins, SignOut};
 use crate::domain::{Error, Fill, OperatorId, OperatorName, Realm, Session, SessionToken};
 use crate::ports::OperatorStore;
 
@@ -36,60 +35,87 @@ impl<S: OperatorStore> Operators<S> {
     }
 
     /// Starts a session for an operator who has just signed in, and returns its new token, which only the
-    /// operator's browser keeps (ADR-0040, `v5.0.0-7.2.4`).
+    /// operator's browser keeps (ADR-0040, `v5.0.0-7.2.4`). It ends at the realm's absolute limit at the latest, by
+    /// the store's clock. The operator's spent sessions are removed as it starts.
     ///
     /// # Errors
     /// Fails if no secure random source can be read, or storage fails, as it does for an unknown operator.
-    pub async fn start_session(
-        &self,
-        operator: OperatorId,
-        now: SystemTime,
-    ) -> Result<SessionToken, Error> {
+    pub async fn start_session(&self, operator: OperatorId) -> Result<SessionToken, Error> {
         let token = SessionToken::generate(self.fill)?;
         let realm = Realm::Operator;
-        let session = Session {
-            realm,
-            operator,
-            started_at: now,
-            last_seen_at: now,
-            ends_at: now + realm.limits().absolute,
-        };
-        self.store.insert_session(&token.hash(), &session).await?;
+        self.store
+            .insert_session(&token.hash(), realm, operator)
+            .await?;
         Ok(token)
     }
 
-    /// The live operator session a cookie's token names, as of a request at `now`, which counts as its latest. A
-    /// token that is malformed, unknown, or past either limit names none, and a session past a limit is removed,
-    /// so it can never be used again (ADR-0048, `v5.0.0-7.3.1`, `v5.0.0-7.3.2`).
+    /// The live operator session named by the session cookie among a request's `Cookie` headers, for a request
+    /// that only reads; this request counts as its latest. A request with no such cookie, one sent twice, a token
+    /// that is malformed, unknown, from another realm, or past either limit names none, and a session past a limit
+    /// is removed, so it can never be used again (ADR-0048, `v5.0.0-7.3.1`, `v5.0.0-7.3.2`). A request that
+    /// changes anything uses [`Self::session_for_change`] instead.
     ///
     /// # Errors
     /// Fails if storage fails.
-    pub async fn session(&self, token: &str, now: SystemTime) -> Result<Option<Session>, Error> {
-        let Some(token) = SessionToken::parse(token) else {
-            return Ok(None);
-        };
-        let hash = token.hash();
-        let Some(mut session) = self.store.find_session(&hash, Realm::Operator).await? else {
-            return Ok(None);
-        };
-        if !session.is_live(now) {
-            self.store.delete_session(&hash).await?;
-            return Ok(None);
+    pub async fn session<'a>(
+        &self,
+        cookies: impl IntoIterator<Item = &'a str>,
+    ) -> Result<Option<Session>, Error> {
+        match Realm::Operator
+            .token_in(cookies)
+            .and_then(SessionToken::parse)
+        {
+            Some(token) => self.live(&token).await,
+            None => Ok(None),
         }
-        self.store.touch_session(&hash, now).await?;
-        session.last_seen_at = session.last_seen_at.max(now);
-        Ok(Some(session))
     }
 
-    /// Ends the session a cookie's token names, on the server, so the token signs no one in again
-    /// (`v5.0.0-7.4.1`). A token that names no session ends nothing.
+    /// What a state-changing request may do: act for its live operator session only when it comes from one of the
+    /// realm's origins and carries that session's own form token, so no other site's form or script can act for a
+    /// signed-in operator (ADR-0048, `v5.0.0-3.5.1`). A refused request leaves the session as it was.
     ///
     /// # Errors
     /// Fails if storage fails.
-    pub async fn end_session(&self, token: &str) -> Result<(), Error> {
-        match SessionToken::parse(token) {
-            Some(token) => self.store.delete_session(&token.hash()).await,
-            None => Ok(()),
-        }
+    pub async fn session_for_change(
+        &self,
+        origins: &Origins,
+        change: &Change<'_>,
+    ) -> Result<ForChange, Error> {
+        let Some(token) = change.verified(Realm::Operator, origins) else {
+            return Ok(ForChange::Refused);
+        };
+        Ok(match self.live(&token).await? {
+            Some(session) => ForChange::Acting(session),
+            None => ForChange::NoSession,
+        })
+    }
+
+    /// Signs out: ends the session on the server, so its token signs no one in again (`v5.0.0-7.4.1`). Signing out
+    /// changes state, so it passes the same checks as [`Self::session_for_change`], and a refused request ends
+    /// nothing. A session that had already ended is removed too, and reported as nothing to end.
+    ///
+    /// # Errors
+    /// Fails if storage fails.
+    pub async fn end_session(
+        &self,
+        origins: &Origins,
+        change: &Change<'_>,
+    ) -> Result<SignOut, Error> {
+        let Some(token) = change.verified(Realm::Operator, origins) else {
+            return Ok(SignOut::Refused);
+        };
+        let ended = self
+            .store
+            .delete_session(&token.hash(), Realm::Operator)
+            .await?;
+        Ok(if ended {
+            SignOut::Ended
+        } else {
+            SignOut::NothingToEnd
+        })
+    }
+
+    async fn live(&self, token: &SessionToken) -> Result<Option<Session>, Error> {
+        self.store.use_session(&token.hash(), Realm::Operator).await
     }
 }

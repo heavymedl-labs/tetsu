@@ -4,11 +4,14 @@
 use std::time::{Duration, SystemTime};
 
 use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
 
 const MAX_NAME: usize = 100;
 /// 256 random bits (ADR-0048).
 const TOKEN_BYTES: usize = 32;
 const HEX: &[u8; 16] = b"0123456789abcdef";
+/// Sets a form token apart from every other value made from a session token.
+const FORM_TOKEN: &[u8] = b"tetsu form token\0";
 
 /// Which kind of person signs in. Each realm has its own host, passkeys, cookie, and session limits (ADR-0040,
 /// ADR-0048); operators come first, in slice 5.
@@ -100,7 +103,7 @@ impl OperatorName {
 
 /// What a session's cookie holds: 256 random bits, written as 64 lowercase hexadecimal digits. Only its hash is
 /// stored (ADR-0047), and it is never printed, so neither a log line nor a stored row can sign anyone in.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct SessionToken([u8; TOKEN_BYTES]);
 
 impl SessionToken {
@@ -118,26 +121,37 @@ impl SessionToken {
     /// The token a cookie holds, if it holds one in the form [`Self::to_text`] writes, and nothing else.
     #[must_use]
     pub fn parse(text: &str) -> Option<Self> {
-        let digits = text.as_bytes();
-        if digits.len() != TOKEN_BYTES * 2 {
-            return None;
-        }
-        let mut bytes = [0; TOKEN_BYTES];
-        for (byte, [high, low]) in bytes.iter_mut().zip(digits.as_chunks::<2>().0) {
-            *byte = digit(*high)? * 16 + digit(*low)?;
-        }
-        Some(Self(bytes))
+        from_hex(text).map(Self)
     }
 
     /// The token as a cookie holds it.
     #[must_use]
     pub fn to_text(&self) -> String {
-        let mut text = String::with_capacity(TOKEN_BYTES * 2);
-        for byte in self.0 {
-            text.push(char::from(HEX[usize::from(byte >> 4)]));
-            text.push(char::from(HEX[usize::from(byte & 0x0f)]));
-        }
-        text
+        to_hex(&self.0)
+    }
+
+    /// The token this session's forms carry, which every state-changing request must send back (ADR-0048,
+    /// `v5.0.0-3.5.1`). It comes from the session's own token, so nothing more is stored, and no page can know it
+    /// without the cookie, which scripts cannot read. It differs from the stored hash, so the database never holds
+    /// it either.
+    #[must_use]
+    pub fn form_token(&self) -> String {
+        to_hex(&self.form_bytes())
+    }
+
+    /// Whether a submitted form token is this session's, compared in constant time, so the comparison's timing
+    /// tells nothing about how much of a guess was right.
+    #[must_use]
+    pub fn form_token_matches(&self, submitted: &str) -> bool {
+        from_hex(submitted).is_some_and(|bytes| bool::from(bytes.ct_eq(&self.form_bytes())))
+    }
+
+    fn form_bytes(&self) -> [u8; TOKEN_BYTES] {
+        Sha256::new()
+            .chain_update(FORM_TOKEN)
+            .chain_update(self.0)
+            .finalize()
+            .into()
     }
 
     /// The SHA-256 hash that stands for the token in storage (ADR-0047).
@@ -146,10 +160,42 @@ impl SessionToken {
     }
 }
 
+/// Equal in constant time, through `subtle`, so comparing a token tells nothing about how much of it matched.
+impl PartialEq for SessionToken {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.ct_eq(&other.0).into()
+    }
+}
+
+impl Eq for SessionToken {}
+
 impl std::fmt::Debug for SessionToken {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("SessionToken(hidden)")
     }
+}
+
+/// Bytes as lowercase hexadecimal digits.
+fn to_hex(bytes: &[u8; TOKEN_BYTES]) -> String {
+    let mut text = String::with_capacity(TOKEN_BYTES * 2);
+    for byte in bytes {
+        text.push(char::from(HEX[usize::from(byte >> 4)]));
+        text.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    text
+}
+
+/// The bytes 64 lowercase hexadecimal digits stand for, and nothing else, so each value has one written form.
+fn from_hex(text: &str) -> Option<[u8; TOKEN_BYTES]> {
+    let digits = text.as_bytes();
+    if digits.len() != TOKEN_BYTES * 2 {
+        return None;
+    }
+    let mut bytes = [0; TOKEN_BYTES];
+    for (byte, [high, low]) in bytes.iter_mut().zip(digits.as_chunks::<2>().0) {
+        *byte = digit(*high)? * 16 + digit(*low)?;
+    }
+    Some(bytes)
 }
 
 /// Fills bytes from a secure random source.
@@ -203,13 +249,6 @@ impl Session {
     pub fn ends_at(&self) -> SystemTime {
         self.ends_at
     }
-
-    /// Whether the session still holds at `now`: before its absolute end, and within its realm's idle limit of its
-    /// last request. Either limit ends it for good (ADR-0048).
-    #[must_use]
-    pub fn is_live(&self, now: SystemTime) -> bool {
-        now < self.ends_at && now < self.last_seen_at + self.realm.limits().idle
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -240,16 +279,6 @@ mod tests {
 
     const HOUR: Duration = Duration::from_hours(1);
     const MINUTE: Duration = Duration::from_mins(1);
-
-    fn session(started: SystemTime, last_seen: SystemTime) -> Session {
-        Session {
-            realm: Realm::Operator,
-            operator: OperatorId::new(1),
-            started_at: started,
-            last_seen_at: last_seen,
-            ends_at: started + Realm::Operator.limits().absolute,
-        }
-    }
 
     #[test]
     fn operators_get_eight_hours_and_fifteen_idle_minutes() {
@@ -337,6 +366,23 @@ mod tests {
     }
 
     #[test]
+    fn a_form_token_is_the_sessions_own_and_not_its_stored_hash() {
+        let token = SessionToken::parse(&"00".repeat(32)).expect("a token");
+        let form = token.form_token();
+        assert!(token.form_token_matches(&form));
+        assert_ne!(form, to_hex(&token.hash()), "the database never holds it");
+        assert_ne!(form, token.to_text());
+        let other = SessionToken::generate(getrandom::fill).expect("a token");
+        assert!(
+            !other.form_token_matches(&form),
+            "another session's form token"
+        );
+        for bad in ["", "not a token", &form.to_uppercase(), &form[1..]] {
+            assert!(!token.form_token_matches(bad), "{bad:?}");
+        }
+    }
+
+    #[test]
     fn a_failed_random_source_is_unavailable() {
         assert_eq!(
             SessionToken::generate(|_| Err(getrandom::Error::UNSUPPORTED)),
@@ -345,18 +391,6 @@ mod tests {
                 getrandom::Error::UNSUPPORTED
             )))
         );
-    }
-
-    #[test]
-    fn a_session_lives_until_either_limit() {
-        let start = SystemTime::UNIX_EPOCH + 1000 * HOUR;
-        let fresh = session(start, start);
-        assert!(fresh.is_live(start));
-        assert!(fresh.is_live(start + 15 * MINUTE - Duration::from_nanos(1)));
-        assert!(!fresh.is_live(start + 15 * MINUTE), "idle");
-        let busy = session(start, start + 8 * HOUR - MINUTE);
-        assert!(busy.is_live(start + 8 * HOUR - Duration::from_nanos(1)));
-        assert!(!busy.is_live(start + 8 * HOUR), "absolute");
     }
 
     #[test]
@@ -389,15 +423,16 @@ mod tests {
             prop_assert_eq!(SessionToken::parse(&text).is_some(), well_formed(&text));
         }
 
-        /// A session is live exactly while both limits hold, wherever its last request fell.
+        /// Every session's form token matches it, and a token one digit off never does.
         #[test]
-        fn liveness_is_both_limits(idle_for in 0u64..2_000, seen_after in 0u64..40_000) {
-            let start = SystemTime::UNIX_EPOCH + 1000 * HOUR;
-            let last_seen = start + Duration::from_secs(seen_after);
-            let now = last_seen + Duration::from_secs(idle_for);
-            let live = session(start, last_seen).is_live(now);
-            let expected = now < start + 8 * HOUR && idle_for < 15 * 60;
-            prop_assert_eq!(live, expected);
+        fn a_form_token_matches_only_exactly(text in "[0-9a-f]{64}", at in 0usize..64) {
+            let token = SessionToken::parse(&text).expect("a token");
+            let form = token.form_token();
+            prop_assert!(token.form_token_matches(&form));
+            let digit = form.as_bytes()[at];
+            let changed = if digit == b'0' { "1" } else { "0" };
+            let near = format!("{}{changed}{}", &form[..at], &form[at + 1..]);
+            prop_assert!(!token.form_token_matches(&near));
         }
     }
 

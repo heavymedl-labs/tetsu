@@ -1,14 +1,17 @@
 //! Operators and their sessions in Postgres (ADR-0040, ADR-0047, ADR-0048), signed in as the application role, as
-//! `tetsu serve` is.
+//! `tetsu serve` is. Postgres's clock is the only one a session follows, so tests move a stored session's times
+//! rather than pass a time in.
 
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
-use tetsu_identity::{Error, Identity, OperatorName, Realm, postgres_store};
+use tetsu_identity::{
+    Change, Error, ForChange, Identity, OperatorName, Origins, Realm, SessionToken, SignOut,
+    postgres_store,
+};
 use tetsu_postgres::test_support::{TestDatabase, fresh_database};
 use tetsu_postgres::{ModuleTransaction, Settings, connect, isolation_violations, migrate, pool};
 
-const MINUTE: Duration = Duration::from_mins(1);
-const HOUR: Duration = Duration::from_hours(1);
+const ORIGIN: &str = "https://ops.example.com";
 
 #[cfg(test)]
 mod support {
@@ -21,17 +24,73 @@ mod support {
         database
     }
 
-    /// A moment Postgres keeps exactly: whole seconds, well after the epoch.
-    pub fn at(seconds: u64) -> SystemTime {
-        SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000 + seconds)
-    }
-
     pub fn name(name: &str) -> OperatorName {
         OperatorName::parse(name).expect("a name")
     }
 
-    /// Replaces `session_for` with one whose `wrong` column comes back as an `int`, and the rest as they should.
-    pub fn session_for_with_wrong(wrong: &str) -> String {
+    /// The operator realm's idle limit, which the database keeps too; tests age sessions by it, so the two must agree.
+    pub fn idle_seconds() -> u64 {
+        Realm::Operator.limits().idle.as_secs()
+    }
+
+    /// The `Cookie` header a browser sends back with an operator's session token.
+    pub fn cookie(token: &str) -> String {
+        format!("{}={token}", Realm::Operator.cookie_name())
+    }
+
+    pub fn text(token: &SessionToken) -> String {
+        cookie(&token.to_text())
+    }
+
+    pub fn origins() -> Origins {
+        Origins::parse(&[ORIGIN]).expect("origins")
+    }
+
+    /// Runs SQL as the test server's administrator, to move a session's times or stand in for a bad migration.
+    pub async fn as_admin(database: &TestDatabase, sql: &str) {
+        connect(database)
+            .await
+            .expect("connects")
+            .batch_execute(sql)
+            .await
+            .expect("runs");
+    }
+
+    /// Whether every stored session meets a condition, such as `last_seen_at > now() - interval '1 minute'`; false
+    /// when none is stored.
+    pub async fn stored(database: &TestDatabase, condition: &str) -> bool {
+        connect(database)
+            .await
+            .expect("connects")
+            .query_one(
+                &format!(
+                    "SELECT count(*) > 0 AND bool_and({condition}) AS met FROM identity.sessions"
+                ),
+                &[],
+            )
+            .await
+            .expect("checks")
+            .try_get("met")
+            .expect("reads")
+    }
+
+    /// How many stored sessions meet a condition.
+    pub async fn count(database: &TestDatabase, condition: &str) -> i64 {
+        connect(database)
+            .await
+            .expect("connects")
+            .query_one(
+                &format!("SELECT count(*) AS n FROM identity.sessions WHERE {condition}"),
+                &[],
+            )
+            .await
+            .expect("counts")
+            .try_get("n")
+            .expect("reads")
+    }
+
+    /// Replaces `use_session` with one whose `wrong` column comes back as an `int`, and the rest as they should.
+    pub fn use_session_with_wrong(wrong: &str) -> String {
         let columns = [
             ("realm", "text", "'operator'"),
             ("operator_id", "bigint", "1::bigint"),
@@ -49,28 +108,24 @@ mod support {
                 }
             })
             .unzip();
-        format!(
-            "DROP FUNCTION identity.session_for(bytea, text);
-             CREATE FUNCTION identity.session_for(wanted_hash bytea, wanted_realm text)
-             RETURNS TABLE ({}) LANGUAGE sql STABLE AS $$ SELECT {} $$;
-             GRANT EXECUTE ON FUNCTION identity.session_for(bytea, text) TO tetsu_identity",
-            types.join(", "),
-            values.join(", ")
-        )
+        replaced_use_session(&types.join(", "), &values.join(", "))
     }
 
-    /// Runs SQL as the test server's administrator, to stand in for a bad migration or a corrupted row.
-    pub async fn as_admin(database: &TestDatabase, sql: &str) {
-        connect(database)
-            .await
-            .expect("connects")
-            .batch_execute(sql)
-            .await
-            .expect("runs");
+    /// SQL that replaces `use_session` with one returning `values` as `columns`.
+    pub fn replaced_use_session(columns: &str, values: &str) -> String {
+        format!(
+            "DROP FUNCTION identity.use_session(bytea, text);
+             CREATE FUNCTION identity.use_session(wanted_hash bytea, wanted_realm text)
+             RETURNS TABLE ({columns}) LANGUAGE sql AS $$ SELECT {values} $$;
+             GRANT EXECUTE ON FUNCTION identity.use_session(bytea, text) TO tetsu_identity"
+        )
     }
 }
 
-use support::{as_admin, at, name, ready, session_for_with_wrong};
+use support::{
+    as_admin, cookie, count, idle_seconds, name, origins, ready, replaced_use_session, stored,
+    text, use_session_with_wrong,
+};
 
 /// Identity keeps its tables in the one schema it owns, under its own name (ADR-0003, ADR-0042).
 #[test]
@@ -95,31 +150,47 @@ async fn identity_follows_the_isolation_rules() {
     );
 }
 
+/// A session starts now by Postgres's clock, lasts eight hours at most, and records each request on it.
 #[tokio::test]
-async fn a_started_session_is_found_by_its_token_and_seen_again() {
+async fn a_started_session_is_found_by_its_token_and_records_each_request() {
     let database = ready().await;
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
     let kurt = operators
         .create(&name("Kurt Medley"))
         .await
         .expect("creates");
-    let token = operators.start_session(kurt, at(0)).await.expect("starts");
+    let token = operators.start_session(kurt).await.expect("starts");
+    assert!(
+        stored(
+            &database,
+            &format!(
+                "last_seen_at = started_at AND ends_at = started_at + interval '{} seconds'",
+                Realm::Operator.limits().absolute.as_secs()
+            )
+        )
+        .await
+    );
+    as_admin(
+        &database,
+        "UPDATE identity.sessions SET last_seen_at = last_seen_at - interval '10 minutes'",
+    )
+    .await;
     let session = operators
-        .session(&token.to_text(), at(60))
+        .session([text(&token).as_str()])
         .await
         .expect("looks up")
         .expect("a session");
     assert_eq!(session.realm(), Realm::Operator);
     assert_eq!(session.operator(), kurt);
-    assert_eq!(session.started_at(), at(0));
-    assert_eq!(session.last_seen_at(), at(60));
-    assert_eq!(session.ends_at(), at(0) + 8 * HOUR);
-    let again = operators
-        .session(&token.to_text(), at(120))
-        .await
-        .expect("looks up")
-        .expect("still a session");
-    assert_eq!(again.last_seen_at(), at(120), "the request was recorded");
+    assert_eq!(
+        session.ends_at(),
+        session.started_at() + Duration::from_hours(8)
+    );
+    assert!(session.last_seen_at() > session.started_at(), "recorded");
+    assert!(
+        stored(&database, "last_seen_at > now() - interval '1 minute'").await,
+        "the request was stored"
+    );
 }
 
 #[tokio::test]
@@ -156,98 +227,120 @@ async fn only_the_tokens_hash_is_stored() {
         .create(&name("Kurt Medley"))
         .await
         .expect("creates");
-    let token = operators.start_session(kurt, at(0)).await.expect("starts");
-    let found = connect(&database)
-        .await
-        .expect("connects")
-        .query_one(
-            "SELECT count(*) FILTER (WHERE token_hash = sha256(decode($1, 'hex'))) AS hashed,
-                    count(*) FILTER (WHERE token_hash = decode($1, 'hex')) AS plain
-             FROM identity.sessions",
-            &[&token.to_text()],
+    let token = operators.start_session(kurt).await.expect("starts");
+    let text = token.to_text();
+    assert!(
+        stored(
+            &database,
+            &format!("token_hash = sha256(decode('{text}', 'hex'))")
         )
         .await
-        .expect("counts");
-    assert_eq!(
-        (
-            found.try_get::<_, i64>("hashed").expect("reads"),
-            found.try_get::<_, i64>("plain").expect("reads")
+    );
+    assert!(!stored(&database, &format!("token_hash = decode('{text}', 'hex')")).await);
+}
+
+/// Fifteen minutes without a request ends an operator's session for good, and its row is removed (ADR-0048).
+#[tokio::test]
+async fn an_idle_session_ends_and_is_removed() {
+    let database = ready().await;
+    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    let kurt = operators
+        .create(&name("Kurt Medley"))
+        .await
+        .expect("creates");
+    let token = operators.start_session(kurt).await.expect("starts");
+    as_admin(
+        &database,
+        &format!(
+            "UPDATE identity.sessions SET last_seen_at = now() - interval '{} seconds'",
+            idle_seconds() - 10
         ),
-        (1, 0)
-    );
-}
-
-/// Fifteen minutes without a request ends an operator's session for good (ADR-0048).
-#[tokio::test]
-async fn an_idle_session_ends_and_stays_ended() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"))
-        .await
-        .expect("creates");
-    let token = operators.start_session(kurt, at(0)).await.expect("starts");
-    let late = at(0) + 15 * MINUTE;
-    assert_eq!(operators.session(&token.to_text(), late).await, Ok(None));
-    assert_eq!(
-        operators.session(&token.to_text(), at(60)).await,
-        Ok(None),
-        "an earlier clock does not bring it back"
-    );
-}
-
-/// Eight hours after it starts, a session ends however busy it is (ADR-0048).
-#[tokio::test]
-async fn a_busy_session_still_ends_after_eight_hours() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"))
-        .await
-        .expect("creates");
-    let token = operators.start_session(kurt, at(0)).await.expect("starts");
-    let mut now = at(0);
-    while now < at(0) + 8 * HOUR - 10 * MINUTE {
-        now += 10 * MINUTE;
-        assert!(
-            operators
-                .session(&token.to_text(), now)
-                .await
-                .expect("looks up")
-                .is_some()
-        );
-    }
-    assert_eq!(
-        operators.session(&token.to_text(), at(0) + 8 * HOUR).await,
-        Ok(None)
-    );
-}
-
-/// Requests that finish out of order never move the last request back, which would shorten the session.
-#[tokio::test]
-async fn an_earlier_request_seen_late_does_not_shorten_the_session() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"))
-        .await
-        .expect("creates");
-    let token = operators.start_session(kurt, at(0)).await.expect("starts");
-    for minutes in [10, 5] {
-        operators
-            .session(&token.to_text(), at(0) + minutes * MINUTE)
-            .await
-            .expect("looks up")
-            .expect("a session");
-    }
+    )
+    .await;
     assert!(
         operators
-            .session(&token.to_text(), at(0) + 24 * MINUTE)
+            .session([text(&token).as_str()])
             .await
             .expect("looks up")
             .is_some(),
-        "still within 15 minutes of the request at 10"
+        "still within 15 minutes"
     );
+    as_admin(
+        &database,
+        &format!(
+            "UPDATE identity.sessions SET last_seen_at = now() - interval '{} seconds'",
+            idle_seconds()
+        ),
+    )
+    .await;
+    assert_eq!(operators.session([text(&token).as_str()]).await, Ok(None));
+    assert!(
+        !stored(&database, "true").await,
+        "the spent session is removed"
+    );
+}
+
+/// Eight hours after it starts, a session ends however busy it is, and its row is removed (ADR-0048).
+#[tokio::test]
+async fn a_busy_session_still_ends_at_its_absolute_limit() {
+    let database = ready().await;
+    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    let kurt = operators
+        .create(&name("Kurt Medley"))
+        .await
+        .expect("creates");
+    let token = operators.start_session(kurt).await.expect("starts");
+    as_admin(&database, "UPDATE identity.sessions SET ends_at = now()").await;
+    assert_eq!(operators.session([text(&token).as_str()]).await, Ok(None));
+    assert!(
+        !stored(&database, "true").await,
+        "the spent session is removed"
+    );
+}
+
+/// A request handled after a later one never moves the last request back, which would shorten the session.
+#[tokio::test]
+async fn the_last_request_never_moves_back() {
+    let database = ready().await;
+    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    let kurt = operators
+        .create(&name("Kurt Medley"))
+        .await
+        .expect("creates");
+    let token = operators.start_session(kurt).await.expect("starts");
+    as_admin(
+        &database,
+        "UPDATE identity.sessions SET last_seen_at = now() + interval '1 minute'",
+    )
+    .await;
+    operators
+        .session([text(&token).as_str()])
+        .await
+        .expect("looks up")
+        .expect("a session");
+    assert!(stored(&database, "last_seen_at > now()").await);
+}
+
+/// Requests arriving together all find a live session, and none ends it: checking and recording are one step.
+#[tokio::test]
+async fn requests_at_the_same_moment_never_end_a_live_session() {
+    let database = ready().await;
+    let operators = std::sync::Arc::new(postgres_store(pool(&database.as_app()).expect("a pool")));
+    let kurt = operators
+        .create(&name("Kurt Medley"))
+        .await
+        .expect("creates");
+    let token = text(&operators.start_session(kurt).await.expect("starts"));
+    let requests: Vec<_> = (0..16)
+        .map(|_| {
+            let (operators, token) = (operators.clone(), token.clone());
+            tokio::spawn(async move { operators.session([token.as_str()]).await })
+        })
+        .collect();
+    for request in requests {
+        assert!(request.await.expect("runs").expect("looks up").is_some());
+    }
+    assert!(stored(&database, "true").await);
 }
 
 #[tokio::test]
@@ -255,37 +348,77 @@ async fn a_token_no_session_holds_finds_none() {
     let database = ready().await;
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
     for token in ["", "not a token", &"ab".repeat(32), &"AB".repeat(32)] {
-        assert_eq!(operators.session(token, at(0)).await, Ok(None), "{token:?}");
+        assert_eq!(
+            operators.session([cookie(token).as_str()]).await,
+            Ok(None),
+            "{token:?}"
+        );
     }
 }
 
-/// Signing out ends the session on the server, so its token signs no one in again (ADR-0048).
+/// Signing out ends the session on the server, so its token signs no one in again; as a change of state, it passes
+/// the origin and form-token checks first, and one that fails them ends nothing (ADR-0048).
 #[tokio::test]
-async fn signing_out_ends_the_session() {
+async fn signing_out_ends_the_session_once_its_checks_pass() {
     let database = ready().await;
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
     let kurt = operators
         .create(&name("Kurt Medley"))
         .await
         .expect("creates");
-    let token = operators.start_session(kurt, at(0)).await.expect("starts");
-    let other = operators.start_session(kurt, at(0)).await.expect("starts");
-    operators.end_session(&token.to_text()).await.expect("ends");
-    assert_eq!(operators.session(&token.to_text(), at(60)).await, Ok(None));
+    let token = operators.start_session(kurt).await.expect("starts");
+    let (jar, form) = (text(&token), token.form_token());
+    let sign_out = |origin| Change::new([jar.as_str()], origin, &form);
+    let from_elsewhere = sign_out(Some("https://evil.example"));
+    assert_eq!(
+        operators.end_session(&origins(), &from_elsewhere).await,
+        Ok(SignOut::Refused)
+    );
     assert!(
         operators
-            .session(&other.to_text(), at(60))
+            .session([jar.as_str()])
             .await
             .expect("looks up")
             .is_some(),
-        "the operator's other session goes on"
+        "not ended"
     );
+    let own = sign_out(Some(ORIGIN));
     assert_eq!(
-        operators.end_session(&token.to_text()).await,
-        Ok(()),
-        "twice"
+        operators.end_session(&origins(), &own).await,
+        Ok(SignOut::Ended)
     );
-    assert_eq!(operators.end_session("not a token").await, Ok(()));
+    assert_eq!(operators.session([jar.as_str()]).await, Ok(None));
+    assert_eq!(
+        operators.end_session(&origins(), &own).await,
+        Ok(SignOut::NothingToEnd),
+        "nothing left to end"
+    );
+}
+
+/// Signing out ends that session alone; the operator's others go on.
+#[tokio::test]
+async fn signing_out_leaves_the_operators_other_sessions() {
+    let database = ready().await;
+    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    let kurt = operators
+        .create(&name("Kurt Medley"))
+        .await
+        .expect("creates");
+    let token = operators.start_session(kurt).await.expect("starts");
+    let other = operators.start_session(kurt).await.expect("starts");
+    let (jar, form) = (text(&token), token.form_token());
+    let sign_out = Change::new([jar.as_str()], Some(ORIGIN), &form);
+    assert_eq!(
+        operators.end_session(&origins(), &sign_out).await,
+        Ok(SignOut::Ended)
+    );
+    assert!(
+        operators
+            .session([text(&other).as_str()])
+            .await
+            .expect("looks up")
+            .is_some()
+    );
 }
 
 #[tokio::test]
@@ -298,7 +431,7 @@ async fn a_session_for_no_operator_is_refused() {
         .expect("creates");
     as_admin(&database, "DELETE FROM identity.operators").await;
     assert!(matches!(
-        operators.start_session(kurt, at(0)).await,
+        operators.start_session(kurt).await,
         Err(Error::Storage(_))
     ));
 }
@@ -324,23 +457,38 @@ async fn identitys_role_cannot_list_sessions() {
 }
 
 /// A session in another realm is never an operator's, so a token from another realm's cookie signs no one in as an
-/// operator, who reaches every business (ADR-0040).
+/// operator, who reaches every business; nor does the operator realm extend or end it (ADR-0040).
 #[tokio::test]
-async fn another_realms_session_is_not_an_operators() {
+async fn another_realms_session_is_neither_used_nor_ended() {
     let database = ready().await;
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
     let kurt = operators
         .create(&name("Kurt Medley"))
         .await
         .expect("creates");
-    let token = operators.start_session(kurt, at(0)).await.expect("starts");
+    let token = operators.start_session(kurt).await.expect("starts");
     as_admin(
         &database,
         "ALTER TABLE identity.sessions DROP CONSTRAINT sessions_realm_check;
-         UPDATE identity.sessions SET realm = 'staff'",
+         UPDATE identity.sessions SET realm = 'staff', last_seen_at = now() - interval '1 hour'",
     )
     .await;
-    assert_eq!(operators.session(&token.to_text(), at(60)).await, Ok(None));
+    assert_eq!(operators.session([text(&token).as_str()]).await, Ok(None));
+    let (jar, form) = (text(&token), token.form_token());
+    let sign_out = Change::new([jar.as_str()], Some(ORIGIN), &form);
+    assert_eq!(
+        operators.end_session(&origins(), &sign_out).await,
+        Ok(SignOut::NothingToEnd),
+        "not this realm's to end"
+    );
+    assert!(
+        stored(
+            &database,
+            "realm = 'staff' AND last_seen_at < now() - interval '59 minutes'"
+        )
+        .await,
+        "left as it was"
+    );
 }
 
 /// A realm Identity does not know, should a lookup return one, is an error, never a session in some default realm.
@@ -350,44 +498,40 @@ async fn an_unknown_realm_is_an_error() {
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
     as_admin(
         &database,
-        "DROP FUNCTION identity.session_for(bytea, text);
-         CREATE FUNCTION identity.session_for(wanted_hash bytea, wanted_realm text)
-         RETURNS TABLE (realm text, operator_id bigint, started_at timestamptz, last_seen_at timestamptz,
-                        ends_at timestamptz)
-         LANGUAGE sql STABLE AS $$ SELECT 'staff', 1::bigint, now(), now(), now() $$;
-         GRANT EXECUTE ON FUNCTION identity.session_for(bytea, text) TO tetsu_identity",
+        &replaced_use_session(
+            "realm text, operator_id bigint, started_at timestamptz, last_seen_at timestamptz, ends_at timestamptz",
+            "'staff', 1::bigint, now(), now(), now()",
+        ),
     )
     .await;
     assert_eq!(
-        operators.session(&"ab".repeat(32), at(60)).await,
+        operators.session([cookie(&"ab".repeat(32)).as_str()]).await,
         Err(Error::Storage("unknown realm \"staff\"".to_string()))
     );
 }
 
-/// A stored row of the wrong type is an error rather than a session.
+/// Each stored column of the wrong type is an error rather than a session, whichever column it is.
 #[tokio::test]
-async fn a_stored_value_of_the_wrong_type_is_an_error() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"))
-        .await
-        .expect("creates");
-    let token = operators.start_session(kurt, at(0)).await.expect("starts");
-    as_admin(
-        &database,
-        "DROP FUNCTION identity.session_for(bytea, text);
-         CREATE FUNCTION identity.session_for(wanted_hash bytea, wanted_realm text)
-         RETURNS TABLE (realm text, operator_id text, started_at timestamptz, last_seen_at timestamptz,
-                        ends_at timestamptz)
-         LANGUAGE sql STABLE AS $$ SELECT 'operator', 'one', now(), now(), now() $$;
-         GRANT EXECUTE ON FUNCTION identity.session_for(bytea, text) TO tetsu_identity",
-    )
-    .await;
-    assert!(matches!(
-        operators.session(&token.to_text(), at(60)).await,
-        Err(Error::Storage(_))
-    ));
+async fn each_stored_column_of_the_wrong_type_is_an_error() {
+    let columns = [
+        "realm",
+        "operator_id",
+        "started_at",
+        "last_seen_at",
+        "ends_at",
+    ];
+    for wrong in columns {
+        let database = ready().await;
+        let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+        as_admin(&database, &use_session_with_wrong(wrong)).await;
+        assert!(
+            matches!(
+                operators.session([cookie(&"ab".repeat(32)).as_str()]).await,
+                Err(Error::Storage(_))
+            ),
+            "{wrong}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -417,24 +561,23 @@ async fn a_stale_cached_statement_is_temporary_and_cleared() {
         .await
         .expect("creates");
     operators
-        .start_session(kurt, at(0))
+        .start_session(kurt)
         .await
         .expect("caches the statement");
     as_admin(
         &database,
-        "DROP FUNCTION identity.start_session(bytea, text, bigint, timestamptz, timestamptz);
-         CREATE FUNCTION identity.start_session(bytea, text, bigint, timestamptz, timestamptz)
+        "DROP FUNCTION identity.start_session(bytea, text, bigint);
+         CREATE FUNCTION identity.start_session(bytea, text, bigint)
          RETURNS int LANGUAGE sql AS 'SELECT 1';
-         GRANT EXECUTE ON FUNCTION identity.start_session(bytea, text, bigint, timestamptz, timestamptz)
-         TO tetsu_identity",
+         GRANT EXECUTE ON FUNCTION identity.start_session(bytea, text, bigint) TO tetsu_identity",
     )
     .await;
     assert!(matches!(
-        operators.start_session(kurt, at(0)).await,
+        operators.start_session(kurt).await,
         Err(Error::Unavailable(why)) if why.starts_with(tetsu_postgres::STALE)
     ));
     assert!(
-        operators.start_session(kurt, at(0)).await.is_ok(),
+        operators.start_session(kurt).await.is_ok(),
         "the next request succeeds"
     );
 }
@@ -451,35 +594,6 @@ async fn an_unreachable_database_is_an_error() {
         operators.create(&name("Kurt Medley")).await,
         Err(Error::Storage(_))
     ));
-}
-
-/// Each stored column of the wrong type is an error rather than a session, whichever column it is.
-#[tokio::test]
-async fn each_stored_column_of_the_wrong_type_is_an_error() {
-    let columns = [
-        "realm",
-        "operator_id",
-        "started_at",
-        "last_seen_at",
-        "ends_at",
-    ];
-    for wrong in columns {
-        let database = ready().await;
-        let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-        let kurt = operators
-            .create(&name("Kurt Medley"))
-            .await
-            .expect("creates");
-        let token = operators.start_session(kurt, at(0)).await.expect("starts");
-        as_admin(&database, &session_for_with_wrong(wrong)).await;
-        assert!(
-            matches!(
-                operators.session(&token.to_text(), at(60)).await,
-                Err(Error::Storage(_))
-            ),
-            "{wrong}"
-        );
-    }
 }
 
 #[tokio::test]
@@ -522,41 +636,25 @@ async fn a_transaction_that_cannot_begin_is_an_error() {
 async fn a_statement_that_cannot_be_prepared_is_an_error() {
     let database = ready().await;
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    as_admin(&database, "DROP FUNCTION identity.end_session(bytea)").await;
-    assert!(matches!(
-        operators.end_session(&"ab".repeat(32)).await,
-        Err(Error::Storage(_))
-    ));
-    as_admin(&database, "DROP FUNCTION identity.session_for(bytea, text)").await;
-    assert!(matches!(
-        operators.session(&"ab".repeat(32), at(0)).await,
-        Err(Error::Storage(_))
-    ));
-}
-
-/// A request that cannot be recorded, or a spent session that cannot be removed, is an error rather than a session
-/// that seems live.
-#[tokio::test]
-async fn a_session_that_cannot_be_touched_or_removed_is_an_error() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
     let kurt = operators
         .create(&name("Kurt Medley"))
         .await
         .expect("creates");
-    let token = operators.start_session(kurt, at(0)).await.expect("starts");
-    as_admin(
-        &database,
-        "DROP FUNCTION identity.touch_session(bytea, timestamptz);
-         DROP FUNCTION identity.end_session(bytea)",
-    )
-    .await;
+    let token = operators.start_session(kurt).await.expect("starts");
+    let (jar, form) = (text(&token), token.form_token());
+    let sign_out = Change::new([jar.as_str()], Some(ORIGIN), &form);
+    as_admin(&database, "DROP FUNCTION identity.end_session(bytea, text)").await;
     assert!(matches!(
-        operators.session(&token.to_text(), at(60)).await,
+        operators.end_session(&origins(), &sign_out).await,
+        Err(Error::Storage(_))
+    ));
+    as_admin(&database, "DROP FUNCTION identity.use_session(bytea, text)").await;
+    assert!(matches!(
+        operators.session([text(&token).as_str()]).await,
         Err(Error::Storage(_))
     ));
     assert!(matches!(
-        operators.session(&token.to_text(), at(0) + HOUR).await,
+        operators.session_for_change(&origins(), &sign_out).await,
         Err(Error::Storage(_))
     ));
 }
@@ -579,9 +677,261 @@ async fn a_refused_commit_starts_no_session() {
     )
     .await;
     assert_eq!(
-        operators.start_session(kurt, at(0)).await.map(drop),
+        operators.start_session(kurt).await.map(drop),
         Err(Error::Storage(
             "commit refused: refused at commit".to_string()
         ))
+    );
+}
+
+/// A state-changing request acts for its session only from the realm's own origin and with that session's own form
+/// token; failing either finds no session and leaves it as it was (ADR-0048).
+#[tokio::test]
+async fn a_change_needs_the_realms_origin_and_the_sessions_form_token() {
+    let database = ready().await;
+    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    let kurt = operators
+        .create(&name("Kurt Medley"))
+        .await
+        .expect("creates");
+    let token = operators.start_session(kurt).await.expect("starts");
+    let other = operators.start_session(kurt).await.expect("starts");
+    as_admin(
+        &database,
+        "UPDATE identity.sessions SET last_seen_at = now() - interval '10 minutes'",
+    )
+    .await;
+    let (session, form, others) = (token.to_text(), token.form_token(), other.form_token());
+    let jar = cookie(&session);
+    let change = |origin, form_token| Change::new([jar.as_str()], origin, form_token);
+    for refused in [
+        change(None, &form),
+        change(Some("null"), &form),
+        change(Some("https://evil.example"), &form),
+        change(Some(ORIGIN), ""),
+        change(Some(ORIGIN), &others),
+        change(Some(ORIGIN), &session),
+    ] {
+        assert_eq!(
+            operators.session_for_change(&origins(), &refused).await,
+            Ok(ForChange::Refused)
+        );
+    }
+    assert!(
+        stored(&database, "last_seen_at < now() - interval '9 minutes'").await,
+        "no refused request was recorded"
+    );
+    let accepted = operators
+        .session_for_change(&origins(), &change(Some(ORIGIN), &form))
+        .await;
+    assert!(
+        matches!(&accepted, Ok(ForChange::Acting(session)) if session.operator() == kurt),
+        "{accepted:?}"
+    );
+}
+
+/// A cookie whose token is not one cannot carry its session's form token, so the request is refused.
+#[tokio::test]
+async fn a_change_with_a_malformed_cookie_finds_no_session() {
+    let database = ready().await;
+    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    let form = "ab".repeat(32);
+    let jar = cookie("not a token");
+    let malformed = Change::new([jar.as_str()], Some(ORIGIN), &form);
+    assert_eq!(
+        operators.session_for_change(&origins(), &malformed).await,
+        Ok(ForChange::Refused)
+    );
+    assert_eq!(
+        operators.end_session(&origins(), &malformed).await,
+        Ok(SignOut::Refused)
+    );
+}
+
+/// A spent session stays spent, however many requests present it at once: none revives it, and it is removed.
+#[tokio::test]
+async fn requests_at_the_same_moment_never_revive_a_spent_session() {
+    let database = ready().await;
+    let operators = std::sync::Arc::new(postgres_store(pool(&database.as_app()).expect("a pool")));
+    let kurt = operators
+        .create(&name("Kurt Medley"))
+        .await
+        .expect("creates");
+    let token = text(&operators.start_session(kurt).await.expect("starts"));
+    as_admin(
+        &database,
+        &format!(
+            "UPDATE identity.sessions SET last_seen_at = now() - interval '{} seconds'",
+            idle_seconds()
+        ),
+    )
+    .await;
+    let requests: Vec<_> = (0..16)
+        .map(|_| {
+            let (operators, token) = (operators.clone(), token.clone());
+            tokio::spawn(async move { operators.session([token.as_str()]).await })
+        })
+        .collect();
+    for request in requests {
+        assert_eq!(request.await.expect("runs"), Ok(None));
+    }
+    assert!(!stored(&database, "true").await, "removed");
+}
+
+/// Starting a session removes that operator's spent sessions, spent by either limit, and nothing else: not their
+/// live ones, so signing in elsewhere signs no one out, and not another operator's.
+#[tokio::test]
+async fn starting_a_session_removes_only_the_operators_spent_ones() {
+    let database = ready().await;
+    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    let kurt = operators
+        .create(&name("Kurt Medley"))
+        .await
+        .expect("creates");
+    let ana = operators.create(&name("Ana Ortiz")).await.expect("creates");
+    for operator in [kurt, kurt, kurt, ana] {
+        operators.start_session(operator).await.expect("starts");
+    }
+    as_admin(
+        &database,
+        &format!(
+            "WITH kurts AS (
+                 SELECT token_hash, row_number() OVER (ORDER BY token_hash) AS n
+                 FROM identity.sessions WHERE operator_id = {kurt}
+             )
+             UPDATE identity.sessions AS s
+             SET ends_at = CASE WHEN k.n = 1 THEN now() ELSE s.ends_at END,
+                 last_seen_at = CASE WHEN k.n = 2
+                     THEN now() - interval '{idle} seconds' ELSE s.last_seen_at END
+             FROM kurts AS k WHERE s.token_hash = k.token_hash;
+             UPDATE identity.sessions SET ends_at = now() WHERE operator_id = {ana}",
+            kurt = kurt.get(),
+            ana = ana.get(),
+            idle = idle_seconds()
+        ),
+    )
+    .await;
+    operators.start_session(kurt).await.expect("starts");
+    assert_eq!(
+        count(&database, &format!("operator_id = {}", kurt.get())).await,
+        2,
+        "the live one and the new one"
+    );
+    assert_eq!(
+        count(&database, &format!("operator_id = {}", ana.get())).await,
+        1,
+        "another operator's sessions are not this sign-in's to remove"
+    );
+}
+
+/// A request that read a session as spent waits for a request refreshing it, and removes it only if it is still
+/// spent once that request has finished, so a session that came back to life is never removed.
+#[tokio::test]
+async fn a_spent_session_refreshed_meanwhile_is_not_removed() {
+    let database = ready().await;
+    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    let kurt = operators
+        .create(&name("Kurt Medley"))
+        .await
+        .expect("creates");
+    let token = text(&operators.start_session(kurt).await.expect("starts"));
+    as_admin(
+        &database,
+        &format!(
+            "UPDATE identity.sessions SET last_seen_at = now() - interval '{} seconds'",
+            idle_seconds() + 1
+        ),
+    )
+    .await;
+    let mut holder = connect(&database).await.expect("connects");
+    let refresh = holder.transaction().await.expect("begins");
+    refresh
+        .execute(
+            "UPDATE identity.sessions SET last_seen_at = clock_timestamp()",
+            &[],
+        )
+        .await
+        .expect("holds the row");
+    let request = {
+        let operators = std::sync::Arc::new(operators);
+        let token = token.clone();
+        tokio::spawn(async move { operators.session([token.as_str()]).await })
+    };
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    refresh.commit().await.expect("commits");
+    assert_eq!(
+        request.await.expect("runs"),
+        Ok(None),
+        "it read the spent one"
+    );
+    assert_eq!(count(&database, "true").await, 1, "but did not remove it");
+}
+
+/// Signing out a session that had already ended removes it, and says there was nothing to end.
+#[tokio::test]
+async fn signing_out_a_spent_session_has_nothing_to_end() {
+    let database = ready().await;
+    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    let kurt = operators
+        .create(&name("Kurt Medley"))
+        .await
+        .expect("creates");
+    let token = operators.start_session(kurt).await.expect("starts");
+    as_admin(&database, "UPDATE identity.sessions SET ends_at = now()").await;
+    let (jar, form) = (text(&token), token.form_token());
+    let sign_out = Change::new([jar.as_str()], Some(ORIGIN), &form);
+    assert_eq!(
+        operators.session_for_change(&origins(), &sign_out).await,
+        Ok(ForChange::NoSession),
+        "the checks pass, but the session has ended"
+    );
+    operators.start_session(kurt).await.expect("starts");
+    let token = operators.start_session(kurt).await.expect("starts");
+    as_admin(
+        &database,
+        &format!(
+            "UPDATE identity.sessions SET last_seen_at = now() - interval '{} seconds'
+             WHERE token_hash = sha256(decode('{}', 'hex'))",
+            idle_seconds(),
+            token.to_text()
+        ),
+    )
+    .await;
+    let (jar, form) = (text(&token), token.form_token());
+    let sign_out = Change::new([jar.as_str()], Some(ORIGIN), &form);
+    assert_eq!(
+        operators.end_session(&origins(), &sign_out).await,
+        Ok(SignOut::NothingToEnd)
+    );
+    assert_eq!(
+        count(&database, "true").await,
+        1,
+        "removed; one live session left"
+    );
+}
+
+/// A lookup that, against its contract, returns no row says no session ended.
+#[tokio::test]
+async fn an_end_that_returns_nothing_ended_nothing() {
+    let database = ready().await;
+    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    let kurt = operators
+        .create(&name("Kurt Medley"))
+        .await
+        .expect("creates");
+    let token = operators.start_session(kurt).await.expect("starts");
+    as_admin(
+        &database,
+        "DROP FUNCTION identity.end_session(bytea, text);
+         CREATE FUNCTION identity.end_session(bytea, text) RETURNS SETOF boolean
+         LANGUAGE sql AS 'SELECT true WHERE false';
+         GRANT EXECUTE ON FUNCTION identity.end_session(bytea, text) TO tetsu_identity",
+    )
+    .await;
+    let (jar, form) = (text(&token), token.form_token());
+    let sign_out = Change::new([jar.as_str()], Some(ORIGIN), &form);
+    assert_eq!(
+        operators.end_session(&origins(), &sign_out).await,
+        Ok(SignOut::NothingToEnd)
     );
 }
