@@ -523,16 +523,59 @@ WHERE
         )
     )
 
+-- One key rule for every tenant-owned row (ADR-0060): tenant_id, then a uuid
+-- id, and nothing else, so no mutable column ever becomes part of a key.
 UNION ALL
-SELECT t.shown || '''s primary key does not start with tenant_id'
+SELECT t.shown || '''s primary key is not (tenant_id, id) with a uuid id'
 FROM tenant_owned AS t
 WHERE
     NOT EXISTS (
         SELECT FROM pg_catalog.pg_constraint AS k
+        INNER JOIN pg_catalog.pg_attribute AS i
+            ON k.conrelid = i.attrelid AND k.conkey[2] = i.attnum
         WHERE
             k.conrelid = t.oid
             AND k.contype = 'p'
+            AND pg_catalog.array_length(k.conkey, 1) = 2
             AND k.conkey[1] = t.tenant_column
+            AND i.attname = 'id'
+            AND i.atttypid = 'pg_catalog.uuid'::pg_catalog.regtype
+    )
+
+-- The database bounds what Rust bounds (ADR-0060): every text, binary, or
+-- JSON column has a validated check that names it and measures its length, or
+-- holds it to a list of values or one value.
+UNION ALL
+SELECT
+    t.shown
+    || '.'
+    || pg_catalog.quote_ident(a.attname)
+    || ' has no check on its size'
+FROM tables AS t
+INNER JOIN pg_catalog.pg_attribute AS a
+    ON t.oid = a.attrelid AND a.attnum > 0 AND NOT a.attisdropped
+WHERE
+    (
+        a.atttypid IN (
+            'pg_catalog.text'::pg_catalog.regtype,
+            'pg_catalog.bytea'::pg_catalog.regtype,
+            'pg_catalog.json'::pg_catalog.regtype,
+            'pg_catalog.jsonb'::pg_catalog.regtype
+        )
+        OR (
+            a.atttypid = 'pg_catalog.varchar'::pg_catalog.regtype
+            AND a.atttypmod < 0
+        )
+    )
+    AND NOT EXISTS (
+        SELECT FROM pg_catalog.pg_constraint AS c
+        WHERE
+            c.conrelid = t.oid
+            AND c.contype = 'c'
+            AND c.convalidated
+            AND a.attnum = any(c.conkey)
+            AND pg_catalog.pg_get_constraintdef(c.oid)
+            ~ '\m(octet_length|char_length|length)\(|= ANY \(ARRAY\[|= '''
     )
 
 -- A foreign key to a tenant-owned table checks the referenced row whatever
@@ -1086,8 +1129,10 @@ WHERE
     OR g.grantee IN (SELECT ap.oid FROM app AS ap)
     OR g.grantee IN (SELECT br.oid FROM bound_roles AS br)
 
--- The application role may connect; PUBLIC keeps Postgres's default rights to
--- connect and make temporary tables; no one else here holds a right.
+-- The application role may connect, and PUBLIC keeps Postgres's default right
+-- to connect, but not to make temporary tables, where a planted type or
+-- function could shadow a definer function's own (ADR-0060); no one else here
+-- holds a right.
 UNION ALL
 SELECT
     coalesce(gr.rolname, 'PUBLIC')
@@ -1104,7 +1149,7 @@ LEFT JOIN pg_catalog.pg_roles AS gr ON g.grantee = gr.oid
 WHERE
     db.datname = current_database()
     AND (
-        (g.grantee = 0 AND g.privilege_type NOT IN ('CONNECT', 'TEMPORARY'))
+        (g.grantee = 0 AND g.privilege_type <> 'CONNECT')
         OR (
             g.grantee IN (SELECT ap.oid FROM app AS ap)
             AND g.privilege_type <> 'CONNECT'

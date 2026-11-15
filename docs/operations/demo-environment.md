@@ -168,6 +168,22 @@ access → Service accounts**, add it a token, and register the server yourself,
 
 The leading space keeps the command out of shell history.
 
+## Resetting the demo database
+
+Before the first real business, a change to a module's first migrations may be folded into those files rather than
+added as new ones, as for [ADR-0060](../adr/0060-database-hardening.md). The runner then refuses the demo's database,
+since its record holds the old text, so the demo starts over from its seed. Set a fresh `tetsu_owner` password and
+`MIGRATION_DATABASE_URL` as in [Moving onto Tetsu's own roles](#moving-onto-tetsus-own-roles), connect as
+`tetsu_owner`, and drop each changed module's schema, which takes its record of applied files with it. The schema's
+owner may drop what other roles own inside it:
+
+```sql
+DROP SCHEMA tenancy, audit CASCADE;
+```
+
+Then run CI, deploy, which migrates, and seed as in [Deploying](#deploying). The demo serves errors from the drop
+until the deploy finishes.
+
 ## When `serve` refuses to start
 
 `tetsu serve` will not start while a stored tenant holds an address a release has since reserved for Tetsu's own

@@ -142,7 +142,7 @@ async fn keys_that_do_not_lead_with_the_tenant_are_caught() {
             "{} ALTER TABLE good DROP CONSTRAINT good_pkey, ADD PRIMARY KEY (id, tenant_id);",
             tenant_owned("good")
         ),
-        "checked.good's primary key does not start with tenant_id",
+        "checked.good's primary key is not (tenant_id, id) with a uuid id",
     )
     .await;
     caught(
@@ -830,6 +830,11 @@ async fn database_wide_objects_tetsu_never_uses_are_caught() {
             "",
             "tetsu_app holds CREATE on database",
         ),
+        (
+            "DO $$ BEGIN EXECUTE format('GRANT TEMPORARY ON DATABASE %I TO PUBLIC', current_database()); END $$",
+            "",
+            "PUBLIC holds TEMPORARY on database",
+        ),
     ])
     .await;
 }
@@ -990,5 +995,72 @@ async fn the_delivery_role_reaches_outboxes_alone() {
             "checked.outbox has policy narrow that is not the tenant rule",
         ),
     ])
+    .await;
+}
+
+/// The database bounds what Rust bounds: a text, binary, or JSON column needs a validated check on its size, or one
+/// holding it to listed values (ADR-0060).
+#[tokio::test]
+async fn columns_without_a_size_check_are_caught() {
+    let global = "COMMENT ON TABLE notes IS 'tetsu:global: test';";
+    for (column, flagged) in [
+        ("body text", true),
+        ("body varchar", true),
+        ("body bytea", true),
+        ("body jsonb", true),
+        ("body json", true),
+        ("body varchar(20)", false),
+        ("body text CHECK (body <> '')", true),
+        ("body text CHECK (octet_length(body) <= 100)", false),
+        ("body text CHECK (char_length(body) <= 100)", false),
+        ("body text CHECK (length(body) <= 100)", false),
+        ("body jsonb CHECK (octet_length(body::text) <= 100)", false),
+        ("body text CHECK (body IN ('a', 'b'))", false),
+        ("body text CHECK (body = 'a')", false),
+        (
+            "body text, other text CHECK (octet_length(other) <= 9)",
+            true,
+        ),
+        (
+            "body text); ALTER TABLE notes ADD CHECK (octet_length(body) <= 9) NOT VALID; SELECT (1",
+            true,
+        ),
+    ] {
+        let found = problems(format!("CREATE TABLE notes ({column}); {global}"), "").await;
+        assert_eq!(
+            found.contains(&"checked.notes.body has no check on its size".to_string()),
+            flagged,
+            "{column}: {found:?}"
+        );
+    }
+}
+
+/// A key holding a column that can change, such as a place in a list, or an id that is not a uuid (ADR-0060).
+#[tokio::test]
+async fn keys_other_than_the_tenant_and_a_uuid_id_are_caught() {
+    caught(
+        format!(
+            "{} ALTER TABLE good ADD COLUMN place int NOT NULL,
+                 DROP CONSTRAINT good_pkey, ADD PRIMARY KEY (tenant_id, place);",
+            tenant_owned("good")
+        ),
+        "checked.good's primary key is not (tenant_id, id) with a uuid id",
+    )
+    .await;
+    caught(
+        format!(
+            "{} ALTER TABLE good ADD COLUMN place int NOT NULL,
+                 DROP CONSTRAINT good_pkey, ADD PRIMARY KEY (tenant_id, id, place);",
+            tenant_owned("good")
+        ),
+        "checked.good's primary key is not (tenant_id, id) with a uuid id",
+    )
+    .await;
+    caught(
+        "CREATE TABLE odd (tenant_id bigint NOT NULL, id bigint NOT NULL, PRIMARY KEY (tenant_id, id));
+         COMMENT ON TABLE odd IS 'tetsu:tenant-owned'"
+            .into(),
+        "checked.odd's primary key is not (tenant_id, id) with a uuid id",
+    )
     .await;
 }

@@ -6,7 +6,7 @@ SET statement_timeout = '30s';
 
 CREATE TABLE operators (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    name text NOT NULL,
+    name text NOT NULL CHECK (char_length(name) BETWEEN 1 AND 100),
     -- WebAuthn's user handle: random, so it says nothing about the operator
     -- (ADR-0040).
     user_handle uuid NOT NULL UNIQUE DEFAULT gen_random_uuid(),
@@ -28,7 +28,10 @@ CREATE TABLE sessions (
     started_at timestamptz NOT NULL,
     last_seen_at timestamptz NOT NULL,
     ends_at timestamptz NOT NULL
-);
+)
+-- Every signed-in request rewrites last_seen_at, which no index names, so
+-- room on the page keeps each rewrite there (ADR-0060).
+WITH (fillfactor = 80);
 
 COMMENT ON TABLE sessions IS
 'tetsu:global: found by its token before any business is known';

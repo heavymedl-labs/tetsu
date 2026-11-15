@@ -65,8 +65,10 @@ Only tenancy's and audit's migrations have run anywhere, on the demo's fictional
 
 ## Consequences
 
-- One migration for tenancy (locations' `id`, the bounds), one for audit (its bounds), and edits to identity's and
-  the outbox's unapplied files. The demo reseeds after the tenancy migration.
+- The changes fold into each module's first migrations, which hold only demo data, and the demo's database is reset
+  from its seed once ([demo environment](../operations/demo-environment.md#resetting-the-demo-database)). Squawk
+  refuses them as new migrations: each added check blocks writes while it scans, and the locations key drops a
+  constraint. Once a real business stores data, changes like these take new migrations in expand and contract steps.
 - Audit's retention, and with it whether `records` is partitioned by time, which its unique `event_id` key blocks, is
   raised on [#22](https://github.com/heavymedl-labs/tetsu/issues/22).
 - The review's later items wait for the slice that touches each: the dispatcher's short claim with a lease, the

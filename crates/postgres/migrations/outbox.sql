@@ -4,12 +4,20 @@
 SET lock_timeout = '5s';
 SET statement_timeout = '30s';
 
+-- An event's type is `module.fact`, and its payload a JSON object of IDs and
+-- facts, bounded as the audit record bounds them (ADR-0060).
 CREATE TABLE outbox_global (
     id uuid PRIMARY KEY DEFAULT uuidv7(),
-    event_type text NOT NULL,
+    event_type text NOT NULL CHECK (
+        octet_length(event_type) <= 100
+        AND event_type ~ '^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$'
+    ),
     event_version bigint NOT NULL,
     occurred_at timestamptz NOT NULL DEFAULT now(),
-    payload jsonb NOT NULL,
+    payload jsonb NOT NULL CHECK (
+        jsonb_typeof(payload) = 'object'
+        AND octet_length(payload::text) <= 65536
+    ),
     keep boolean NOT NULL DEFAULT FALSE,
     attempts bigint NOT NULL DEFAULT 0,
     due_at timestamptz NOT NULL DEFAULT now(),
@@ -22,7 +30,7 @@ COMMENT ON TABLE outbox_global IS
 -- The same columns, for one business's events.
 CREATE TABLE outbox (
     tenant_id bigint NOT NULL,
-    LIKE outbox_global INCLUDING DEFAULTS,
+    LIKE outbox_global INCLUDING DEFAULTS INCLUDING CONSTRAINTS,
     PRIMARY KEY (tenant_id, id)
 );
 

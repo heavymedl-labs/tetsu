@@ -308,14 +308,68 @@ async fn a_bad_stored_row_is_an_error_not_a_bad_page() {
         .await
         .expect("creates");
     let client = tetsu_postgres::connect(&settings).await.expect("connects");
+    // The database refuses such a row (ADR-0060), so the check is dropped to stand for one stored before it.
     client
-        .batch_execute("UPDATE tenancy.tenants SET primary_color = 'red'")
+        .batch_execute(
+            "ALTER TABLE tenancy.tenants DROP CONSTRAINT tenants_primary_color;
+             UPDATE tenancy.tenants SET primary_color = 'red'",
+        )
         .await
         .expect("corrupts the row");
     assert!(matches!(
         store.resolve("/sample-studio").await,
         Err(Error::Invalid(_))
     ));
+}
+
+/// The database holds tenants to the shapes Tenancy's domain writes, whatever writes them (ADR-0060).
+#[tokio::test]
+async fn the_database_refuses_what_the_domain_refuses() {
+    let (store, settings) = store_and_settings().await;
+    store
+        .create(&tenant("sample-studio", &[("Denver", "America/Denver")]))
+        .await
+        .expect("creates");
+    let client = tetsu_postgres::connect(&settings).await.expect("connects");
+    for (statement, constraint) in [
+        (
+            "UPDATE tenancy.tenants SET primary_color = 'red'",
+            "tenants_primary_color",
+        ),
+        (
+            "UPDATE tenancy.tenants SET accent_color = '#e5622b'",
+            "tenants_accent_color",
+        ),
+        ("UPDATE tenancy.tenants SET slug = 'Sample'", "tenants_slug"),
+        (
+            "UPDATE tenancy.tenants SET slug = repeat('a', 64)",
+            "tenants_slug",
+        ),
+        ("UPDATE tenancy.tenants SET name = ''", "tenants_name"),
+        (
+            "UPDATE tenancy.tenants SET name = repeat('é', 101)",
+            "tenants_name",
+        ),
+        (
+            "UPDATE tenancy.addresses SET address = '/'",
+            "addresses_address",
+        ),
+        (
+            "UPDATE tenancy.addresses SET address = repeat('a', 254)",
+            "addresses_address",
+        ),
+    ] {
+        let refused = client.batch_execute(statement).await.expect_err(statement);
+        assert_eq!(
+            refused.as_db_error().and_then(|db| db.constraint()),
+            Some(constraint),
+            "{statement}"
+        );
+    }
+    client
+        .batch_execute("UPDATE tenancy.tenants SET name = repeat('é', 100)")
+        .await
+        .expect("a name of 100 characters fits, whatever its bytes");
 }
 
 /// A site route always wins over a tenant's address, so a stored address a later release reserves would hide its
@@ -586,5 +640,52 @@ async fn another_unique_refusal_is_a_storage_error() {
     assert!(
         matches!(&refused, Err(Error::Storage(why)) if why.contains("one_name")),
         "{refused:?}"
+    );
+}
+
+/// Each location has its own id, so nothing that refers to one depends on its place, and two may swap places in one
+/// transaction but never share one (ADR-0060).
+#[tokio::test]
+async fn locations_keep_their_ids_and_swap_places_but_never_share_one() {
+    let (store, settings) = store_and_settings().await;
+    store
+        .create(&tenant(
+            "sample-studio",
+            &[("Denver", "America/Denver"), ("Boulder", "America/Denver")],
+        ))
+        .await
+        .expect("creates");
+    let client = tetsu_postgres::connect(&settings).await.expect("connects");
+    let ids = async || -> Vec<String> {
+        client
+            .query(
+                "SELECT id::text FROM tenancy.locations ORDER BY sort_order",
+                &[],
+            )
+            .await
+            .expect("reads")
+            .iter()
+            .map(|row| row.try_get(0).expect("an id"))
+            .collect()
+    };
+    let before = ids().await;
+    assert_eq!(before.len(), 2);
+    assert_ne!(before[0], before[1]);
+    client
+        .batch_execute(
+            "BEGIN;
+             UPDATE tenancy.locations SET sort_order = 1 - sort_order;
+             COMMIT",
+        )
+        .await
+        .expect("two places swap in one transaction");
+    assert_eq!(ids().await, [before[1].clone(), before[0].clone()]);
+    let shared = client
+        .batch_execute("UPDATE tenancy.locations SET sort_order = 0")
+        .await
+        .expect_err("two locations in one place");
+    assert_eq!(
+        shared.as_db_error().and_then(|db| db.constraint()),
+        Some("locations_place")
     );
 }

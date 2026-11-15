@@ -205,8 +205,15 @@ async fn create(options: &str) -> Result<TestDatabase, Error> {
     let admin = connect(&Settings::from_values(&admin_url, Some("disable"))).await?;
     // Roles belong to the whole server, so every test database shares this one, made by whichever test is first.
     ensure_role(&admin, APP_ROLE, &format!("CREATE ROLE {APP_ROLE} LOGIN")).await?;
+    // PUBLIC may not make temporary tables, as on every Tetsu database (ADR-0060).
+    let name_sql = quoted(&name);
     admin
-        .batch_execute(&format!("CREATE DATABASE {}{options}", quoted(&name)))
+        .batch_execute(&format!("CREATE DATABASE {name_sql}{options}"))
+        .await?;
+    admin
+        .batch_execute(&format!(
+            "REVOKE TEMPORARY ON DATABASE {name_sql} FROM PUBLIC"
+        ))
         .await?;
     Ok(TestDatabase {
         settings,

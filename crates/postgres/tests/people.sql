@@ -2,7 +2,7 @@
 CREATE TABLE people (
     tenant_id bigint NOT NULL,
     id uuid NOT NULL DEFAULT uuidv7(),
-    email text NOT NULL,
+    email text NOT NULL CHECK (octet_length(email) <= 254),
     PRIMARY KEY (tenant_id, id),
     UNIQUE (tenant_id, email)
 );

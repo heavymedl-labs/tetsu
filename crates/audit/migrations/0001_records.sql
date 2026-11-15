@@ -4,14 +4,23 @@
 SET lock_timeout = '5s';
 SET statement_timeout = '30s';
 
+-- A producer is a module's schema, an event's type is `module.fact`, and a
+-- payload is a JSON object of IDs and facts, bounded as the outbox bounds them
+-- (ADR-0060).
 CREATE TABLE records_global (
     id uuid PRIMARY KEY DEFAULT uuidv7(),
     event_id uuid NOT NULL UNIQUE,
-    producer text NOT NULL,
-    event_type text NOT NULL,
+    producer text NOT NULL CHECK (octet_length(producer) BETWEEN 1 AND 63),
+    event_type text NOT NULL CHECK (
+        octet_length(event_type) <= 100
+        AND event_type ~ '^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$'
+    ),
     event_version bigint NOT NULL,
     occurred_at timestamptz NOT NULL,
-    payload jsonb NOT NULL,
+    payload jsonb NOT NULL CHECK (
+        jsonb_typeof(payload) = 'object'
+        AND octet_length(payload::text) <= 65536
+    ),
     recorded_at timestamptz NOT NULL DEFAULT now()
 );
 
@@ -21,7 +30,7 @@ COMMENT ON TABLE records_global IS
 -- The same columns, for one business's events.
 CREATE TABLE records (
     tenant_id bigint NOT NULL,
-    LIKE records_global INCLUDING DEFAULTS,
+    LIKE records_global INCLUDING DEFAULTS INCLUDING CONSTRAINTS,
     PRIMARY KEY (tenant_id, id),
     UNIQUE (tenant_id, event_id)
 );
