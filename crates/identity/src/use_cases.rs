@@ -1,7 +1,10 @@
 //! Use cases, reached only through [`Operators`] (ADR-0021).
 
 use crate::browser::{Change, ForChange, Origins, SignOut};
-use crate::domain::{Error, Fill, OperatorId, OperatorName, Realm, Session, SessionToken};
+use crate::domain::{
+    EnrollmentToken, Error, Fill, OperatorId, OperatorName, OperatorSummary, Realm, Session,
+    SessionToken,
+};
 use crate::ports::OperatorStore;
 
 /// The operator realm's use cases over a store. It offers nothing that reaches the store, so no caller can read or
@@ -26,7 +29,7 @@ impl<S: OperatorStore> Operators<S> {
         Self { store, fill }
     }
 
-    /// Creates an operator with no passkey, for ADR-0040's enrollment command.
+    /// Creates an operator with no passkey, for ADR-0040's enrollment command, and records it for the audit record.
     ///
     /// # Errors
     /// Fails if storage fails.
@@ -34,12 +37,63 @@ impl<S: OperatorStore> Operators<S> {
         self.store.insert_operator(name).await
     }
 
+    /// Issues an operator's enrollment link token, good once and for an hour, replacing any earlier link, and
+    /// records that one was issued, never the token (ADR-0040). The command prints it only to its own terminal.
+    ///
+    /// # Errors
+    /// Fails with [`Error::Invalid`] for a disabled or unknown operator, if no secure random source can be read,
+    /// or if storage fails.
+    pub async fn enroll(&self, operator: OperatorId) -> Result<EnrollmentToken, Error> {
+        let token = EnrollmentToken::generate(self.fill)?;
+        if self.store.issue_enrollment(&token.hash(), operator).await? {
+            Ok(token)
+        } else {
+            Err(no_enabled(operator))
+        }
+    }
+
+    /// Disables an operator, and in the same step ends every session and enrollment link they hold, so a disabled
+    /// operator is signed out at once and signs in again nowhere (`v5.0.0-7.4.2`). Says whether they were enabled.
+    ///
+    /// # Errors
+    /// Fails if storage fails.
+    pub async fn disable(&self, operator: OperatorId) -> Result<bool, Error> {
+        self.store.disable_operator(operator).await
+    }
+
+    /// Ends every session one operator holds, as an administrator may (`v5.0.0-7.4.5`), and says how many.
+    ///
+    /// # Errors
+    /// Fails if storage fails.
+    pub async fn end_sessions(&self, operator: OperatorId) -> Result<u64, Error> {
+        self.store
+            .end_operator_sessions(operator, Realm::Operator)
+            .await
+    }
+
+    /// Ends every operator session, as an administrator may (`v5.0.0-7.4.5`), and says how many.
+    ///
+    /// # Errors
+    /// Fails if storage fails.
+    pub async fn end_all_sessions(&self) -> Result<u64, Error> {
+        self.store.end_realm_sessions(Realm::Operator).await
+    }
+
+    /// Every operator, oldest first.
+    ///
+    /// # Errors
+    /// Fails if storage fails.
+    pub async fn list(&self) -> Result<Vec<OperatorSummary>, Error> {
+        self.store.list_operators().await
+    }
+
     /// Starts a session for an operator who has just signed in, and returns its new token, which only the
     /// operator's browser keeps (ADR-0040, `v5.0.0-7.2.4`). It ends at the realm's absolute limit at the latest, by
     /// the store's clock. The operator's spent sessions are removed as it starts.
     ///
     /// # Errors
-    /// Fails if no secure random source can be read, or storage fails, as it does for an unknown operator.
+    /// Fails with [`Error::Invalid`] for a disabled or unknown operator, if no secure random source can be read, or
+    /// if storage fails.
     pub async fn start_session(&self, operator: OperatorId) -> Result<SessionToken, Error> {
         let token = SessionToken::generate(self.fill)?;
         let realm = Realm::Operator;
@@ -118,4 +172,8 @@ impl<S: OperatorStore> Operators<S> {
     async fn live(&self, token: &SessionToken) -> Result<Option<Session>, Error> {
         self.store.use_session(&token.hash(), Realm::Operator).await
     }
+}
+
+fn no_enabled(operator: OperatorId) -> Error {
+    Error::Invalid(format!("no enabled operator {}", operator.get()))
 }

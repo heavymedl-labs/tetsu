@@ -8,6 +8,7 @@ mod logs;
     expect(dead_code, reason = "only build.rs and the tests call it")
 )]
 mod manifest;
+mod operator;
 mod ops;
 mod seed;
 mod serve;
@@ -25,7 +26,8 @@ use tetsu_tenancy::Tenancy;
 /// Every module the binary runs, in the order their migrations apply.
 const MODULES: &[&dyn Module] = &[&Tenancy, &Identity, &Audit];
 const USAGE: &str = "usage: tetsu [migrate | seed [--check] <file or folder> | serve | check | reset <schema>... \
-                     | replay <schema> <event id> | rename <address> <new slug>]";
+                     | replay <schema> <event id> | rename <address> <new slug> \
+                     | operator <create <name> | enroll <id> | list | disable <id> | end-sessions <id | --all>>]";
 
 #[derive(Debug, PartialEq, Eq)]
 enum Command {
@@ -34,6 +36,7 @@ enum Command {
     Seed { path: PathBuf, check_only: bool },
     Serve,
     Chore(ops::Chore),
+    Operator(operator::Operator),
 }
 
 fn parse(args: &[String]) -> Result<Command, String> {
@@ -48,6 +51,7 @@ fn parse(args: &[String]) -> Result<Command, String> {
             "serve takes no arguments; set PORT to choose the port",
         ),
         "seed" => parse_seed(rest),
+        "operator" => operator::parse(rest).map(Command::Operator),
         other => ops::parse(other, rest).map_or_else(
             || Err(format!("unknown command {command:?}")),
             |chore| chore.map(Command::Chore),
@@ -111,7 +115,14 @@ async fn run(command: Command) -> Result<(), String> {
         Command::Seed { path, check_only } => run_seed(&path, check_only).await,
         Command::Serve => run_serve().await,
         Command::Chore(chore) => run_chore(chore).await,
+        Command::Operator(command) => run_operator(command).await,
     }
+}
+
+/// Runs an operator command with the local settings, telling it whether its output reaches a terminal.
+async fn run_operator(command: operator::Operator) -> Result<(), String> {
+    let terminal = std::io::IsTerminal::is_terminal(&std::io::stdout());
+    say_all(&operator::run(command, &local()?, terminal).await?)
 }
 
 /// Runs a hosted chore with the local settings, and prints what it reports.
@@ -270,6 +281,12 @@ fn explain(error: &(dyn std::error::Error + 'static)) -> String {
     causes.join(": ")
 }
 
+/// Words as a command line holds them, for tests.
+#[cfg(test)]
+fn args(words: &[&str]) -> Vec<String> {
+    words.iter().map(ToString::to_string).collect()
+}
+
 fn names(modules: &[&dyn Module]) -> String {
     if modules.is_empty() {
         return "none".to_string();
@@ -296,10 +313,6 @@ mod tests {
         fn name(&self) -> &'static str {
             self.0
         }
-    }
-
-    fn args(values: &[&str]) -> Vec<String> {
-        values.iter().map(ToString::to_string).collect()
     }
 
     #[test]

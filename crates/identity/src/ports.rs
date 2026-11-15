@@ -1,6 +1,6 @@
 //! The driven port Identity calls out through.
 
-use crate::domain::{Error, OperatorId, OperatorName, Realm, Session};
+use crate::domain::{Error, OperatorId, OperatorName, OperatorSummary, Realm, Session};
 use std::future::Future;
 
 /// Where operators and their sessions are kept. A session is reached only by its token's hash and realm, one at a
@@ -38,4 +38,32 @@ pub trait OperatorStore {
         hash: &[u8; 32],
         realm: Realm,
     ) -> impl Future<Output = Result<bool, Error>> + Send;
+
+    /// Stores an operator's enrollment link under its token's hash, good for an hour, replacing any earlier one,
+    /// and says whether it did: a disabled or unknown operator is issued none.
+    fn issue_enrollment(
+        &self,
+        hash: &[u8; 32],
+        operator: OperatorId,
+    ) -> impl Future<Output = Result<bool, Error>> + Send;
+
+    /// Disables an operator, ending every session and enrollment link they hold in the same step, and says whether
+    /// they were enabled.
+    fn disable_operator(
+        &self,
+        operator: OperatorId,
+    ) -> impl Future<Output = Result<bool, Error>> + Send;
+
+    /// Ends every session one operator holds in a realm, and says how many.
+    fn end_operator_sessions(
+        &self,
+        operator: OperatorId,
+        realm: Realm,
+    ) -> impl Future<Output = Result<u64, Error>> + Send;
+
+    /// Ends every session in a realm, and says how many.
+    fn end_realm_sessions(&self, realm: Realm) -> impl Future<Output = Result<u64, Error>> + Send;
+
+    /// Every operator, oldest first.
+    fn list_operators(&self) -> impl Future<Output = Result<Vec<OperatorSummary>, Error>> + Send;
 }

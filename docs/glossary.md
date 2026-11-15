@@ -62,6 +62,9 @@ simplifying a change. Listed in [AGENTS.md](../AGENTS.md#duties).
 **Embed.** A frame of a Tetsu page placed in a business's own website by the `<tetsu-embed>` element, for
 browsing only: nothing signed in is ever framed ([ADR-0031](adr/0031-front-end-model-revised.md)).
 
+**Enrollment link.** A single-use link, good for an hour, through which an operator enrolls their first passkey.
+The operator command issues it and prints it only to the terminal that ran it ([ADR-0040](adr/0040-identity-and-sign-in.md)).
+
 **Fresh review.** A review by an agent that did not write the change, seeing only
 the issue and the diff. See [docs/review.md](review.md).
 

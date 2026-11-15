@@ -126,10 +126,7 @@ pub async fn rename(local: &Local, address: &str, slug: &str) -> Result<Vec<Stri
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn args(words: &[&str]) -> Vec<String> {
-        words.iter().map(ToString::to_string).collect()
-    }
+    use crate::args;
 
     /// The hosted chores take exactly what they act on (#135), and any other command is not a chore.
     #[test]

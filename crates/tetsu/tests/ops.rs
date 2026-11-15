@@ -125,19 +125,23 @@ async fn rename_moves_a_tenant_to_a_new_address() {
     );
 }
 
-/// Replay reaches only the outboxes of the modules the binary runs; none of them records events yet, so each
-/// name is refused before it reaches the database's SQL.
+/// Replay reaches only the outboxes of the modules the binary runs that record events, as Identity does: another
+/// name is refused before it reaches the database's SQL, and an event in neither of Identity's outboxes is not found.
 #[tokio::test]
 async fn replay_names_a_module_that_records_events() {
     let database = seeded().await;
-    let refused = tetsu(
-        &database.as_app(),
-        &["replay", "identity", "0190a3d2-0000-7000-8000-000000000001"],
-        None,
-    );
+    let app = database.as_app();
+    let id = "0190a3d2-0000-7000-8000-000000000001";
+    let refused = tetsu(&app, &["replay", "tenancy", id], None);
     assert!(!refused.status.success());
     assert!(
-        err(&refused).contains("\"identity\" records no events here"),
+        err(&refused).contains("\"tenancy\" records no events here"),
         "{refused:?}"
+    );
+    let missing = tetsu(&app, &["replay", "identity", id], None);
+    assert!(!missing.status.success());
+    assert!(
+        err(&missing).contains(&format!("no event {id} in identity's outboxes")),
+        "{missing:?}"
     );
 }

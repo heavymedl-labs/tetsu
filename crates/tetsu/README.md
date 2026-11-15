@@ -17,8 +17,13 @@ names no business that uses Tetsu. Its root page names fictional customers only 
 | `tetsu reset <schema>...` | Drops module schemas so the next `migrate` builds them afresh. Only where `TETSU_DEMO` is true, and only modules' schemas; all or none |
 | `tetsu replay <schema> <event id>` | Makes an event that stopped retrying due again, from the outboxes of the module whose schema recorded it |
 | `tetsu rename <address> <new slug>` | Moves the tenant at an address, such as one a release has since reserved, to a new slug and its address |
+| `tetsu operator create <name>` | Creates an operator and prints their enrollment link, good once and for an hour. Prints a link only to a terminal |
+| `tetsu operator enroll <id>` | Prints a new enrollment link for an operator, replacing the last. Only to a terminal |
+| `tetsu operator list` | Lists operators: ID, name, and whether they are enabled |
+| `tetsu operator disable <id>` | Disables an operator, ending their sessions and enrollment link |
+| `tetsu operator end-sessions <id \| --all>` | Ends one operator's sessions, or every operator's |
 
-The deploy workflow runs the last four against the demo ([runbook](../../docs/operations/demo-environment.md)).
+The deploy workflow runs `check`, `reset`, `replay`, and `rename` against the demo ([runbook](../../docs/operations/demo-environment.md)).
 
 A folder means its `.toml` files at the top level, in name order, leaving out hidden files. One that is not a
 regular file fails the run. Seeding
@@ -97,6 +102,7 @@ Stop the server when you are done.
 | `DATABASE_TLS` | `migrate`, `seed`, `serve` | `require` (the default) or `disable`, for local tests only ([ADR-0013](../../docs/adr/0013-postgres-tls.md)) |
 | `DATABASE_CA_FILE` | `migrate`, `seed`, `serve` | Optional: a PEM file of certificate authorities, such as a provider's own, trusted instead of the public ones. Refused with `DATABASE_TLS=disable` |
 | `TETSU_DEMO` | `serve` | `true` or `false`, with no default: whether every page says its business is a demo and asks not to be indexed, and whether the root page shows its fictional customers ([ADR-0018](../../docs/adr/0018-demo-businesses-as-data.md), [ADR-0037](../../docs/adr/0037-fictional-customers-on-tetsus-page.md)) |
+| `TETSU_ORIGIN` | `operator create`, `operator enroll` | The site's own origin, such as `https://tetsu-demo.onrender.com`, which enrollment links point to: `https`, or `http` for this machine alone, with no path |
 | `PORT` | `serve` | The port a host such as Render sets, listened on at every interface. Without it, `serve` listens on `127.0.0.1:8080` |
 | `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`, or `OTEL_EXPORTER_OTLP_ENDPOINT` with `/v1/logs` added | `serve` | Optional: where logs are exported over OTLP ([ADR-0049](../../docs/adr/0049-log-export.md)). HTTPS, or HTTP to this machine. Without it, nothing is exported |
 | `OTEL_EXPORTER_OTLP_LOGS_HEADERS` or `OTEL_EXPORTER_OTLP_HEADERS` | `serve` | Optional: percent-encoded `name=value` pairs sent with each export, such as the backend's key |

@@ -105,6 +105,17 @@ pub fn listen(var: impl Fn(&str) -> Result<String, VarError>) -> Result<SocketAd
     }
 }
 
+/// The site's own origin, from `TETSU_ORIGIN`, such as `https://tetsu-demo.onrender.com`: enrollment links point
+/// there, and only it may send a state-changing request (ADR-0048). It is written as a browser sends an origin,
+/// `https`, or `http` for this machine alone, with no path, so a typo fails here rather than in a link.
+pub fn origin(var: impl Fn(&str) -> Result<String, VarError>) -> Result<String, String> {
+    let origin = value(&var, "TETSU_ORIGIN")?.ok_or("TETSU_ORIGIN must be set")?;
+    tetsu_identity::Origins::parse(&[origin.as_str()]).map_err(|_| {
+        format!("TETSU_ORIGIN must be an origin such as https://example.com, not {origin:?}")
+    })?;
+    Ok(origin)
+}
+
 /// Whether this environment holds demo businesses, from `TETSU_DEMO`. It must be `true` or `false`, with no
 /// default, so an environment never serves real businesses marked as demos or demos left unmarked (ADR-0018).
 pub fn demo(var: impl Fn(&str) -> Result<String, VarError>) -> Result<bool, String> {
@@ -338,11 +349,37 @@ mod tests {
         })
     }
 
+    fn origin_from(value: Option<&str>) -> Result<String, String> {
+        origin(|name| match (name, value) {
+            ("TETSU_ORIGIN", Some(value)) => Ok(value.to_string()),
+            _ => Err(VarError::NotPresent),
+        })
+    }
+
     fn marked(value: Option<&str>) -> Result<bool, String> {
         demo(|name| match (name, value) {
             ("TETSU_DEMO", Some(value)) => Ok(value.to_string()),
             _ => Err(VarError::NotPresent),
         })
+    }
+
+    #[test]
+    fn the_origin_is_written_as_a_browser_sends_it() {
+        for good in ["https://tetsu-demo.onrender.com", "http://localhost:8080"] {
+            assert_eq!(origin_from(Some(good)), Ok(good.to_string()));
+        }
+        assert_eq!(origin_from(None), Err("TETSU_ORIGIN must be set".into()));
+        for bad in [
+            "tetsu-demo.onrender.com",
+            "https://tetsu-demo.onrender.com/",
+            "http://tetsu-demo.onrender.com",
+        ] {
+            assert!(
+                origin_from(Some(bad))
+                    .is_err_and(|why| why.starts_with("TETSU_ORIGIN must be an origin")),
+                "{bad}"
+            );
+        }
     }
 
     #[test]

@@ -12,7 +12,10 @@ mod use_cases;
 
 pub use adapters::postgres::postgres_store;
 pub use browser::{Change, ForChange, Origins, SignOut};
-pub use domain::{Error, Limits, OperatorId, OperatorName, Realm, Session, SessionToken};
+pub use domain::{
+    EnrollmentToken, Error, Limits, OperatorId, OperatorName, OperatorSummary, Realm, Session,
+    SessionToken,
+};
 pub use ports::OperatorStore;
 pub use use_cases::Operators;
 

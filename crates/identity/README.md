@@ -4,8 +4,8 @@ Who signs in to Tetsu, their passkeys, and their sessions ([ADR-0040](../../docs
 [ADR-0048](../../docs/adr/0048-sign-in-design.md)). Tier 1, since it is identity and access. Operators come first,
 in slice 5 ([#110](https://github.com/heavymedl-labs/tetsu/issues/110)); staff and customers follow.
 
-So far, `Operators` creates operators and starts, finds, and ends their sessions. `postgres_store(pool)` returns it
-over Postgres.
+So far, `Operators` creates, lists, and disables operators, issues their enrollment links, and starts, finds, and
+ends their sessions. `postgres_store(pool)` returns it over Postgres.
 
 - **Session tokens are 256 random bits** from the operating system's source, written as 64 lowercase hexadecimal
   digits. Only their SHA-256 hash is stored ([ADR-0047](../../docs/adr/0047-sign-in-libraries.md)), and a token
@@ -44,8 +44,26 @@ over Postgres.
 - **Finding a session** runs on every signed-in request: one call to `use_session`, an update by primary key that
   returns the row. ADR-0040 asks for a benchmark of it, which comes with the session middleware.
 
+## The operator command
+
+`tetsu operator` ([ADR-0040](../../docs/adr/0040-identity-and-sign-in.md),
+[ADR-0059](../../docs/adr/0059-session-controls-and-request-checks.md)) works through these use cases:
+
+- **An enrollment link** carries 256 random bits, stored only as their hash, good once and for an hour. Each
+  operator has one open link at most; a new one replaces the last. The command prints it only to a terminal, and
+  the token sits in the link's fragment, which a browser never sends to a server.
+- **Disabling an operator** ends every session and the open link they hold in the same statement
+  (`v5.0.0-7.4.2`). A disabled operator starts no session and is issued no link. `start_session` holds the
+  operator's row until it commits, so a disable at the same moment ends what it started.
+- **Ending sessions,** one operator's or every operator's, is the administrator's control (`v5.0.0-7.4.5`).
+- **Every change records an audit event** in Identity's outbox, in the same transaction, with IDs and counts only:
+  `identity.operator_created`, `identity.enrollment_issued`, `identity.operator_disabled`, and
+  `identity.sessions_ended`.
+
 ## Not yet
 
-Passkeys, enrollment, the sign-in pages, the `Sec-Fetch-Site` check, the headers that apply these checks, the
-commands and pages that end sessions ([ADR-0059](../../docs/adr/0059-session-controls-and-request-checks.md)), rate
-limits, and the `identity.signed_in` event arrive in the later steps of #110.
+Passkeys and consuming an enrollment link, refusing a link to an operator who already has a passkey, the sign-in
+pages, the `Sec-Fetch-Site` check, the headers that apply these checks, the session list
+([ADR-0059](../../docs/adr/0059-session-controls-and-request-checks.md)), rate limits, the `identity.signed_in`
+event, and running the dispatcher that carries Identity's events to the audit record arrive in later steps of
+[#110](https://github.com/heavymedl-labs/tetsu/issues/110).

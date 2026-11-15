@@ -432,7 +432,7 @@ async fn a_session_for_no_operator_is_refused() {
     as_admin(&database, "DELETE FROM identity.operators").await;
     assert!(matches!(
         operators.start_session(kurt).await,
-        Err(Error::Storage(_))
+        Err(Error::Invalid(why)) if why == "no enabled operator"
     ));
 }
 
@@ -603,6 +603,7 @@ async fn an_operator_id_of_the_wrong_type_is_an_error() {
     as_admin(
         &database,
         "ALTER TABLE identity.sessions DROP CONSTRAINT sessions_operator_id_fkey;
+         ALTER TABLE identity.enrollments DROP CONSTRAINT enrollments_operator_id_fkey;
          DROP TABLE identity.operators;
          CREATE TABLE identity.operators (id text NOT NULL DEFAULT 'one', name text NOT NULL);
          GRANT SELECT, INSERT ON identity.operators TO tetsu_identity",
@@ -986,4 +987,29 @@ async fn the_database_takes_the_longest_name_the_domain_takes() {
             refused.chars().count()
         );
     }
+}
+
+/// A change whose audit event cannot be recorded is undone with it, so nothing changes without its record
+/// (ADR-0043, ADR-0045).
+#[tokio::test]
+async fn a_change_whose_event_cannot_be_recorded_is_undone() {
+    let database = ready().await;
+    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    as_admin(
+        &database,
+        "REVOKE INSERT ON identity.outbox_global FROM tetsu_identity",
+    )
+    .await;
+    assert!(matches!(
+        operators.create(&name("Kurt Medley")).await,
+        Err(Error::Storage(why)) if why.contains("outbox_global")
+    ));
+    let client = connect(&database).await.expect("connects");
+    let stored: i64 = client
+        .query_one("SELECT count(*) FROM identity.operators", &[])
+        .await
+        .expect("counts")
+        .try_get(0)
+        .expect("a count");
+    assert_eq!(stored, 0);
 }

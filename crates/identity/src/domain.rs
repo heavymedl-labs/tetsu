@@ -69,6 +69,14 @@ impl OperatorId {
     pub fn get(self) -> i64 {
         self.0
     }
+
+    /// An ID as the operator command takes one: a positive whole number, written plainly, and nothing else.
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        let plain =
+            !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit()) && !text.starts_with('0');
+        text.parse().ok().filter(|_| plain).map(Self)
+    }
 }
 
 /// What an operator is called in Tetsu's own tools and the audit record.
@@ -223,6 +231,43 @@ fn from_hex<const N: usize>(text: &str) -> Option<[u8; N]> {
     Some(bytes)
 }
 
+/// What an enrollment link carries: 256 random bits, like a session token, good once and for an hour. Only its hash
+/// is stored, and the operator command prints it only to the terminal that ran it (ADR-0040).
+#[derive(Clone)]
+pub struct EnrollmentToken(SessionToken);
+
+impl EnrollmentToken {
+    pub(crate) fn generate(fill: Fill) -> Result<Self, Error> {
+        SessionToken::generate(fill).map(Self)
+    }
+
+    /// The token as an enrollment link carries it.
+    #[must_use]
+    pub fn to_text(&self) -> String {
+        self.0.to_text()
+    }
+
+    pub(crate) fn hash(&self) -> [u8; 32] {
+        self.0.hash()
+    }
+}
+
+impl std::fmt::Debug for EnrollmentToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("EnrollmentToken(hidden)")
+    }
+}
+
+/// An operator as the operator command lists them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperatorSummary {
+    pub id: OperatorId,
+    pub name: String,
+    pub created_at: SystemTime,
+    /// When the operator was disabled, if they were.
+    pub disabled_at: Option<SystemTime>,
+}
+
 /// Fills bytes from a secure random source.
 pub(crate) type Fill = fn(&mut [u8]) -> Result<(), getrandom::Error>;
 
@@ -300,6 +345,38 @@ impl std::error::Error for Error {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An enrollment token never prints, so no log line or debug output can enroll anyone.
+    #[test]
+    fn an_enrollment_token_is_hidden_when_printed() {
+        let token = EnrollmentToken::generate(getrandom::fill).expect("a token");
+        assert_eq!(format!("{token:?}"), "EnrollmentToken(hidden)");
+        assert_eq!(token.to_text().len(), 64);
+        assert_ne!(token.hash(), [0; 32]);
+    }
+
+    #[test]
+    fn an_operator_id_is_a_plain_positive_number() {
+        assert_eq!(OperatorId::parse("42"), Some(OperatorId(42)));
+        assert_eq!(
+            OperatorId::parse("9223372036854775807"),
+            Some(OperatorId(i64::MAX))
+        );
+        for bad in [
+            "",
+            "0",
+            "042",
+            "-1",
+            "+1",
+            " 1",
+            "1 ",
+            "1.0",
+            "x",
+            "9223372036854775808",
+        ] {
+            assert_eq!(OperatorId::parse(bad), None, "{bad:?}");
+        }
+    }
     use proptest::prelude::*;
 
     const HOUR: Duration = Duration::from_hours(1);
