@@ -92,16 +92,10 @@ pub async fn run(
     act(&operators, operator, &origin, &by).await
 }
 
-/// Where a link points. A `.env` may name it only when it names the database too: a link holds a live token, so a
-/// stray `.env` in whatever folder the command runs in must not point the real database's links at another site.
+/// Where a link points. A link holds a live token, so a `.env` may name the origin only when it names the database
+/// too, and never point a real database's links at another site.
 fn link_origin(local: &Local) -> Result<String, String> {
-    if local.in_file("TETSU_ORIGIN") && !local.in_file("DATABASE_URL") {
-        return Err(
-            "TETSU_ORIGIN comes from .env but DATABASE_URL does not; set TETSU_ORIGIN in the environment too, so \
-             links point where that database's site is"
-                .into(),
-        );
-    }
+    local.beside("DATABASE_URL", &["TETSU_ORIGIN"])?;
     settings::origin(|name| local.var(name))
 }
 
@@ -124,13 +118,17 @@ fn login(var: impl Fn(&str) -> Result<String, VarError>) -> Option<String> {
 /// pipe, or larger than a host name could be, so reading it can never hang the command.
 fn read_small(path: impl AsRef<std::path::Path>) -> Option<String> {
     const MOST: u64 = 4096;
-    let file = std::fs::File::open(path).ok()?;
-    let metadata = file.metadata().ok()?;
+    // Checked before opening, since opening a pipe waits for a writer.
+    let metadata = std::fs::metadata(&path).ok()?;
     if !metadata.is_file() || metadata.len() > MOST {
         return None;
     }
     let mut text = String::new();
-    file.take(MOST).read_to_string(&mut text).ok()?;
+    std::fs::File::open(path)
+        .ok()?
+        .take(MOST)
+        .read_to_string(&mut text)
+        .ok()?;
     Some(text)
 }
 
@@ -231,7 +229,8 @@ fn listed(operator: &OperatorSummary) -> String {
 }
 
 /// The enrollment link, with the token in the fragment, which a browser never sends to the server or in a
-/// `Referer`, so it stays out of every log.
+/// `Referer`, so it stays out of the server's logs. A browser's history keeps it, and a container run with a
+/// terminal (`docker run -t`) logs it, which is why it is good once and for an hour.
 fn link(origin: &str, token: &EnrollmentToken) -> String {
     format!(
         "enrollment link, good once and for an hour: {origin}/ops/enroll#{}",
@@ -348,6 +347,13 @@ mod tests {
         let folder = Scratch::folder("hostname-folder").unwrap();
         assert_eq!(read_small(&*folder), None);
         assert_eq!(read_small(folder.join("missing")), None);
+        let pipe = folder.join("pipe");
+        let made = std::process::Command::new("mkfifo")
+            .arg(&pipe)
+            .status()
+            .unwrap();
+        assert!(made.success());
+        assert_eq!(read_small(&pipe), None);
         let binary = Scratch::folder("hostname-binary").unwrap();
         std::fs::write(binary.join("hostname"), [0xff, 0xfe]).unwrap();
         assert_eq!(read_small(binary.join("hostname")), None);

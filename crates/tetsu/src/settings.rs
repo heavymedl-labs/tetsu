@@ -53,6 +53,25 @@ impl Local {
         matches!(self.environment(name), Err(VarError::NotPresent)) && self.file.contains_key(name)
     }
 
+    /// Refuses settings from the file that go with `lead` when `lead` comes from the environment: a stray `.env`
+    /// in whatever folder a command runs in must not change how a database named elsewhere is reached, or where
+    /// its links point.
+    ///
+    /// # Errors
+    /// Names the first such setting.
+    pub fn beside(&self, lead: &str, settings: &[&str]) -> Result<(), String> {
+        if self.in_file(lead) {
+            return Ok(());
+        }
+        match settings.iter().find(|name| self.in_file(name)) {
+            Some(name) => Err(format!(
+                "{name} comes from .env but {lead} does not; set {name} in the environment too, or remove it from \
+                 .env, so a stray .env cannot change how that database is reached"
+            )),
+            None => Ok(()),
+        }
+    }
+
     fn environment(&self, name: &str) -> Result<String, VarError> {
         if self.environment {
             std::env::var(name)
@@ -373,6 +392,26 @@ fn value(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Settings from `.env` that go with the database are refused when the database is named elsewhere, so a
+    /// stray file cannot turn off TLS for it, trust another authority, or move where its links point.
+    #[test]
+    fn a_stray_env_file_cannot_change_how_a_database_is_reached() {
+        let lead = "DATABASE_URL";
+        let followers = ["DATABASE_TLS", "DATABASE_CA_FILE"];
+        for stray in ["DATABASE_TLS=disable\n", "DATABASE_CA_FILE=/tmp/evil.pem\n"] {
+            let refused = Local::file_only(stray)
+                .beside(lead, &followers)
+                .unwrap_err();
+            assert!(
+                refused.contains("comes from .env but DATABASE_URL does not"),
+                "{refused}"
+            );
+        }
+        let both = "DATABASE_URL=postgres://localhost/tetsu\nDATABASE_TLS=disable\n";
+        assert_eq!(Local::file_only(both).beside(lead, &followers), Ok(()));
+        assert_eq!(Local::file_only("").beside(lead, &followers), Ok(()));
+    }
 
     fn listening(port: Option<&str>) -> Result<SocketAddr, String> {
         listen(|name| match (name, port) {

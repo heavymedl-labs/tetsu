@@ -1,22 +1,38 @@
 //! `tetsu operator` against a real Postgres, its output piped as CI or a log would take it (ADR-0040).
 
+use std::path::Path;
 use std::process::{Command, Output};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tetsu_identity::{Identity, OperatorName};
-use tetsu_postgres::test_support::{TestDatabase, fresh_database};
+use tetsu_postgres::test_support::{Scratch, TestDatabase, fresh_database};
 use tetsu_postgres::{Settings, migrate, pool};
 
 #[cfg(test)]
 mod support {
     use super::*;
 
-    /// Runs the command as the login `tester`, with no site origin, which no command printing to a pipe needs.
+    /// Runs the command as the login `tester`, with no site origin, which no command printing to a pipe needs, in
+    /// an empty folder, so no `.env` a developer keeps can change what it does.
     pub fn operator(settings: &Settings, args: &[&str]) -> Output {
+        static RUN: AtomicUsize = AtomicUsize::new(0);
+        let folder = Scratch::folder(&format!(
+            "operator-run-{}",
+            RUN.fetch_add(1, Ordering::Relaxed)
+        ))
+        .expect("a folder");
+        operator_in(&folder, settings, args)
+    }
+
+    /// Runs the command in `folder`, as [`operator`] does.
+    pub fn operator_in(folder: &Path, settings: &Settings, args: &[&str]) -> Output {
         Command::new(env!("CARGO_BIN_EXE_tetsu"))
             .arg("operator")
             .args(args)
+            .current_dir(folder)
             .env("DATABASE_URL", settings.url())
             .env("DATABASE_TLS", "disable")
+            .env_remove("DATABASE_CA_FILE")
             .env_remove("TETSU_ORIGIN")
             .env_remove("SUDO_USER")
             .env("USER", "tester")
@@ -47,7 +63,7 @@ mod support {
     }
 }
 
-use support::{err, operator, out, with_kurt};
+use support::{err, operator, operator_in, out, with_kurt};
 
 /// A link never reaches a pipe, so no CI log or redirect captures one, and nothing is created when it is refused.
 #[tokio::test]
@@ -118,4 +134,18 @@ fn unknown_operator_commands_are_usage_errors() {
         let output = operator(&settings, args);
         assert_eq!(output.status.code(), Some(2), "{args:?}");
     }
+}
+
+/// A `.env` in the folder the command runs in cannot change how a database the environment names is reached.
+#[tokio::test]
+async fn a_stray_env_file_cannot_turn_off_tls_for_a_named_database() {
+    let database = with_kurt().await;
+    let folder = Scratch::folder("operator-stray-env").expect("a folder");
+    std::fs::write(folder.join(".env"), "DATABASE_CA_FILE=/nowhere.pem\n").expect("writes");
+    let refused = operator_in(&folder, &database.as_app(), &["list"]);
+    assert_eq!(refused.status.code(), Some(1));
+    assert!(
+        err(&refused).contains("DATABASE_CA_FILE comes from .env but DATABASE_URL does not"),
+        "{refused:?}"
+    );
 }

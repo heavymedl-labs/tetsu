@@ -1,2 +1,19 @@
--- Adds an operator with no passkey.
-INSERT INTO identity.operators (name) VALUES ($1) RETURNING id;
+-- Adds an operator with no passkey, and says whether it did: a name already
+-- taken adds none, and names the operator who holds it, if the statement can
+-- see them yet.
+WITH added AS (
+    INSERT INTO identity.operators (name) VALUES ($1)
+    ON CONFLICT (name) DO NOTHING
+    RETURNING id
+)
+
+SELECT
+    added.id,
+    true AS created
+FROM added
+UNION ALL
+SELECT
+    o.id,
+    false AS created
+FROM identity.operators AS o
+WHERE o.name = $1 AND NOT EXISTS (SELECT FROM added);

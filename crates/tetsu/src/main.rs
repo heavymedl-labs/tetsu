@@ -237,6 +237,7 @@ fn local() -> Result<settings::Local, String> {
 
 /// Reads the database settings, checks the server is new enough and stores text as UTF-8, and opens a pool to it.
 async fn connect(local: &settings::Local) -> Result<tetsu_postgres::Pool, String> {
+    local.beside("DATABASE_URL", &["DATABASE_TLS", "DATABASE_CA_FILE"])?;
     let settings = settings::database(|name| local.var(name))?;
     tetsu_postgres::require_supported_server(&settings)
         .await

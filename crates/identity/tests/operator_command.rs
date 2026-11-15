@@ -804,3 +804,87 @@ async fn an_operator_is_added_by_a_plain_name_alone() {
         assert_eq!(error.code(), Some(&refused), "{insert}");
     }
 }
+
+/// Names are unique, so a create retried after its output was lost finds the first operator rather than making a
+/// second; the refusal is recorded, naming the operator who holds the name.
+#[tokio::test]
+async fn a_name_already_taken_is_refused_and_recorded() {
+    let database = ready().await;
+    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    operators
+        .create(&name("Kurt Medley"), &actor())
+        .await
+        .expect("creates");
+    assert_eq!(
+        operators.create(&name("Kurt Medley"), &actor()).await,
+        Err(Error::Invalid("operator 1 already has that name".into()))
+    );
+    let (kind, payload) = events(&database).await.pop().expect("an event");
+    assert_eq!(kind, "identity.operator_created");
+    assert_eq!(payload["operator_id"], json!(1));
+    assert_eq!(payload["outcome"], json!("refused"));
+}
+
+/// A create that waits on another of the same name, still being written, is refused once that one commits, though
+/// it cannot yet see who holds the name.
+#[tokio::test]
+async fn a_name_taken_while_a_create_waits_is_refused() {
+    let database = ready().await;
+    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    let mut admin = connect(&database).await.expect("connects");
+    let writing = admin.transaction().await.expect("begins");
+    writing
+        .execute(
+            "INSERT INTO identity.operators (name) VALUES ('Kurt Medley')",
+            &[],
+        )
+        .await
+        .expect("writes");
+    let creating =
+        tokio::spawn(async move { operators.create(&name("Kurt Medley"), &actor()).await });
+    waits_for_a_lock(&database).await;
+    writing.commit().await.expect("commits");
+    assert_eq!(
+        creating.await.expect("finishes"),
+        Err(Error::Invalid(
+            "another operator already has that name".into()
+        ))
+    );
+    let (_, payload) = events(&database).await.pop().expect("an event");
+    assert_eq!(payload["operator_id"], Value::Null);
+    assert_eq!(payload["outcome"], json!("refused"));
+}
+
+/// A disable never answers "already disabled" over an enable about to commit: it waits for the enable, then
+/// disables, so the operator ends disabled, as it says.
+#[tokio::test]
+async fn a_disable_waits_for_an_enable_being_written() {
+    let database = ready().await;
+    let pool = pool(&database.as_app()).expect("a pool");
+    let operators = postgres_store(pool.clone());
+    let kurt = operators
+        .create(&name("Kurt Medley"), &actor())
+        .await
+        .expect("creates");
+    operators.disable(kurt, &actor()).await.expect("disables");
+    let mut client = pool.get().await.expect("a connection");
+    let enabling = ModuleTransaction::begin(&mut client, "identity")
+        .await
+        .expect("begins");
+    enabling
+        .execute("SELECT identity.enable_operator($1)", &[&kurt.get()])
+        .await
+        .expect("enables");
+    let disabling = tokio::spawn(async move { operators.disable(kurt, &actor()).await });
+    waits_for_a_lock(&database).await;
+    enabling.commit().await.expect("commits");
+    assert_eq!(disabling.await.expect("finishes"), Ok(disabled(true, 0, 0)));
+    assert_eq!(
+        number(
+            &database,
+            "SELECT count(*) FROM identity.operators WHERE disabled_at IS NOT NULL"
+        )
+        .await,
+        1
+    );
+}

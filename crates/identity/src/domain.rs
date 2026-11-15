@@ -84,8 +84,9 @@ impl OperatorId {
 pub struct OperatorName(String);
 
 impl OperatorName {
-    /// A name of 1 to 100 characters, trimmed of whitespace at its ends, with no control, invisible, or
-    /// direction-changing characters, which could hide or reorder what the name shows.
+    /// A name of 1 to 100 characters, trimmed of whitespace at its ends, with no control, invisible,
+    /// direction-changing, or blank-looking characters, which could hide or reorder what the name shows, and no
+    /// two spaces together, which the operator command's list puts between columns.
     ///
     /// # Errors
     /// Fails with [`Error::Invalid`] for an empty or overlong name, or one holding such a character.
@@ -96,9 +97,14 @@ impl OperatorName {
                 "a name has 1 to {MAX_NAME} characters"
             )));
         }
-        if name.chars().any(hidden) {
+        if name
+            .chars()
+            .any(|c| c != ' ' && (c.is_whitespace() || hidden(c)))
+            || name.contains("  ")
+        {
             return Err(Error::Invalid(
-                "a name has no control, invisible, or direction-changing characters".to_string(),
+                "a name has no control, invisible, or direction-changing characters, and single plain spaces"
+                    .to_string(),
             ));
         }
         Ok(Self(name.to_string()))
@@ -268,22 +274,23 @@ pub struct Actor(String);
 /// The longest user or host in an actor.
 const MAX_PART: usize = 99;
 
-/// Whether text can be one part of an actor: 1 to [`MAX_PART`] characters, no space at either end, and nothing
-/// hidden or that reads as an `@`, so no part can pass for another.
+/// Whether text can be one part of an actor: 1 to [`MAX_PART`] characters, with no space, nothing hidden, and
+/// nothing that reads as an `@`, so no part can pass for another.
 fn actor_part(part: &str) -> bool {
     !part.is_empty()
-        && part.trim() == part
         && part.chars().count() <= MAX_PART
         && !part
             .chars()
-            .any(|c| matches!(c, '@' | '\u{FE6B}' | '\u{FF20}') || hidden(c))
+            .any(|c| matches!(c, '@' | '\u{FE6B}' | '\u{FF20}') || c.is_whitespace() || hidden(c))
 }
 
 /// A character that could hide or reorder text where it is shown: a control character, one Unicode says a
-/// display may ignore or that only formats, or one that shows as blank. The list follows Unicode 16's
-/// `Default_Ignorable_Code_Point` and `Cf` sets, plus blank-looking letters such as the Hangul fillers.
+/// display may ignore or that only formats, one that shows as blank, or one with no agreed look. The list follows
+/// Unicode 16's `Default_Ignorable_Code_Point` and `Cf` sets, plus blank-looking characters such as the Hangul
+/// and Khitan fillers, the object replacement character, private use, and noncharacters. Unassigned code points
+/// are not refused, since telling them apart needs Unicode's tables.
 fn hidden(c: char) -> bool {
-    const INVISIBLE: [(char, char); 26] = [
+    const INVISIBLE: [(char, char); 31] = [
         ('\u{00AD}', '\u{00AD}'),
         ('\u{034F}', '\u{034F}'),
         ('\u{0600}', '\u{0605}'),
@@ -299,19 +306,26 @@ fn hidden(c: char) -> bool {
         ('\u{2028}', '\u{202E}'),
         ('\u{2060}', '\u{206F}'),
         ('\u{2800}', '\u{2800}'),
+        ('\u{E000}', '\u{F8FF}'),
+        ('\u{FDD0}', '\u{FDEF}'),
         ('\u{3164}', '\u{3164}'),
         ('\u{FE00}', '\u{FE0F}'),
         ('\u{FEFF}', '\u{FEFF}'),
         ('\u{FFA0}', '\u{FFA0}'),
-        ('\u{FFF0}', '\u{FFFB}'),
+        ('\u{FFF0}', '\u{FFFC}'),
         ('\u{110BD}', '\u{110BD}'),
         ('\u{110CD}', '\u{110CD}'),
         ('\u{13430}', '\u{1343F}'),
+        ('\u{16FE4}', '\u{16FE4}'),
         ('\u{1BCA0}', '\u{1BCA3}'),
+        ('\u{1D159}', '\u{1D159}'),
         ('\u{1D173}', '\u{1D17A}'),
         ('\u{E0000}', '\u{E0FFF}'),
+        ('\u{F0000}', '\u{10FFFF}'),
     ];
+    // Each plane's last two code points are noncharacters.
     c.is_control()
+        || u32::from(c) & 0xFFFE == 0xFFFE
         || INVISIBLE
             .iter()
             .any(|&(first, last)| (first..=last).contains(&c))
@@ -471,6 +485,8 @@ mod tests {
             format!("{}@b", "é".repeat(100)),
             format!("a@{}", "é".repeat(100)),
             "kurt\nforged@host".into(),
+            "root kurt@host".into(),
+            "admin\u{2003}(approved)@host".into(),
         ] {
             assert!(Actor::parse(&bad).is_err(), "{bad:?}");
         }
@@ -492,6 +508,15 @@ mod tests {
             "\u{0600}a",
             "a\u{1D173}",
             "a\u{2800}",
+            "\u{16FE4}",
+            "a\u{1D159}",
+            "a\u{FFFC}",
+            "a\u{E000}",
+            "a\u{FDD0}",
+            "a\u{1FFFE}",
+            "a\u{10FFFD}",
+            "a\u{3000}b",
+            "a\u{00A0}b",
         ] {
             assert!(OperatorName::parse(hidden).is_err(), "{hidden:?}");
             assert!(
@@ -500,9 +525,18 @@ mod tests {
             );
         }
         // Visible letters and marks beside the ranges stay allowed.
-        for shown in ["Zoë", "\u{0606}", "\u{1161}", "\u{FE10}"] {
+        for shown in [
+            "Zoë",
+            "Kurt Medley",
+            "\u{0606}",
+            "\u{1161}",
+            "\u{FE10}",
+            "\u{FFFD}",
+        ] {
             assert!(OperatorName::parse(shown).is_ok(), "{shown:?}");
         }
+        // Two spaces together would read as a gap between the list's columns.
+        assert!(OperatorName::parse("Kurt  disabled").is_err());
     }
 
     /// An actor made from a login names `unknown` for any part that is missing or cannot be shown safely, so it
@@ -600,7 +634,7 @@ mod tests {
         assert!(OperatorName::parse(&"é".repeat(100)).is_ok());
         let length = Err(Error::Invalid("a name has 1 to 100 characters".to_string()));
         let control = Err(Error::Invalid(
-            "a name has no control, invisible, or direction-changing characters".to_string(),
+            "a name has no control, invisible, or direction-changing characters, and single plain spaces".to_string(),
         ));
         assert_eq!(OperatorName::parse(""), length);
         assert_eq!(OperatorName::parse("   "), length);

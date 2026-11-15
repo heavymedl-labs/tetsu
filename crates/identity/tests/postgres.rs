@@ -207,7 +207,7 @@ async fn each_operator_gets_their_own_id_and_a_random_user_handle() {
         .await
         .expect("creates");
     let second = operators
-        .create(&name("Kurt Medley"), &actor())
+        .create(&name("Lee Park"), &actor())
         .await
         .expect("creates");
     assert_ne!(first, second);
@@ -539,19 +539,22 @@ async fn each_stored_column_of_the_wrong_type_is_an_error() {
     }
 }
 
+/// A create whose answer cannot be read is a storage failure.
 #[tokio::test]
-async fn an_insert_that_returns_no_id_is_an_error() {
+async fn a_create_answer_that_cannot_be_read_is_a_storage_failure() {
     let database = ready().await;
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
     as_admin(
         &database,
-        "CREATE FUNCTION identity.skip() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END $$;
-         CREATE TRIGGER skip BEFORE INSERT ON identity.operators FOR EACH ROW EXECUTE FUNCTION identity.skip()",
+        "ALTER TABLE identity.operators ALTER COLUMN id TYPE integer",
     )
     .await;
     assert_eq!(
         operators.create(&name("Kurt Medley"), &actor()).await,
-        Err(Error::Storage("no operator id returned".to_string()))
+        Err(Error::Storage(
+            "error deserializing column 0: cannot convert between the Rust type `i64` and the Postgres type `int4`"
+                .to_string()
+        ))
     );
 }
 

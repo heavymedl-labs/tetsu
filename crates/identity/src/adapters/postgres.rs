@@ -219,30 +219,18 @@ fn column<'a, T: FromSql<'a>>(row: &'a Row, name: &str) -> Result<T, Error> {
     row.try_get(name).map_err(|e| sorted(&e))
 }
 
-fn no_id() -> Error {
-    Error::Storage("no operator id returned".to_string())
-}
-
 impl OperatorStore for PostgresOperators {
     async fn insert_operator(
         &self,
         name: &OperatorName,
         actor: &Actor,
     ) -> Result<OperatorId, Error> {
-        let id = OnceLock::new();
+        let added = OnceLock::new();
         self.query_recording(INSERT_OPERATOR, &[&name.as_str()], &|rows| {
-            let stored: i64 = column(rows.first().ok_or_else(no_id)?, "id")?;
-            let _ = id.set(stored);
-            let payload = json!({"operator_id": stored});
-            Ok(Some(event(
-                "identity.operator_created",
-                actor,
-                "changed",
-                payload,
-            )))
+            creation(rows, actor, &added)
         })
         .await?;
-        Ok(OperatorId::new(id.get().copied().unwrap_or_default()))
+        created(added.get().copied().flatten())
     }
 
     async fn insert_session(
@@ -421,6 +409,52 @@ fn counted(rows: &[Row], name: &str) -> Result<Option<u64>, Error> {
     Ok(ended.map(|ended| u64::try_from(ended).unwrap_or_default()))
 }
 
+/// Reads what a create found, keeps it in `added`, and makes the event it records: changed when it added the
+/// operator, and refused when the name was taken, naming
+/// who holds it if the statement could see them.
+fn creation(
+    rows: &[Row],
+    actor: &Actor,
+    added: &OnceLock<Option<(i64, bool)>>,
+) -> Result<Option<(&'static str, String)>, Error> {
+    let found = rows.first().map(added_from).transpose()?;
+    let _ = added.set(found);
+    Ok(Some(creation_event(found, actor)))
+}
+
+/// The event a create records for what it found.
+fn creation_event(found: Option<(i64, bool)>, actor: &Actor) -> (&'static str, String) {
+    let outcome = if matches!(found, Some((_, true))) {
+        "changed"
+    } else {
+        "refused"
+    };
+    event(
+        "identity.operator_created",
+        actor,
+        outcome,
+        json!({"operator_id": found.map(|(id, _)| id)}),
+    )
+}
+
+/// What a create returns: the new operator, or why there is none.
+fn created(found: Option<(i64, bool)>) -> Result<OperatorId, Error> {
+    match found {
+        Some((id, true)) => Ok(OperatorId::new(id)),
+        Some((id, false)) => Err(Error::Invalid(format!(
+            "operator {id} already has that name"
+        ))),
+        None => Err(Error::Invalid(
+            "another operator already has that name".to_string(),
+        )),
+    }
+}
+
+/// The operator a create added, or the one already holding its name.
+fn added_from(row: &Row) -> Result<(i64, bool), Error> {
+    column(row, "id").and_then(|id| column(row, "created").map(|created| (id, created)))
+}
+
 /// What a disable did, or nothing for an operator who does not exist.
 fn disabling_from(row: &Row) -> Result<Option<Disabling>, Error> {
     let done: Option<bool> = column(row, "done")?;
@@ -548,6 +582,98 @@ mod tests {
             }),
             Error::Storage("taken".to_string())
         );
+    }
+
+    /// A create says what it found and records it, in this one build, which llvm-cov scores on its own: an
+    /// operator added, a name another holds, or a name taken by one it cannot yet see.
+    #[test]
+    fn a_create_reports_and_records_what_it_found() {
+        assert_eq!(created(Some((1, true))), Ok(OperatorId::new(1)));
+        assert_eq!(
+            created(Some((1, false))),
+            Err(Error::Invalid(
+                "operator 1 already has that name".to_string()
+            ))
+        );
+        assert_eq!(
+            created(None),
+            Err(Error::Invalid(
+                "another operator already has that name".to_string()
+            ))
+        );
+        let recorded = |found| {
+            let (kind, payload) = creation_event(found, &support::actor());
+            let payload: serde_json::Value = serde_json::from_str(&payload).expect("JSON");
+            (
+                kind,
+                payload["outcome"].clone(),
+                payload["operator_id"].clone(),
+            )
+        };
+        assert_eq!(
+            recorded(Some((1, true))),
+            ("identity.operator_created", json!("changed"), json!(1))
+        );
+        assert_eq!(
+            recorded(Some((1, false))),
+            ("identity.operator_created", json!("refused"), json!(1))
+        );
+        assert_eq!(
+            recorded(None),
+            ("identity.operator_created", json!("refused"), json!(null))
+        );
+    }
+
+    /// A create's answer with a column of the wrong type is a storage failure, whichever column it is.
+    #[tokio::test]
+    async fn a_create_answer_of_the_wrong_type_is_a_storage_failure() {
+        let (pool, _database) = support::migrated().await;
+        let client = pool.get().await.expect("a connection");
+        for (answer, column, rust, postgres) in [
+            ("SELECT 1::integer AS id, true AS created", 0, "i64", "int4"),
+            ("SELECT 1::bigint AS id, 1 AS created", 1, "bool", "int4"),
+        ] {
+            let rows = client.query(answer, &[]).await.expect("answers");
+            assert_eq!(
+                added_from(&rows[0]),
+                Err(Error::Storage(format!(
+                    "error deserializing column {column}: cannot convert between the Rust type `{rust}` and the \
+                     Postgres type `{postgres}`"
+                )))
+            );
+        }
+    }
+
+    /// A create whose answer cannot be read is a storage failure, in this one build, which llvm-cov scores on its
+    /// own, and the operator it added is undone.
+    #[tokio::test]
+    async fn a_create_answer_that_cannot_be_read_is_a_storage_failure() {
+        let (pool, database) = support::migrated().await;
+        let admin = tetsu_postgres::connect(&database).await.expect("connects");
+        admin
+            .batch_execute("ALTER TABLE identity.operators ALTER COLUMN id TYPE integer")
+            .await
+            .expect("alters");
+        let operators = Operators::new(PostgresOperators { pool });
+        let failed = operators
+            .create(
+                &OperatorName::parse("Kurt Medley").expect("a name"),
+                &support::actor(),
+            )
+            .await;
+        assert_eq!(
+            failed,
+            Err(Error::Storage(
+                "error deserializing column 0: cannot convert between the Rust type `i64` and the Postgres type \
+                 `int4`"
+                    .to_string()
+            ))
+        );
+        let left = admin
+            .query_one("SELECT count(*) FROM identity.operators", &[])
+            .await
+            .expect("counts");
+        assert_eq!(left.try_get::<_, i64>(0).expect("a count"), 0);
     }
 
     /// A disabled operator is issued no link, and told apart from one who does not exist.

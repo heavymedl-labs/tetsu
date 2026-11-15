@@ -52,12 +52,18 @@ ends their sessions. `postgres_store(pool)` returns it over Postgres.
 - **An enrollment link** carries 256 random bits, stored only as their hash, good once and for an hour, by one
   reading of the clock. Each operator has one open link at most; a new one replaces the last. The command prints
   it only to a terminal, a guard against it landing in a log by accident; the trust boundary is access to the
-  database. The token sits in the link's fragment, which a browser never sends to a server.
+  database. The token sits in the link's fragment, which a browser never sends to a server, though its history
+  keeps it. The page a link opens, `/ops/enroll`, arrives with passkeys, so until then a link opens nothing.
+- **Names are unique.** A create retried after its output was lost is refused, naming the operator who holds the
+  name, rather than making a second.
 - **Disabling an operator** ends every session and the open link they hold (`v5.0.0-7.4.2`), in separate statements
   after the update, so they see a sign-in or link committed while the update waited on the operator's row. That
   holds only under read committed, which every scoped transaction asks for, and which disabling and ending
   sessions refuse to run without. A disabled operator starts no session, uses none, and is issued no link.
   Enabling them again leaves their sessions ended.
+- **A request already past its session check** when a disable commits finishes that one request. Stopping it too
+  would mean holding the operator's row through every request, ASVS level 3's "applied immediately" (8.3.2),
+  beyond the level 2 Tetsu targets.
 - **Ending sessions,** one operator's or every operator's, is the administrator's control (`v5.0.0-7.4.5`). It
   takes the operators' rows first, so a sign-in that holds one finishes and is ended too. A sign-in still waiting
   for a row, or one that starts after, goes through, since ending sessions changes nothing about the operator.
@@ -70,7 +76,7 @@ ends their sessions. `postgres_store(pool)` returns it over Postgres.
   (`v5.0.0-16.2.1`, `v5.0.0-16.3.3`): `identity.operator_created`, `identity.enrollment_issued`,
   `identity.operator_disabled` (with the sessions and links it ended), `identity.operator_enabled`, and
   `identity.sessions_ended`. Listing changes nothing and records nothing. A command refused before it reaches the
-  database, such as one printing a link to a pipe, is a usage error, not an event. Signing in and out records
+  database, such as one printing a link to a pipe, records no event. Signing in and out records
   nothing yet; `identity.signed_in` comes with the sign-in pages.
 - **Who ran a command** is `user@host`: the first of `SUDO_USER`, `USER`, and `LOGNAME` that is set, and the
   first real line of `/etc/hostname`, with `unknown` for a part that is missing, not UTF-8, or would not show

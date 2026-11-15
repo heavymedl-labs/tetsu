@@ -7,9 +7,12 @@ SET statement_timeout = '30s';
 
 CREATE TABLE operators (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    -- No control characters either, so no name can forge a line of output.
-    name text NOT NULL CHECK (
-        char_length(name) BETWEEN 1 AND 100 AND name !~ '[[:cntrl:]]'
+    -- No control character or line break either, so no name can start a new
+    -- line of output. Unique, so retrying a create finds the first instead of
+    -- making a second.
+    name text NOT NULL UNIQUE CHECK (
+        char_length(name) BETWEEN 1 AND 100
+        AND name !~ '[[:cntrl:]\u2028\u2029]'
     ),
     -- WebAuthn's user handle: random, so it says nothing about the operator
     -- (ADR-0040).
@@ -68,20 +71,27 @@ REVOKE ALL ON SEQUENCE operators_id_seq FROM tetsu_identity;
 -- list them. Those functions read whether an operator is disabled, and lock
 -- its row while they do, so a disable at the same moment never misses what
 -- they add.
-GRANT SELECT, INSERT (name) ON operators TO tetsu_identity;
-GRANT SELECT, INSERT, DELETE ON sessions, enrollments TO tetsu_identity_lookup;
-GRANT UPDATE (last_seen_at) ON sessions TO tetsu_identity_lookup;
+GRANT SELECT (id, name, created_at, disabled_at), INSERT (name) ON operators
+TO tetsu_identity;
+GRANT SELECT (
+    token_hash, realm, operator_id, started_at, last_seen_at, ends_at
+),
+INSERT (token_hash, realm, operator_id, started_at, last_seen_at, ends_at),
+UPDATE (last_seen_at),
+DELETE ON sessions TO tetsu_identity_lookup;
+GRANT SELECT, INSERT, DELETE ON enrollments TO tetsu_identity_lookup;
 GRANT UPDATE (token_hash, issued_at, ends_at) ON enrollments
 TO tetsu_identity_lookup;
 GRANT SELECT (id, disabled_at), UPDATE (disabled_at) ON operators
 TO tetsu_identity_lookup;
 
 -- Each realm's limits live here, beside the clock that applies them, so no
--- caller can lengthen a session by passing other numbers (ADR-0048). Every
--- function reads the clock once, as each statement runs, so neither a
--- server's clock nor a request handled late can stretch a session; a
--- statement that waits for another's lock on the same row is judged as of its
--- own start, a wait no longer than the lock timeout.
+-- caller can lengthen a session by passing other numbers (ADR-0048). Each
+-- function reads the clock once, so neither a server's clock nor a request
+-- handled late can stretch a session. A use that waits for another's lock on
+-- the same row is judged as of its own start, a wait no longer than the lock
+-- timeout; a start reads the clock after its wait, so it is never dated
+-- before what held it up.
 
 -- Starts a session now, only for an enabled operator, and removes the
 -- operator's spent sessions in the realm, so they do not pile up. One
@@ -259,7 +269,7 @@ $$;
 -- ones it ended, spent ones going too: done is false for an operator already
 -- disabled, and null for one that does not exist. Each step is its own
 -- statement, so the deletes see what a sign-in or link committed while the
--- update waited on the operator's row. One statement would not, and nor would
+-- lock waited on the operator's row. One statement would not, and nor would
 -- repeatable read, which it refuses with TD002, as do the functions that end
 -- sessions.
 CREATE FUNCTION disable_operator(wanted_operator bigint)
@@ -269,70 +279,73 @@ SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
     at timestamptz;
+    was timestamptz;
 BEGIN
     IF current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'disabling needs read committed' USING ERRCODE = 'TD002';
     END IF;
     sessions_ended := 0;
     links_ended := 0;
-    UPDATE identity.operators AS o
-    SET disabled_at = clock_timestamp()
-    WHERE o.id = wanted_operator AND o.disabled_at IS NULL;
-    IF FOUND THEN
-        done := true;
-        at := clock_timestamp();
-        WITH gone AS (
-            DELETE FROM identity.sessions AS s
-            WHERE s.operator_id = wanted_operator
-            RETURNING
-                at < s.ends_at
-                AND at < s.last_seen_at + CASE s.realm
-                    WHEN 'operator' THEN interval '15 minutes'
-                END AS live
-        )
-
-        SELECT count(*) FILTER (WHERE gone.live) INTO sessions_ended FROM gone;
-        WITH gone AS (
-            DELETE FROM identity.enrollments AS e
-            WHERE e.operator_id = wanted_operator
-            RETURNING at < e.ends_at AS live
-        )
-
-        SELECT count(*) FILTER (WHERE gone.live) INTO links_ended FROM gone;
-    ELSIF EXISTS (
-        SELECT FROM identity.operators AS o WHERE o.id = wanted_operator
-    ) THEN
-        done := false;
+    -- The row first, waiting out any enable, so its answer is the state it
+    -- leaves, never "already disabled" over an enable about to commit.
+    SELECT o.disabled_at INTO was
+    FROM identity.operators AS o
+    WHERE o.id = wanted_operator
+    FOR NO KEY UPDATE;
+    IF NOT FOUND OR was IS NOT NULL THEN
+        done := CASE WHEN FOUND THEN false END;
+        RETURN NEXT;
+        RETURN;
     END IF;
+    at := clock_timestamp();
+    UPDATE identity.operators AS o SET disabled_at = at
+    WHERE o.id = wanted_operator;
+    WITH gone AS (
+        DELETE FROM identity.sessions AS s
+        WHERE s.operator_id = wanted_operator
+        RETURNING
+            at < s.ends_at
+            AND at < s.last_seen_at + CASE s.realm
+                WHEN 'operator' THEN interval '15 minutes'
+            END AS live
+    )
+
+    SELECT count(*) FILTER (WHERE gone.live) INTO sessions_ended FROM gone;
+    WITH gone AS (
+        DELETE FROM identity.enrollments AS e
+        WHERE e.operator_id = wanted_operator
+        RETURNING at < e.ends_at AS live
+    )
+
+    SELECT count(*) FILTER (WHERE gone.live) INTO links_ended FROM gone;
+    done := true;
     RETURN NEXT;
 END
 $$;
 
 -- Enables a disabled operator again, and says whether it acted: false for an
--- operator already enabled, null for one that does not exist. Their sessions
--- stay ended, and they sign in afresh.
+-- operator already enabled, null for one that does not exist. Like a disable,
+-- it takes the row first, so its answer is the state it leaves. Their
+-- sessions stay ended, and they sign in afresh.
 CREATE FUNCTION enable_operator(wanted_operator bigint)
 RETURNS boolean
-LANGUAGE sql VOLATILE SECURITY DEFINER
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
 AS $$
-    WITH enabled AS (
-        UPDATE identity.operators AS o
-        SET disabled_at = NULL
-        WHERE o.id = wanted_operator AND o.disabled_at IS NOT NULL
-        RETURNING o.id
-    )
-
-    SELECT
-        CASE
-            WHEN EXISTS (SELECT FROM enabled) THEN true
-            WHEN
-                EXISTS (
-                    SELECT FROM identity.operators AS o
-                    WHERE o.id = wanted_operator
-                )
-                THEN false
-        END
+DECLARE
+    was timestamptz;
+BEGIN
+    SELECT o.disabled_at INTO was
+    FROM identity.operators AS o
+    WHERE o.id = wanted_operator
+    FOR NO KEY UPDATE;
+    IF NOT FOUND THEN
+        RETURN null;
+    END IF;
+    UPDATE identity.operators AS o SET disabled_at = null
+    WHERE o.id = wanted_operator;
+    RETURN was IS NOT NULL;
+END
 $$;
 
 -- Ends every session one operator holds in a realm, or every operator's when
@@ -356,6 +369,7 @@ BEGIN
     PERFORM
     FROM identity.operators AS o
     WHERE wanted_operator IS NULL OR o.id = wanted_operator
+    ORDER BY o.id
     FOR NO KEY UPDATE;
     IF NOT FOUND AND wanted_operator IS NOT NULL THEN
         RETURN null;
