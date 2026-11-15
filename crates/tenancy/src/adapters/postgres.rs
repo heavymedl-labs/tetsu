@@ -2,9 +2,8 @@
 
 use deadpool_postgres::Object;
 use tetsu_kernel::Migration;
-use tetsu_postgres::{ModuleTransaction, Pool, TenantTransaction};
+use tetsu_postgres::{Failure, ModuleTransaction, Pool, TenantTransaction};
 use tokio_postgres::Row;
-use tokio_postgres::error::SqlState;
 use tokio_postgres::types::ToSql;
 
 use crate::domain::{Color, Error, Location, NewTenant, Slug, Tenant, TenantId, Theme};
@@ -29,11 +28,6 @@ const INSERT_LOCATION: &str = include_str!("../../sql/insert_location.sql");
 const FIND_TENANT: &str = include_str!("../../sql/find_tenant_by_address.sql");
 const FIND_LOCATIONS: &str = include_str!("../../sql/find_locations.sql");
 const FIND_ADDRESSES_IN_USE: &str = include_str!("../../sql/find_addresses_in_use.sql");
-/// Marks an error from a cached statement that no longer matches its table (ADR-0011).
-const STALE: &str = "stale cached statement: ";
-/// The Postgres function that raises it, which unlike the message does not change with the server's language.
-const STALE_ROUTINE: &str = "RevalidateCachedQuery";
-
 /// Tenancy over Postgres, for the composition root. It returns the use cases, never the store itself
 /// (ADR-0021).
 ///
@@ -79,91 +73,39 @@ struct PostgresTenants {
     pool: Pool,
 }
 
-/// Sorts driver errors as ADR-0011 asks. Only a dropped connection or a stale cached statement is worth
-/// retrying, and every error keeps the driver's message. A taken slug and a taken address are told apart by the
+/// Sorts driver errors through `tetsu_postgres` (ADR-0011). A taken slug and a taken address are told apart by the
 /// constraint each breaks.
 fn database(error: &tokio_postgres::Error) -> Error {
-    let message = message(error);
-    if error.code() == Some(&SqlState::UNIQUE_VIOLATION) {
-        match error.as_db_error().and_then(|db| db.constraint()) {
+    from_failure(tetsu_postgres::sort(error))
+}
+
+fn commit_error(error: &tokio_postgres::Error) -> Error {
+    from_failure(tetsu_postgres::sort_commit(error))
+}
+
+fn pool_error(error: deadpool_postgres::PoolError) -> Error {
+    from_failure(tetsu_postgres::sort_pool(error))
+}
+
+fn from_failure(failure: Failure) -> Error {
+    match failure {
+        Failure::Taken {
+            constraint,
+            message,
+        } => match constraint.as_deref() {
             Some("tenants_slug_key") => Error::SlugTaken,
             Some("addresses_pkey") => Error::AddressTaken,
             _ => Error::Storage(message),
-        }
-    } else if is_stale(error) {
-        Error::Unavailable(format!("{STALE}{message}"))
-    } else if error.is_closed() || is_io(error) || is_server_unavailable(error) {
-        Error::Unavailable(message)
-    } else {
-        Error::Storage(message)
+        },
+        Failure::Temporary(why) => Error::Unavailable(why),
+        Failure::Permanent(why) => Error::Storage(why),
     }
 }
 
-/// A commit Postgres answered was refused and rolled back, so it is sorted like any other error. One with no
-/// answer may still have been saved, so a retry is not safe: it is never temporary (ADR-0011).
-fn commit_error(error: &tokio_postgres::Error) -> Error {
-    if error.as_db_error().is_none() {
-        return Error::Storage(format!("commit outcome unknown: {}", message(error)));
-    }
-    match database(error) {
-        Error::Storage(why) | Error::Unavailable(why) => {
-            Error::Storage(format!("commit refused: {why}"))
-        }
-        other => other,
-    }
-}
-
-/// The driver's own text is just "db error" or "error connecting to server", so this keeps what Postgres said,
-/// or the cause underneath, such as a refused connection.
-fn message(error: &tokio_postgres::Error) -> String {
-    if let Some(db) = error.as_db_error() {
-        return db.message().to_string();
-    }
-    let causes: Vec<String> =
-        std::iter::successors(Some(error as &dyn std::error::Error), |e| e.source())
-            .map(ToString::to_string)
-            .collect();
-    causes.join(": ")
-}
-
-/// The server ending the session for a restart, crash, or failover, still starting up, or out of connections.
-/// A query running at that moment gets one of these, not a closed connection.
-fn is_server_unavailable(error: &tokio_postgres::Error) -> bool {
-    error.code().is_some_and(|code| {
-        [
-            SqlState::ADMIN_SHUTDOWN,
-            SqlState::CRASH_SHUTDOWN,
-            SqlState::CANNOT_CONNECT_NOW,
-            SqlState::TOO_MANY_CONNECTIONS,
-        ]
-        .contains(code)
-    })
-}
-
-fn is_stale(error: &tokio_postgres::Error) -> bool {
-    error.as_db_error().is_some_and(|db| {
-        db.code() == &SqlState::FEATURE_NOT_SUPPORTED && db.routine() == Some(STALE_ROUTINE)
-    })
-}
-
-fn is_io(error: &tokio_postgres::Error) -> bool {
-    std::error::Error::source(error).is_some_and(<dyn std::error::Error>::is::<std::io::Error>)
-}
-
-/// A pool timeout or a lost connection is worth retrying. A refused login or bad settings is not.
-fn pool_error(error: deadpool_postgres::PoolError) -> Error {
-    match error {
-        deadpool_postgres::PoolError::Timeout(_) => Error::Unavailable(error.to_string()),
-        deadpool_postgres::PoolError::Backend(error) => database(&error),
-        other => Error::Storage(other.to_string()),
-    }
-}
-
-/// A stale statement stays cached until the caches are cleared. Every pooled connection may hold it,
-/// so clear them all before the next request.
+/// Clears every pooled connection's statement cache after a stale statement, before the next request.
 fn clear_if_stale<T>(pool: &Pool, result: Result<T, Error>) -> Result<T, Error> {
-    if matches!(&result, Err(Error::Unavailable(why)) if why.starts_with(STALE)) {
-        pool.manager().statement_caches.clear();
+    if let Err(Error::Unavailable(why)) = &result {
+        tetsu_postgres::clear_if_stale(pool, why);
     }
     result
 }
@@ -333,79 +275,4 @@ fn location_from(row: &Row) -> Result<Location, Error> {
 
 fn text(row: &Row, column: &str) -> Result<String, Error> {
     row.try_get(column).map_err(|e| database(&e))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A connection, a second one to end it with, and the first one's server process id.
-    async fn client_and_its_killer() -> (
-        tetsu_postgres::test_support::TestDatabase,
-        tokio_postgres::Client,
-        tokio_postgres::Client,
-        i32,
-    ) {
-        let settings = tetsu_postgres::test_support::fresh_database()
-            .await
-            .expect("a test database");
-        let client = tetsu_postgres::connect(&settings).await.expect("connects");
-        let admin = tetsu_postgres::connect(&settings).await.expect("connects");
-        let row = client
-            .query_one("SELECT pg_backend_pid() AS pid", &[])
-            .await
-            .expect("finds its pid");
-        let pid = row.try_get("pid").expect("maps");
-        (settings, client, admin, pid)
-    }
-
-    /// The pool replaces a dead connection, so this case is a race in practice: test the sorting directly.
-    #[tokio::test]
-    async fn a_connection_the_server_closed_is_temporary() {
-        let (_database, client, admin, pid) = client_and_its_killer().await;
-        admin
-            .execute("SELECT pg_terminate_backend($1)", &[&pid])
-            .await
-            .expect("ends the connection");
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        let error = client
-            .query_one("SELECT 1", &[])
-            .await
-            .expect_err("the connection is closed");
-        assert!(matches!(database(&error), Error::Unavailable(_)), "{error}");
-    }
-
-    /// A restart or failover ends sessions with a FATAL error that reaches a query still running, not a closed
-    /// connection, so it must be sorted as temporary too.
-    #[tokio::test]
-    async fn a_query_the_server_cuts_off_is_temporary() {
-        let (_database, client, admin, pid) = client_and_its_killer().await;
-        let running =
-            tokio::spawn(async move { client.query_one("SELECT pg_sleep(10)", &[]).await });
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        admin
-            .execute("SELECT pg_terminate_backend($1)", &[&pid])
-            .await
-            .expect("ends the session");
-        let error = running
-            .await
-            .expect("the query task ends")
-            .expect_err("the query is cut off");
-        assert_eq!(error.code(), Some(&SqlState::ADMIN_SHUTDOWN), "{error}");
-        assert!(matches!(database(&error), Error::Unavailable(_)), "{error}");
-    }
-
-    #[tokio::test]
-    async fn only_a_stale_plan_counts_among_unsupported_features() {
-        let settings = tetsu_postgres::test_support::fresh_database()
-            .await
-            .expect("a test database");
-        let client = tetsu_postgres::connect(&settings).await.expect("connects");
-        let error = client
-            .query("SELECT count(*) FROM pg_class FOR UPDATE", &[])
-            .await
-            .expect_err("unsupported");
-        assert_eq!(error.code(), Some(&SqlState::FEATURE_NOT_SUPPORTED));
-        assert!(matches!(database(&error), Error::Storage(_)), "{error}");
-    }
 }

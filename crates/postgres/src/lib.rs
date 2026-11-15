@@ -1,9 +1,10 @@
-//! Postgres connections (ADR-0011, ADR-0013), the migration runner (ADR-0007, ADR-0012), tenant isolation
+//! Postgres connections (ADR-0011, ADR-0013), sorting the driver's errors (ADR-0011), the migration runner (ADR-0007, ADR-0012), tenant isolation
 //! (ADR-0042), and domain events through each module's outbox (ADR-0043). A module that records events adds
 //! [`OUTBOX`] as one of its migrations, and one that consumes them adds [`INBOX`] and implements [`Consumer`].
 
 mod connection;
 mod events;
+mod failure;
 mod isolation;
 mod migrate;
 mod roles;
@@ -16,6 +17,7 @@ pub use deadpool_postgres::{Object, Pool, Transaction};
 pub use events::{
     Applied, Consumer, Dispatcher, Event, INBOX, KEPT_FOR, MAX_ATTEMPTS, NewEvent, OUTBOX,
 };
+pub use failure::{Failure, STALE, clear_if_stale, sort, sort_commit, sort_pool};
 pub use isolation::{
     isolation_violations, isolation_violations_for, module_schemas, rows_seen_without_a_tenant,
 };
