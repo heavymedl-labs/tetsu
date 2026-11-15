@@ -156,7 +156,10 @@ jobs:
           echo "$TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           docker push "$IMAGE"
           docker logout ghcr.io
-          docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE" >digest
+          # The image may carry digests under other names, such as the one it was loaded as, in any order, so the
+          # pushed one is picked by its repository; finding none fails the job rather than record another.
+          docker inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$IMAGE" |
+            grep -m1 '^ghcr\.io/heavymedl-labs/tetsu@sha256:[0-9a-f]\{64\}$' >digest
           cat digest
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
