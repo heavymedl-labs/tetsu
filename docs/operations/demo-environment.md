@@ -28,13 +28,10 @@ A rollback cannot cross a migration that takes rights away. Code from before
 Tenancy's second migration forbids, so every request it served would fail; fix forward instead. The same is true of
 the old instance in the minute between the Migrate step and Render's switch to the new one.
 
-Seeding is still by hand until [#73](https://github.com/heavymedl-labs/tetsu/issues/73), as `tetsu_app`, like
-`tetsu serve`. Copy `DATABASE_URL` from the service's environment in Render and paste it at the prompt, so it is never
-shown or saved; `seed` skips tenants that exist:
-
-```bash
-read -rs DATABASE_URL && DATABASE_URL="$DATABASE_URL" tetsu seed ../tetsu-demos/demos
-```
+Every deploy that migrates then seeds the demo businesses from the private `tetsu-demos` repository, with the image
+it deploys, as `tetsu_app` ([ADR-0062](../adr/0062-seeding-from-the-deploy.md)). Seeding skips businesses that exist,
+so a deploy that resets the demo leaves it complete. To add a business, add its file to `tetsu-demos` and run a
+deploy.
 
 ## Neon
 
@@ -181,8 +178,8 @@ gh workflow run deploy -f reset=tenancy,audit
 ```
 
 The Reset step checks the server against the floor, then drops the named schemas, records of applied files
-included, and migrates and checks as usual; it drops nothing if any name is not a module's schema. Then seed as in
-[Deploying](#deploying). The demo serves errors from the drop until the deploy finishes.
+included, migrates, checks, and seeds as usual; it drops nothing if any name is not a module's schema. The demo
+serves errors from the drop until the deploy finishes.
 
 ## When `serve` refuses to start
 

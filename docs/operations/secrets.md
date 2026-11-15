@@ -15,7 +15,8 @@ tool that made it into its store, never shown.
 | --- | --- | --- | --- | --- |
 | `GITHUB_TOKEN` | GitHub, issued per workflow run | That run, with the permissions below | Each workflow's own API calls | automatic |
 | `MIGRATION_DATABASE_URL` | GitHub Actions, repository secret | Role `tetsu_owner` on Neon project `tetsu-demo`, direct endpoint, which owns Tetsu's schemas and creates its roles; set from a password no one kept ([runbook](demo-environment.md#moving-onto-tetsus-own-roles)) | `deploy.yml`'s Reset, Migrate, and Check isolation steps | 2026-11-12 |
-| `RENDER_API_KEY` | GitHub Actions, repository secret | The maintainer's Render account; Render offers no narrower key | `deploy.yml`'s Deploy step, and its chore job, which reads the service's `DATABASE_URL` through it and masks it | 2026-11-09 |
+| `RENDER_API_KEY` | GitHub Actions, repository secret | The maintainer's Render account; Render offers no narrower key | `deploy.yml`'s Deploy and Seed steps, and its chore job, which read the service's `DATABASE_URL` through it and mask it | 2026-11-09 |
+| `DEMOS_READ_TOKEN` | GitHub Actions, repository secret | A fine-grained GitHub token that reaches only `heavymedl-labs/tetsu-demos`, with read access to its contents (ADR-0062) | `deploy.yml`'s Fetch the demo businesses step | 2026-11-15 |
 | `DATABASE_URL` | Render, environment of service `tetsu-demo` | Role `tetsu_app`, which acts only as module roles, one transaction at a time | `tetsu serve` | 2026-11-09 |
 | `OTEL_EXPORTER_OTLP_HEADERS` | Render, environment of service `tetsu-demo` | Grafana Cloud token `render-tetsu-demo` on access policy `tetsu-demo-logs`: only `logs:write` on stack `regalchicken947`; it never expires, so it rotates yearly ([runbook](demo-environment.md#logs-and-alerts)) | `tetsu serve`'s log export | 2026-11-13 |
 | `ghcr-tetsu` | Render, registry credential | A GitHub classic token with only `read:packages`, expiring 2027-11-09 | Render pulling the private image | 2026-11-09 |
@@ -31,6 +32,7 @@ here that has passed.
 
 | What | Renew by | Why |
 | --- | --- | --- |
+| `DEMOS_READ_TOKEN` | 2027-11-15 | The GitHub token expires; make a new one the same way, with the same one repository and read access only |
 | `ghcr-tetsu` | 2027-11-09 | The GitHub token expires; make a new one with only `read:packages` and set it on Render |
 | Grafana Cloud trial | 2026-11-27 | The stack's trial ends; with no card on file it stays on the free plan, so check a `served` line still arrives, then remove this row |
 

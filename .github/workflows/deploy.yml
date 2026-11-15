@@ -152,6 +152,30 @@ jobs:
           DATABASE_URL: ${{ secrets.MIGRATION_DATABASE_URL }}
           DIGEST: ${{ steps.image.outputs.digest }}
         run: docker run --rm -e DATABASE_URL "$DIGEST" check
+      # The demo businesses, from the private tetsu-demos repository, with the image being deployed (ADR-0062).
+      # Seeding skips businesses that exist, so after a reset the demo is complete again. The files are read with a
+      # token that reaches only that repository, and seeded as the application role, whose URL lives on Render.
+      - name: Fetch the demo businesses
+        if: inputs.rollback_to == ''
+        env:
+          GH_TOKEN: ${{ secrets.DEMOS_READ_TOKEN }}
+        run: gh repo clone heavymedl-labs/tetsu-demos "$RUNNER_TEMP/tetsu-demos" -- --depth 1 --quiet
+      - name: Seed the demo businesses
+        if: inputs.rollback_to == ''
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          SERVICE: ${{ vars.RENDER_SERVICE_ID }}
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          DATABASE_URL="$(curl -fsS -H "Authorization: Bearer $RENDER_API_KEY" -H "Accept: application/json" \
+            "https://api.render.com/v1/services/$SERVICE/env-vars/DATABASE_URL" | jq -r '.value // ""')"
+          echo "::add-mask::$DATABASE_URL"
+          if [[ ! "$DATABASE_URL" =~ ^postgres(ql)?:// ]]; then
+            echo "::error::The Render service's DATABASE_URL could not be read as a Postgres URL."
+            exit 1
+          fi
+          export DATABASE_URL
+          docker run --rm -e DATABASE_URL -v "$RUNNER_TEMP/tetsu-demos/demos:/demos:ro" "$DIGEST" seed /demos
       - name: Install the Render CLI
         run: |
           zip="cli_${RENDER_CLI_VERSION}_linux_amd64.zip"
