@@ -225,7 +225,19 @@ fn listed(operator: &OperatorSummary) -> String {
     } else {
         "enabled"
     };
-    format!("{}  {}  {state}", operator.id.get(), operator.name)
+    let passkeys = match operator.passkeys {
+        1 => "1 passkey".to_string(),
+        count => format!("{count} passkeys"),
+    };
+    let link = operator
+        .link_minutes
+        .map(|minutes| format!("  link open {minutes} min"))
+        .unwrap_or_default();
+    format!(
+        "{}  {}  {state}  {passkeys}{link}",
+        operator.id.get(),
+        operator.name
+    )
 }
 
 /// The enrollment link, with the token in the fragment, which a browser never sends to the server or in a
@@ -359,6 +371,27 @@ mod tests {
         assert_eq!(read_small(binary.join("hostname")), None);
     }
 
+    /// A list line counts passkeys in words that read right for one, and shows a link only while it is open.
+    #[test]
+    fn a_list_line_counts_passkeys_and_shows_an_open_link() {
+        let operator = |passkeys, link_minutes| OperatorSummary {
+            id: OperatorId::parse("3").unwrap(),
+            name: "Ana Ortiz".into(),
+            created_at: std::time::SystemTime::UNIX_EPOCH,
+            disabled_at: None,
+            passkeys,
+            link_minutes,
+        };
+        assert_eq!(
+            listed(&operator(1, None)),
+            "3  Ana Ortiz  enabled  1 passkey"
+        );
+        assert_eq!(
+            listed(&operator(2, Some(7))),
+            "3  Ana Ortiz  enabled  2 passkeys  link open 7 min"
+        );
+    }
+
     /// Who runs the command is `SUDO_USER`, `USER`, or `LOGNAME`, the first that is set and not blank, and no one
     /// when one is not UTF-8.
     #[test]
@@ -458,7 +491,7 @@ mod tests {
         }
         assert_eq!(
             said(&operators, Operator::List).await,
-            ["1  Kurt Medley  enabled"]
+            ["1  Kurt Medley  enabled  0 passkeys  link open 60 min"]
         );
         assert_eq!(
             said(&operators, Operator::EndSessions { id: kurt }).await,
@@ -492,7 +525,7 @@ mod tests {
         );
         assert_eq!(
             said(&operators, Operator::List).await,
-            ["1  Kurt Medley  disabled"]
+            ["1  Kurt Medley  disabled  0 passkeys"]
         );
         assert_eq!(
             act(&operators, Operator::Enroll { id: kurt }, ORIGIN, &by()).await,

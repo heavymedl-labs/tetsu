@@ -9,7 +9,7 @@ use tokio_postgres::Row;
 use tokio_postgres::types::{FromSql, ToSql};
 
 use crate::domain::{
-    Actor, Disabling, Error, OperatorId, OperatorName, OperatorSummary, Realm, Session,
+    Actor, Disabling, Error, Issue, OperatorId, OperatorName, OperatorSummary, Realm, Session,
 };
 use crate::ports::OperatorStore;
 use crate::use_cases::Operators;
@@ -263,23 +263,15 @@ impl OperatorStore for PostgresOperators {
         hash: &[u8; 32],
         operator: OperatorId,
         actor: &Actor,
-    ) -> Result<Option<bool>, Error> {
+    ) -> Result<Option<Issue>, Error> {
         let id = operator.get();
         let parameters: [&(dyn ToSql + Sync); 2] = [&hash.as_slice(), &id];
-        self.change(ISSUE_ENROLLMENT, &parameters, |issued| {
-            let outcome = if issued == Some(true) {
-                "changed"
-            } else {
-                "refused"
-            };
-            event(
-                "identity.enrollment_issued",
-                actor,
-                outcome,
-                json!({"operator_id": id}),
-            )
+        let issued = OnceLock::new();
+        self.query_recording(ISSUE_ENROLLMENT, &parameters, &|rows| {
+            issuance(rows, id, actor, &issued)
         })
-        .await
+        .await?;
+        Ok(issued.get().copied().flatten())
     }
 
     async fn disable_operator(
@@ -372,14 +364,7 @@ impl OperatorStore for PostgresOperators {
         self.query(LIST_OPERATORS, &[])
             .await?
             .iter()
-            .map(|row| {
-                Ok(OperatorSummary {
-                    id: OperatorId::new(column(row, "id")?),
-                    name: column(row, "name")?,
-                    created_at: column(row, "created_at")?,
-                    disabled_at: column(row, "disabled_at")?,
-                })
-            })
+            .map(summary_from)
             .collect()
     }
 }
@@ -448,6 +433,57 @@ fn created(found: Option<(i64, bool)>) -> Result<OperatorId, Error> {
             "another operator already has that name".to_string(),
         )),
     }
+}
+
+/// Reads what issuing a link came to, keeps it in `issued`, and makes the event it records: changed when a link
+/// was issued, and refused otherwise, with the reason.
+fn issuance(
+    rows: &[Row],
+    id: i64,
+    actor: &Actor,
+    issued: &OnceLock<Option<Issue>>,
+) -> Result<Option<(&'static str, String)>, Error> {
+    let issue = rows
+        .first()
+        .map_or(Ok(None), |row| column::<Option<String>>(row, "issued"))
+        .and_then(|answer| answer.as_deref().map(issue_from).transpose())?;
+    let _ = issued.set(issue);
+    Ok(Some(issuance_event(issue, id, actor)))
+}
+
+/// An answer Identity's database never writes is a storage failure, never a guess.
+fn issue_from(text: &str) -> Result<Issue, Error> {
+    Issue::parse(text).ok_or_else(|| Error::Storage(format!("issuing a link answered {text:?}")))
+}
+
+/// The event issuing a link records for what it came to.
+fn issuance_event(issue: Option<Issue>, id: i64, actor: &Actor) -> (&'static str, String) {
+    let (outcome, reason) = match issue {
+        Some(Issue::Issued) => ("changed", None),
+        Some(Issue::Disabled) => ("refused", Some("disabled")),
+        Some(Issue::Enrolled) => ("refused", Some("enrolled")),
+        None => ("refused", Some("unknown")),
+    };
+    event(
+        "identity.enrollment_issued",
+        actor,
+        outcome,
+        json!({"operator_id": id, "reason": reason}),
+    )
+}
+
+/// An operator as listed, with their passkeys and open link.
+fn summary_from(row: &Row) -> Result<OperatorSummary, Error> {
+    let passkeys: i64 = column(row, "passkeys")?;
+    let link_minutes: Option<i64> = column(row, "link_minutes")?;
+    Ok(OperatorSummary {
+        id: OperatorId::new(column(row, "id")?),
+        name: column(row, "name")?,
+        created_at: column(row, "created_at")?,
+        disabled_at: column(row, "disabled_at")?,
+        passkeys: u64::try_from(passkeys).unwrap_or_default(),
+        link_minutes: link_minutes.map(|minutes| u64::try_from(minutes).unwrap_or_default()),
+    })
 }
 
 /// The operator a create added, or the one already holding its name.
@@ -584,6 +620,38 @@ mod tests {
         );
     }
 
+    /// Issuing a link records what it came to and why, in this one build, which llvm-cov scores on its own, and
+    /// an answer the database never writes is a storage failure.
+    #[test]
+    fn issuing_a_link_records_what_it_came_to() {
+        let recorded = |issue| {
+            let (kind, payload) = issuance_event(issue, 7, &support::actor());
+            let payload: serde_json::Value = serde_json::from_str(&payload).expect("JSON");
+            (kind, payload["outcome"].clone(), payload["reason"].clone())
+        };
+        let kind = "identity.enrollment_issued";
+        assert_eq!(
+            recorded(Some(Issue::Issued)),
+            (kind, json!("changed"), json!(null))
+        );
+        assert_eq!(
+            recorded(Some(Issue::Disabled)),
+            (kind, json!("refused"), json!("disabled"))
+        );
+        assert_eq!(
+            recorded(Some(Issue::Enrolled)),
+            (kind, json!("refused"), json!("enrolled"))
+        );
+        assert_eq!(recorded(None), (kind, json!("refused"), json!("unknown")));
+        assert_eq!(issue_from("enrolled"), Ok(Issue::Enrolled));
+        assert_eq!(
+            issue_from("maybe"),
+            Err(Error::Storage(
+                "issuing a link answered \"maybe\"".to_string()
+            ))
+        );
+    }
+
     /// A create says what it found and records it, in this one build, which llvm-cov scores on its own: an
     /// operator added, a name another holds, or a name taken by one it cannot yet see.
     #[test]
@@ -698,6 +766,52 @@ mod tests {
                 "no enabled operator {}",
                 kurt.get()
             )))
+        );
+    }
+
+    /// An operator who holds a passkey is issued no link, in this one build, which llvm-cov scores on its own, and
+    /// an answer the database never writes is a storage failure.
+    #[tokio::test]
+    async fn an_enrolled_operator_is_issued_no_link() {
+        let (pool, database) = support::migrated().await;
+        let operators = Operators::new(PostgresOperators { pool });
+        let lee = operators
+            .create(
+                &OperatorName::parse("Lee Park").expect("a name"),
+                &support::actor(),
+            )
+            .await
+            .expect("creates");
+        let admin = tetsu_postgres::connect(&database).await.expect("connects");
+        admin
+            .execute(
+                "INSERT INTO identity.passkeys (credential_id, operator_id, passkey, aaguid, created_at)
+                 VALUES (sha256('lee'::bytea), $1, '{}', gen_random_uuid(), now())",
+                &[&lee.get()],
+            )
+            .await
+            .expect("stores a passkey");
+        assert_eq!(
+            operators.enroll(lee, &support::actor()).await.map(drop),
+            Err(Error::Invalid(format!(
+                "operator {} has a passkey already, and adds another after signing in",
+                lee.get()
+            )))
+        );
+        admin
+            .batch_execute(
+                "DROP FUNCTION identity.issue_enrollment(bytea, bigint);
+                 CREATE FUNCTION identity.issue_enrollment(bytea, bigint) RETURNS text
+                 LANGUAGE sql AS 'SELECT ''maybe''::text';
+                 GRANT EXECUTE ON FUNCTION identity.issue_enrollment(bytea, bigint) TO tetsu_identity",
+            )
+            .await
+            .expect("replaces");
+        assert_eq!(
+            operators.enroll(lee, &support::actor()).await.map(drop),
+            Err(Error::Storage(
+                "issuing a link answered \"maybe\"".to_string()
+            ))
         );
     }
 

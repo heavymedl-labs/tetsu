@@ -612,6 +612,7 @@ async fn an_operator_id_of_the_wrong_type_is_an_error() {
         &database,
         "ALTER TABLE identity.sessions DROP CONSTRAINT sessions_operator_id_fkey;
          ALTER TABLE identity.enrollments DROP CONSTRAINT enrollments_operator_id_fkey;
+         ALTER TABLE identity.passkeys DROP CONSTRAINT passkeys_operator_id_fkey;
          DROP TABLE identity.operators;
          CREATE TABLE identity.operators (id text NOT NULL DEFAULT 'one', name text NOT NULL);
          GRANT SELECT, INSERT ON identity.operators TO tetsu_identity",

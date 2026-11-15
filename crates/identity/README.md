@@ -50,7 +50,9 @@ ends their sessions. `postgres_store(pool)` returns it over Postgres.
 [ADR-0059](../../docs/adr/0059-session-controls-and-request-checks.md)) works through these use cases:
 
 - **An enrollment link** carries 256 random bits, stored only as their hash, good once and for an hour, by one
-  reading of the clock. Each operator has one open link at most; a new one replaces the last. The command prints
+  reading of the clock. Each operator has one open link at most; a new one replaces the last. An operator who
+  holds a passkey is issued none, since another passkey is added only after signing in (`v5.0.0-6.4.1`). The
+  command prints
   it only to a terminal, a guard against it landing in a log by accident; the trust boundary is access to the
   database. The token sits in the link's fragment, which a browser never sends to a server, though its history
   keeps it. The page a link opens, `/ops/enroll`, arrives with passkeys, so until then a link opens nothing.
@@ -89,7 +91,8 @@ ends their sessions. `postgres_store(pool)` returns it over Postgres.
 
 ## Not yet
 
-Passkeys and consuming an enrollment link, revoking a link on its own (today a new link or a disable ends it), refusing a link to an operator who already has a passkey, the sign-in
+Enrolling and signing in with passkeys, which the `passkeys` table already holds, revoking a link on its own
+(today a new link or a disable ends it), the sign-in
 pages, the `Sec-Fetch-Site` check, the headers that apply these checks, the session list
 ([ADR-0059](../../docs/adr/0059-session-controls-and-request-checks.md)), rate limits, the `identity.signed_in`
 event, and running the dispatcher that carries Identity's events to the audit record arrive in later steps of

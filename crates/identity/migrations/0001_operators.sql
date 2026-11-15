@@ -61,9 +61,30 @@ CREATE TABLE enrollments (
 COMMENT ON TABLE enrollments IS
 'tetsu:global: found by its token before anyone is signed in';
 
+-- An operator's passkeys, two at most (ADR-0057), each as webauthn-rs keeps
+-- it: a public key, a signature counter, and flags, never a secret.
+CREATE TABLE passkeys (
+    credential_id bytea PRIMARY KEY CHECK (
+        octet_length(credential_id) >= 16
+        AND octet_length(credential_id) <= 1023
+    ),
+    operator_id bigint NOT NULL REFERENCES operators (id),
+    passkey jsonb NOT NULL CHECK (octet_length(passkey::text) <= 8192),
+    -- Which kind of authenticator made it, kept for the attestation gate
+    -- before the Level 2 review (ADR-0057); all zeros when it does not say.
+    aaguid uuid NOT NULL,
+    created_at timestamptz NOT NULL,
+    last_used_at timestamptz
+);
+
+COMMENT ON TABLE passkeys IS
+'tetsu:global: found by its credential before anyone is signed in';
+
+CREATE INDEX passkeys_operator_id ON passkeys (operator_id);
+
 -- The runner's default privileges give Identity's role every right on a new
 -- table; each is replaced by exactly what is granted below.
-REVOKE ALL ON operators, sessions, enrollments FROM tetsu_identity;
+REVOKE ALL ON operators, sessions, enrollments, passkeys FROM tetsu_identity;
 REVOKE ALL ON SEQUENCE operators_id_seq FROM tetsu_identity;
 
 -- Identity's role adds and reads operators, and reaches sessions and links
@@ -71,8 +92,7 @@ REVOKE ALL ON SEQUENCE operators_id_seq FROM tetsu_identity;
 -- list them. Those functions read whether an operator is disabled, and lock
 -- its row while they do, so a disable at the same moment never misses what
 -- they add.
-GRANT SELECT (id, name, created_at, disabled_at), INSERT (name) ON operators
-TO tetsu_identity;
+GRANT SELECT (id, name), INSERT (name) ON operators TO tetsu_identity;
 GRANT SELECT (
     token_hash, realm, operator_id, started_at, last_seen_at, ends_at
 ),
@@ -82,8 +102,9 @@ DELETE ON sessions TO tetsu_identity_lookup;
 GRANT SELECT, INSERT, DELETE ON enrollments TO tetsu_identity_lookup;
 GRANT UPDATE (token_hash, issued_at, ends_at) ON enrollments
 TO tetsu_identity_lookup;
-GRANT SELECT (id, disabled_at), UPDATE (disabled_at) ON operators
-TO tetsu_identity_lookup;
+GRANT SELECT (id, name, created_at, disabled_at), UPDATE (disabled_at)
+ON operators TO tetsu_identity_lookup;
+GRANT SELECT (operator_id) ON passkeys TO tetsu_identity_lookup;
 
 -- Each realm's limits live here, beside the clock that applies them, so no
 -- caller can lengthen a session by passing other numbers (ADR-0048). Each
@@ -218,50 +239,80 @@ AS $$
 $$;
 
 -- Issues an operator's enrollment link, replacing any earlier one, and says
--- whether it did: false for a disabled operator, who is issued none, and null
--- for one that does not exist. It reads the
+-- what it did: issued; disabled, for an operator issued none; enrolled, for
+-- one who has a passkey already and adds another only after signing in
+-- (v5.0.0-6.4.1); or null for one that does not exist. It takes the
+-- operator's row, so a passkey being stored for them is seen, and reads the
 -- clock once, so every link lasts exactly an hour.
 CREATE FUNCTION issue_enrollment(wanted_hash bytea, wanted_operator bigint)
-RETURNS boolean
-LANGUAGE sql VOLATILE SECURITY DEFINER
+RETURNS text
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
 AS $$
-    WITH clock AS (SELECT clock_timestamp() AS at),
+DECLARE
+    at timestamptz;
+    was timestamptz;
+BEGIN
+    SELECT o.disabled_at INTO was
+    FROM identity.operators AS o
+    WHERE o.id = wanted_operator
+    FOR SHARE;
+    IF NOT FOUND THEN
+        RETURN null;
+    ELSIF was IS NOT NULL THEN
+        RETURN 'disabled';
+    ELSIF EXISTS (
+        SELECT FROM identity.passkeys AS p WHERE p.operator_id = wanted_operator
+    ) THEN
+        RETURN 'enrolled';
+    END IF;
+    at := clock_timestamp();
+    INSERT INTO identity.enrollments
+        (token_hash, operator_id, issued_at, ends_at)
+    VALUES (wanted_hash, wanted_operator, at, at + interval '1 hour')
+    ON CONFLICT (operator_id) DO UPDATE
+        SET
+            token_hash = excluded.token_hash,
+            issued_at = excluded.issued_at,
+            ends_at = excluded.ends_at;
+    RETURN 'issued';
+END
+$$;
 
-    enabled AS (
-        SELECT o.id
-        FROM identity.operators AS o
-        WHERE o.id = wanted_operator AND o.disabled_at IS NULL
-        FOR SHARE
-    ),
-
-    issued AS (
-        INSERT INTO identity.enrollments
-            (token_hash, operator_id, issued_at, ends_at)
-        SELECT
-            wanted_hash,
-            enabled.id,
-            clock.at,
-            clock.at + interval '1 hour'
-        FROM enabled, clock
-        ON CONFLICT (operator_id) DO UPDATE
-            SET
-                token_hash = excluded.token_hash,
-                issued_at = excluded.issued_at,
-                ends_at = excluded.ends_at
-        RETURNING operator_id
-    )
-
+-- Every operator, oldest first, with how many passkeys each holds and how many
+-- minutes their open enrollment link has left, if one is open. Only counts
+-- and times leave: never a credential or a token's hash.
+CREATE FUNCTION list_operators()
+RETURNS TABLE (
+    id bigint,
+    name text,
+    created_at timestamptz,
+    disabled_at timestamptz,
+    passkeys bigint,
+    link_minutes bigint
+)
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
     SELECT
-        CASE
-            WHEN EXISTS (SELECT FROM issued) THEN true
-            WHEN
-                EXISTS (
-                    SELECT FROM identity.operators AS o
-                    WHERE o.id = wanted_operator
-                )
-                THEN false
-        END
+        o.id,
+        o.name,
+        o.created_at,
+        o.disabled_at,
+        (
+            SELECT count(*) FROM identity.passkeys AS p
+            WHERE p.operator_id = o.id
+        ) AS passkeys,
+        (
+            SELECT
+                ceil(
+                    extract(EPOCH FROM e.ends_at - clock_timestamp()) / 60
+                )::bigint
+            FROM identity.enrollments AS e
+            WHERE e.operator_id = o.id AND e.ends_at > clock_timestamp()
+        ) AS link_minutes
+    FROM identity.operators AS o
+    ORDER BY o.id
 $$;
 
 -- Disables an operator, then ends every session it holds in any realm and its
@@ -394,11 +445,11 @@ $$;
 
 REVOKE EXECUTE ON FUNCTION start_session(bytea, text, bigint),
 use_session(bytea, text), end_session(bytea, text),
-issue_enrollment(bytea, bigint), disable_operator(bigint),
+issue_enrollment(bytea, bigint), list_operators(), disable_operator(bigint),
 enable_operator(bigint), end_sessions(text, bigint) FROM public;
 GRANT EXECUTE ON FUNCTION start_session(bytea, text, bigint),
 use_session(bytea, text), end_session(bytea, text),
-issue_enrollment(bytea, bigint), disable_operator(bigint),
+issue_enrollment(bytea, bigint), list_operators(), disable_operator(bigint),
 enable_operator(bigint), end_sessions(text, bigint) TO tetsu_identity;
 
 -- A new owner needs CREATE on the schema at the moment it takes a function,
@@ -409,6 +460,7 @@ OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION use_session(bytea, text) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION end_session(bytea, text) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION issue_enrollment(bytea, bigint) OWNER TO tetsu_identity_lookup;
+ALTER FUNCTION list_operators() OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION disable_operator(bigint) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION enable_operator(bigint) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION end_sessions(text, bigint) OWNER TO tetsu_identity_lookup;

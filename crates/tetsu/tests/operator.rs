@@ -79,7 +79,10 @@ async fn no_enrollment_link_is_printed_to_a_pipe() {
         );
         assert_eq!(out(&refused), "");
     }
-    assert_eq!(out(&operator(&app, &["list"])), "1  Kurt Medley  enabled\n");
+    assert_eq!(
+        out(&operator(&app, &["list"])),
+        "1  Kurt Medley  enabled  0 passkeys\n"
+    );
 }
 
 /// The commands that print no link run anywhere, and say what they did.
@@ -101,7 +104,7 @@ async fn operators_are_listed_signed_out_and_disabled() {
             &["enable", "1"],
             "enabled operator 1, who signs in afresh\n",
         ),
-        (&["list"], "1  Kurt Medley  enabled\n"),
+        (&["list"], "1  Kurt Medley  enabled  0 passkeys\n"),
     ] {
         let output = operator(&app, args);
         assert!(output.status.success(), "{args:?}: {output:?}");

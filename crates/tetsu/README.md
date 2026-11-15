@@ -19,7 +19,7 @@ names no business that uses Tetsu. Its root page names fictional customers only 
 | `tetsu rename <address> <new slug>` | Moves the tenant at an address, such as one a release has since reserved, to a new slug and its address |
 | `tetsu operator create <name>` | Creates an operator and prints their enrollment link, good once and for an hour. Prints a link only to a terminal |
 | `tetsu operator enroll <id>` | Prints a new enrollment link for an operator, replacing the last. Only to a terminal |
-| `tetsu operator list` | Lists operators: ID, name, and whether they are enabled |
+| `tetsu operator list` | Lists operators: ID, name, whether they are enabled, their passkeys, and the minutes left on an open enrollment link |
 | `tetsu operator disable <id>` | Disables an operator, ending their sessions and enrollment link |
 | `tetsu operator enable <id>` | Enables a disabled operator again; their sessions stay ended |
 | `tetsu operator end-sessions <id \| --all>` | Ends one operator's sessions, or every operator's |

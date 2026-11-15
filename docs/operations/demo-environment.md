@@ -181,6 +181,9 @@ The Reset step checks the server against the floor, then drops the named schemas
 included, migrates, checks, and seeds as usual; it drops nothing if any name is not a module's schema. The demo
 serves errors from the drop until the deploy finishes.
 
+**Pending:** Identity's first migration gains passkeys during #110's step 4, so the next deploy must run with
+`-f reset=identity`. The demo holds no operators yet, so nothing is lost. Remove this note once it has run.
+
 ## When `serve` refuses to start
 
 `tetsu serve` will not start while a stored tenant holds an address a release has since reserved for Tetsu's own

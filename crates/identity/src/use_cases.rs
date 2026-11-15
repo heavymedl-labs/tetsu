@@ -2,8 +2,8 @@
 
 use crate::browser::{Change, ForChange, Origins, SignOut};
 use crate::domain::{
-    Actor, Disabling, EnrollmentToken, Error, Fill, OperatorId, OperatorName, OperatorSummary,
-    Realm, Session, SessionToken,
+    Actor, Disabling, EnrollmentToken, Error, Fill, Issue, OperatorId, OperatorName,
+    OperatorSummary, Realm, Session, SessionToken,
 };
 use crate::ports::OperatorStore;
 
@@ -41,8 +41,8 @@ impl<S: OperatorStore> Operators<S> {
     /// records whether one was issued, never the token (ADR-0040). The command prints it only to its own terminal.
     ///
     /// # Errors
-    /// Fails with [`Error::Invalid`] for a disabled operator or one who does not exist, each named as such, if no
-    /// secure random source can be read, or if storage fails.
+    /// Fails with [`Error::Invalid`] for an operator who is disabled, holds a passkey already, or does not exist,
+    /// each named as such, if no secure random source can be read, or if storage fails.
     pub async fn enroll(
         &self,
         operator: OperatorId,
@@ -54,8 +54,12 @@ impl<S: OperatorStore> Operators<S> {
             .issue_enrollment(&token.hash(), operator, actor)
             .await?
         {
-            Some(true) => Ok(token),
-            Some(false) => Err(no_enabled(operator)),
+            Some(Issue::Issued) => Ok(token),
+            Some(Issue::Disabled) => Err(no_enabled(operator)),
+            Some(Issue::Enrolled) => Err(Error::Invalid(format!(
+                "operator {} has a passkey already, and adds another after signing in",
+                operator.get()
+            ))),
             None => Err(no_operator(operator)),
         }
     }

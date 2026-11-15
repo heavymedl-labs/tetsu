@@ -384,6 +384,32 @@ pub struct OperatorSummary {
     pub created_at: SystemTime,
     /// When the operator was disabled, if they were.
     pub disabled_at: Option<SystemTime>,
+    /// How many passkeys they hold.
+    pub passkeys: u64,
+    /// The whole minutes, rounded up, their open enrollment link has left, if one is open.
+    pub link_minutes: Option<u64>,
+}
+
+/// What issuing an enrollment link came to for an operator who exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Issue {
+    Issued,
+    /// The operator is disabled, and is issued no link.
+    Disabled,
+    /// The operator holds a passkey already, and adds another only after signing in (`v5.0.0-6.4.1`).
+    Enrolled,
+}
+
+impl Issue {
+    /// The answer as Identity's database writes it, or none for one it never writes.
+    pub(crate) fn parse(text: &str) -> Option<Self> {
+        match text {
+            "issued" => Some(Self::Issued),
+            "disabled" => Some(Self::Disabled),
+            "enrolled" => Some(Self::Enrolled),
+            _ => None,
+        }
+    }
 }
 
 /// Fills bytes from a secure random source.
@@ -795,7 +821,12 @@ mod tests {
         }
     }
 
+    /// Both checks run on every input, with no `&&` to skip the second: the inputs are random, so a short circuit
+    /// would leave its right side covered only on runs that happen to draw a well-formed token (#138).
     fn well_formed(text: &str) -> bool {
-        text.chars().all(|c| "0123456789abcdef".contains(c)) && text.len() == 64
+        [
+            text.len() == 64,
+            text.chars().all(|c| "0123456789abcdef".contains(c)),
+        ] == [true, true]
     }
 }

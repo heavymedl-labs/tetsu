@@ -82,6 +82,15 @@ mod support {
         panic!("nothing waited on a lock");
     }
 
+    /// SQL that stores a passkey for an operator, as enrollment will, with a credential ID of 16 bytes made from
+    /// the operator's ID.
+    pub fn passkey_for(operator: i64) -> String {
+        format!(
+            "INSERT INTO identity.passkeys (credential_id, operator_id, passkey, aaguid, created_at)
+             VALUES (sha256(int8send({operator}))::bytea, {operator}, '{{}}', gen_random_uuid(), now());"
+        )
+    }
+
     /// Every event Identity has recorded, oldest first, as type and payload.
     pub async fn events(database: &TestDatabase) -> Vec<(String, Value)> {
         connect(database)
@@ -105,7 +114,9 @@ mod support {
     }
 }
 
-use support::{actor, as_admin, disabled, events, name, number, ready, waits_for_a_lock};
+use support::{
+    actor, as_admin, disabled, events, name, number, passkey_for, ready, waits_for_a_lock,
+};
 
 /// The link's token is stored only as its SHA-256 hash, is good for an hour, and a new one replaces the last; each
 /// issue is recorded with the operator's ID and nothing of the token (ADR-0040, ADR-0047).
@@ -139,12 +150,14 @@ async fn an_enrollment_link_is_stored_hashed_for_an_hour_and_replaced() {
     assert_eq!(number(&database, &stored(&first.to_text())).await, 0);
     let id = kurt.get();
     let changed = json!({"operator_id": id, "actor": "kurt@workstation", "outcome": "changed"});
+    let issued = json!({"operator_id": id, "actor": "kurt@workstation", "outcome": "changed",
+                        "reason": null});
     assert_eq!(
         events(&database).await,
         [
-            ("identity.operator_created".into(), changed.clone()),
-            ("identity.enrollment_issued".into(), changed.clone()),
-            ("identity.enrollment_issued".into(), changed),
+            ("identity.operator_created".into(), changed),
+            ("identity.enrollment_issued".into(), issued.clone()),
+            ("identity.enrollment_issued".into(), issued),
         ]
     );
 }
@@ -229,10 +242,12 @@ async fn an_unknown_operator_is_issued_no_link() {
     let refused = json!({"operator_id": 42, "actor": "kurt@workstation", "outcome": "refused"});
     let ended = json!({"operator_id": 42, "realm": "operator", "ended": null,
                        "actor": "kurt@workstation", "outcome": "refused"});
+    let unissued = json!({"operator_id": 42, "actor": "kurt@workstation", "outcome": "refused",
+                          "reason": "unknown"});
     assert_eq!(
         events(&database).await,
         [
-            ("identity.enrollment_issued".into(), refused.clone()),
+            ("identity.enrollment_issued".into(), unissued),
             ("identity.operator_disabled".into(), refused.clone()),
             ("identity.operator_enabled".into(), refused),
             ("identity.sessions_ended".into(), ended),
@@ -496,8 +511,7 @@ async fn each_command_fails_as_storage_when_the_database_refuses_it() {
         &database,
         "REVOKE EXECUTE ON FUNCTION identity.issue_enrollment(bytea, bigint),
            identity.disable_operator(bigint), identity.enable_operator(bigint),
-           identity.end_sessions(text, bigint) FROM tetsu_identity;
-         REVOKE SELECT ON identity.operators FROM tetsu_identity;
+           identity.end_sessions(text, bigint), identity.list_operators() FROM tetsu_identity;
          REVOKE INSERT ON identity.outbox_global FROM tetsu_identity",
     )
     .await;
@@ -544,6 +558,7 @@ async fn an_answer_of_the_wrong_type_is_a_storage_failure() {
     for (function, arguments) in [
         ("issue_enrollment", "bytea, bigint"),
         ("disable_operator", "bigint"),
+        ("enable_operator", "bigint"),
         ("end_sessions", "text, bigint"),
     ] {
         write!(
@@ -558,6 +573,7 @@ async fn an_answer_of_the_wrong_type_is_a_storage_failure() {
     let storage = |result: Result<(), Error>| matches!(result, Err(Error::Storage(_)));
     assert!(storage(operators.enroll(kurt, &actor()).await.map(drop)));
     assert!(storage(operators.disable(kurt, &actor()).await.map(drop)));
+    assert!(storage(operators.enable(kurt, &actor()).await.map(drop)));
     assert!(storage(
         operators.end_sessions(kurt, &actor()).await.map(drop)
     ));
@@ -569,30 +585,51 @@ async fn an_answer_of_the_wrong_type_is_a_storage_failure() {
 /// A listed column of the wrong type is a storage failure, whichever column it is.
 #[tokio::test]
 async fn a_listed_column_of_the_wrong_type_is_a_storage_failure() {
-    for columns in [
-        "o.id::text AS id, o.name, o.created_at, o.disabled_at",
-        "o.id, 1 AS name, o.created_at, o.disabled_at",
-        "o.id, o.name, 'x'::text AS created_at, o.disabled_at",
-        "o.id, o.name, o.created_at, 1 AS disabled_at",
-    ] {
+    let right = [
+        ("id", "bigint", "1"),
+        ("name", "text", "'Kurt Medley'"),
+        ("created_at", "timestamptz", "now()"),
+        ("disabled_at", "timestamptz", "null"),
+        ("passkeys", "bigint", "0"),
+        ("link_minutes", "bigint", "null"),
+    ];
+    for wrong in 0..right.len() {
         let database = ready().await;
         let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-        operators
-            .create(&name("Kurt Medley"), &actor())
-            .await
-            .expect("creates");
+        let columns: Vec<String> = right
+            .iter()
+            .enumerate()
+            .map(|(at, (name, kind, _))| {
+                format!("{name} {}", if at == wrong { "integer" } else { kind })
+            })
+            .collect();
+        let values: Vec<String> = right
+            .iter()
+            .enumerate()
+            .map(|(at, (_, kind, value))| {
+                if at == wrong {
+                    "1".to_string()
+                } else {
+                    format!("{value}::{kind}")
+                }
+            })
+            .collect();
         as_admin(
             &database,
             &format!(
-                "ALTER TABLE identity.operators RENAME TO operators_real;
-                 CREATE VIEW identity.operators AS SELECT {columns} FROM identity.operators_real AS o;
-                 GRANT SELECT ON identity.operators TO tetsu_identity"
+                "DROP FUNCTION identity.list_operators();
+                 CREATE FUNCTION identity.list_operators() RETURNS TABLE ({})
+                 LANGUAGE sql AS 'SELECT {}';
+                 GRANT EXECUTE ON FUNCTION identity.list_operators() TO tetsu_identity",
+                columns.join(", "),
+                values.join(", ").replace('\'', "''")
             ),
         )
         .await;
         assert!(
             matches!(operators.list().await, Err(Error::Storage(_))),
-            "{columns}"
+            "{}",
+            right[wrong].0
         );
     }
 }
@@ -887,4 +924,88 @@ async fn a_disable_waits_for_an_enable_being_written() {
         .await,
         1
     );
+}
+
+/// An operator who holds a passkey is issued no link: another passkey is added only after signing in
+/// (`v5.0.0-6.4.1`). Each refusal records why.
+#[tokio::test]
+async fn an_enrolled_or_disabled_operator_is_issued_no_link() {
+    let database = ready().await;
+    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    let kurt = operators
+        .create(&name("Kurt Medley"), &actor())
+        .await
+        .expect("creates");
+    let lee = operators
+        .create(&name("Lee Park"), &actor())
+        .await
+        .expect("creates");
+    as_admin(&database, &passkey_for(kurt.get())).await;
+    operators.disable(lee, &actor()).await.expect("disables");
+    assert_eq!(
+        operators.enroll(kurt, &actor()).await.map(drop),
+        Err(Error::Invalid(
+            "operator 1 has a passkey already, and adds another after signing in".into()
+        ))
+    );
+    assert_eq!(
+        operators.enroll(lee, &actor()).await.map(drop),
+        Err(Error::Invalid("no enabled operator 2".into()))
+    );
+    let reasons: Vec<Value> = events(&database)
+        .await
+        .into_iter()
+        .filter(|(kind, _)| kind == "identity.enrollment_issued")
+        .map(|(_, payload)| json!([payload["outcome"], payload["reason"]]))
+        .collect();
+    assert_eq!(
+        reasons,
+        [
+            json!(["refused", "enrolled"]),
+            json!(["refused", "disabled"])
+        ]
+    );
+    assert_eq!(
+        number(&database, "SELECT count(*) FROM identity.enrollments").await,
+        0
+    );
+}
+
+/// The list shows how many passkeys each operator holds, and the minutes left on an open link, rounded up, but
+/// not a link that has ended.
+#[tokio::test]
+async fn the_list_shows_passkeys_and_open_links() {
+    let database = ready().await;
+    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    let kurt = operators
+        .create(&name("Kurt Medley"), &actor())
+        .await
+        .expect("creates");
+    let lee = operators
+        .create(&name("Lee Park"), &actor())
+        .await
+        .expect("creates");
+    let ana = operators
+        .create(&name("Ana Ortiz"), &actor())
+        .await
+        .expect("creates");
+    operators.enroll(kurt, &actor()).await.expect("issues");
+    operators.enroll(ana, &actor()).await.expect("issues");
+    as_admin(
+        &database,
+        &format!(
+            "{} UPDATE identity.enrollments SET ends_at = now() - interval '1 second' WHERE operator_id = {};",
+            passkey_for(lee.get()),
+            ana.get()
+        ),
+    )
+    .await;
+    let listed: Vec<(u64, Option<u64>)> = operators
+        .list()
+        .await
+        .expect("lists")
+        .iter()
+        .map(|operator| (operator.passkeys, operator.link_minutes))
+        .collect();
+    assert_eq!(listed, [(0, Some(60)), (1, None), (0, None)]);
 }
