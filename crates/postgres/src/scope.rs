@@ -21,23 +21,18 @@ pub const IDLE_TIMEOUT: &str = "10s";
 /// connection and its 30 seconds, since a pass stops before any later consumer once its minute is up.
 const DELIVERY_TIMEOUT: &str = "2min";
 
-/// Clears the tenant too, so a setting left on the session, however it got there, never narrows a module
-/// transaction to a tenant it did not choose.
-const SET_MODULE: &str = "SELECT pg_catalog.set_config('role', $1, true),
-       pg_catalog.set_config('statement_timeout', $2, true),
-       pg_catalog.set_config('lock_timeout', $3, true),
-       pg_catalog.set_config('transaction_timeout', $4, true),
-       pg_catalog.set_config('idle_in_transaction_session_timeout', $5, true),
-       pg_catalog.set_config('app.tenant_id', '', true)";
-const SET_TENANT_TOO: &str = "SELECT pg_catalog.set_config('role', $1, true),
+/// Every setting a scoped transaction makes, in one round trip: `$1` is the role, `$2` to `$5` the limits, and `$6`
+/// the tenant. A module or delivery transaction passes no tenant, which clears one left on the session, however it
+/// got there, so it never narrows a transaction to a tenant it did not choose.
+const SET_SCOPE: &str = "SELECT pg_catalog.set_config('role', $1, true),
        pg_catalog.set_config('statement_timeout', $2, true),
        pg_catalog.set_config('lock_timeout', $3, true),
        pg_catalog.set_config('transaction_timeout', $4, true),
        pg_catalog.set_config('idle_in_transaction_session_timeout', $5, true),
        pg_catalog.set_config('app.tenant_id', $6, true)";
+/// No tenant, for a transaction that acts for none.
+const NO_TENANT: &str = "";
 const SET_TENANT: &str = "SELECT pg_catalog.set_config('app.tenant_id', $1, true)";
-/// What a module transaction sets, as the delivery role, which may reach no tenant through a setting either.
-const SET_DELIVERY: &str = SET_MODULE;
 
 /// A transaction acting as one module's role, with no tenant: it reaches global tables and lookup functions, and
 /// tenant-owned tables show it no rows.
@@ -91,13 +86,13 @@ impl<'a> ModuleTransaction<'a> {
     ) -> Result<Self, tokio_postgres::Error> {
         let transaction = open(
             client,
-            SET_MODULE,
             &[
                 &module_role(schema),
                 &STATEMENT_TIMEOUT,
                 &LOCK_TIMEOUT,
                 &TRANSACTION_TIMEOUT,
                 &IDLE_TIMEOUT,
+                &NO_TENANT,
             ],
         )
         .await?;
@@ -135,7 +130,6 @@ impl<'a> TenantTransaction<'a> {
     ) -> Result<Self, tokio_postgres::Error> {
         let transaction = open(
             client,
-            SET_TENANT_TOO,
             &[
                 &module_role(schema),
                 &STATEMENT_TIMEOUT,
@@ -158,13 +152,13 @@ impl<'a> DeliveryTransaction<'a> {
     pub async fn begin(client: &'a mut Object) -> Result<Self, tokio_postgres::Error> {
         let transaction = open(
             client,
-            SET_DELIVERY,
             &[
                 &DELIVERY_ROLE,
                 &STATEMENT_TIMEOUT,
                 &LOCK_TIMEOUT,
                 &DELIVERY_TIMEOUT,
                 &DELIVERY_TIMEOUT,
+                &NO_TENANT,
             ],
         )
         .await?;
@@ -181,11 +175,10 @@ impl<'a> DeliveryTransaction<'a> {
 /// Starts a transaction and makes its settings in one round trip.
 async fn open<'a>(
     client: &'a mut Object,
-    settings: &str,
     values: &[&(dyn tokio_postgres::types::ToSql + Sync)],
 ) -> Result<Transaction<'a>, tokio_postgres::Error> {
     let transaction = client.transaction().await?;
-    let statement = transaction.prepare_cached(settings).await?;
+    let statement = transaction.prepare_cached(SET_SCOPE).await?;
     transaction.query_one(&statement, values).await?;
     Ok(transaction)
 }
