@@ -166,6 +166,10 @@ jobs:
             gh api "repos/$GITHUB_REPOSITORY/deployments" --input - --jq .id)" || { echo "$not_recorded"; exit 1; }
           gh api "repos/$GITHUB_REPOSITORY/deployments/$id/statuses" -f state=success >/dev/null ||
             { echo "$not_recorded"; exit 1; }
+      # After the deploy is recorded, so a rollback still knows what is live if the pages are broken (#137). Render's
+      # free instance may still be waking, which the check waits out.
+      - name: Check the pages
+        run: python3 scripts/smoke_check.py https://tetsu-demo.onrender.com
       # Housekeeping after a good deploy, so a failure warns rather than failing the run.
       - name: Prune old images
         env:

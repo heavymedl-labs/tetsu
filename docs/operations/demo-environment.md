@@ -18,6 +18,11 @@ Every deploy that migrates then runs hosted test 8, `tetsu check`, as `tetsu_own
 every catalog rule, `tetsu_app` included, and that each module's role sees no row with no tenant set. A problem
 fails the deploy before Render serves the new image, and the log names it.
 
+Once Render serves the image and the deploy is recorded, `scripts/smoke_check.py` fetches the home page and a missing
+page, waiting out the free instance's wake, and checks each status and security header. A failure names the page and
+what was wrong: roll back to the previous commit, then fix forward. Run it against `tetsu serve` locally the same way,
+with the local address.
+
 A rollback cannot cross a migration that takes rights away. Code from before
 [#106](https://github.com/heavymedl-labs/tetsu/issues/106) reads Tenancy's tables as `tetsu_app` directly, which
 Tenancy's second migration forbids, so every request it served would fail; fix forward instead. The same is true of
