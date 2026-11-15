@@ -41,22 +41,22 @@ impl<S: OperatorStore> Operators<S> {
     /// records whether one was issued, never the token (ADR-0040). The command prints it only to its own terminal.
     ///
     /// # Errors
-    /// Fails with [`Error::Invalid`] for a disabled or unknown operator, if no secure random source can be read,
-    /// or if storage fails.
+    /// Fails with [`Error::Invalid`] for a disabled operator or one who does not exist, each named as such, if no
+    /// secure random source can be read, or if storage fails.
     pub async fn enroll(
         &self,
         operator: OperatorId,
         actor: &Actor,
     ) -> Result<EnrollmentToken, Error> {
         let token = EnrollmentToken::generate(self.fill)?;
-        if self
+        match self
             .store
             .issue_enrollment(&token.hash(), operator, actor)
             .await?
         {
-            Ok(token)
-        } else {
-            Err(no_enabled(operator))
+            Some(true) => Ok(token),
+            Some(false) => Err(no_enabled(operator)),
+            None => Err(no_operator(operator)),
         }
     }
 

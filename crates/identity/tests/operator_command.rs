@@ -211,7 +211,7 @@ async fn an_unknown_operator_is_issued_no_link() {
     let nobody = OperatorId::parse("42").expect("an ID");
     assert_eq!(
         operators.enroll(nobody, &actor()).await.map(|_| ()),
-        Err(Error::Invalid("no enabled operator 42".into()))
+        Err(Error::Invalid("no operator 42".into()))
     );
     let no_operator = Err(Error::Invalid("no operator 42".into()));
     assert_eq!(
@@ -496,8 +496,7 @@ async fn each_command_fails_as_storage_when_the_database_refuses_it() {
         &database,
         "REVOKE EXECUTE ON FUNCTION identity.issue_enrollment(bytea, bigint),
            identity.disable_operator(bigint), identity.enable_operator(bigint),
-           identity.end_operator_sessions(bigint, text),
-           identity.end_realm_sessions(text) FROM tetsu_identity;
+           identity.end_sessions(text, bigint) FROM tetsu_identity;
          REVOKE SELECT ON identity.operators FROM tetsu_identity;
          REVOKE INSERT ON identity.outbox_global FROM tetsu_identity",
     )
@@ -545,8 +544,7 @@ async fn an_answer_of_the_wrong_type_is_a_storage_failure() {
     for (function, arguments) in [
         ("issue_enrollment", "bytea, bigint"),
         ("disable_operator", "bigint"),
-        ("end_operator_sessions", "bigint, text"),
-        ("end_realm_sessions", "text"),
+        ("end_sessions", "text, bigint"),
     ] {
         write!(
             replaced,
@@ -639,5 +637,170 @@ async fn a_disable_answer_of_the_wrong_type_is_a_storage_failure() {
             ),
             "{columns}"
         );
+    }
+}
+
+/// Disabling and ending sessions refuse to run under repeatable read, where a session committed while they waited
+/// would survive them, whoever starts the transaction.
+#[tokio::test]
+async fn disabling_and_ending_sessions_need_read_committed() {
+    let database = ready().await;
+    let pool = pool(&database.as_app()).expect("a pool");
+    postgres_store(pool.clone())
+        .create(&name("Kurt Medley"), &actor())
+        .await
+        .expect("creates");
+    let mut client = pool.get().await.expect("a connection");
+    for call in [
+        "SELECT * FROM identity.disable_operator(1)",
+        "SELECT identity.end_sessions('operator', 1)",
+        "SELECT identity.end_sessions('operator', null)",
+    ] {
+        let transaction = client
+            .build_transaction()
+            .isolation_level(tokio_postgres::IsolationLevel::RepeatableRead)
+            .start()
+            .await
+            .expect("begins");
+        transaction
+            .batch_execute("SET LOCAL ROLE tetsu_identity")
+            .await
+            .expect("takes Identity's role");
+        let refused = transaction.query(call, &[]).await.expect_err("refused");
+        assert_eq!(
+            refused.code().map(tokio_postgres::error::SqlState::code),
+            Some("TD002"),
+            "{call}"
+        );
+    }
+}
+
+/// Only live sessions and links count as ended: spent ones are removed too, but ending them changes nothing, so the
+/// record says so.
+#[tokio::test]
+async fn spent_sessions_and_links_are_removed_but_not_counted() {
+    let database = ready().await;
+    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    let kurt = operators
+        .create(&name("Kurt Medley"), &actor())
+        .await
+        .expect("creates");
+    let spent = "SELECT identity.start_session(sha256('a'::bytea), 'operator', 1);
+                 UPDATE identity.sessions SET last_seen_at = last_seen_at - interval '16 minutes';
+                 SELECT identity.issue_enrollment(sha256('b'::bytea), 1);
+                 UPDATE identity.enrollments SET ends_at = now() - interval '1 second'";
+    as_admin(&database, spent).await;
+    assert_eq!(operators.end_sessions(kurt, &actor()).await, Ok(0));
+    assert_eq!(
+        number(&database, "SELECT count(*) FROM identity.sessions").await,
+        0
+    );
+    as_admin(&database, spent).await;
+    assert_eq!(operators.end_all_sessions(&actor()).await, Ok(0));
+    as_admin(&database, spent).await;
+    assert_eq!(
+        operators.disable(kurt, &actor()).await,
+        Ok(disabled(true, 0, 0))
+    );
+    assert_eq!(
+        number(
+            &database,
+            "SELECT (SELECT count(*) FROM identity.sessions) + (SELECT count(*) FROM identity.enrollments)"
+        )
+        .await,
+        0
+    );
+    let outcomes: Vec<Value> = events(&database)
+        .await
+        .into_iter()
+        .skip(1)
+        .map(|(_, payload)| payload["outcome"].clone())
+        .collect();
+    assert_eq!(
+        outcomes,
+        [json!("unchanged"), json!("unchanged"), json!("changed")]
+    );
+}
+
+/// A session starts when it is stored, after any wait for the operator's row, never before an end of sessions that
+/// held it up.
+#[tokio::test]
+async fn a_session_starts_after_the_wait_that_held_it_up() {
+    let database = ready().await;
+    let pool = pool(&database.as_app()).expect("a pool");
+    let operators = postgres_store(pool.clone());
+    operators
+        .create(&name("Kurt Medley"), &actor())
+        .await
+        .expect("creates");
+    let mut admin = connect(&database).await.expect("connects");
+    let holding = admin.transaction().await.expect("begins");
+    holding
+        .execute(
+            "SELECT FROM identity.operators WHERE id = 1 FOR NO KEY UPDATE",
+            &[],
+        )
+        .await
+        .expect("locks");
+    let starting = tokio::spawn(async move {
+        let mut client = pool.get().await.expect("a connection");
+        let writing = ModuleTransaction::begin(&mut client, "identity")
+            .await
+            .expect("begins");
+        writing
+            .execute(
+                "SELECT identity.start_session(sha256('a'::bytea), 'operator', 1)",
+                &[],
+            )
+            .await
+            .expect("writes");
+        writing.commit().await.expect("commits");
+    });
+    waits_for_a_lock(&database).await;
+    let released: std::time::SystemTime = holding
+        .query_one("SELECT clock_timestamp()", &[])
+        .await
+        .expect("reads the clock")
+        .try_get(0)
+        .expect("a time");
+    holding.commit().await.expect("commits");
+    starting.await.expect("finishes");
+    let started: std::time::SystemTime = connect(&database)
+        .await
+        .expect("connects")
+        .query_one("SELECT started_at FROM identity.sessions", &[])
+        .await
+        .expect("reads")
+        .try_get(0)
+        .expect("a time");
+    assert!(started >= released, "{started:?} before {released:?}");
+}
+
+/// Identity's role adds an operator by name alone, and the database refuses a name with a control character, so
+/// neither a direct insert nor a later path around the domain's checks can forge a line of the command's output.
+#[tokio::test]
+async fn an_operator_is_added_by_a_plain_name_alone() {
+    let database = ready().await;
+    let pool = pool(&database.as_app()).expect("a pool");
+    let mut client = pool.get().await.expect("a connection");
+    for (insert, refused) in [
+        (
+            "INSERT INTO identity.operators (name, disabled_at) VALUES ('Eve', now())",
+            tokio_postgres::error::SqlState::INSUFFICIENT_PRIVILEGE,
+        ),
+        (
+            "INSERT INTO identity.operators (id, name) OVERRIDING SYSTEM VALUE VALUES (3, 'Eve')",
+            tokio_postgres::error::SqlState::INSUFFICIENT_PRIVILEGE,
+        ),
+        (
+            "INSERT INTO identity.operators (name) VALUES (E'Eve\\n1  Kurt Medley  enabled')",
+            tokio_postgres::error::SqlState::CHECK_VIOLATION,
+        ),
+    ] {
+        let transaction = ModuleTransaction::begin(&mut client, "identity")
+            .await
+            .expect("begins");
+        let error = transaction.execute(insert, &[]).await.expect_err("refused");
+        assert_eq!(error.code(), Some(&refused), "{insert}");
     }
 }

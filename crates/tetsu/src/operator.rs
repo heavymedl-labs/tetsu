@@ -6,6 +6,9 @@
 //! accident. That guards against mistakes; the trust boundary is access to the database, which this command
 //! signs in to directly (ADR-0040, `v5.0.0-6.4.1`).
 
+use std::env::VarError;
+use std::io::Read;
+
 use tetsu_identity::{
     Actor, Disabling, EnrollmentToken, OperatorId, OperatorName, OperatorStore, OperatorSummary,
     Operators,
@@ -35,7 +38,7 @@ pub fn parse(rest: &[String]) -> Result<Operator, String> {
     };
     match (command.as_str(), arguments) {
         // A name like an option, such as --help, is a mistake, never an operator to create and enroll.
-        ("create", [name]) if name.starts_with('-') => Err(USAGE.into()),
+        ("create", [name]) if name.trim_start().starts_with('-') => Err(USAGE.into()),
         ("create", [name]) => OperatorName::parse(name)
             .map(|name| Operator::Create { name })
             .map_err(|error| error.to_string()),
@@ -60,9 +63,14 @@ fn with_id(command: &str, text: &str) -> Result<Operator, String> {
         .ok_or(format!("{text:?} is not an operator ID"))
 }
 
-/// Runs an operator command, and returns the lines it reports. `terminal` says whether those lines go to a
-/// terminal, which a command that issues a link requires.
-pub async fn run(operator: Operator, local: &Local, terminal: bool) -> Result<Vec<String>, String> {
+/// Runs an operator command with the settings `local` loads, and returns the lines it reports. `terminal` says
+/// whether those lines go to a terminal, which a command that issues a link requires, checked before any setting is
+/// read.
+pub async fn run(
+    operator: Operator,
+    local: impl FnOnce() -> Result<Local, String>,
+    terminal: bool,
+) -> Result<Vec<String>, String> {
     let issues_link = matches!(operator, Operator::Create { .. } | Operator::Enroll { .. });
     if issues_link && !terminal {
         return Err(
@@ -70,27 +78,60 @@ pub async fn run(operator: Operator, local: &Local, terminal: bool) -> Result<Ve
                 .into(),
         );
     }
+    let local = local()?;
     let origin = if issues_link {
-        settings::origin(|name| local.var(name))?
+        link_origin(&local)?
     } else {
         String::new()
     };
-    let hostname = std::fs::read_to_string("/etc/hostname").ok();
     let by = Actor::from_login(
-        login(|name| std::env::var(name).ok()).as_deref(),
-        hostname.as_deref().and_then(host_name),
+        login(|name| std::env::var(name)).as_deref(),
+        read_small("/etc/hostname").as_deref().and_then(host_name),
     );
-    let operators = tetsu_identity::postgres_store(crate::connect(local).await?);
+    let operators = tetsu_identity::postgres_store(crate::connect(&local).await?);
     act(&operators, operator, &origin, &by).await
 }
 
-/// Who is signed in to run the command: `USER`, or `LOGNAME` where `USER` is unset or blank, read from the
-/// process's own environment and never from `.env`, which holds settings, not who someone is. It is asserted, not
-/// proven: database access is what grants the command (ADR-0061).
-fn login(var: impl Fn(&str) -> Option<String>) -> Option<String> {
-    ["USER", "LOGNAME"]
-        .into_iter()
-        .find_map(|name| var(name).filter(|value| !value.trim().is_empty()))
+/// Where a link points. A `.env` may name it only when it names the database too: a link holds a live token, so a
+/// stray `.env` in whatever folder the command runs in must not point the real database's links at another site.
+fn link_origin(local: &Local) -> Result<String, String> {
+    if local.in_file("TETSU_ORIGIN") && !local.in_file("DATABASE_URL") {
+        return Err(
+            "TETSU_ORIGIN comes from .env but DATABASE_URL does not; set TETSU_ORIGIN in the environment too, so \
+             links point where that database's site is"
+                .into(),
+        );
+    }
+    settings::origin(|name| local.var(name))
+}
+
+/// Who is signed in to run the command, read from the process's own environment and never from `.env`, which
+/// holds settings, not who someone is: `SUDO_USER` first, so `sudo` does not hide the person, then `USER`, then
+/// `LOGNAME`, each skipped when unset or blank. A value that is not UTF-8 names no one, rather than falling through
+/// to the next. It is asserted, not proven: database access is what grants the command (ADR-0061).
+fn login(var: impl Fn(&str) -> Result<String, VarError>) -> Option<String> {
+    for name in ["SUDO_USER", "USER", "LOGNAME"] {
+        match var(name) {
+            Ok(value) if !value.trim().is_empty() => return Some(value),
+            Err(VarError::NotUnicode(_)) => return None,
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The text of a small regular file, or none for one that is missing, unreadable, not a regular file, such as a
+/// pipe, or larger than a host name could be, so reading it can never hang the command.
+fn read_small(path: impl AsRef<std::path::Path>) -> Option<String> {
+    const MOST: u64 = 4096;
+    let file = std::fs::File::open(path).ok()?;
+    let metadata = file.metadata().ok()?;
+    if !metadata.is_file() || metadata.len() > MOST {
+        return None;
+    }
+    let mut text = String::new();
+    file.take(MOST).read_to_string(&mut text).ok()?;
+    Some(text)
 }
 
 /// The machine's name from `/etc/hostname`: its first line that is neither blank nor a `#` comment.
@@ -202,6 +243,7 @@ fn link(origin: &str, token: &EnrollmentToken) -> String {
 mod tests {
     use super::*;
     use crate::args;
+    use tetsu_postgres::test_support::Scratch;
 
     #[test]
     fn operator_commands_are_parsed_exactly() {
@@ -230,6 +272,8 @@ mod tests {
             &["end-sessions"],
             &["create", "--help"],
             &["create", "-x"],
+            &["create", " --help"],
+            &["create", "\u{A0}-x"],
         ] {
             assert_eq!(parse(&args(bad)), Err(USAGE.into()), "{bad:?}");
         }
@@ -243,7 +287,6 @@ mod tests {
     /// A link is issued only to a terminal, checked before anything is created or read.
     #[tokio::test]
     async fn a_link_is_issued_only_to_a_terminal() {
-        let local = Local::default();
         for operator in [
             Operator::Create {
                 name: OperatorName::parse("Kurt Medley").unwrap(),
@@ -252,7 +295,9 @@ mod tests {
                 id: OperatorId::parse("7").unwrap(),
             },
         ] {
-            let refused = run(operator, &local, false).await.unwrap_err();
+            let refused = run(operator, || panic!("reads no settings"), false)
+                .await
+                .unwrap_err();
             assert!(
                 refused.starts_with("an enrollment link prints only to a terminal"),
                 "{refused}"
@@ -267,26 +312,78 @@ mod tests {
             Operator::Enroll {
                 id: OperatorId::parse("7").unwrap(),
             },
-            &Local::default(),
+            || Ok(Local::default()),
             true,
         )
         .await;
         assert_eq!(refused, Err("TETSU_ORIGIN must be set".into()));
     }
 
-    /// Who runs the command is `USER`, or `LOGNAME` when `USER` is unset or blank.
+    /// A `.env` names where links point only when it names the database too, so a stray one cannot send a real
+    /// database's links to another site.
     #[test]
-    fn the_login_is_user_or_else_logname() {
-        let from = |user: Option<&str>, logname: Option<&str>| {
-            login(|name| match name {
-                "USER" => user.map(String::from),
-                _ => logname.map(String::from),
+    fn a_link_points_where_its_database_is_named() {
+        let origin = "TETSU_ORIGIN=https://elsewhere.example\n";
+        let refused = link_origin(&Local::file_only(origin)).unwrap_err();
+        assert!(
+            refused.starts_with("TETSU_ORIGIN comes from .env but DATABASE_URL does not"),
+            "{refused}"
+        );
+        let both = format!("{origin}DATABASE_URL=postgres://localhost/tetsu\n");
+        assert_eq!(
+            link_origin(&Local::file_only(&both)),
+            Ok("https://elsewhere.example".into())
+        );
+    }
+
+    /// Only a small regular file is read, so a pipe or a huge file never holds the command up.
+    #[test]
+    fn only_a_small_regular_file_is_read() {
+        let small = Scratch::file("hostname-small", "workstation\n").unwrap();
+        assert_eq!(read_small(&*small), Some("workstation\n".into()));
+        let full = Scratch::file("hostname-full", &"a".repeat(4096)).unwrap();
+        assert_eq!(read_small(&*full).map(|text| text.len()), Some(4096));
+        let large = Scratch::file("hostname-large", &"a".repeat(4097)).unwrap();
+        assert_eq!(read_small(&*large), None);
+        let folder = Scratch::folder("hostname-folder").unwrap();
+        assert_eq!(read_small(&*folder), None);
+        assert_eq!(read_small(folder.join("missing")), None);
+        let binary = Scratch::folder("hostname-binary").unwrap();
+        std::fs::write(binary.join("hostname"), [0xff, 0xfe]).unwrap();
+        assert_eq!(read_small(binary.join("hostname")), None);
+    }
+
+    /// Who runs the command is `SUDO_USER`, `USER`, or `LOGNAME`, the first that is set and not blank, and no one
+    /// when one is not UTF-8.
+    #[test]
+    fn the_login_is_the_first_set_of_sudo_user_user_and_logname() {
+        let from = |values: [Option<&str>; 3]| {
+            login(|name| {
+                let at = ["SUDO_USER", "USER", "LOGNAME"]
+                    .iter()
+                    .position(|known| *known == name)
+                    .expect("a login variable");
+                match values[at] {
+                    Some("\u{FFFD}") => Err(VarError::NotUnicode("\u{FFFD}".into())),
+                    Some(value) => Ok(value.to_string()),
+                    None => Err(VarError::NotPresent),
+                }
             })
         };
-        assert_eq!(from(Some("kurt"), Some("other")), Some("kurt".into()));
-        assert_eq!(from(Some(" "), Some("kurt")), Some("kurt".into()));
-        assert_eq!(from(None, Some("kurt")), Some("kurt".into()));
-        assert_eq!(from(None, None), None);
+        assert_eq!(
+            from([Some("kurt"), Some("root"), Some("root")]),
+            Some("kurt".into())
+        );
+        assert_eq!(
+            from([None, Some("kurt"), Some("other")]),
+            Some("kurt".into())
+        );
+        assert_eq!(
+            from([Some(" "), Some(""), Some("kurt")]),
+            Some("kurt".into())
+        );
+        assert_eq!(from([None, Some("\u{FFFD}"), Some("mallory")]), None);
+        assert_eq!(from([None, None, None]), None);
     }
 
     /// The host name is the first line of `/etc/hostname` that is neither blank nor a comment.

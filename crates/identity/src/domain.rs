@@ -265,34 +265,51 @@ impl std::fmt::Debug for EnrollmentToken {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Actor(String);
 
-const MAX_ACTOR: usize = 200;
-/// Each part of an actor made from a login, so the two and their `@` fit in [`MAX_ACTOR`].
+/// The longest user or host in an actor.
 const MAX_PART: usize = 99;
 
-/// One part of an actor made from a login, or `unknown` for a part that is missing, blank, overlong, or holds a
-/// hidden character or an `@`.
-fn login_part(part: Option<&str>) -> &str {
-    part.map(str::trim)
-        .filter(|part| {
-            !part.is_empty()
-                && part.chars().count() <= MAX_PART
-                && !part.chars().any(|c| c == '@' || hidden(c))
-        })
-        .unwrap_or("unknown")
+/// Whether text can be one part of an actor: 1 to [`MAX_PART`] characters, no space at either end, and nothing
+/// hidden or that reads as an `@`, so no part can pass for another.
+fn actor_part(part: &str) -> bool {
+    !part.is_empty()
+        && part.trim() == part
+        && part.chars().count() <= MAX_PART
+        && !part
+            .chars()
+            .any(|c| matches!(c, '@' | '\u{FE6B}' | '\u{FF20}') || hidden(c))
 }
 
-/// A character that could hide or reorder text where it is shown: a control character, or one of Unicode's
-/// invisible formatting characters, such as a zero-width space or a direction override.
+/// A character that could hide or reorder text where it is shown: a control character, one Unicode says a
+/// display may ignore or that only formats, or one that shows as blank. The list follows Unicode 16's
+/// `Default_Ignorable_Code_Point` and `Cf` sets, plus blank-looking letters such as the Hangul fillers.
 fn hidden(c: char) -> bool {
-    const INVISIBLE: [(char, char); 8] = [
+    const INVISIBLE: [(char, char); 26] = [
         ('\u{00AD}', '\u{00AD}'),
+        ('\u{034F}', '\u{034F}'),
+        ('\u{0600}', '\u{0605}'),
         ('\u{061C}', '\u{061C}'),
-        ('\u{180E}', '\u{180E}'),
+        ('\u{06DD}', '\u{06DD}'),
+        ('\u{070F}', '\u{070F}'),
+        ('\u{0890}', '\u{0891}'),
+        ('\u{08E2}', '\u{08E2}'),
+        ('\u{115F}', '\u{1160}'),
+        ('\u{17B4}', '\u{17B5}'),
+        ('\u{180B}', '\u{180F}'),
         ('\u{200B}', '\u{200F}'),
         ('\u{2028}', '\u{202E}'),
         ('\u{2060}', '\u{206F}'),
+        ('\u{2800}', '\u{2800}'),
+        ('\u{3164}', '\u{3164}'),
+        ('\u{FE00}', '\u{FE0F}'),
         ('\u{FEFF}', '\u{FEFF}'),
-        ('\u{FFF9}', '\u{FFFB}'),
+        ('\u{FFA0}', '\u{FFA0}'),
+        ('\u{FFF0}', '\u{FFFB}'),
+        ('\u{110BD}', '\u{110BD}'),
+        ('\u{110CD}', '\u{110CD}'),
+        ('\u{13430}', '\u{1343F}'),
+        ('\u{1BCA0}', '\u{1BCA3}'),
+        ('\u{1D173}', '\u{1D17A}'),
+        ('\u{E0000}', '\u{E0FFF}'),
     ];
     c.is_control()
         || INVISIBLE
@@ -302,15 +319,18 @@ fn hidden(c: char) -> bool {
 
 impl Actor {
     /// # Errors
-    /// Fails on an empty or overlong actor, or one holding a control, invisible, or direction-changing character.
+    /// Fails unless the text is `user@host`, each part 1 to 99 characters with no space at either end and no
+    /// control, invisible, or direction-changing character, and no other `@`.
     pub fn parse(text: &str) -> Result<Self, Error> {
-        if text.is_empty() || text.chars().count() > MAX_ACTOR || text.chars().any(hidden) {
-            return Err(Error::Invalid(format!(
-                "an actor must be 1 to {MAX_ACTOR} characters with no control, invisible, or direction-changing \
-                 characters"
-            )));
+        match text.split_once('@') {
+            Some((user, host)) if actor_part(user) && actor_part(host) => {
+                Ok(Self(text.to_string()))
+            }
+            _ => Err(Error::Invalid(format!(
+                "an actor is user@host, each part 1 to {MAX_PART} characters with no control, invisible, or \
+                 direction-changing characters"
+            ))),
         }
-        Ok(Self(text.to_string()))
     }
 
     /// The actor `user@host` for a login and a machine, either of which may be missing. A part that is missing,
@@ -318,7 +338,13 @@ impl Actor {
     /// command, and no part can pass for another.
     #[must_use]
     pub fn from_login(user: Option<&str>, host: Option<&str>) -> Self {
-        Self(format!("{}@{}", login_part(user), login_part(host)))
+        let part = |part: Option<&str>| {
+            part.map(str::trim)
+                .filter(|part| actor_part(part))
+                .unwrap_or("unknown")
+                .to_string()
+        };
+        Self(format!("{}@{}", part(user), part(host)))
     }
 
     #[must_use]
@@ -425,13 +451,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_actor_is_plain_text_of_bounded_length() {
+    fn an_actor_is_a_user_at_a_host() {
         assert_eq!(
             Actor::parse("kurt@workstation").map(|actor| actor.as_str().to_string()),
             Ok("kurt@workstation".into())
         );
-        assert!(Actor::parse(&"é".repeat(200)).is_ok());
-        for bad in [String::new(), "é".repeat(201), "kurt\nforged".into()] {
+        let longest = format!("{}@{}", "é".repeat(99), "é".repeat(99));
+        assert!(Actor::parse(&longest).is_ok());
+        for bad in [
+            String::new(),
+            "kurt".into(),
+            "@host".into(),
+            "kurt@".into(),
+            " kurt@host".into(),
+            "kurt@host ".into(),
+            "kurt@a@b".into(),
+            "kurt\u{FF20}a@b".into(),
+            "kurt\u{FE6B}a@b".into(),
+            format!("{}@b", "é".repeat(100)),
+            format!("a@{}", "é".repeat(100)),
+            "kurt\nforged@host".into(),
+        ] {
             assert!(Actor::parse(&bad).is_err(), "{bad:?}");
         }
     }
@@ -445,9 +485,23 @@ mod tests {
             "\u{2066}a",
             "a\u{FEFF}",
             "\u{00AD}",
+            "Kurt\u{E0041}",
+            "\u{3164}",
+            "Kurt\u{034F}",
+            "a\u{FE0F}",
+            "\u{0600}a",
+            "a\u{1D173}",
+            "a\u{2800}",
         ] {
             assert!(OperatorName::parse(hidden).is_err(), "{hidden:?}");
-            assert!(Actor::parse(hidden).is_err(), "{hidden:?}");
+            assert!(
+                Actor::parse(&format!("{hidden}@host")).is_err(),
+                "{hidden:?}"
+            );
+        }
+        // Visible letters and marks beside the ranges stay allowed.
+        for shown in ["Zoë", "\u{0606}", "\u{1161}", "\u{FE10}"] {
+            assert!(OperatorName::parse(shown).is_ok(), "{shown:?}");
         }
     }
 
@@ -466,6 +520,7 @@ mod tests {
             "",
             " ",
             "kurt@workstation",
+            "kurt\u{FF20}workstation",
             "a\u{202E}b",
             "a\nb",
             long.as_str(),

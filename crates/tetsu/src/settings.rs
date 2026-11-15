@@ -34,14 +34,31 @@ impl Local {
         }
     }
 
+    /// Settings from a file's text alone, never the environment, for a test.
+    #[cfg(test)]
+    pub(crate) fn file_only(text: &str) -> Self {
+        Self {
+            file: parse(text).expect("settings"),
+            environment: false,
+        }
+    }
+
     /// A variable from the environment, or from the file when the environment leaves it unset.
     pub fn var(&self, name: &str) -> Result<String, VarError> {
-        let environment = if self.environment {
+        self.or(self.environment(name), name)
+    }
+
+    /// Whether a variable's value is the file's, the environment having left it unset.
+    pub fn in_file(&self, name: &str) -> bool {
+        matches!(self.environment(name), Err(VarError::NotPresent)) && self.file.contains_key(name)
+    }
+
+    fn environment(&self, name: &str) -> Result<String, VarError> {
+        if self.environment {
             std::env::var(name)
         } else {
             Err(VarError::NotPresent)
-        };
-        self.or(environment, name)
+        }
     }
 
     fn or(&self, environment: Result<String, VarError>, name: &str) -> Result<String, VarError> {

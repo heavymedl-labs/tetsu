@@ -44,13 +44,13 @@ pub trait OperatorStore {
     ) -> impl Future<Output = Result<bool, Error>> + Send;
 
     /// Stores an operator's enrollment link under its token's hash, good for an hour, replacing any earlier one,
-    /// and says whether it did: a disabled or unknown operator is issued none.
+    /// and says whether it did: a disabled operator is issued none, and one who does not exist is none.
     fn issue_enrollment(
         &self,
         hash: &[u8; 32],
         operator: OperatorId,
         actor: &Actor,
-    ) -> impl Future<Output = Result<bool, Error>> + Send;
+    ) -> impl Future<Output = Result<Option<bool>, Error>> + Send;
 
     /// Disables an operator, ending every session and enrollment link they hold, and says what it did, or none for
     /// an operator who does not exist.

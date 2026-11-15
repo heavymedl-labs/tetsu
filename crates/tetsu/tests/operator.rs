@@ -10,13 +10,16 @@ use tetsu_postgres::{Settings, migrate, pool};
 mod support {
     use super::*;
 
+    /// Runs the command as the login `tester`, with no site origin, which no command printing to a pipe needs.
     pub fn operator(settings: &Settings, args: &[&str]) -> Output {
         Command::new(env!("CARGO_BIN_EXE_tetsu"))
             .arg("operator")
             .args(args)
             .env("DATABASE_URL", settings.url())
             .env("DATABASE_TLS", "disable")
-            .env("TETSU_ORIGIN", "https://ops.example.com")
+            .env_remove("TETSU_ORIGIN")
+            .env_remove("SUDO_USER")
+            .env("USER", "tester")
             .output()
             .expect("the binary runs")
     }
@@ -88,6 +91,19 @@ async fn operators_are_listed_signed_out_and_disabled() {
         assert!(output.status.success(), "{args:?}: {output:?}");
         assert_eq!(out(&output), said, "{args:?}");
     }
+    // Each change names who ran it: the login, at this machine.
+    let actors = tetsu_postgres::connect(&database)
+        .await
+        .expect("connects")
+        .query(
+            "SELECT DISTINCT payload->>'actor' FROM identity.outbox_global WHERE event_type <> 'identity.operator_created'",
+            &[],
+        )
+        .await
+        .expect("reads");
+    assert_eq!(actors.len(), 1);
+    let actor: String = actors[0].try_get(0).expect("an actor");
+    assert!(actor.starts_with("tester@"), "{actor}");
     // A mistyped ID fails, rather than reading as nothing to do.
     let missing = operator(&app, &["disable", "99"]);
     assert_eq!(missing.status.code(), Some(1));

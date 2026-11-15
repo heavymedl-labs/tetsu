@@ -123,7 +123,7 @@ async fn run(command: Command) -> Result<(), String> {
 /// Runs an operator command with the local settings, telling it whether its output reaches a terminal.
 async fn run_operator(command: operator::Operator) -> Result<(), String> {
     let terminal = std::io::IsTerminal::is_terminal(&std::io::stdout());
-    say_all(&operator::run(command, &local()?, terminal).await?)
+    say_all(&operator::run(command, local, terminal).await?)
 }
 
 /// Runs a hosted chore with the local settings, and prints what it reports.

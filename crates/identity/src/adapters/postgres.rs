@@ -275,25 +275,23 @@ impl OperatorStore for PostgresOperators {
         hash: &[u8; 32],
         operator: OperatorId,
         actor: &Actor,
-    ) -> Result<bool, Error> {
+    ) -> Result<Option<bool>, Error> {
         let id = operator.get();
         let parameters: [&(dyn ToSql + Sync); 2] = [&hash.as_slice(), &id];
-        let issued = self
-            .change(ISSUE_ENROLLMENT, &parameters, |issued| {
-                let outcome = if issued == Some(true) {
-                    "changed"
-                } else {
-                    "refused"
-                };
-                event(
-                    "identity.enrollment_issued",
-                    actor,
-                    outcome,
-                    json!({"operator_id": id}),
-                )
-            })
-            .await?;
-        Ok(issued == Some(true))
+        self.change(ISSUE_ENROLLMENT, &parameters, |issued| {
+            let outcome = if issued == Some(true) {
+                "changed"
+            } else {
+                "refused"
+            };
+            event(
+                "identity.enrollment_issued",
+                actor,
+                outcome,
+                json!({"operator_id": id}),
+            )
+        })
+        .await
     }
 
     async fn disable_operator(
@@ -552,6 +550,31 @@ mod tests {
         );
     }
 
+    /// A disabled operator is issued no link, and told apart from one who does not exist.
+    #[tokio::test]
+    async fn a_disabled_operator_is_issued_no_link() {
+        let (pool, _database) = support::migrated().await;
+        let operators = Operators::new(PostgresOperators { pool });
+        let kurt = operators
+            .create(
+                &OperatorName::parse("Kurt Medley").expect("a name"),
+                &support::actor(),
+            )
+            .await
+            .expect("creates");
+        operators
+            .disable(kurt, &support::actor())
+            .await
+            .expect("disables");
+        assert_eq!(
+            operators.enroll(kurt, &support::actor()).await.map(drop),
+            Err(Error::Invalid(format!(
+                "no enabled operator {}",
+                kurt.get()
+            )))
+        );
+    }
+
     /// Every path through issuing a link, in this one build, which llvm-cov scores on its own: no random source,
     /// a link issued, an unknown operator, and a database that refuses.
     #[tokio::test]
@@ -581,7 +604,7 @@ mod tests {
                 .enroll(OperatorId::new(i64::MAX), &support::actor())
                 .await
                 .map(drop),
-            Err(Error::Invalid(format!("no enabled operator {}", i64::MAX)))
+            Err(Error::Invalid(format!("no operator {}", i64::MAX)))
         );
         tetsu_postgres::connect(&database)
             .await
