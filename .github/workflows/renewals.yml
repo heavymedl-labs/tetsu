@@ -1,0 +1,45 @@
+name: Renewals
+
+# Weekly, and on demand: opens an issue for each secret, token, or free plan the operations secrets list holds due
+# for renewal within 30 days, once per renewal (#136). It reads only the repository, and uses no secret.
+on:
+  schedule:
+    - cron: "17 14 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  remind:
+    name: Remind of renewals due
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      # To open a reminder, and to see whether one is already open.
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # A date the script cannot read fails the run, so a typo never hides a renewal.
+      - name: Open a reminder for each renewal due
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/check_secrets.py --due 30 >"$RUNNER_TEMP/due"
+          while IFS=$'\t' read -r date name why; do
+            title="Renew $name by $date"
+            if gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" \
+              --json title --jq '.[].title' | grep -Fxq -- "$title"; then
+              echo "Already open: $title"
+              continue
+            fi
+            body="$(printf '%s by %s: %s.\n\nSee the secrets list in docs/operations and ADR-0027. Close this once renewed and its date updated.' "$name" "$date" "$why")"
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body" --label task --label "area: infra"
+          done <"$RUNNER_TEMP/due"

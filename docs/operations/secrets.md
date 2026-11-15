@@ -23,6 +23,17 @@ tool that made it into its store, never shown.
 | Render CLI token | `~/.render/cli.yaml` on the maintainer's machine, mode 600 | The maintainer's Render account, refreshed by `render login` | Setting up and inspecting the service | 2026-11-09 |
 | Neon CLI token | `~/.config/neon/credentials.json` on the maintainer's machine, mode 600 | The maintainer's Neon account, refreshed by `neonctl auth` | Setting up and inspecting the database | 2026-11-09 |
 
+## Renewals
+
+What lapses on a date of its own, beside each secret's yearly rotation above. A weekly workflow, `renewals.yml`,
+opens an issue for each date here or rotation deadline within 30 days, once; `scripts/check.sh` fails on a date
+here that has passed.
+
+| What | Renew by | Why |
+| --- | --- | --- |
+| `ghcr-tetsu` | 2027-11-09 | The GitHub token expires; make a new one with only `read:packages` and set it on Render |
+| Grafana Cloud trial | 2026-11-27 | The stack's trial ends; with no card on file it stays on the free plan, so check a `served` line still arrives, then remove this row |
+
 ## Workflow tokens
 
 | Workflow | `GITHUB_TOKEN` permissions |
@@ -30,4 +41,5 @@ tool that made it into its store, never shown.
 | `ci.yml` | `contents: read`, and `actions: read` to find the commit the last successful run checked; its publish job, which runs only GitHub's own actions after every check passes, has `packages: write` alone, to publish the image a manual run on main checked |
 | `deploy.yml` | `contents: read`, `actions: read` to find the CI run that checked the commit and download its digest, `packages: write` to pull the image and prune old ones, and `deployments: write` to record each deploy. Render's service ID is a repository variable, not a secret |
 | `ops.yml` | `contents: read`, `deployments: read` to find the image live on the demo, and `packages: read` to pull it |
+| `renewals.yml` | `contents: read`, and `issues: write` to open a reminder for each renewal due within 30 days |
 | `benchmarks.yml` | `contents: read`; its image job adds `packages: write` to push the benchmark image, and its run job `packages: read` to pull it |

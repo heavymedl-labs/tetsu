@@ -121,6 +121,11 @@ jobs:
         self.assertEqual(result.returncode, 1)
         self.assertIn("no Secrets table", result.stderr)
 
+    def test_a_file_named_for_secrets_is_not_a_secret(self):
+        workflow = "on: push\nsteps:\n  - run: python3 scripts/check_secrets.py --due 30\n"
+        result = self.check(secrets_list([("GITHUB_TOKEN", "automatic")]), workflow=workflow)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_unknown_arguments_are_a_usage_error(self):
         for args in [["--today"], ["--today", "nope"], ["--soon"]]:
             result = run(["python3", SCRIPT, *args], ROOT)
@@ -130,6 +135,68 @@ jobs:
     def test_the_repository_list_passes_today(self):
         result = run(["python3", SCRIPT], ROOT)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+
+RENEWALS = """
+## Renewals
+
+| What | Renew by | Why |
+| --- | --- | --- |
+| `IMAGE_TOKEN` | 2026-12-01 | it expires |
+| Free plan | 2027-06-01 | the trial ends |
+"""
+
+
+class RenewalsTest(unittest.TestCase):
+    """The weekly reminder lists what must be renewed soon, from both tables, and fails on a date it cannot
+    read rather than miss it (#136)."""
+
+    def run_on(self, text, *args, today=TODAY):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            write(repo / "docs/operations/secrets.md", text)
+            write(repo / ".github/workflows/ci.yml", "on: push\n")
+            return run(["python3", SCRIPT, "--today", today, *args], repo)
+
+    def due(self, text, days="30"):
+        return self.run_on(text, "--due", days)
+
+    def test_it_lists_rotations_and_renewals_due_within_the_days_oldest_first(self):
+        # DEPLOY_KEY was rotated 2025-10-20, so its 13 months end 2026-11-20.
+        text = secrets_list([("GITHUB_TOKEN", "automatic"), ("DEPLOY_KEY", "2025-10-20")]) + RENEWALS
+        result = self.due(text)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.splitlines(),
+            [
+                "2026-11-20\tDEPLOY_KEY\trotate it, last rotated 2025-10-20 (ADR-0027)",
+                "2026-12-01\tIMAGE_TOKEN\tit expires",
+            ],
+        )
+        self.assertEqual(self.due(text, days="0").stdout, "")
+        self.assertIn("Free plan", self.due(text, days="300").stdout)
+
+    def test_a_date_it_cannot_read_fails_rather_than_hides(self):
+        for text, message in [
+            (secrets_list([("DEPLOY_KEY", "soon")]), "DEPLOY_KEY: last rotated must be YYYY-MM-DD"),
+            (secrets_list([]) + RENEWALS.replace("2026-12-01", "December"), "IMAGE_TOKEN: renew by must be"),
+        ]:
+            result = self.due(text)
+            self.assertEqual(result.returncode, 1, text)
+            self.assertIn(message, result.stderr)
+
+    def test_the_regular_check_fails_on_a_renewal_past_or_unreadable(self):
+        passed = self.run_on(secrets_list([]) + RENEWALS, today="2026-12-01")
+        self.assertEqual(passed.returncode, 0, passed.stderr)
+        late = self.run_on(secrets_list([]) + RENEWALS, today="2026-12-02")
+        self.assertIn("IMAGE_TOKEN was due to be renewed by 2026-12-01", late.stderr)
+        unreadable = self.run_on(secrets_list([]) + RENEWALS.replace("2027-06-01", "June"))
+        self.assertIn("Free plan: renew by must be YYYY-MM-DD", unreadable.stderr)
+
+    def test_due_takes_a_number_of_days(self):
+        for args in [["--due"], ["--due", "soon"], ["--due", "3", "--due", "4"], ["--days", "3"]]:
+            result = run(["python3", SCRIPT, *args], ROOT)
+            self.assertEqual(result.returncode, 2, args)
 
 
 if __name__ == "__main__":

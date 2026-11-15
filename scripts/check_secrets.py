@@ -3,9 +3,14 @@
 
 ADR-0027: secrets rotate yearly, so a last-rotated date over 13 months old fails. The list names every
 secret a workflow uses and every GITHUB_TOKEN permission each workflow sets, and lists no workflow that is
-gone. A date is YYYY-MM-DD, or automatic for a token GitHub issues per run.
+gone. A date is YYYY-MM-DD, or automatic for a token GitHub issues per run. The Renewals table holds what
+lapses on a date of its own, such as a token's expiry or a free plan's end, and a date there that has passed
+fails too.
 
-usage: scripts/check_secrets.py [--today YYYY-MM-DD]
+With --due, it prints instead what must be renewed within that many days, one `date<TAB>name<TAB>why` line
+each, oldest first: each secret's rotation deadline and each renewal (#136).
+
+usage: scripts/check_secrets.py [--today YYYY-MM-DD] [--due DAYS]
 """
 
 import calendar
@@ -79,9 +84,40 @@ def rotation_problem(name, rotated, today):
     return None
 
 
+def renewal_problem(name, renew_by, today):
+    date = parsed(renew_by)
+    if date is None:
+        return f"{name}: renew by must be YYYY-MM-DD"
+    if date < today:
+        return f"{name} was due to be renewed by {renew_by}; renew it and update its date"
+    return None
+
+
+def due(text, today, days):
+    """What must be renewed by `days` from today, as (date, name, why), oldest first. Every date must read."""
+    found = []
+    for name, *_, rotated in table(text, "Secrets") or []:
+        date = parsed(rotated)
+        if date is not None:
+            found.append((deadline(date), name, f"rotate it, last rotated {rotated} (ADR-0027)"))
+        elif rotated != "automatic":
+            raise ValueError(f"{name}: last rotated must be YYYY-MM-DD or automatic")
+    for name, renew_by, why in table(text, "Renewals") or []:
+        date = parsed(renew_by)
+        if date is None:
+            raise ValueError(f"{name}: renew by must be YYYY-MM-DD")
+        found.append((date, name, why))
+    horizon = today + datetime.timedelta(days=days)
+    return sorted(entry for entry in found if entry[0] <= horizon)
+
+
 def problems(text, workflows, today):
     secrets = table(text, "Secrets")
     tokens = table(text, "Workflow tokens")
+    for name, renew_by, *_ in table(text, "Renewals") or []:
+        problem = renewal_problem(name, renew_by, today)
+        if problem:
+            yield problem
     if secrets is None:
         yield "no Secrets table"
     if tokens is None:
@@ -107,20 +143,41 @@ def workflow_problems(name, workflow, row, named):
     for permission in sorted(set(permissions(workflow))):
         if permission not in row:
             yield f"{name} sets {permission}, which its row does not list"
-    for secret in sorted(set(re.findall(r"secrets\.([A-Za-z0-9_]+)", workflow)) - named):
+    # A word boundary, so a file such as check_secrets.py is not read as a secret's use.
+    for secret in sorted(set(re.findall(r"\bsecrets\.([A-Za-z0-9_]+)", workflow)) - named):
         yield f"{name} uses secrets.{secret}, which has no row in the secrets table"
 
 
+def options(args):
+    """The day to check as, and the days ahead to list, or None if the arguments are not understood."""
+    pairs = dict(zip(args[::2], args[1::2], strict=False))
+    if len(args) % 2 or len(pairs) != len(args) // 2 or not set(pairs) <= {"--today", "--due"}:
+        return None
+    today = parsed(pairs["--today"]) if "--today" in pairs else datetime.date.today()
+    days = pairs.get("--due")
+    if today is None or (days is not None and not days.isdigit()):
+        return None
+    return today, None if days is None else int(days)
+
+
 def main(args):
-    today = datetime.date.today() if not args else None
-    if args[:1] == ["--today"] and len(args) == len(["--today", "date"]):
-        today = parsed(args[1])
-    if today is None:
+    understood = options(args)
+    if understood is None:
         print(__doc__.strip().splitlines()[-1], file=sys.stderr)
         return 2
+    today, days = understood
     if not LIST.is_file():
         print(f"error: {LIST} is missing", file=sys.stderr)
         return 1
+    if days is not None:
+        try:
+            entries = due(LIST.read_text(), today, days)
+        except ValueError as error:
+            print(f"error: {LIST}: {error}", file=sys.stderr)
+            return 1
+        for date, name, why in entries:
+            print(f"{date.isoformat()}\t{name}\t{why}")
+        return 0
     workflows = {path.name: path.read_text() for path in WORKFLOWS.glob("*.y*ml")}
     found = list(problems(LIST.read_text(), workflows, today))
     for problem in found:
