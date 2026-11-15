@@ -6,6 +6,53 @@ use tetsu_kernel::Module;
 
 use crate::settings::{self, Local};
 
+/// A hosted chore, with what it acts on.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Chore {
+    Check,
+    Reset { schemas: Vec<String> },
+    Replay { producer: String, id: String },
+    Rename { address: String, slug: String },
+}
+
+/// The chore a command names, with its arguments checked, or none when the command names no chore.
+pub fn parse(command: &str, rest: &[String]) -> Option<Result<Chore, String>> {
+    let wrong = |why: &str| Some(Err(why.to_string()));
+    match (command, rest) {
+        ("check", []) => Some(Ok(Chore::Check)),
+        ("check", _) => wrong("check takes no arguments"),
+        ("reset", []) => wrong("reset takes one or more module schemas"),
+        ("reset", schemas) => Some(Ok(Chore::Reset {
+            schemas: schemas.to_vec(),
+        })),
+        ("replay", [producer, id]) => Some(Ok(Chore::Replay {
+            producer: producer.clone(),
+            id: id.clone(),
+        })),
+        ("replay", _) => wrong("replay takes the recording module's schema and the event's ID"),
+        ("rename", [address, slug]) => Some(Ok(Chore::Rename {
+            address: address.clone(),
+            slug: slug.clone(),
+        })),
+        ("rename", _) => wrong("rename takes the tenant's address and its new slug"),
+        _ => None,
+    }
+}
+
+/// Runs a chore, and returns the lines it reports.
+pub async fn run(
+    chore: Chore,
+    local: &Local,
+    modules: &[&dyn Module],
+) -> Result<Vec<String>, String> {
+    match chore {
+        Chore::Check => check(local).await,
+        Chore::Reset { schemas } => reset(local, &schemas).await,
+        Chore::Replay { producer, id } => replay(local, modules, &producer, &id).await,
+        Chore::Rename { address, slug } => rename(local, &address, &slug).await,
+    }
+}
+
 /// Hosted test 8 after a migrate: each problem on its own line, and an error if there is any.
 pub async fn check(local: &Local) -> Result<Vec<String>, String> {
     let settings = settings::database(|name| local.var(name))?;
@@ -74,4 +121,65 @@ pub async fn rename(local: &Local, address: &str, slug: &str) -> Result<Vec<Stri
         "moved the tenant at {address} to {}",
         to.address()
     )])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(words: &[&str]) -> Vec<String> {
+        words.iter().map(ToString::to_string).collect()
+    }
+
+    /// The hosted chores take exactly what they act on (#135), and any other command is not a chore.
+    #[test]
+    fn chores_are_parsed_exactly() {
+        assert_eq!(parse("check", &[]), Some(Ok(Chore::Check)));
+        assert_eq!(
+            parse("reset", &args(&["tenancy", "audit"])),
+            Some(Ok(Chore::Reset {
+                schemas: args(&["tenancy", "audit"])
+            }))
+        );
+        assert_eq!(
+            parse("replay", &args(&["identity", "0190"])),
+            Some(Ok(Chore::Replay {
+                producer: "identity".into(),
+                id: "0190".into()
+            }))
+        );
+        assert_eq!(
+            parse("rename", &args(&["/login", "sample-gym"])),
+            Some(Ok(Chore::Rename {
+                address: "/login".into(),
+                slug: "sample-gym".into()
+            }))
+        );
+        for (command, rest, why) in [
+            ("check", &["now"][..], "check takes no arguments"),
+            ("reset", &[], "reset takes one or more module schemas"),
+            (
+                "replay",
+                &["identity"],
+                "replay takes the recording module's schema and the event's ID",
+            ),
+            (
+                "rename",
+                &["/login"],
+                "rename takes the tenant's address and its new slug",
+            ),
+            (
+                "rename",
+                &["/login", "a", "b"],
+                "rename takes the tenant's address and its new slug",
+            ),
+        ] {
+            assert_eq!(
+                parse(command, &args(rest)),
+                Some(Err(why.into())),
+                "{command} {rest:?}"
+            );
+        }
+        assert_eq!(parse("migrate", &[]), None);
+    }
 }

@@ -33,10 +33,7 @@ enum Command {
     Migrate,
     Seed { path: PathBuf, check_only: bool },
     Serve,
-    Check,
-    Reset { schemas: Vec<String> },
-    Replay { producer: String, id: String },
-    Rename { address: String, slug: String },
+    Chore(ops::Chore),
 }
 
 fn parse(args: &[String]) -> Result<Command, String> {
@@ -44,32 +41,26 @@ fn parse(args: &[String]) -> Result<Command, String> {
         return Ok(Command::Summary);
     };
     match command.as_str() {
-        "migrate" if rest.is_empty() => Ok(Command::Migrate),
-        "migrate" => Err("migrate takes no arguments".into()),
-        "serve" if rest.is_empty() => Ok(Command::Serve),
-        "serve" => Err("serve takes no arguments; set PORT to choose the port".into()),
+        "migrate" => bare(rest, Command::Migrate, "migrate takes no arguments"),
+        "serve" => bare(
+            rest,
+            Command::Serve,
+            "serve takes no arguments; set PORT to choose the port",
+        ),
         "seed" => parse_seed(rest),
-        "check" if rest.is_empty() => Ok(Command::Check),
-        "check" => Err("check takes no arguments".into()),
-        "reset" if !rest.is_empty() => Ok(Command::Reset {
-            schemas: rest.to_vec(),
-        }),
-        "reset" => Err("reset takes one or more module schemas".into()),
-        "replay" => match rest {
-            [producer, id] => Ok(Command::Replay {
-                producer: producer.clone(),
-                id: id.clone(),
-            }),
-            _ => Err("replay takes the recording module's schema and the event's ID".into()),
-        },
-        "rename" => match rest {
-            [address, slug] => Ok(Command::Rename {
-                address: address.clone(),
-                slug: slug.clone(),
-            }),
-            _ => Err("rename takes the tenant's address and its new slug".into()),
-        },
-        _ => Err(format!("unknown command {command:?}")),
+        other => ops::parse(other, rest).map_or_else(
+            || Err(format!("unknown command {command:?}")),
+            |chore| chore.map(Command::Chore),
+        ),
+    }
+}
+
+/// A command that takes no arguments, or the reason it was refused.
+fn bare(rest: &[String], command: Command, why: &str) -> Result<Command, String> {
+    if rest.is_empty() {
+        Ok(command)
+    } else {
+        Err(why.into())
     }
 }
 
@@ -115,20 +106,17 @@ async fn main() -> ExitCode {
 
 async fn run(command: Command) -> Result<(), String> {
     match command {
-        Command::Summary => say(&summary(MODULES))?,
-        Command::Migrate => run_migrate().await?,
-        Command::Seed { path, check_only } => run_seed(&path, check_only).await?,
-        Command::Serve => run_serve().await?,
-        Command::Check => say_all(&ops::check(&local()?).await?)?,
-        Command::Reset { schemas } => say_all(&ops::reset(&local()?, &schemas).await?)?,
-        Command::Replay { producer, id } => {
-            say_all(&ops::replay(&local()?, MODULES, &producer, &id).await?)?;
-        }
-        Command::Rename { address, slug } => {
-            say_all(&ops::rename(&local()?, &address, &slug).await?)?;
-        }
+        Command::Summary => say(&summary(MODULES)),
+        Command::Migrate => run_migrate().await,
+        Command::Seed { path, check_only } => run_seed(&path, check_only).await,
+        Command::Serve => run_serve().await,
+        Command::Chore(chore) => run_chore(chore).await,
     }
-    Ok(())
+}
+
+/// Runs a hosted chore with the local settings, and prints what it reports.
+async fn run_chore(chore: ops::Chore) -> Result<(), String> {
+    say_all(&ops::run(chore, &local()?, MODULES).await?)
 }
 
 /// Runs each module's new migrations.
@@ -395,49 +383,6 @@ mod tests {
             &["seed", "--check", ""],
         ] {
             assert_eq!(parse(&args(bad)), wrong, "{bad:?}");
-        }
-    }
-    /// The hosted chores take exactly what they act on (#135).
-    #[test]
-    fn hosted_chores_are_parsed_exactly() {
-        assert_eq!(parse(&args(&["check"])), Ok(Command::Check));
-        assert_eq!(
-            parse(&args(&["reset", "tenancy", "audit"])),
-            Ok(Command::Reset {
-                schemas: vec!["tenancy".into(), "audit".into()]
-            })
-        );
-        assert_eq!(
-            parse(&args(&["replay", "identity", "0190"])),
-            Ok(Command::Replay {
-                producer: "identity".into(),
-                id: "0190".into()
-            })
-        );
-        assert_eq!(
-            parse(&args(&["rename", "/login", "sample-gym"])),
-            Ok(Command::Rename {
-                address: "/login".into(),
-                slug: "sample-gym".into()
-            })
-        );
-        for (bad, why) in [
-            (&["check", "now"][..], "check takes no arguments"),
-            (&["reset"], "reset takes one or more module schemas"),
-            (
-                &["replay", "identity"],
-                "replay takes the recording module's schema and the event's ID",
-            ),
-            (
-                &["rename", "/login"],
-                "rename takes the tenant's address and its new slug",
-            ),
-            (
-                &["rename", "/login", "a", "b"],
-                "rename takes the tenant's address and its new slug",
-            ),
-        ] {
-            assert_eq!(parse(&args(bad)), Err(why.into()), "{bad:?}");
         }
     }
 }
