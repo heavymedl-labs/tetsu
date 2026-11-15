@@ -20,6 +20,9 @@ COMMENT ON TABLE operators IS
 -- (ADR-0047).
 CREATE TABLE sessions (
     token_hash bytea PRIMARY KEY CHECK (octet_length(token_hash) = 32),
+    -- What a list of a person's sessions shows and ends them by: random, so
+    -- it says nothing about the token, whose hash never leaves the database.
+    id uuid NOT NULL UNIQUE DEFAULT gen_random_uuid(),
     realm text NOT NULL CHECK (realm IN ('operator')),
     operator_id bigint NOT NULL REFERENCES operators (id),
     started_at timestamptz NOT NULL,

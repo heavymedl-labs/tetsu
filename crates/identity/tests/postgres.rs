@@ -367,7 +367,7 @@ async fn signing_out_ends_the_session_once_its_checks_pass() {
         .await
         .expect("creates");
     let token = operators.start_session(kurt).await.expect("starts");
-    let (jar, form) = (text(&token), token.form_token());
+    let (jar, form) = (text(&token), token.form_token().expect("a form token"));
     let sign_out = |origin| Change::new([jar.as_str()], origin, &form);
     let from_elsewhere = sign_out(Some("https://evil.example"));
     assert_eq!(
@@ -406,7 +406,7 @@ async fn signing_out_leaves_the_operators_other_sessions() {
         .expect("creates");
     let token = operators.start_session(kurt).await.expect("starts");
     let other = operators.start_session(kurt).await.expect("starts");
-    let (jar, form) = (text(&token), token.form_token());
+    let (jar, form) = (text(&token), token.form_token().expect("a form token"));
     let sign_out = Change::new([jar.as_str()], Some(ORIGIN), &form);
     assert_eq!(
         operators.end_session(&origins(), &sign_out).await,
@@ -474,7 +474,7 @@ async fn another_realms_session_is_neither_used_nor_ended() {
     )
     .await;
     assert_eq!(operators.session([text(&token).as_str()]).await, Ok(None));
-    let (jar, form) = (text(&token), token.form_token());
+    let (jar, form) = (text(&token), token.form_token().expect("a form token"));
     let sign_out = Change::new([jar.as_str()], Some(ORIGIN), &form);
     assert_eq!(
         operators.end_session(&origins(), &sign_out).await,
@@ -641,7 +641,7 @@ async fn a_statement_that_cannot_be_prepared_is_an_error() {
         .await
         .expect("creates");
     let token = operators.start_session(kurt).await.expect("starts");
-    let (jar, form) = (text(&token), token.form_token());
+    let (jar, form) = (text(&token), token.form_token().expect("a form token"));
     let sign_out = Change::new([jar.as_str()], Some(ORIGIN), &form);
     as_admin(&database, "DROP FUNCTION identity.end_session(bytea, text)").await;
     assert!(matches!(
@@ -701,7 +701,11 @@ async fn a_change_needs_the_realms_origin_and_the_sessions_form_token() {
         "UPDATE identity.sessions SET last_seen_at = now() - interval '10 minutes'",
     )
     .await;
-    let (session, form, others) = (token.to_text(), token.form_token(), other.form_token());
+    let (session, form, others) = (
+        token.to_text(),
+        token.form_token().expect("a form token"),
+        other.form_token().expect("a form token"),
+    );
     let jar = cookie(&session);
     let change = |origin, form_token| Change::new([jar.as_str()], origin, form_token);
     for refused in [
@@ -878,7 +882,7 @@ async fn signing_out_a_spent_session_has_nothing_to_end() {
         .expect("creates");
     let token = operators.start_session(kurt).await.expect("starts");
     as_admin(&database, "UPDATE identity.sessions SET ends_at = now()").await;
-    let (jar, form) = (text(&token), token.form_token());
+    let (jar, form) = (text(&token), token.form_token().expect("a form token"));
     let sign_out = Change::new([jar.as_str()], Some(ORIGIN), &form);
     assert_eq!(
         operators.session_for_change(&origins(), &sign_out).await,
@@ -897,7 +901,7 @@ async fn signing_out_a_spent_session_has_nothing_to_end() {
         ),
     )
     .await;
-    let (jar, form) = (text(&token), token.form_token());
+    let (jar, form) = (text(&token), token.form_token().expect("a form token"));
     let sign_out = Change::new([jar.as_str()], Some(ORIGIN), &form);
     assert_eq!(
         operators.end_session(&origins(), &sign_out).await,
@@ -928,10 +932,32 @@ async fn an_end_that_returns_nothing_ended_nothing() {
          GRANT EXECUTE ON FUNCTION identity.end_session(bytea, text) TO tetsu_identity",
     )
     .await;
-    let (jar, form) = (text(&token), token.form_token());
+    let (jar, form) = (text(&token), token.form_token().expect("a form token"));
     let sign_out = Change::new([jar.as_str()], Some(ORIGIN), &form);
     assert_eq!(
         operators.end_session(&origins(), &sign_out).await,
         Ok(SignOut::NothingToEnd)
+    );
+}
+
+/// Each session has its own random public id, apart from its token, for a list of sessions to show.
+#[tokio::test]
+async fn each_session_has_a_random_public_id() {
+    let database = ready().await;
+    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    let kurt = operators
+        .create(&name("Kurt Medley"))
+        .await
+        .expect("creates");
+    for _ in 0..3 {
+        operators.start_session(kurt).await.expect("starts");
+    }
+    assert_eq!(count(&database, "true").await, 3);
+    assert!(
+        stored(
+            &database,
+            "id IS NOT NULL AND (SELECT count(DISTINCT id) FROM identity.sessions) = 3"
+        )
+        .await
     );
 }

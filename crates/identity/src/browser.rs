@@ -42,7 +42,8 @@ impl Realm {
             .into_iter()
             .flat_map(|header| header.split(';'))
             .filter_map(|pair| {
-                let (name, value) = pair.trim().split_once('=')?;
+                // ASCII whitespace alone: a name led by Unicode whitespace is another cookie to the browser.
+                let (name, value) = pair.trim_ascii().split_once('=')?;
                 (name == self.cookie_name()).then_some(value)
             });
         let first = found.next()?;
@@ -228,6 +229,26 @@ mod tests {
         );
     }
 
+    /// A name led by Unicode whitespace is another cookie, which a browser stores apart from ours, so it is never
+    /// read as ours: only ASCII whitespace is trimmed, which closes the cookie prefix bypass published in September 2025.
+    #[test]
+    fn a_name_led_by_unicode_whitespace_is_not_ours() {
+        let token = "ab".repeat(32);
+        for space in ["\u{2000}", "\u{a0}", "\u{85}"] {
+            let planted = format!("{space}__Host-tetsu-operator={token}");
+            assert_eq!(
+                Realm::Operator.token_in([planted.as_str()]),
+                None,
+                "{space:?}"
+            );
+        }
+        let spaced = format!(" \t__Host-tetsu-operator={token}");
+        assert_eq!(
+            Realm::Operator.token_in([spaced.as_str()]),
+            Some(token.as_str())
+        );
+    }
+
     /// A second copy in another `Cookie` header, as HTTP/2 may send, is still a second copy.
     #[test]
     fn a_cookie_sent_twice_across_headers_names_no_token() {
@@ -259,7 +280,7 @@ mod tests {
         let origins = Origins::parse(&["https://ops.example.com"]).expect("origins");
         let token = token();
         let (form, cookie) = (
-            token.form_token(),
+            token.form_token().expect("a form token"),
             format!("__Host-tetsu-operator={}", token.to_text()),
         );
         let origin = Some("https://ops.example.com");

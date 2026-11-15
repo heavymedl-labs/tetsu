@@ -133,17 +133,41 @@ impl SessionToken {
     /// The token this session's forms carry, which every state-changing request must send back (ADR-0048,
     /// `v5.0.0-3.5.1`). It comes from the session's own token, so nothing more is stored, and no page can know it
     /// without the cookie, which scripts cannot read. It differs from the stored hash, so the database never holds
-    /// it either.
-    #[must_use]
-    pub fn form_token(&self) -> String {
-        to_hex(&self.form_bytes())
+    /// it either. Each call masks it with a fresh random pad, as `pad || (pad XOR token)`, so it reads differently
+    /// in every page, and a compressed page never repeats it for an attacker to measure (BREACH).
+    ///
+    /// # Errors
+    /// Fails with [`Error::Unavailable`] if the secure random source cannot be read.
+    pub fn form_token(&self) -> Result<String, Error> {
+        self.masked_form_token(getrandom::fill)
     }
 
-    /// Whether a submitted form token is this session's, compared in constant time, so the comparison's timing
-    /// tells nothing about how much of a guess was right.
+    pub(crate) fn masked_form_token(&self, fill: Fill) -> Result<String, Error> {
+        let mut pad = [0; TOKEN_BYTES];
+        fill(&mut pad).map_err(no_randomness)?;
+        let mut masked = [0; TOKEN_BYTES * 2];
+        masked[..TOKEN_BYTES].copy_from_slice(&pad);
+        for (out, (pad, secret)) in masked[TOKEN_BYTES..]
+            .iter_mut()
+            .zip(pad.iter().zip(self.form_bytes()))
+        {
+            *out = pad ^ secret;
+        }
+        Ok(to_hex(&masked))
+    }
+
+    /// Whether a submitted form token is this session's, however it was masked: it is unmasked, then compared in
+    /// constant time, so the comparison's timing tells nothing about how much of a guess was right.
     #[must_use]
     pub fn form_token_matches(&self, submitted: &str) -> bool {
-        from_hex(submitted).is_some_and(|bytes| bool::from(bytes.ct_eq(&self.form_bytes())))
+        from_hex::<{ TOKEN_BYTES * 2 }>(submitted).is_some_and(|bytes| {
+            let (pad, masked) = bytes.split_at(TOKEN_BYTES);
+            let mut unmasked = [0; TOKEN_BYTES];
+            for (out, (pad, masked)) in unmasked.iter_mut().zip(pad.iter().zip(masked)) {
+                *out = pad ^ masked;
+            }
+            bool::from(unmasked.ct_eq(&self.form_bytes()))
+        })
     }
 
     fn form_bytes(&self) -> [u8; TOKEN_BYTES] {
@@ -176,8 +200,8 @@ impl std::fmt::Debug for SessionToken {
 }
 
 /// Bytes as lowercase hexadecimal digits.
-fn to_hex(bytes: &[u8; TOKEN_BYTES]) -> String {
-    let mut text = String::with_capacity(TOKEN_BYTES * 2);
+fn to_hex<const N: usize>(bytes: &[u8; N]) -> String {
+    let mut text = String::with_capacity(N * 2);
     for byte in bytes {
         text.push(char::from(HEX[usize::from(byte >> 4)]));
         text.push(char::from(HEX[usize::from(byte & 0x0f)]));
@@ -185,13 +209,14 @@ fn to_hex(bytes: &[u8; TOKEN_BYTES]) -> String {
     text
 }
 
-/// The bytes 64 lowercase hexadecimal digits stand for, and nothing else, so each value has one written form.
-fn from_hex(text: &str) -> Option<[u8; TOKEN_BYTES]> {
+/// The `N` bytes that `2 * N` lowercase hexadecimal digits stand for, and nothing else, so each value has one written
+/// form.
+fn from_hex<const N: usize>(text: &str) -> Option<[u8; N]> {
     let digits = text.as_bytes();
-    if digits.len() != TOKEN_BYTES * 2 {
+    if digits.len() != N * 2 {
         return None;
     }
-    let mut bytes = [0; TOKEN_BYTES];
+    let mut bytes = [0; N];
     for (byte, [high, low]) in bytes.iter_mut().zip(digits.as_chunks::<2>().0) {
         *byte = digit(*high)? * 16 + digit(*low)?;
     }
@@ -368,10 +393,17 @@ mod tests {
     #[test]
     fn a_form_token_is_the_sessions_own_and_not_its_stored_hash() {
         let token = SessionToken::parse(&"00".repeat(32)).expect("a token");
-        let form = token.form_token();
+        let form = token.form_token().expect("a form token");
         assert!(token.form_token_matches(&form));
-        assert_ne!(form, to_hex(&token.hash()), "the database never holds it");
-        assert_ne!(form, token.to_text());
+        assert_ne!(
+            token.form_bytes(),
+            token.hash(),
+            "the database never holds it"
+        );
+        assert!(
+            !token.form_token_matches(&to_hex(&token.form_bytes())),
+            "only a masked token is accepted"
+        );
         let other = SessionToken::generate(getrandom::fill).expect("a token");
         assert!(
             !other.form_token_matches(&form),
@@ -380,6 +412,32 @@ mod tests {
         for bad in ["", "not a token", &form.to_uppercase(), &form[1..]] {
             assert!(!token.form_token_matches(bad), "{bad:?}");
         }
+    }
+
+    /// Each render masks the token afresh, so no two pages repeat it, and every render still matches.
+    #[test]
+    fn each_render_of_a_form_token_differs_and_matches() {
+        let token = SessionToken::generate(getrandom::fill).expect("a token");
+        let (first, second) = (
+            token.form_token().expect("a form token"),
+            token.form_token().expect("a form token"),
+        );
+        assert_ne!(first, second);
+        assert!(token.form_token_matches(&first));
+        assert!(token.form_token_matches(&second));
+        assert_eq!(first.len(), 128);
+    }
+
+    #[test]
+    fn no_form_token_is_made_without_randomness() {
+        let token = SessionToken::parse(&"00".repeat(32)).expect("a token");
+        assert_eq!(
+            token.masked_form_token(|_| Err(getrandom::Error::UNSUPPORTED)),
+            Err(Error::Unavailable(format!(
+                "no secure random source: {}",
+                getrandom::Error::UNSUPPORTED
+            )))
+        );
     }
 
     #[test]
@@ -425,9 +483,9 @@ mod tests {
 
         /// Every session's form token matches it, and a token one digit off never does.
         #[test]
-        fn a_form_token_matches_only_exactly(text in "[0-9a-f]{64}", at in 0usize..64) {
+        fn a_form_token_matches_only_exactly(text in "[0-9a-f]{64}", at in 0usize..128) {
             let token = SessionToken::parse(&text).expect("a token");
-            let form = token.form_token();
+            let form = token.form_token().expect("a form token");
             prop_assert!(token.form_token_matches(&form));
             let digit = form.as_bytes()[at];
             let changed = if digit == b'0' { "1" } else { "0" };

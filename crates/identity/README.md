@@ -26,15 +26,17 @@ over Postgres.
 - **Both tables are global** ([ADR-0042](../../docs/adr/0042-tenant-isolation.md)): `identity.operators`, which
   Identity's role adds to and reads, and `identity.sessions`, which it reaches only through lookup functions that
   take one token's hash and realm a call, so nothing can list sessions, and no realm uses or ends another's.
-- **Each operator has a random WebAuthn user handle,** which says nothing about them.
+- **Each operator has a random WebAuthn user handle,** which says nothing about them, and each session a random
+  public id, for a list of sessions to show and end them by without the token's hash.
 - **Each realm's session cookie** is `__Host-` prefixed, `Secure`, `HttpOnly`, and `SameSite=Lax`, with path `/`
   and a `Max-Age` no longer than the session (`Realm::session_cookie`, `Realm::cleared_cookie`). Reading it
-  (`Realm::token_in`) takes every `Cookie` header, as HTTP/2 may split them, and refuses a request that carries it
-  twice.
+  (`Realm::token_in`) takes every `Cookie` header, as HTTP/2 may split them, refuses a request that carries it
+  twice, and trims only ASCII whitespace, so a name led by Unicode whitespace is never taken for it.
 - **Every state-changing request** must come from one of the realm's `Origins`, exactly, and carry the session's
   form token (`Operators::session_for_change`). A `Change` is built from every `Cookie` header, so the session
-  token is always read through `Realm::token_in`. A form token is derived from the session token with SHA-256, so nothing more is stored, and is
-  compared in constant time. These are plain text in and out; the page adapter in step 4 reads and writes the
+  token is always read through `Realm::token_in`. A form token is derived from the session token with SHA-256, so nothing more is stored. Each page
+  masks it with a fresh random pad, so a compressed page never repeats it (BREACH), and it is unmasked and compared in
+  constant time. These are plain text in and out; the page adapter in step 4 reads and writes the
   headers.
 
 ## Hot paths
