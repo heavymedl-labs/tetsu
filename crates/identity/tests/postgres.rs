@@ -961,3 +961,29 @@ async fn each_session_has_a_random_public_id() {
         .await
     );
 }
+
+/// The longest name the domain accepts fits the database, and a longer one is refused there too (ADR-0060).
+#[tokio::test]
+async fn the_database_takes_the_longest_name_the_domain_takes() {
+    let database = ready().await;
+    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    let longest = "é".repeat(100);
+    operators.create(&name(&longest)).await.expect("fits");
+    for refused in [String::new(), "é".repeat(101)] {
+        let error = connect(&database)
+            .await
+            .expect("connects")
+            .execute(
+                "INSERT INTO identity.operators (name) VALUES ($1)",
+                &[&refused],
+            )
+            .await
+            .expect_err("refused");
+        assert_eq!(
+            error.as_db_error().and_then(|db| db.constraint()),
+            Some("operators_name_check"),
+            "{} characters",
+            refused.chars().count()
+        );
+    }
+}

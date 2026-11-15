@@ -17,7 +17,8 @@ pub const LOCK_TIMEOUT: &str = "2s";
 /// inside the transaction, so it is set here, never on the session, where a later one could not tighten it.
 pub const TRANSACTION_TIMEOUT: &str = "15s";
 pub const IDLE_TIMEOUT: &str = "10s";
-/// The delivery role's limits cover its longest pass: a minute of claiming, and one consumer's 30 seconds.
+/// The delivery role's limits cover its longest pass: a minute, then at most one more consumer's wait for a
+/// connection and its 30 seconds, since a pass stops before any later consumer once its minute is up.
 const DELIVERY_TIMEOUT: &str = "2min";
 
 /// Clears the tenant too, so a setting left on the session, however it got there, never narrows a module

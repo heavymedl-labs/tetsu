@@ -205,6 +205,37 @@ tables AS (
         AND NOT (r.relname = 'migrations' AND NOT r.relispartition)
 ),
 
+-- Every text, binary, or JSON column in a module's tables, or one of a domain
+-- over those types or of unbounded character types, and the column as a check
+-- names it, with any character a pattern could read as an operator escaped.
+text_columns AS (
+    SELECT
+        t.oid,
+        a.attnum,
+        t.shown || '.' || pg_catalog.quote_ident(a.attname) AS shown,
+        pg_catalog.regexp_replace(
+            pg_catalog.quote_ident(a.attname), '([^a-z0-9_])', '\\\1', 'g'
+        ) AS pattern
+    FROM tables AS t
+    INNER JOIN pg_catalog.pg_attribute AS a
+        ON t.oid = a.attrelid AND a.attnum > 0 AND NOT a.attisdropped
+    INNER JOIN pg_catalog.pg_type AS ty ON a.atttypid = ty.oid
+    WHERE
+        coalesce(nullif(ty.typbasetype, 0), ty.oid) IN (
+            'pg_catalog.text'::pg_catalog.regtype,
+            'pg_catalog.bytea'::pg_catalog.regtype,
+            'pg_catalog.json'::pg_catalog.regtype,
+            'pg_catalog.jsonb'::pg_catalog.regtype
+        )
+        OR (
+            coalesce(nullif(ty.typbasetype, 0), ty.oid) IN (
+                'pg_catalog.varchar'::pg_catalog.regtype,
+                'pg_catalog.bpchar'::pg_catalog.regtype
+            )
+            AND a.atttypmod < 0
+        )
+),
+
 tenant_owned AS (
     SELECT
         t.*,
@@ -543,39 +574,51 @@ WHERE
     )
 
 -- The database bounds what Rust bounds (ADR-0060): every text, binary, or
--- JSON column has a validated check that names it and measures its length, or
--- holds it to a list of values or one value.
+-- JSON column, or domain over one, has a validated check that limits that
+-- column's length from above, or holds it to listed values or one value. A
+-- check counts only as Postgres prints it back, with the column itself as the
+-- operand, so a check on another column or a lower bound alone does not.
+UNION ALL
+SELECT tc.shown || ' has no check on its size'
+FROM text_columns AS tc
+WHERE
+    NOT EXISTS (
+        SELECT FROM pg_catalog.pg_constraint AS c
+        WHERE
+            c.conrelid = tc.oid
+            AND c.contype = 'c'
+            AND c.convalidated
+            AND tc.attnum = any(c.conkey)
+            AND pg_catalog.pg_get_constraintdef(c.oid) ~ (
+                '\m(octet_length|char_length|length)\(\(?'
+                || tc.pattern
+                || '\)?(::[a-z ]+)?\) (<=|<|=) [0-9]'
+                || '|\('
+                || tc.pattern
+                || ' = (ANY \(ARRAY\[|'')'
+            )
+    )
+
+-- An array of text, binary, or JSON has no size a check above can show.
 UNION ALL
 SELECT
     t.shown
     || '.'
     || pg_catalog.quote_ident(a.attname)
-    || ' has no check on its size'
+    || ' is an array of text, binary, or JSON, which no size rule covers'
 FROM tables AS t
 INNER JOIN pg_catalog.pg_attribute AS a
     ON t.oid = a.attrelid AND a.attnum > 0 AND NOT a.attisdropped
+INNER JOIN pg_catalog.pg_type AS ty ON a.atttypid = ty.oid
 WHERE
-    (
-        a.atttypid IN (
-            'pg_catalog.text'::pg_catalog.regtype,
-            'pg_catalog.bytea'::pg_catalog.regtype,
-            'pg_catalog.json'::pg_catalog.regtype,
-            'pg_catalog.jsonb'::pg_catalog.regtype
-        )
-        OR (
-            a.atttypid = 'pg_catalog.varchar'::pg_catalog.regtype
-            AND a.atttypmod < 0
-        )
-    )
-    AND NOT EXISTS (
-        SELECT FROM pg_catalog.pg_constraint AS c
-        WHERE
-            c.conrelid = t.oid
-            AND c.contype = 'c'
-            AND c.convalidated
-            AND a.attnum = any(c.conkey)
-            AND pg_catalog.pg_get_constraintdef(c.oid)
-            ~ '\m(octet_length|char_length|length)\(|= ANY \(ARRAY\[|= '''
+    ty.typcategory = 'A'
+    AND ty.typelem IN (
+        'pg_catalog.text'::pg_catalog.regtype,
+        'pg_catalog.bytea'::pg_catalog.regtype,
+        'pg_catalog.json'::pg_catalog.regtype,
+        'pg_catalog.jsonb'::pg_catalog.regtype,
+        'pg_catalog.varchar'::pg_catalog.regtype,
+        'pg_catalog.bpchar'::pg_catalog.regtype
     )
 
 -- A foreign key to a tenant-owned table checks the referenced row whatever

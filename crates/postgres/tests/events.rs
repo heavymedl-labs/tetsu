@@ -804,6 +804,49 @@ async fn a_busy_pool_costs_no_attempts() {
     assert_eq!(dispatcher.deliver_due().await.expect("delivers"), 1);
 }
 
+/// A pass whose time is up stops before a later consumer, at no charge, so it never outlasts its limits by more
+/// than one consumer's time, and the next pass finishes the event (ADR-0060).
+#[tokio::test]
+async fn a_pass_out_of_time_stops_before_a_later_consumer() {
+    let World {
+        pool,
+        ledger,
+        database,
+        ..
+    } = world().await;
+    let journal = Arc::new(support::Journal {
+        failures_left: AtomicUsize::new(0),
+    });
+    let consumers: Vec<Arc<dyn Consumer>> = vec![ledger.clone(), journal];
+    let dispatcher = Dispatcher::new(pool.clone(), &["people"], consumers)
+        .await
+        .expect("a dispatcher");
+    record(&pool, 1, &JOINED, true).await;
+    let out_of_time = dispatcher.with_pass_limit(Duration::ZERO);
+    assert_eq!(out_of_time.deliver_due().await.expect("passes"), 0);
+    assert_eq!(
+        ledger.calls.load(Ordering::SeqCst),
+        1,
+        "the first consumer ran"
+    );
+    assert_eq!(
+        read::<i64>(&database, "SELECT count(*) FROM journal.inbox").await,
+        0,
+        "the later one did not"
+    );
+    assert_eq!(
+        read::<i64>(&database, "SELECT attempts FROM people.outbox").await,
+        0,
+        "no attempt is charged"
+    );
+    let dispatcher = out_of_time.with_pass_limit(Duration::from_mins(1));
+    assert_eq!(dispatcher.deliver_due().await.expect("delivers"), 1);
+    assert_eq!(
+        read::<i64>(&database, "SELECT count(*) FROM journal.inbox").await,
+        1
+    );
+}
+
 /// A consumer that never answers counts as a failure after its time, so delivery goes on.
 #[tokio::test]
 async fn a_consumer_that_never_answers_fails_after_its_time() {
@@ -1036,4 +1079,47 @@ async fn the_delivery_role_has_limits_that_cover_its_pass() {
         ),
         ("2min".into(), "2min".into())
     );
+}
+
+/// The outbox takes only a `module.fact` type and a JSON object of at most 64 KiB, in both its tables, since event
+/// types are written in code and the database is their check (ADR-0060).
+#[tokio::test]
+async fn the_outbox_refuses_a_malformed_event() {
+    let World {
+        pool,
+        database: _database,
+        ..
+    } = world().await;
+    let big = format!(r#"{{"note": "{}"}}"#, "a".repeat(65_536));
+    for (kind, payload) in [
+        ("people.signed-in", JOINED.payload),
+        ("joined", JOINED.payload),
+        ("People.joined", JOINED.payload),
+        ("people.joined", "[1, 2]"),
+        ("people.joined", "\"text\""),
+        ("people.joined", big.as_str()),
+    ] {
+        let event = NewEvent {
+            kind,
+            payload,
+            ..JOINED
+        };
+        let mut client = pool.get().await.expect("a connection");
+        let transaction = TenantTransaction::begin(&mut client, "people", 1)
+            .await
+            .expect("begins");
+        let tenant = transaction.record(&event).await.expect_err(kind);
+        drop(transaction);
+        let transaction = ModuleTransaction::begin(&mut client, "people")
+            .await
+            .expect("begins");
+        let global = transaction.record(&event).await.expect_err(kind);
+        for refused in [tenant, global] {
+            assert_eq!(
+                refused.code(),
+                Some(&tokio_postgres::error::SqlState::CHECK_VIOLATION),
+                "{kind} {payload:.20}"
+            );
+        }
+    }
 }

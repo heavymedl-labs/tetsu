@@ -689,3 +689,41 @@ async fn locations_keep_their_ids_and_swap_places_but_never_share_one() {
         Some("locations_place")
     );
 }
+
+/// The largest of everything the domain accepts fits the database, so its checks never refuse what Rust takes
+/// (ADR-0060), and a location's name or time zone past it is refused there too.
+#[tokio::test]
+async fn the_database_takes_the_largest_tenant_the_domain_takes() {
+    let (store, settings) = store_and_settings().await;
+    let longest = "é".repeat(100);
+    let largest = NewTenant::new(
+        Slug::parse(&format!("a-{}", "b".repeat(61))).expect("a 63-byte slug"),
+        &longest,
+        Theme {
+            primary: Color::parse("#ffffff").expect("color"),
+            accent: Color::parse("#000000").expect("color"),
+        },
+        vec![Location::new(&longest, &longest).expect("a location")],
+    )
+    .expect("a tenant");
+    store.create(&largest).await.expect("fits");
+    let client = tetsu_postgres::connect(&settings).await.expect("connects");
+    for (statement, constraint) in [
+        ("UPDATE tenancy.locations SET name = ''", "locations_name"),
+        (
+            "UPDATE tenancy.locations SET name = repeat('é', 101)",
+            "locations_name",
+        ),
+        (
+            "UPDATE tenancy.locations SET time_zone = repeat('a', 101)",
+            "locations_time_zone",
+        ),
+    ] {
+        let refused = client.batch_execute(statement).await.expect_err(statement);
+        assert_eq!(
+            refused.as_db_error().and_then(|db| db.constraint()),
+            Some(constraint),
+            "{statement}"
+        );
+    }
+}

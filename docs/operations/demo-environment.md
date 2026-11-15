@@ -174,15 +174,17 @@ Before the first real business, a change to a module's first migrations may be f
 added as new ones, as for [ADR-0060](../adr/0060-database-hardening.md). The runner then refuses the demo's database,
 since its record holds the old text, so the demo starts over from its seed. Set a fresh `tetsu_owner` password and
 `MIGRATION_DATABASE_URL` as in [Moving onto Tetsu's own roles](#moving-onto-tetsus-own-roles), connect as
-`tetsu_owner`, and drop each changed module's schema, which takes its record of applied files with it. The schema's
-owner may drop what other roles own inside it:
+`tetsu_owner`, and first check that the server is one the new release accepts, since after the drop the demo has
+nothing to fall back on. Then drop each changed module's schema, which takes its record of applied files with it. The
+schema's owner may drop what other roles own inside it:
 
 ```sql
+SHOW server_version;   -- at least the floor in migrate.rs, such as 18.7
 DROP SCHEMA tenancy, audit CASCADE;
 ```
 
-Then run CI, deploy, which migrates, and seed as in [Deploying](#deploying). The demo serves errors from the drop
-until the deploy finishes.
+Then run CI, deploy, which migrates, and seed as in [Deploying](#deploying), and run hosted test 8 again, the only
+place the catalog check runs against the demo. The demo serves errors from the drop until the deploy finishes.
 
 ## When `serve` refuses to start
 

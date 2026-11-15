@@ -43,7 +43,9 @@ fn recorded() -> &'static watch::Sender<u64> {
 }
 
 /// An event to record: a fact in the past tense, such as `identity.signed_in`, its version, and a JSON payload of
-/// IDs and facts, never personal details.
+/// IDs and facts, never personal details. Its type is written in code, so the outbox is its check: a type other
+/// than `module.fact` in lowercase letters, digits, and underscores, or a payload that is not a JSON object of at
+/// most 64 KiB, is refused there (ADR-0060).
 pub struct NewEvent<'a> {
     pub kind: &'a str,
     pub version: i64,
@@ -148,6 +150,8 @@ pub struct Dispatcher {
     producers: Vec<String>,
     consumers: Vec<Arc<dyn Consumer>>,
     apply_timeout: Duration,
+    /// How long a pass hands out events before it commits and leaves the rest for the next.
+    pass_limit: Duration,
 }
 
 /// One outbox: a module's tenant-owned or global table.
@@ -257,7 +261,18 @@ impl Dispatcher {
             producers,
             consumers,
             apply_timeout: APPLY_TIMEOUT,
+            pass_limit: PASS_LIMIT,
         })
+    }
+
+    /// The same dispatcher, ending each pass after `limit`, so tests need not wait out the real one.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_pass_limit(self, limit: Duration) -> Self {
+        Self {
+            pass_limit: limit,
+            ..self
+        }
     }
 
     /// The same dispatcher, giving each consumer `timeout` to apply an event, so tests need not wait out the real
@@ -335,14 +350,14 @@ impl Dispatcher {
     /// Delivers one outbox's due events, and commits what it has settled and charged when the pool has no
     /// connection for a consumer or the pass reaches [`PASS_LIMIT`], leaving the rest for the next pass.
     async fn deliver_from(&self, place: &Place<'_>) -> Result<Pass, Error> {
-        let started = Instant::now();
+        let deadline = Instant::now() + self.pass_limit;
         let mut client = self.pool.get().await?;
         let transaction = DeliveryTransaction::begin(&mut client).await?;
         let rows = due(&transaction, place).await?;
         let mut pass = Pass::default();
         for row in &rows {
-            pass.count(self.deliver_one(&transaction, place, row).await?);
-            if pass.starved || started.elapsed() >= PASS_LIMIT {
+            pass.count(self.deliver_one(&transaction, place, row, deadline).await?);
+            if pass.starved || Instant::now() >= deadline {
                 break;
             }
         }
@@ -356,9 +371,10 @@ impl Dispatcher {
         transaction: &Transaction<'_>,
         place: &Place<'_>,
         row: &tokio_postgres::Row,
+        deadline: Instant,
     ) -> Result<Handed, Error> {
         let event = read_event(row, place.producer)?;
-        let (failed, starved) = self.hand_over(&event).await;
+        let (failed, starved) = self.hand_over(&event, deadline).await;
         if !failed.is_empty() {
             retry_later(transaction, place, &event, &failed).await?;
         } else if !starved {
@@ -371,16 +387,26 @@ impl Dispatcher {
         })
     }
 
-    /// Gives the event to each consumer that wants it, and returns those that failed, and whether the pool ran
-    /// out of connections before every consumer had one. A shortage is no consumer's failure, so it charges only
-    /// the failures that came before it.
-    async fn hand_over(&self, event: &Event) -> (Vec<&dyn Consumer>, bool) {
+    /// Gives the event to each consumer that wants it, and returns those that failed, and whether the pass ended
+    /// before every consumer had it: the pool ran out of connections, or the pass reached its deadline before a
+    /// later consumer. Neither is a consumer's failure, so it charges only the failures that came before it. The
+    /// first consumer always runs, so every pass moves on, and no pass outlasts its deadline by more than one
+    /// consumer's time, which the delivery transaction's limits cover (ADR-0060).
+    async fn hand_over(&self, event: &Event, deadline: Instant) -> (Vec<&dyn Consumer>, bool) {
         let mut failed = Vec::new();
-        for consumer in self
+        for (index, consumer) in self
             .consumers
             .iter()
             .filter(|consumer| consumer.wants(event))
+            .enumerate()
         {
+            if index > 0 && Instant::now() >= deadline {
+                tracing::info!(
+                    event_id = event.id,
+                    "the pass reached its limit; the event waits for the next"
+                );
+                return (failed, true);
+            }
             let mut client = match self.pool.get().await {
                 Ok(client) => client,
                 Err(error) => {

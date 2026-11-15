@@ -1025,6 +1025,22 @@ async fn columns_without_a_size_check_are_caught() {
             "body text); ALTER TABLE notes ADD CHECK (octet_length(body) <= 9) NOT VALID; SELECT (1",
             true,
         ),
+        // A lower bound alone, a bound on another column, and a comparison that is not equality bound nothing.
+        ("body text CHECK (char_length(body) > 0)", true),
+        ("body text CHECK (char_length(body) BETWEEN 1 AND 9)", false),
+        ("body text CHECK (octet_length(body) = 7)", false),
+        (
+            "body text, kind text, CHECK (body <> '' AND kind = 'x')",
+            true,
+        ),
+        (
+            "body text, kind text, CHECK (octet_length(kind) <= 9 AND body <> '')",
+            true,
+        ),
+        ("body text CHECK (body >= 'a')", true),
+        ("somebody text, body text CHECK (somebody = 'a')", true),
+        ("body bpchar", true),
+        ("body char(5)", false),
     ] {
         let found = problems(format!("CREATE TABLE notes ({column}); {global}"), "").await;
         assert_eq!(
@@ -1061,6 +1077,24 @@ async fn keys_other_than_the_tenant_and_a_uuid_id_are_caught() {
          COMMENT ON TABLE odd IS 'tetsu:tenant-owned'"
             .into(),
         "checked.odd's primary key is not (tenant_id, id) with a uuid id",
+    )
+    .await;
+}
+
+/// A domain over text needs a check on its size as text does, and an array of text, binary, or JSON has no size a
+/// check can show, so both are caught (ADR-0060).
+#[tokio::test]
+async fn domains_and_arrays_of_text_are_caught() {
+    caught(
+        "CREATE DOMAIN words AS text; CREATE TABLE notes (body words);
+         COMMENT ON TABLE notes IS 'tetsu:global: test';"
+            .into(),
+        "checked.notes.body has no check on its size",
+    )
+    .await;
+    caught(
+        "CREATE TABLE notes (tags text[]); COMMENT ON TABLE notes IS 'tetsu:global: test';".into(),
+        "checked.notes.tags is an array of text, binary, or JSON, which no size rule covers",
     )
     .await;
 }
