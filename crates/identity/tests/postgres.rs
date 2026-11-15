@@ -974,7 +974,8 @@ async fn each_session_has_a_random_public_id() {
     );
 }
 
-/// The longest name the domain accepts fits the database, and a longer one is refused there too (ADR-0060).
+/// The longest name the domain accepts fits the database, and a longer one is refused there too (ADR-0060). Names
+/// are unique, so the longest is stored once.
 #[tokio::test]
 async fn the_database_takes_the_longest_name_the_domain_takes() {
     let database = ready().await;
