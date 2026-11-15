@@ -18,6 +18,7 @@ serde.workspace = true
 # of it.
 serde_json.workspace = true
 tetsu-audit.workspace = true
+tetsu-identity.workspace = true
 tetsu-kernel.workspace = true
 tetsu-postgres.workspace = true
 tetsu-tenancy.workspace = true

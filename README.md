@@ -22,6 +22,7 @@ business is a tenant, isolated in the database itself, and industries add only w
 
 - **Tenancy:** each business's address and page, kept apart by row-level security
 - **Audit:** a record of security events that is never lost
+- **Identity:** operators and their server-side sessions, with tokens stored only as hashes (sign-in in progress)
 - **Domain events:** delivered once through an outbox, retried, and logged when they stop
 - **Operations:** JSON logs with alert fields, exported to any OTLP backend
 

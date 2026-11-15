@@ -17,11 +17,12 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use tetsu_audit::Audit;
+use tetsu_identity::Identity;
 use tetsu_kernel::Module;
 use tetsu_tenancy::Tenancy;
 
 /// Every module the binary runs, in the order their migrations apply.
-const MODULES: &[&dyn Module] = &[&Tenancy, &Audit];
+const MODULES: &[&dyn Module] = &[&Tenancy, &Identity, &Audit];
 const USAGE: &str = "usage: tetsu [migrate | seed [--check] <file or folder> | serve]";
 
 #[derive(Debug, PartialEq, Eq)]

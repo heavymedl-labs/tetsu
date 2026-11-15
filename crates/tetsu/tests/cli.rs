@@ -28,7 +28,7 @@ fn with_no_command_it_prints_its_version_and_modules() {
     assert_eq!(
         stdout.trim(),
         format!(
-            "tetsu {}, modules: tenancy, audit",
+            "tetsu {}, modules: tenancy, identity, audit",
             env!("CARGO_PKG_VERSION")
         )
     );

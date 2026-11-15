@@ -17,6 +17,8 @@ askama = { version = "0.16", default-features = false, features = ["derive", "st
 # HTTP (ADR-0007): HTTP/1 serving on Tokio, and the matched route, which logs record in place of the path (ADR-0045).
 axum = { version = "0.8", default-features = false, features = ["http1", "matched-path", "tokio"] }
 deadpool-postgres = "0.14"
+# Random session tokens, and codes later, from the operating system (ADR-0047).
+getrandom = "0.4"
 # Log export over OTLP (ADR-0049): HTTP with protobuf and optional gzip, through a blocking client on the batch
 # thread, with rustls. Span fields are copied onto a record only from an allowlist. Internal logs put export
 # failures on standard output.
@@ -24,12 +26,17 @@ opentelemetry = { version = "0.33.1", default-features = false, features = ["log
 opentelemetry-appender-tracing = { version = "0.33.1", default-features = false, features = ["experimental_span_attributes"] }
 opentelemetry-otlp = { version = "0.33.1", default-features = false, features = ["gzip-http", "http-proto", "internal-logs", "logs", "reqwest-blocking-client", "reqwest-rustls"] }
 opentelemetry_sdk = { version = "0.33.1", default-features = false, features = ["logs"] }
+# Property tests for Tier 1 invariants, as a dev-dependency only (ADR-0046).
+proptest = "1.12"
 rustls = "0.23.46"
 # Seed files only; derives stay on file types in crates/tetsu (ADR-0018).
 serde = { version = "1.0.229", features = ["derive"] }
 # Reads Vite's manifest when the tetsu crate builds; it never reaches the binary (ADR-0034).
 serde_json = "1.0.154"
+# Hashing session tokens, and codes later, before they are stored (ADR-0047).
+sha2 = "0.11"
 tetsu-audit = { path = "crates/audit" }
+tetsu-identity = { path = "crates/identity" }
 tetsu-kernel = { path = "crates/kernel" }
 tetsu-postgres = { path = "crates/postgres" }
 tetsu-tenancy = { path = "crates/tenancy" }
