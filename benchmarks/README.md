@@ -48,7 +48,7 @@ Docker is the simplest way, and matches CI:
 
 ```bash
 docker build -f benchmarks/Dockerfile -t tetsu-bench .
-docker run -d --name bench-pg --network host -e POSTGRES_HOST_AUTH_METHOD=trust postgres:18.6 \
+docker run -d --name bench-pg --network host -e POSTGRES_HOST_AUTH_METHOD=trust postgres:18.7 \
   -c listen_addresses=localhost
 docker run --rm --network host --security-opt seccomp=unconfined \
   -e ADMIN_URL=postgres://postgres@localhost:5432/postgres \

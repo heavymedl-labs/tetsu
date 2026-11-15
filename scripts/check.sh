@@ -122,7 +122,7 @@ if [[ -z "${TEST_DATABASE_URL:-}" ]]; then
     echo "error: no test Postgres answers at ${url:-the default in .cargo/config.toml}. Start one, or set" >&2
     echo "TEST_DATABASE_URL to a Postgres the tests may create databases on:" >&2
     echo "  docker run -d --name tetsu-test-pg --restart unless-stopped -p 127.0.0.1:54329:5432 \\" >&2
-    echo "    -e POSTGRES_HOST_AUTH_METHOD=trust --tmpfs /var/lib/postgresql postgres:18.6 \\" >&2
+    echo "    -e POSTGRES_HOST_AUTH_METHOD=trust --tmpfs /var/lib/postgresql postgres:18.7 \\" >&2
     echo "    -c fsync=off -c synchronous_commit=off -c full_page_writes=off -c ssl=on \\" >&2
     echo "    -c ssl_cert_file=/etc/ssl/certs/ssl-cert-snakeoil.pem -c ssl_key_file=/etc/ssl/private/ssl-cert-snakeoil.key" >&2
     exit 1

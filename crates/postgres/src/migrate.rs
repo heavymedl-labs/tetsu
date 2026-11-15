@@ -23,7 +23,7 @@ const RESET_SESSION: &str = "RESET SESSION AUTHORIZATION; RESET ROLE; RESET ALL;
 /// Applies each module's new migrations.
 ///
 /// # Errors
-/// Fails if the modules break the kernel contract, the server is older than PostgreSQL 18.6 or the database is not
+/// Fails if the modules break the kernel contract, the server is older than PostgreSQL 18.7 or the database is not
 /// UTF8, the application role is missing, the lock stays held, a file fails, or an applied file has changed.
 pub async fn migrate(settings: &Settings, modules: &[&dyn Module]) -> Result<(), Error> {
     migrate_with_wait(settings, modules, LOCK_WAIT).await
@@ -133,10 +133,11 @@ fn plain_schema(schema: &str) -> bool {
 /// checks read as a lookup role. A schema ending in `_lookup` would be another module's lookup role.
 const RESERVED_SCHEMAS: &[&str] = &["app", "owner", "migrate", "lookup", "delivery"];
 
-/// The oldest server Tetsu runs on: 18.6 fixes CVE-2026-14666 in row security (ADR-0042).
-pub const MIN_SERVER_VERSION: i32 = 180_006;
+/// The oldest server Tetsu runs on: 18.7 fixes CVE-2026-116311 and CVE-2026-116316 in row security and definer
+/// functions, after 18.6 fixed CVE-2026-14666 (ADR-0042, ADR-0060).
+pub const MIN_SERVER_VERSION: i32 = 180_007;
 
-/// Fails unless the server is PostgreSQL 18.6 or later and the database stores text as UTF8. Modules check text
+/// Fails unless the server is PostgreSQL 18.7 or later and the database stores text as UTF8. Modules check text
 /// before storing it, and those checks assume the database can hold any Unicode text, so anything that writes
 /// checked text calls this first, and so does anything that serves.
 ///
@@ -146,7 +147,7 @@ pub async fn require_supported_server(settings: &Settings) -> Result<(), Error> 
     check_server(&connect(settings).await?).await
 }
 
-/// The test server runs 18.6, so no test reaches the refusal itself; `supported` is tested alone.
+/// The test server runs 18.7, so no test reaches the refusal itself; `supported` is tested alone.
 async fn check_server(client: &Client) -> Result<(), Error> {
     let row = client
         .query_one(
@@ -164,9 +165,11 @@ fn supported(version: i32) -> Result<(), Error> {
         Ok(())
     } else {
         Err(format!(
-            "PostgreSQL {}.{} is too old; Tetsu needs 18.6 or later",
+            "PostgreSQL {}.{} is too old; Tetsu needs {}.{} or later",
             version / 10_000,
-            version % 10_000
+            version % 10_000,
+            MIN_SERVER_VERSION / 10_000,
+            MIN_SERVER_VERSION % 10_000
         )
         .into())
     }
@@ -398,16 +401,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_server_must_be_18_6_or_later() {
-        for old in [170_009, 180_000, 180_005] {
+    fn the_server_must_be_18_7_or_later() {
+        for old in [170_009, 180_000, 180_006] {
             let error = supported(old).unwrap_err().to_string();
-            assert!(error.contains("needs 18.6 or later"), "{error}");
+            assert!(error.contains("needs 18.7 or later"), "{error}");
         }
         assert_eq!(
-            supported(180_005).unwrap_err().to_string(),
-            "PostgreSQL 18.5 is too old; Tetsu needs 18.6 or later"
+            supported(180_006).unwrap_err().to_string(),
+            "PostgreSQL 18.6 is too old; Tetsu needs 18.7 or later"
         );
-        for new in [180_006, 180_010, 190_000] {
+        for new in [180_007, 180_010, 190_000] {
             supported(new).unwrap();
         }
     }
