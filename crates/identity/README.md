@@ -34,10 +34,10 @@ over Postgres.
   twice, and trims only ASCII whitespace, so a name led by Unicode whitespace is never taken for it.
 - **Every state-changing request** must come from one of the realm's `Origins`, exactly, and carry the session's
   form token (`Operators::session_for_change`). A `Change` is built from every `Cookie` header, so the session
-  token is always read through `Realm::token_in`. A form token is derived from the session token with SHA-256, so nothing more is stored. Each page
-  masks it with a fresh random pad, so a compressed page never repeats it (BREACH), and it is unmasked and compared in
-  constant time. These are plain text in and out; the page adapter in step 4 reads and writes the
-  headers.
+  token is always read through `Realm::token_in`. A form token is derived from the session token with SHA-256, so
+  nothing more is stored. Each page masks it with a fresh random pad, so a compressed page never repeats it (BREACH),
+  and it is unmasked and compared in constant time. These are plain text in and out; the page adapter in step 4 reads
+  and writes the headers.
 
 ## Hot paths
 
@@ -46,5 +46,6 @@ over Postgres.
 
 ## Not yet
 
-Passkeys, enrollment, the sign-in pages and the pre-session form token they need, the headers that apply these
-checks, rate limits, and the `identity.signed_in` event arrive in the later steps of #110.
+Passkeys, enrollment, the sign-in pages, the `Sec-Fetch-Site` check, the headers that apply these checks, the
+commands and pages that end sessions ([ADR-0059](../../docs/adr/0059-session-controls-and-request-checks.md)), rate
+limits, and the `identity.signed_in` event arrive in the later steps of #110.
