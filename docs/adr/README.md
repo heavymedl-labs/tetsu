@@ -65,7 +65,8 @@ number, and add a row below. Never renumber.
 | [0057](0057-operator-passkeys-before-level-2.md) | Operator passkeys and email before the Level 2 review | Building operator sign-in, or sending email before #111 | Accepted |
 | [0058](0058-test-authenticator.md) | A virtual authenticator for sign-in tests | Testing passkey enrollment or sign-in | Accepted |
 | [0059](0059-session-controls-and-request-checks.md) | Session controls and cross-site request checks | Building sessions, sign-out, session lists, or checks on state-changing requests | Accepted |
-| [0060](0060-database-hardening.md) | Database hardening after the design review | Writing a migration, a table, or connection settings | Proposed |
+| [0060](0060-database-hardening.md) | Database hardening after the design review | Writing a migration, a table, or connection settings | Accepted |
+| [0061](0061-one-service-until-domains.md) | One service and two logins until Tetsu has domains | Deploying, adding a realm, or adding a database login | Accepted |
 
 ## Open decisions
 

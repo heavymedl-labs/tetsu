@@ -5,6 +5,9 @@
 - Settles the schema boundary enforcement that [ADR-0003](0003-architecture.md) left to this decision
 - Supersedes the rule in [ADR-0040](0040-identity-and-sign-in.md) that the demo's hosts sit under a domain of its
   own: until Tetsu has domains, each demo realm is its own free host
+- The server floor, keys, bounds, and grants are amended by [ADR-0060](0060-database-hardening.md); one service
+  and two logins replace a service per realm and the operator's login until domains, by
+  [ADR-0061](0061-one-service-until-domains.md)
 
 ## Context
 

@@ -1,6 +1,7 @@
 # 0011. Server stack guardrails
 
 - Status: Accepted
+- Connection and transaction bounds are added by [ADR-0060](0060-database-hardening.md)
 - Date: 2026-11-04
 - Migration runner trigger reviewed in [ADR-0012](0012-first-hosting-and-deploys.md)
 

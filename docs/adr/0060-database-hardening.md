@@ -1,9 +1,8 @@
 # 0060. Database hardening after the design review
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-15
-- Amends [ADR-0042](0042-tenant-isolation.md) (the server floor, keys, and grants),
-  [ADR-0043](0043-domain-event-delivery.md) (the delivery role's login), and
+- Amends [ADR-0042](0042-tenant-isolation.md) (the server floor, keys, and grants) and
   [ADR-0011](0011-server-stack-guardrails.md) (connection timeouts)
 
 ## Context
@@ -20,8 +19,7 @@ convention, or nowhere:
 - Slugs, colors, names, addresses, and event payloads are bounded only in Rust.
 - Nothing bounds a query once it is sent: a stalled network holds a request until TCP keepalive, two hours by
   default, and no setting bounds a whole transaction.
-- The catalog check allows `TEMPORARY` on the database to PUBLIC, and the request login may become `tetsu_delivery`,
-  which reads every tenant's outbox.
+- The catalog check allows `TEMPORARY` on the database to PUBLIC.
 
 Only tenancy's and audit's migrations have run anywhere, on the demo's fictional data, so these are cheap now.
 
@@ -43,9 +41,9 @@ Only tenancy's and audit's migrations have run anywhere, on the demo's fictional
   dropped, not returned to the pool. Connections set `tcp_user_timeout` and keepalives of seconds, not hours. Each
   login sets `transaction_timeout` and `idle_in_transaction_session_timeout`, sized to its longest legitimate
   transaction, and their errors sort as temporary ([ADR-0011](0011-server-stack-guardrails.md)).
-- **No role gets more than its work needs.** The catalog check refuses `TEMPORARY` on the database for PUBLIC, as
-  the demo runbook already revokes it. The dispatcher logs in through its own login and pool, like the operator
-  role, and the request login is no longer granted `tetsu_delivery`.
+- **The catalog check refuses `TEMPORARY` on the database for PUBLIC,** as the demo runbook already revokes it. The
+  review also suggested a login of its own for the dispatcher, which [ADR-0061](0061-one-service-until-domains.md) defers
+  for the first real business's data.
 - **The sessions table keeps room for its updates,** with `fillfactor = 80`, so each request's write to
   `last_seen_at`, which no index names, stays on its page.
 
@@ -65,7 +63,6 @@ Only tenancy's and audit's migrations have run anywhere, on the demo's fictional
 
 - One migration for tenancy (locations' `id`, the bounds), one for audit (its bounds), and edits to identity's and
   the outbox's unapplied files. The demo reseeds after the tenancy migration.
-- The dispatcher needs a second database URL in each environment, set by the maintainer for the demo.
 - Audit's retention, and with it whether `records` is partitioned by time, which its unique `event_id` key blocks, is
   raised on [#22](https://github.com/heavymedl-labs/tetsu/issues/22).
 - The review's later items wait for the slice that touches each: the dispatcher's short claim with a lease, the

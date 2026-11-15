@@ -1,6 +1,8 @@
 # 0040. Identity and sign-in
 
 - Status: Accepted
+- Until Tetsu has domains, the realms share one service and its passkey domain, by
+  [ADR-0061](0061-one-service-until-domains.md)
 - Date: 2026-11-11
 - Supersedes the rule in [ADR-0029](0029-security-target-revised.md) that #9's ADR decides recovery and records
   any relaxation of `v5.0.0-6.3.3`; both move to #105's ADR
