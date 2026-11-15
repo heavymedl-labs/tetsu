@@ -347,3 +347,41 @@ async fn a_module_transaction_ignores_a_tenant_left_on_the_session() {
         .expect("a count");
     assert_eq!(seen, 0);
 }
+
+/// A request's transaction ends if it runs or sits idle too long, and the limits leave with it (ADR-0060).
+#[tokio::test]
+async fn a_transaction_has_limits_on_its_length_and_idling() {
+    let (pool, _database) = app_pool().await;
+    let mut client = pool.get().await.expect("a connection");
+    let limits = async |client: &tokio_postgres::Client| {
+        let row = client
+            .query_one(
+                "SELECT current_setting('transaction_timeout'),
+                        current_setting('idle_in_transaction_session_timeout')",
+                &[],
+            )
+            .await
+            .expect("reads the limits");
+        (
+            row.try_get::<_, String>(0).expect("text"),
+            row.try_get::<_, String>(1).expect("text"),
+        )
+    };
+    let transaction = TenantTransaction::begin(&mut client, "people", ANVIL)
+        .await
+        .expect("begins");
+    assert_eq!(
+        limits(transaction.client()).await,
+        ("15s".into(), "10s".into())
+    );
+    transaction.commit().await.expect("commits");
+    let transaction = ModuleTransaction::begin(&mut client, "people")
+        .await
+        .expect("begins");
+    assert_eq!(
+        limits(transaction.client()).await,
+        ("15s".into(), "10s".into())
+    );
+    drop(transaction);
+    assert_eq!(limits(&client).await, ("0".into(), "0".into()));
+}

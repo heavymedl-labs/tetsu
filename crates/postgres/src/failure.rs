@@ -101,8 +101,9 @@ fn message(error: &tokio_postgres::Error) -> String {
     causes.join(": ")
 }
 
-/// The server ending the session for a restart, crash, or failover, still starting up, or out of connections. A
-/// query running at that moment gets one of these, not a closed connection.
+/// The server ending the session for a restart, crash, or failover, still starting up, or out of connections, or
+/// because a transaction ran or sat idle past its limit (ADR-0060). A query running at that moment gets one of these,
+/// not a closed connection.
 fn is_server_unavailable(error: &tokio_postgres::Error) -> bool {
     error.code().is_some_and(|code| {
         [
@@ -110,8 +111,11 @@ fn is_server_unavailable(error: &tokio_postgres::Error) -> bool {
             SqlState::CRASH_SHUTDOWN,
             SqlState::CANNOT_CONNECT_NOW,
             SqlState::TOO_MANY_CONNECTIONS,
+            SqlState::IDLE_IN_TRANSACTION_SESSION_TIMEOUT,
         ]
         .contains(code)
+            // The driver predates Postgres 17's code for a transaction past `transaction_timeout`.
+            || code.code() == "25P04"
     })
 }
 

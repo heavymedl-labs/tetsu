@@ -279,3 +279,36 @@ async fn an_unreachable_server_is_temporary() {
     };
     assert!(why.contains("refused"), "{why}");
 }
+
+/// Postgres ends a session whose transaction runs past `transaction_timeout`, and that is worth retrying on a fresh
+/// connection (ADR-0060).
+#[tokio::test]
+async fn a_transaction_past_its_limit_is_temporary() {
+    let database = fresh_database().await.expect("a test database");
+    let client = connect(&database).await.expect("connects");
+    client
+        .batch_execute("BEGIN; SELECT set_config('transaction_timeout', '100ms', true)")
+        .await
+        .expect("begins");
+    let error = client
+        .batch_execute("SELECT pg_sleep(0.3)")
+        .await
+        .expect_err("ended");
+    assert!(matches!(sort(&error), Failure::Temporary(_)), "{error:?}");
+}
+
+/// Postgres ends a session that sits idle in a transaction past its limit, and that is worth retrying too.
+#[tokio::test]
+async fn a_transaction_left_idle_past_its_limit_is_temporary() {
+    let database = fresh_database().await.expect("a test database");
+    let client = connect(&database).await.expect("connects");
+    client
+        .batch_execute(
+            "BEGIN; SELECT set_config('idle_in_transaction_session_timeout', '100ms', true)",
+        )
+        .await
+        .expect("begins");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let error = client.batch_execute("SELECT 1").await.expect_err("ended");
+    assert!(matches!(sort(&error), Failure::Temporary(_)), "{error:?}");
+}

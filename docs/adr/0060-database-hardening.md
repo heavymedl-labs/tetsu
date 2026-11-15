@@ -37,10 +37,14 @@ Only tenancy's and audit's migrations have run anywhere, on the demo's fictional
   flags any such column without one. Tables copied with `LIKE` include constraints. Rust still checks first, so
   people get a clear message; the database is the backstop. Time zones wait for
   [#21](https://github.com/heavymedl-labs/tetsu/issues/21), since a `CHECK` cannot consult the zone list.
-- **Every query has a bound the client enforces,** a little above `statement_timeout`, after which the connection is
-  dropped, not returned to the pool. Connections set `tcp_user_timeout` and keepalives of seconds, not hours. Each
-  login sets `transaction_timeout` and `idle_in_transaction_session_timeout`, sized to its longest legitimate
-  transaction, and their errors sort as temporary ([ADR-0011](0011-server-stack-guardrails.md)).
+- **A stalled network ends the connection within about half a minute,** since every connection sets
+  `tcp_user_timeout` and keepalives of seconds, not hours, and the pool never hands out a closed connection. A timer
+  around each query would bound it closer to `statement_timeout`, but every adapter's queries would have to go
+  through it; the half minute is enough until load says otherwise.
+- **Every scoped transaction sets `transaction_timeout` and `idle_in_transaction_session_timeout`,** 15 and 10
+  seconds for a module, and enough for the dispatcher's longest pass, with its other limits. They are set inside the
+  transaction because Postgres cannot tighten a session-level one there. Their errors sort as temporary
+  ([ADR-0011](0011-server-stack-guardrails.md)).
 - **The catalog check refuses `TEMPORARY` on the database for PUBLIC,** as the demo runbook already revokes it. The
   review also suggested a login of its own for the dispatcher, which [ADR-0061](0061-one-service-until-domains.md) defers
   for the first real business's data.

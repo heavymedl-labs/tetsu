@@ -1008,3 +1008,32 @@ async fn a_failure_before_a_shortage_is_still_charged() {
         1
     );
 }
+
+/// The delivery role's limits cover its longest pass, a minute of claiming and one consumer's 30 seconds (ADR-0060).
+#[tokio::test]
+async fn the_delivery_role_has_limits_that_cover_its_pass() {
+    let World {
+        pool,
+        database: _database,
+        ..
+    } = world().await;
+    let mut client = pool.get().await.expect("a connection");
+    let transaction = DeliveryTransaction::begin(&mut client)
+        .await
+        .expect("begins");
+    let limits = transaction
+        .query_one(
+            "SELECT current_setting('transaction_timeout'),
+                    current_setting('idle_in_transaction_session_timeout')",
+            &[],
+        )
+        .await
+        .expect("reads the limits");
+    assert_eq!(
+        (
+            limits.try_get::<_, String>(0).expect("text"),
+            limits.try_get::<_, String>(1).expect("text")
+        ),
+        ("2min".into(), "2min".into())
+    );
+}

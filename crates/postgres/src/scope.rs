@@ -12,17 +12,28 @@ use crate::roles::{DELIVERY_ROLE, module_role};
 pub const STATEMENT_TIMEOUT: &str = "5s";
 /// How long a statement waits for a lock before failing, so one slow transaction cannot queue every request.
 pub const LOCK_TIMEOUT: &str = "2s";
+/// How long a request's whole transaction may last, and sit idle within it, before Postgres ends the session, so an
+/// open transaction never holds back vacuum or its locks for long (ADR-0060). Postgres arms a transaction limit set
+/// inside the transaction, so it is set here, never on the session, where a later one could not tighten it.
+pub const TRANSACTION_TIMEOUT: &str = "15s";
+pub const IDLE_TIMEOUT: &str = "10s";
+/// The delivery role's limits cover its longest pass: a minute of claiming, and one consumer's 30 seconds.
+const DELIVERY_TIMEOUT: &str = "2min";
 
 /// Clears the tenant too, so a setting left on the session, however it got there, never narrows a module
 /// transaction to a tenant it did not choose.
 const SET_MODULE: &str = "SELECT pg_catalog.set_config('role', $1, true),
        pg_catalog.set_config('statement_timeout', $2, true),
        pg_catalog.set_config('lock_timeout', $3, true),
+       pg_catalog.set_config('transaction_timeout', $4, true),
+       pg_catalog.set_config('idle_in_transaction_session_timeout', $5, true),
        pg_catalog.set_config('app.tenant_id', '', true)";
 const SET_TENANT_TOO: &str = "SELECT pg_catalog.set_config('role', $1, true),
        pg_catalog.set_config('statement_timeout', $2, true),
        pg_catalog.set_config('lock_timeout', $3, true),
-       pg_catalog.set_config('app.tenant_id', $4, true)";
+       pg_catalog.set_config('transaction_timeout', $4, true),
+       pg_catalog.set_config('idle_in_transaction_session_timeout', $5, true),
+       pg_catalog.set_config('app.tenant_id', $6, true)";
 const SET_TENANT: &str = "SELECT pg_catalog.set_config('app.tenant_id', $1, true)";
 /// What a module transaction sets, as the delivery role, which may reach no tenant through a setting either.
 const SET_DELIVERY: &str = SET_MODULE;
@@ -80,7 +91,13 @@ impl<'a> ModuleTransaction<'a> {
         let transaction = open(
             client,
             SET_MODULE,
-            &[&module_role(schema), &STATEMENT_TIMEOUT, &LOCK_TIMEOUT],
+            &[
+                &module_role(schema),
+                &STATEMENT_TIMEOUT,
+                &LOCK_TIMEOUT,
+                &TRANSACTION_TIMEOUT,
+                &IDLE_TIMEOUT,
+            ],
         )
         .await?;
         Ok(Self {
@@ -122,6 +139,8 @@ impl<'a> TenantTransaction<'a> {
                 &module_role(schema),
                 &STATEMENT_TIMEOUT,
                 &LOCK_TIMEOUT,
+                &TRANSACTION_TIMEOUT,
+                &IDLE_TIMEOUT,
                 &tenant.to_string(),
             ],
         )
@@ -139,7 +158,13 @@ impl<'a> DeliveryTransaction<'a> {
         let transaction = open(
             client,
             SET_DELIVERY,
-            &[&DELIVERY_ROLE, &STATEMENT_TIMEOUT, &LOCK_TIMEOUT],
+            &[
+                &DELIVERY_ROLE,
+                &STATEMENT_TIMEOUT,
+                &LOCK_TIMEOUT,
+                &DELIVERY_TIMEOUT,
+                &DELIVERY_TIMEOUT,
+            ],
         )
         .await?;
         Ok(Self { transaction })

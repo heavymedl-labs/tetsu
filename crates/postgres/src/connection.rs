@@ -19,6 +19,13 @@ const POOL_WAIT: Duration = Duration::from_secs(2);
 /// How long opening a connection may take, which also covers a server that accepts and then stalls.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const STATEMENT_TIMEOUT: &str = "-c statement_timeout=5000";
+/// How long sent data may go unacknowledged, and how soon a quiet connection is probed, so a network that stalls
+/// mid-query ends the connection within about half a minute, not the two hours of the system's keepalive default
+/// (ADR-0060). A closed connection is never handed out again.
+const TCP_USER_TIMEOUT: Duration = Duration::from_secs(15);
+const KEEPALIVE_IDLE: Duration = Duration::from_secs(10);
+const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(5);
+const KEEPALIVE_RETRIES: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tls {
@@ -152,6 +159,12 @@ impl Settings {
             Tls::Required => SslMode::Require,
             Tls::Disabled => SslMode::Disable,
         });
+        config
+            .tcp_user_timeout(TCP_USER_TIMEOUT)
+            .keepalives(true)
+            .keepalives_idle(KEEPALIVE_IDLE)
+            .keepalives_interval(KEEPALIVE_INTERVAL)
+            .keepalives_retries(KEEPALIVE_RETRIES);
         Ok(config)
     }
 }
@@ -280,6 +293,25 @@ mod tests {
             (short.connect_timeout, short.pool_wait),
             (Duration::from_millis(1), Duration::from_millis(2))
         );
+    }
+
+    /// A stalled network ends the connection within about half a minute, whatever the URL asked (ADR-0060).
+    #[test]
+    fn every_connection_gives_up_on_a_stalled_network() {
+        let config = Settings::new("postgres://h/db?keepalives=0&keepalives_idle=7200")
+            .config()
+            .expect("a config");
+        assert_eq!(
+            config.get_tcp_user_timeout(),
+            Some(&Duration::from_secs(15))
+        );
+        assert!(config.get_keepalives());
+        assert_eq!(config.get_keepalives_idle(), Duration::from_secs(10));
+        assert_eq!(
+            config.get_keepalives_interval(),
+            Some(Duration::from_secs(5))
+        );
+        assert_eq!(config.get_keepalives_retries(), Some(3));
     }
 
     #[test]
