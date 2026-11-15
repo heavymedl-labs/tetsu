@@ -907,6 +907,7 @@ mod tests {
     #[test]
     fn a_folder_without_a_file_has_no_local_settings() {
         let folder = tetsu_postgres::test_support::Scratch::folder("no-env").unwrap();
+        // No file's settings, yet still the environment's, unlike a default, which reads neither.
         assert_eq!(
             Local::load(&folder),
             Ok(Local {
