@@ -119,6 +119,7 @@ if [[ -z "${TEST_DATABASE_URL:-}" ]]; then
   if ! [[ "$url" =~ @([^:/]+):([0-9]+)/ ]] || ! (echo >"/dev/tcp/${BASH_REMATCH[1]}/${BASH_REMATCH[2]}") 2>/dev/null; then
     # No password, so the port is for this machine only. The data is throwaway, so it stays in memory. TLS uses
     # the image's self-signed certificate, which the TLS tests must refuse. CI starts the same container.
+    # The image is at least the floor in crates/postgres/src/migrate.rs (ADR-0060).
     echo "error: no test Postgres answers at ${url:-the default in .cargo/config.toml}. Start one, or set" >&2
     echo "TEST_DATABASE_URL to a Postgres the tests may create databases on:" >&2
     echo "  docker run -d --name tetsu-test-pg --restart unless-stopped -p 127.0.0.1:54329:5432 \\" >&2

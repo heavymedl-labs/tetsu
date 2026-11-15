@@ -25,6 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
+        # At least MIN_SERVER_VERSION in crates/postgres/src/migrate.rs (ADR-0060).
         image: postgres:18.7
         env:
           POSTGRES_HOST_AUTH_METHOD: trust

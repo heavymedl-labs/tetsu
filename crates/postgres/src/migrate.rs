@@ -400,6 +400,7 @@ async fn refuse_invalid_indexes(client: &Client, schema: &str) -> Result<(), Err
 mod tests {
     use super::*;
 
+    /// The floor rises with each PostgreSQL advisory on row security, roles, or definer functions (ADR-0060).
     #[test]
     fn the_server_must_be_18_7_or_later() {
         for old in [170_009, 180_000, 180_006] {
