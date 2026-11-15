@@ -395,6 +395,8 @@ mod tests {
         let token = SessionToken::parse(&"00".repeat(32)).expect("a token");
         let form = token.form_token().expect("a form token");
         assert!(token.form_token_matches(&form));
+        assert_ne!(form, to_hex(&token.hash()), "the database never holds it");
+        assert_ne!(form, token.to_text());
         assert_ne!(
             token.form_bytes(),
             token.hash(),
