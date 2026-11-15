@@ -68,7 +68,8 @@ REVOKE ALL ON SEQUENCE operators_id_seq FROM tetsu_identity;
 GRANT SELECT, INSERT ON operators TO tetsu_identity;
 GRANT SELECT, INSERT, UPDATE, DELETE ON sessions, enrollments
 TO tetsu_identity_lookup;
-GRANT SELECT, UPDATE (disabled_at) ON operators TO tetsu_identity_lookup;
+GRANT SELECT (id, disabled_at), UPDATE (disabled_at) ON operators
+TO tetsu_identity_lookup;
 
 -- Each realm's limits live here, beside the clock that applies them, so no
 -- caller can lengthen a session by passing other numbers (ADR-0048). Every
@@ -236,30 +237,43 @@ AS $$
 $$;
 
 -- Disables an operator, then ends every session it holds in any realm and its
--- enrollment link (v5.0.0-7.4.2), and says whether it was enabled. Each step
--- is its own statement, so the deletes see what a sign-in or link committed
--- while the update waited on the operator's row; one statement would not.
+-- enrollment link (v5.0.0-7.4.2), and says whether it acted and how many of
+-- each it ended: done is false for an operator already disabled, and null for
+-- one that does not exist. Each step is its own statement, so the deletes see
+-- what a sign-in or link committed while the update waited on the operator's
+-- row; one statement would not, and nor would repeatable read, which every
+-- scoped transaction rules out.
 CREATE FUNCTION disable_operator(wanted_operator bigint)
-RETURNS boolean
+RETURNS TABLE (done boolean, sessions_ended bigint, links_ended bigint)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
 AS $$
 BEGIN
+    sessions_ended := 0;
+    links_ended := 0;
     UPDATE identity.operators AS o
     SET disabled_at = clock_timestamp()
     WHERE o.id = wanted_operator AND o.disabled_at IS NULL;
-    IF NOT FOUND THEN
-        RETURN false;
+    IF FOUND THEN
+        done := true;
+        DELETE FROM identity.sessions AS s
+        WHERE s.operator_id = wanted_operator;
+        GET DIAGNOSTICS sessions_ended = ROW_COUNT;
+        DELETE FROM identity.enrollments AS e
+        WHERE e.operator_id = wanted_operator;
+        GET DIAGNOSTICS links_ended = ROW_COUNT;
+    ELSIF EXISTS (
+        SELECT FROM identity.operators AS o WHERE o.id = wanted_operator
+    ) THEN
+        done := false;
     END IF;
-    DELETE FROM identity.sessions AS s WHERE s.operator_id = wanted_operator;
-    DELETE FROM identity.enrollments AS e
-    WHERE e.operator_id = wanted_operator;
-    RETURN true;
+    RETURN NEXT;
 END
 $$;
 
--- Enables a disabled operator again, and says whether it was disabled. Their
--- sessions stay ended, and they sign in afresh.
+-- Enables a disabled operator again, and says whether it acted: false for an
+-- operator already enabled, null for one that does not exist. Their sessions
+-- stay ended, and they sign in afresh.
 CREATE FUNCTION enable_operator(wanted_operator bigint)
 RETURNS boolean
 LANGUAGE sql VOLATILE SECURITY DEFINER
@@ -272,12 +286,22 @@ AS $$
         RETURNING o.id
     )
 
-    SELECT EXISTS (SELECT FROM enabled)
+    SELECT
+        CASE
+            WHEN EXISTS (SELECT FROM enabled) THEN true
+            WHEN
+                EXISTS (
+                    SELECT FROM identity.operators AS o
+                    WHERE o.id = wanted_operator
+                )
+                THEN false
+        END
 $$;
 
--- Ends every session one operator holds in a realm, and says how many
--- (v5.0.0-7.4.5). It first takes the operator's row, so a sign-in under way
--- finishes before the delete, which then ends it too.
+-- Ends every session one operator holds in a realm, and says how many, or null
+-- for an operator who does not exist (v5.0.0-7.4.5). It first takes the
+-- operator's row, so a sign-in under way finishes before the delete, which
+-- then ends it too.
 CREATE FUNCTION end_operator_sessions(wanted_operator bigint, wanted_realm text)
 RETURNS bigint
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
@@ -290,6 +314,9 @@ BEGIN
     FROM identity.operators AS o
     WHERE o.id = wanted_operator
     FOR NO KEY UPDATE;
+    IF NOT FOUND THEN
+        RETURN null;
+    END IF;
     DELETE FROM identity.sessions AS s
     WHERE s.operator_id = wanted_operator AND s.realm = wanted_realm;
     GET DIAGNOSTICS ended = ROW_COUNT;

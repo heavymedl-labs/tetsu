@@ -54,20 +54,29 @@ ends their sessions. `postgres_store(pool)` returns it over Postgres.
   it only to a terminal, a guard against it landing in a log by accident; the trust boundary is access to the
   database. The token sits in the link's fragment, which a browser never sends to a server.
 - **Disabling an operator** ends every session and the open link they hold (`v5.0.0-7.4.2`), in separate statements
-  after the update, so they see a sign-in or link committed while the update waited on the operator's row. A
-  disabled operator starts no session, uses none, and is issued no link. Enabling them again leaves their sessions
-  ended.
+  after the update, so they see a sign-in or link committed while the update waited on the operator's row. That
+  holds only under read committed, which every scoped transaction now asks for. A disabled operator starts no
+  session, uses none, and is issued no link. Enabling them again leaves their sessions ended.
 - **Ending sessions,** one operator's or every operator's, is the administrator's control (`v5.0.0-7.4.5`). It
-  takes the operators' rows first, so a sign-in under way finishes and is ended too.
-- **Every command records one audit event** in Identity's outbox, in the same transaction, with IDs and counts,
-  never names or tokens, plus who ran it (`user@host`, asserted, since every command shares one database login)
-  and its outcome, `changed`, `unchanged`, or `refused` (`v5.0.0-16.2.1`, `v5.0.0-16.3.3`):
-  `identity.operator_created`, `identity.enrollment_issued`, `identity.operator_disabled`,
-  `identity.operator_enabled`, and `identity.sessions_ended`.
+  takes the operators' rows first, so a sign-in under way finishes and is ended too. A sign-in that starts after it
+  finishes is not stopped, since ending sessions changes nothing about the operator; disabling does.
+- **An operator who does not exist** is refused by every command, never treated as one with nothing to do.
+- **Each change records one audit event** in Identity's outbox, in the same transaction, with IDs and counts,
+  never names or tokens, plus who ran it and its outcome, `changed`, `unchanged`, or `refused`
+  (`v5.0.0-16.2.1`, `v5.0.0-16.3.3`): `identity.operator_created`, `identity.enrollment_issued`,
+  `identity.operator_disabled` (with the sessions and links it ended), `identity.operator_enabled`, and
+  `identity.sessions_ended`. Listing changes nothing and records nothing. A command refused before it reaches the
+  database, such as one printing a link to a pipe, is a usage error, not an event.
+- **Who ran a command** is `user@host`, from the login's `USER` or `LOGNAME` and the first line of `/etc/hostname`,
+  with `unknown` for a part that is missing or would not show safely. It is asserted, not proven: every command
+  shares one database login (ADR-0061), so database access is the trust boundary, and only Identity's code, not
+  the database, makes a change record its event.
+- **Names and actors** hold no control, invisible, or direction-changing characters, so neither can hide or
+  reorder what the audit record shows.
 
 ## Not yet
 
-Passkeys and consuming an enrollment link, refusing a link to an operator who already has a passkey, the sign-in
+Passkeys and consuming an enrollment link, revoking a link on its own (today a new link or a disable ends it), refusing a link to an operator who already has a passkey, the sign-in
 pages, the `Sec-Fetch-Site` check, the headers that apply these checks, the session list
 ([ADR-0059](../../docs/adr/0059-session-controls-and-request-checks.md)), rate limits, the `identity.signed_in`
 event, and running the dispatcher that carries Identity's events to the audit record arrive in later steps of

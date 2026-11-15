@@ -76,14 +76,22 @@ async fn operators_are_listed_signed_out_and_disabled() {
         (&["end-sessions", "--all"], "ended 0 operator sessions\n"),
         (
             &["disable", "1"],
-            "disabled operator 1, and ended their sessions and enrollment link\n",
+            "disabled operator 1, ending 0 sessions and 0 enrollment links\n",
         ),
-        (&["list"], "1  Kurt Medley  disabled\n"),
+        (
+            &["enable", "1"],
+            "enabled operator 1, who signs in afresh\n",
+        ),
+        (&["list"], "1  Kurt Medley  enabled\n"),
     ] {
         let output = operator(&app, args);
         assert!(output.status.success(), "{args:?}: {output:?}");
         assert_eq!(out(&output), said, "{args:?}");
     }
+    // A mistyped ID fails, rather than reading as nothing to do.
+    let missing = operator(&app, &["disable", "99"]);
+    assert_eq!(missing.status.code(), Some(1));
+    assert!(err(&missing).contains("no operator 99"), "{missing:?}");
 }
 
 /// Words the command does not take are a usage error.

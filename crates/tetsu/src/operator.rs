@@ -6,10 +6,9 @@
 //! accident. That guards against mistakes; the trust boundary is access to the database, which this command
 //! signs in to directly (ADR-0040, `v5.0.0-6.4.1`).
 
-use std::env::VarError;
-
 use tetsu_identity::{
-    Actor, EnrollmentToken, OperatorId, OperatorName, OperatorStore, OperatorSummary, Operators,
+    Actor, Disabling, EnrollmentToken, OperatorId, OperatorName, OperatorStore, OperatorSummary,
+    Operators,
 };
 
 use crate::settings::{self, Local};
@@ -35,6 +34,8 @@ pub fn parse(rest: &[String]) -> Result<Operator, String> {
         return Err(USAGE.into());
     };
     match (command.as_str(), arguments) {
+        // A name like an option, such as --help, is a mistake, never an operator to create and enroll.
+        ("create", [name]) if name.starts_with('-') => Err(USAGE.into()),
         ("create", [name]) => OperatorName::parse(name)
             .map(|name| Operator::Create { name })
             .map_err(|error| error.to_string()),
@@ -75,29 +76,28 @@ pub async fn run(operator: Operator, local: &Local, terminal: bool) -> Result<Ve
         String::new()
     };
     let hostname = std::fs::read_to_string("/etc/hostname").ok();
-    let by = actor(|name| local.var(name), hostname.as_deref())?;
+    let by = Actor::from_login(
+        login(|name| std::env::var(name).ok()).as_deref(),
+        hostname.as_deref().and_then(host_name),
+    );
     let operators = tetsu_identity::postgres_store(crate::connect(local).await?);
     act(&operators, operator, &origin, &by).await
 }
 
-/// Who runs the command, as `user@host`, from the login's `USER` or `LOGNAME` and the machine's host name, with
-/// `unknown` for either that is missing. It is asserted, not proven: database access is what grants the command
-/// (ADR-0061).
-fn actor(
-    var: impl Fn(&str) -> Result<String, VarError>,
-    hostname: Option<&str>,
-) -> Result<Actor, String> {
-    let user = var("USER").or_else(|_| var("LOGNAME")).unwrap_or_default();
-    let host = hostname.map(str::trim).unwrap_or_default();
-    let known = |part: &str| {
-        if part.is_empty() {
-            "unknown".to_string()
-        } else {
-            part.to_string()
-        }
-    };
-    Actor::parse(&format!("{}@{}", known(user.trim()), known(host)))
-        .map_err(|error| error.to_string())
+/// Who is signed in to run the command: `USER`, or `LOGNAME` where `USER` is unset or blank, read from the
+/// process's own environment and never from `.env`, which holds settings, not who someone is. It is asserted, not
+/// proven: database access is what grants the command (ADR-0061).
+fn login(var: impl Fn(&str) -> Option<String>) -> Option<String> {
+    ["USER", "LOGNAME"]
+        .into_iter()
+        .find_map(|name| var(name).filter(|value| !value.trim().is_empty()))
+}
+
+/// The machine's name from `/etc/hostname`: its first line that is neither blank nor a `#` comment.
+fn host_name(text: &str) -> Option<&str> {
+    text.lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && !line.starts_with('#'))
 }
 
 /// Does what an operator command asks, through Identity's use cases.
@@ -117,18 +117,17 @@ async fn act(
             .list()
             .await
             .map(|all| all.iter().map(listed).collect()),
-        Operator::Disable { id } => operators.disable(id, by).await.map(|done| {
-            vec![changed(
-                id,
-                done,
-                "disabled",
-                "and ended their sessions and enrollment link",
-            )]
-        }),
-        Operator::Enable { id } => operators
-            .enable(id, by)
+        Operator::Disable { id } => operators
+            .disable(id, by)
             .await
-            .map(|done| vec![changed(id, done, "enabled", "who signs in afresh")]),
+            .map(|done| vec![disabled(id, done)]),
+        Operator::Enable { id } => operators.enable(id, by).await.map(|done| {
+            vec![if done {
+                format!("enabled operator {}, who signs in afresh", id.get())
+            } else {
+                format!("operator {} was already enabled", id.get())
+            }]
+        }),
         Operator::EndSessions { id } => operators
             .end_sessions(id, by)
             .await
@@ -165,15 +164,17 @@ async fn create(
     ])
 }
 
-/// What disabling or enabling an operator did.
-fn changed(id: OperatorId, done: bool, state: &str, then: &str) -> String {
-    if done {
-        format!("{state} operator {}, {then}", id.get())
-    } else {
+/// What disabling an operator did, with how many sessions and enrollment links it ended.
+fn disabled(id: OperatorId, done: Disabling) -> String {
+    if done.done {
         format!(
-            "operator {} was already {state}, or does not exist",
-            id.get()
+            "disabled operator {}, ending {} sessions and {} enrollment links",
+            id.get(),
+            done.sessions_ended,
+            done.links_ended
         )
+    } else {
+        format!("operator {} was already disabled", id.get())
     }
 }
 
@@ -227,6 +228,8 @@ mod tests {
             &["list", "all"],
             &["remove", "7"],
             &["end-sessions"],
+            &["create", "--help"],
+            &["create", "-x"],
         ] {
             assert_eq!(parse(&args(bad)), Err(USAGE.into()), "{bad:?}");
         }
@@ -271,29 +274,30 @@ mod tests {
         assert_eq!(refused, Err("TETSU_ORIGIN must be set".into()));
     }
 
-    /// Who runs the command comes from the login and the host, with `unknown` for what is missing, and never holds
-    /// a control character, so it cannot forge another line of the audit record.
+    /// Who runs the command is `USER`, or `LOGNAME` when `USER` is unset or blank.
     #[test]
-    fn the_actor_is_the_login_at_the_host() {
-        let named =
-            |user: Option<&'static str>, logname: Option<&'static str>, host: Option<&str>| {
-                actor(
-                    |name| match name {
-                        "USER" => user.map(String::from).ok_or(VarError::NotPresent),
-                        "LOGNAME" => logname.map(String::from).ok_or(VarError::NotPresent),
-                        _ => Err(VarError::NotPresent),
-                    },
-                    host,
-                )
-                .map(|actor| actor.as_str().to_string())
-            };
+    fn the_login_is_user_or_else_logname() {
+        let from = |user: Option<&str>, logname: Option<&str>| {
+            login(|name| match name {
+                "USER" => user.map(String::from),
+                _ => logname.map(String::from),
+            })
+        };
+        assert_eq!(from(Some("kurt"), Some("other")), Some("kurt".into()));
+        assert_eq!(from(Some(" "), Some("kurt")), Some("kurt".into()));
+        assert_eq!(from(None, Some("kurt")), Some("kurt".into()));
+        assert_eq!(from(None, None), None);
+    }
+
+    /// The host name is the first line of `/etc/hostname` that is neither blank nor a comment.
+    #[test]
+    fn the_host_name_skips_comments_and_blank_lines() {
+        assert_eq!(host_name("workstation\n"), Some("workstation"));
         assert_eq!(
-            named(Some("kurt"), None, Some("workstation\n")),
-            Ok("kurt@workstation".into())
+            host_name("# managed by ansible\n\n  prod-bastion  \n"),
+            Some("prod-bastion")
         );
-        assert_eq!(named(None, Some("kurt"), None), Ok("kurt@unknown".into()));
-        assert_eq!(named(None, None, Some(" ")), Ok("unknown@unknown".into()));
-        assert!(named(Some("kurt\nforged"), None, None).is_err());
+        assert_eq!(host_name("# only a comment\n"), None);
     }
 
     const ORIGIN: &str = "https://ops.example.com";
@@ -377,11 +381,11 @@ mod tests {
         .await;
         assert_eq!(
             said(&operators, Operator::Disable { id: kurt }).await,
-            ["disabled operator 1, and ended their sessions and enrollment link"]
+            ["disabled operator 1, ending 0 sessions and 1 enrollment links"]
         );
         assert_eq!(
             said(&operators, Operator::Disable { id: kurt }).await,
-            ["operator 1 was already disabled, or does not exist"]
+            ["operator 1 was already disabled"]
         );
         assert_eq!(
             said(&operators, Operator::List).await,
@@ -397,8 +401,19 @@ mod tests {
         );
         assert_eq!(
             said(&operators, Operator::Enable { id: kurt }).await,
-            ["operator 1 was already enabled, or does not exist"]
+            ["operator 1 was already enabled"]
         );
+        let nobody = OperatorId::parse("9").unwrap();
+        for command in [
+            Operator::Disable { id: nobody },
+            Operator::Enable { id: nobody },
+            Operator::EndSessions { id: nobody },
+        ] {
+            assert_eq!(
+                act(&operators, command, ORIGIN, &by()).await,
+                Err("invalid: no operator 9".into())
+            );
+        }
     }
 
     /// When the link cannot be issued after the operator is made, the error names the operator, so a link can be

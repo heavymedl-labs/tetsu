@@ -1,7 +1,6 @@
 //! Identity's Postgres adapter. Driver types stay in this file (ADR-0007).
 
-use std::sync::atomic::Ordering::Relaxed;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64};
+use std::sync::OnceLock;
 
 use serde_json::{Value, json};
 use tetsu_kernel::Migration;
@@ -9,7 +8,9 @@ use tetsu_postgres::{Failure, ModuleTransaction, NewEvent, Pool};
 use tokio_postgres::Row;
 use tokio_postgres::types::{FromSql, ToSql};
 
-use crate::domain::{Actor, Error, OperatorId, OperatorName, OperatorSummary, Realm, Session};
+use crate::domain::{
+    Actor, Disabling, Error, OperatorId, OperatorName, OperatorSummary, Realm, Session,
+};
 use crate::ports::OperatorStore;
 use crate::use_cases::Operators;
 
@@ -100,37 +101,40 @@ impl PostgresOperators {
             .await
     }
 
-    /// Runs a lookup function that answers yes or no in its `done` column, and records the event `event` makes of
-    /// the answer, whatever it is, in the same transaction.
+    /// Runs a lookup function that answers yes, no, or nothing in its `done` column, and records the event `event`
+    /// makes of the answer, whatever it is, in the same transaction.
     async fn change(
         &self,
         statement: &str,
         parameters: &[&(dyn ToSql + Sync)],
-        event: impl Fn(bool) -> (&'static str, String) + Sync,
-    ) -> Result<bool, Error> {
-        let done = AtomicBool::new(false);
+        event: impl Fn(Option<bool>) -> (&'static str, String) + Sync,
+    ) -> Result<Option<bool>, Error> {
+        let done = OnceLock::new();
         self.query_recording(statement, parameters, &|rows| {
-            done.store(flag(rows, "done")?, Relaxed);
-            Ok(Some(event(done.load(Relaxed))))
+            let answer = answered(rows, "done")?;
+            let _ = done.set(answer);
+            Ok(Some(event(answer)))
         })
         .await?;
-        Ok(done.load(Relaxed))
+        Ok(done.get().copied().flatten())
     }
 
-    /// Runs a lookup function that ends sessions and counts them, and records the event `event` makes of the count.
+    /// Runs a lookup function that ends sessions and counts them, or answers nothing for an unknown operator, and
+    /// records the event `event` makes of the count.
     async fn ended(
         &self,
         statement: &str,
         parameters: &[&(dyn ToSql + Sync)],
-        event: impl Fn(u64) -> (&'static str, String) + Sync,
-    ) -> Result<u64, Error> {
-        let ended = AtomicU64::new(0);
+        event: impl Fn(Option<u64>) -> (&'static str, String) + Sync,
+    ) -> Result<Option<u64>, Error> {
+        let ended = OnceLock::new();
         self.query_recording(statement, parameters, &|rows| {
-            ended.store(count(rows)?, Relaxed);
-            Ok(Some(event(ended.load(Relaxed))))
+            let count = counted(rows, "ended")?;
+            let _ = ended.set(count);
+            Ok(Some(event(count)))
         })
         .await?;
-        Ok(ended.load(Relaxed))
+        Ok(ended.get().copied().flatten())
     }
 
     /// Runs a statement, and records the event `event` makes of what it returned, if any, in the same transaction,
@@ -225,10 +229,11 @@ impl OperatorStore for PostgresOperators {
         name: &OperatorName,
         actor: &Actor,
     ) -> Result<OperatorId, Error> {
-        let id = AtomicI64::new(0);
+        let id = OnceLock::new();
         self.query_recording(INSERT_OPERATOR, &[&name.as_str()], &|rows| {
-            id.store(column(rows.first().ok_or_else(no_id)?, "id")?, Relaxed);
-            let payload = json!({"operator_id": id.load(Relaxed)});
+            let stored: i64 = column(rows.first().ok_or_else(no_id)?, "id")?;
+            let _ = id.set(stored);
+            let payload = json!({"operator_id": stored});
             Ok(Some(event(
                 "identity.operator_created",
                 actor,
@@ -237,7 +242,7 @@ impl OperatorStore for PostgresOperators {
             )))
         })
         .await?;
-        Ok(OperatorId::new(id.load(Relaxed)))
+        Ok(OperatorId::new(id.get().copied().unwrap_or_default()))
     }
 
     async fn insert_session(
@@ -273,40 +278,68 @@ impl OperatorStore for PostgresOperators {
     ) -> Result<bool, Error> {
         let id = operator.get();
         let parameters: [&(dyn ToSql + Sync); 2] = [&hash.as_slice(), &id];
-        self.change(ISSUE_ENROLLMENT, &parameters, |issued| {
-            let outcome = if issued { "changed" } else { "refused" };
-            event(
-                "identity.enrollment_issued",
-                actor,
-                outcome,
-                json!({"operator_id": id}),
-            )
-        })
-        .await
+        let issued = self
+            .change(ISSUE_ENROLLMENT, &parameters, |issued| {
+                let outcome = if issued == Some(true) {
+                    "changed"
+                } else {
+                    "refused"
+                };
+                event(
+                    "identity.enrollment_issued",
+                    actor,
+                    outcome,
+                    json!({"operator_id": id}),
+                )
+            })
+            .await?;
+        Ok(issued == Some(true))
     }
 
-    async fn disable_operator(&self, operator: OperatorId, actor: &Actor) -> Result<bool, Error> {
+    async fn disable_operator(
+        &self,
+        operator: OperatorId,
+        actor: &Actor,
+    ) -> Result<Option<Disabling>, Error> {
         let id = operator.get();
-        self.change(DISABLE_OPERATOR, &[&id], |disabled| {
-            let payload = json!({"operator_id": id});
-            event(
+        let disabling = OnceLock::new();
+        self.query_recording(DISABLE_OPERATOR, &[&id], &|rows| {
+            let found = rows.first().map(disabling_from).transpose()?.flatten();
+            let _ = disabling.set(found);
+            let payload = found.map_or_else(
+                || json!({"operator_id": id}),
+                |done| {
+                    json!({
+                        "operator_id": id,
+                        "sessions_ended": done.sessions_ended,
+                        "links_ended": done.links_ended,
+                    })
+                },
+            );
+            let outcome = outcome(found.map(|done| done.done));
+            Ok(Some(event(
                 "identity.operator_disabled",
                 actor,
-                changed(disabled),
+                outcome,
                 payload,
-            )
+            )))
         })
-        .await
+        .await?;
+        Ok(disabling.get().copied().flatten())
     }
 
-    async fn enable_operator(&self, operator: OperatorId, actor: &Actor) -> Result<bool, Error> {
+    async fn enable_operator(
+        &self,
+        operator: OperatorId,
+        actor: &Actor,
+    ) -> Result<Option<bool>, Error> {
         let id = operator.get();
         self.change(ENABLE_OPERATOR, &[&id], |enabled| {
             let payload = json!({"operator_id": id});
             event(
                 "identity.operator_enabled",
                 actor,
-                changed(enabled),
+                outcome(enabled),
                 payload,
             )
         })
@@ -318,7 +351,7 @@ impl OperatorStore for PostgresOperators {
         operator: OperatorId,
         realm: Realm,
         actor: &Actor,
-    ) -> Result<u64, Error> {
+    ) -> Result<Option<u64>, Error> {
         let (id, name) = (operator.get(), realm.as_str());
         let parameters: [&(dyn ToSql + Sync); 2] = [&id, &name];
         self.ended(END_OPERATOR_SESSIONS, &parameters, |ended| {
@@ -326,7 +359,7 @@ impl OperatorStore for PostgresOperators {
             event(
                 "identity.sessions_ended",
                 actor,
-                changed(ended > 0),
+                outcome(ended.map(|ended| ended > 0)),
                 payload,
             )
         })
@@ -335,16 +368,18 @@ impl OperatorStore for PostgresOperators {
 
     async fn end_realm_sessions(&self, realm: Realm, actor: &Actor) -> Result<u64, Error> {
         let name = realm.as_str();
-        self.ended(END_REALM_SESSIONS, &[&name], |ended| {
-            let payload = json!({"realm": name, "ended": ended});
-            event(
-                "identity.sessions_ended",
-                actor,
-                changed(ended > 0),
-                payload,
-            )
-        })
-        .await
+        let ended = self
+            .ended(END_REALM_SESSIONS, &[&name], |ended| {
+                let payload = json!({"realm": name, "ended": ended});
+                event(
+                    "identity.sessions_ended",
+                    actor,
+                    outcome(ended.map(|ended| ended > 0)),
+                    payload,
+                )
+            })
+            .await?;
+        Ok(ended.unwrap_or_default())
     }
 
     async fn list_operators(&self) -> Result<Vec<OperatorSummary>, Error> {
@@ -376,19 +411,37 @@ fn event(
     (kind, payload.to_string())
 }
 
-fn changed(done: bool) -> &'static str {
-    if done { "changed" } else { "unchanged" }
+/// The yes, no, or nothing a lookup function answers in a column; no row at all is nothing too.
+fn answered(rows: &[Row], name: &str) -> Result<Option<bool>, Error> {
+    rows.first().map_or(Ok(None), |row| column(row, name))
 }
 
-/// The boolean a lookup function returns, which says it did nothing when there is no row, as for `delete_session`.
-fn flag(rows: &[Row], name: &str) -> Result<bool, Error> {
-    rows.first().map_or(Ok(false), |row| column(row, name))
+/// The count a lookup function answers, or nothing for an operator who does not exist. Postgres's count is never
+/// negative, so the conversion cannot fail.
+fn counted(rows: &[Row], name: &str) -> Result<Option<u64>, Error> {
+    let ended: Option<i64> = rows.first().map_or(Ok(None), |row| column(row, name))?;
+    Ok(ended.map(|ended| u64::try_from(ended).unwrap_or_default()))
 }
 
-/// The count a lookup function returns. Postgres's count is never negative, so the conversion cannot fail.
-fn count(rows: &[Row]) -> Result<u64, Error> {
-    let ended: i64 = rows.first().map_or(Ok(0), |row| column(row, "ended"))?;
-    Ok(u64::try_from(ended).unwrap_or_default())
+/// What a disable did, or nothing for an operator who does not exist.
+fn disabling_from(row: &Row) -> Result<Option<Disabling>, Error> {
+    let done: Option<bool> = column(row, "done")?;
+    let (sessions, links): (i64, i64) =
+        (column(row, "sessions_ended")?, column(row, "links_ended")?);
+    Ok(done.map(|done| Disabling {
+        done,
+        sessions_ended: u64::try_from(sessions).unwrap_or_default(),
+        links_ended: u64::try_from(links).unwrap_or_default(),
+    }))
+}
+
+/// The outcome of a change: it acted, it found nothing to do, or there was no such operator.
+fn outcome(acted: Option<bool>) -> &'static str {
+    match acted {
+        Some(true) => "changed",
+        Some(false) => "unchanged",
+        None => "refused",
+    }
 }
 
 /// A stored realm Identity does not know is an error, never a session in some default realm.

@@ -7,9 +7,13 @@ use std::path::Path;
 
 use tetsu_postgres::{Settings, Tls};
 
-/// Settings a local `.env` file holds (ADR-0050). The environment always wins over them.
+/// Settings a local `.env` file holds (ADR-0050). The environment always wins over them. The default holds no
+/// settings and never reads the environment, so a test given one cannot reach whatever database its shell exports.
 #[derive(Debug, Default, PartialEq, Eq)]
-pub struct Local(HashMap<String, String>);
+pub struct Local {
+    file: HashMap<String, String>,
+    environment: bool,
+}
 
 impl Local {
     /// Reads `.env` in `folder`, or nothing when there is none.
@@ -18,20 +22,31 @@ impl Local {
     /// Fails when the file cannot be read, or a line is not a setting.
     pub fn load(folder: &Path) -> Result<Self, String> {
         match std::fs::read_to_string(folder.join(".env")) {
-            Ok(text) => parse(&text).map(Self),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
+            Ok(text) => parse(&text).map(|file| Self {
+                file,
+                environment: true,
+            }),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self {
+                file: HashMap::new(),
+                environment: true,
+            }),
             Err(error) => Err(format!(".env could not be read: {error}")),
         }
     }
 
     /// A variable from the environment, or from the file when the environment leaves it unset.
     pub fn var(&self, name: &str) -> Result<String, VarError> {
-        self.or(std::env::var(name), name)
+        let environment = if self.environment {
+            std::env::var(name)
+        } else {
+            Err(VarError::NotPresent)
+        };
+        self.or(environment, name)
     }
 
     fn or(&self, environment: Result<String, VarError>, name: &str) -> Result<String, VarError> {
         match environment {
-            Err(VarError::NotPresent) => self.0.get(name).cloned().ok_or(VarError::NotPresent),
+            Err(VarError::NotPresent) => self.file.get(name).cloned().ok_or(VarError::NotPresent),
             found => found,
         }
     }
@@ -783,10 +798,13 @@ mod tests {
 
     #[test]
     fn a_local_file_holds_settings_comments_and_blank_lines() {
-        let local = Local(
-            parse("# Local defaults\n\nDATABASE_URL = postgres://localhost/tetsu_local\nTETSU_DEMO=true\nEMPTY=\nA_1=x=y\n")
-                .unwrap(),
-        );
+        let local = Local {
+            file: parse(
+                "# Local defaults\n\nDATABASE_URL = postgres://localhost/tetsu_local\nTETSU_DEMO=true\nEMPTY=\nA_1=x=y\n",
+            )
+            .unwrap(),
+            environment: true,
+        };
         let missing = || Err(VarError::NotPresent);
         assert_eq!(
             local.or(missing(), "DATABASE_URL"),
@@ -801,7 +819,10 @@ mod tests {
     /// The environment wins, whether it holds a value or one that is not UTF-8.
     #[test]
     fn the_environment_wins_over_the_file() {
-        let local = Local(parse("PORT=9000").unwrap());
+        let local = Local {
+            file: parse("PORT=9000").unwrap(),
+            environment: true,
+        };
         assert_eq!(local.or(Ok("8080".into()), "PORT"), Ok("8080".into()));
         assert_eq!(
             local.or(Err(VarError::NotUnicode("x".into())), "PORT"),
@@ -830,7 +851,13 @@ mod tests {
     #[test]
     fn a_folder_without_a_file_has_no_local_settings() {
         let folder = tetsu_postgres::test_support::Scratch::folder("no-env").unwrap();
-        assert_eq!(Local::load(&folder), Ok(Local::default()));
+        assert_eq!(
+            Local::load(&folder),
+            Ok(Local {
+                file: HashMap::new(),
+                environment: true,
+            })
+        );
         std::fs::write(folder.join(".env"), "TETSU_DEMO=false\n").unwrap();
         assert_eq!(
             Local::load(&folder)

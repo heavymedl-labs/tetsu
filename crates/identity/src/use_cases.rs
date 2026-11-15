@@ -2,8 +2,8 @@
 
 use crate::browser::{Change, ForChange, Origins, SignOut};
 use crate::domain::{
-    Actor, EnrollmentToken, Error, Fill, OperatorId, OperatorName, OperatorSummary, Realm, Session,
-    SessionToken,
+    Actor, Disabling, EnrollmentToken, Error, Fill, OperatorId, OperatorName, OperatorSummary,
+    Realm, Session, SessionToken,
 };
 use crate::ports::OperatorStore;
 
@@ -60,32 +60,40 @@ impl<S: OperatorStore> Operators<S> {
         }
     }
 
-    /// Disables an operator, and in the same step ends every session and enrollment link they hold, so a disabled
-    /// operator is signed out at once and signs in again nowhere (`v5.0.0-7.4.2`). Says whether they were enabled.
+    /// Disables an operator, and then ends every session and enrollment link they hold, so a disabled operator is
+    /// signed out at once and signs in again nowhere (`v5.0.0-7.4.2`). Says what it did; an operator already
+    /// disabled is left as is.
     ///
     /// # Errors
-    /// Fails if storage fails.
-    pub async fn disable(&self, operator: OperatorId, actor: &Actor) -> Result<bool, Error> {
-        self.store.disable_operator(operator, actor).await
+    /// Fails with [`Error::Invalid`] for an operator who does not exist, or if storage fails.
+    pub async fn disable(&self, operator: OperatorId, actor: &Actor) -> Result<Disabling, Error> {
+        self.store
+            .disable_operator(operator, actor)
+            .await?
+            .ok_or_else(|| no_operator(operator))
     }
 
     /// Enables a disabled operator again, and says whether they were disabled. Their sessions stay ended, so they
     /// sign in afresh.
     ///
     /// # Errors
-    /// Fails if storage fails.
+    /// Fails with [`Error::Invalid`] for an operator who does not exist, or if storage fails.
     pub async fn enable(&self, operator: OperatorId, actor: &Actor) -> Result<bool, Error> {
-        self.store.enable_operator(operator, actor).await
+        self.store
+            .enable_operator(operator, actor)
+            .await?
+            .ok_or_else(|| no_operator(operator))
     }
 
     /// Ends every session one operator holds, as an administrator may (`v5.0.0-7.4.5`), and says how many.
     ///
     /// # Errors
-    /// Fails if storage fails.
+    /// Fails with [`Error::Invalid`] for an operator who does not exist, or if storage fails.
     pub async fn end_sessions(&self, operator: OperatorId, actor: &Actor) -> Result<u64, Error> {
         self.store
             .end_operator_sessions(operator, Realm::Operator, actor)
-            .await
+            .await?
+            .ok_or_else(|| no_operator(operator))
     }
 
     /// Ends every operator session, as an administrator may (`v5.0.0-7.4.5`), and says how many.
@@ -193,6 +201,10 @@ impl<S: OperatorStore> Operators<S> {
     async fn live(&self, token: &SessionToken) -> Result<Option<Session>, Error> {
         self.store.use_session(&token.hash(), Realm::Operator).await
     }
+}
+
+fn no_operator(operator: OperatorId) -> Error {
+    Error::Invalid(format!("no operator {}", operator.get()))
 }
 
 fn no_enabled(operator: OperatorId) -> Error {

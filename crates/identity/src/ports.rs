@@ -1,6 +1,8 @@
 //! The driven port Identity calls out through.
 
-use crate::domain::{Actor, Error, OperatorId, OperatorName, OperatorSummary, Realm, Session};
+use crate::domain::{
+    Actor, Disabling, Error, OperatorId, OperatorName, OperatorSummary, Realm, Session,
+};
 use std::future::Future;
 
 /// Where operators and their sessions are kept. A session is reached only by its token's hash and realm, one at a
@@ -50,28 +52,30 @@ pub trait OperatorStore {
         actor: &Actor,
     ) -> impl Future<Output = Result<bool, Error>> + Send;
 
-    /// Disables an operator, ending every session and enrollment link they hold in the same step, and says whether
-    /// they were enabled.
+    /// Disables an operator, ending every session and enrollment link they hold, and says what it did, or none for
+    /// an operator who does not exist.
     fn disable_operator(
         &self,
         operator: OperatorId,
         actor: &Actor,
-    ) -> impl Future<Output = Result<bool, Error>> + Send;
+    ) -> impl Future<Output = Result<Option<Disabling>, Error>> + Send;
 
-    /// Enables a disabled operator again, and says whether they were disabled. Their sessions stay ended.
+    /// Enables a disabled operator again, and says whether they were disabled, or none for an operator who does not
+    /// exist. Their sessions stay ended.
     fn enable_operator(
         &self,
         operator: OperatorId,
         actor: &Actor,
-    ) -> impl Future<Output = Result<bool, Error>> + Send;
+    ) -> impl Future<Output = Result<Option<bool>, Error>> + Send;
 
-    /// Ends every session one operator holds in a realm, and says how many.
+    /// Ends every session one operator holds in a realm, and says how many, or none for an operator who does not
+    /// exist.
     fn end_operator_sessions(
         &self,
         operator: OperatorId,
         realm: Realm,
         actor: &Actor,
-    ) -> impl Future<Output = Result<u64, Error>> + Send;
+    ) -> impl Future<Output = Result<Option<u64>, Error>> + Send;
 
     /// Ends every session in a realm, and says how many.
     fn end_realm_sessions(

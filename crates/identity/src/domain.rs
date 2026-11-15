@@ -84,10 +84,11 @@ impl OperatorId {
 pub struct OperatorName(String);
 
 impl OperatorName {
-    /// A name of 1 to 100 characters, trimmed of whitespace at its ends, with no control characters.
+    /// A name of 1 to 100 characters, trimmed of whitespace at its ends, with no control, invisible, or
+    /// direction-changing characters, which could hide or reorder what the name shows.
     ///
     /// # Errors
-    /// Fails with [`Error::Invalid`] for an empty or overlong name, or one holding a control character.
+    /// Fails with [`Error::Invalid`] for an empty or overlong name, or one holding such a character.
     pub fn parse(name: &str) -> Result<Self, Error> {
         let name = name.trim();
         if name.is_empty() || name.chars().count() > MAX_NAME {
@@ -95,9 +96,9 @@ impl OperatorName {
                 "a name has 1 to {MAX_NAME} characters"
             )));
         }
-        if name.chars().any(char::is_control) {
+        if name.chars().any(hidden) {
             return Err(Error::Invalid(
-                "a name has no control characters".to_string(),
+                "a name has no control, invisible, or direction-changing characters".to_string(),
             ));
         }
         Ok(Self(name.to_string()))
@@ -265,24 +266,74 @@ impl std::fmt::Debug for EnrollmentToken {
 pub struct Actor(String);
 
 const MAX_ACTOR: usize = 200;
+/// Each part of an actor made from a login, so the two and their `@` fit in [`MAX_ACTOR`].
+const MAX_PART: usize = 99;
+
+/// One part of an actor made from a login, or `unknown` for a part that is missing, blank, overlong, or holds a
+/// hidden character or an `@`.
+fn login_part(part: Option<&str>) -> &str {
+    part.map(str::trim)
+        .filter(|part| {
+            !part.is_empty()
+                && part.chars().count() <= MAX_PART
+                && !part.chars().any(|c| c == '@' || hidden(c))
+        })
+        .unwrap_or("unknown")
+}
+
+/// A character that could hide or reorder text where it is shown: a control character, or one of Unicode's
+/// invisible formatting characters, such as a zero-width space or a direction override.
+fn hidden(c: char) -> bool {
+    const INVISIBLE: [(char, char); 8] = [
+        ('\u{00AD}', '\u{00AD}'),
+        ('\u{061C}', '\u{061C}'),
+        ('\u{180E}', '\u{180E}'),
+        ('\u{200B}', '\u{200F}'),
+        ('\u{2028}', '\u{202E}'),
+        ('\u{2060}', '\u{206F}'),
+        ('\u{FEFF}', '\u{FEFF}'),
+        ('\u{FFF9}', '\u{FFFB}'),
+    ];
+    c.is_control()
+        || INVISIBLE
+            .iter()
+            .any(|&(first, last)| (first..=last).contains(&c))
+}
 
 impl Actor {
     /// # Errors
-    /// Fails on an empty or overlong actor, or one holding a control character.
+    /// Fails on an empty or overlong actor, or one holding a control, invisible, or direction-changing character.
     pub fn parse(text: &str) -> Result<Self, Error> {
-        if text.is_empty() || text.chars().count() > MAX_ACTOR || text.chars().any(char::is_control)
-        {
+        if text.is_empty() || text.chars().count() > MAX_ACTOR || text.chars().any(hidden) {
             return Err(Error::Invalid(format!(
-                "an actor must be 1 to {MAX_ACTOR} characters with no control characters"
+                "an actor must be 1 to {MAX_ACTOR} characters with no control, invisible, or direction-changing \
+                 characters"
             )));
         }
         Ok(Self(text.to_string()))
+    }
+
+    /// The actor `user@host` for a login and a machine, either of which may be missing. A part that is missing,
+    /// blank, overlong, or holds a hidden character or an `@` reads `unknown`, so naming the actor never stops a
+    /// command, and no part can pass for another.
+    #[must_use]
+    pub fn from_login(user: Option<&str>, host: Option<&str>) -> Self {
+        Self(format!("{}@{}", login_part(user), login_part(host)))
     }
 
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
+}
+
+/// What disabling an operator did: whether it acted, since an operator already disabled is left as is, and how
+/// many sessions and enrollment links it ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Disabling {
+    pub done: bool,
+    pub sessions_ended: u64,
+    pub links_ended: u64,
 }
 
 /// An operator as the operator command lists them.
@@ -385,6 +436,49 @@ mod tests {
         }
     }
 
+    /// No name or actor holds a character that could hide or reorder what the audit record shows.
+    #[test]
+    fn names_and_actors_hold_no_hidden_characters() {
+        for hidden in [
+            "\u{200B}",
+            "a\u{202E}b",
+            "\u{2066}a",
+            "a\u{FEFF}",
+            "\u{00AD}",
+        ] {
+            assert!(OperatorName::parse(hidden).is_err(), "{hidden:?}");
+            assert!(Actor::parse(hidden).is_err(), "{hidden:?}");
+        }
+    }
+
+    /// An actor made from a login names `unknown` for any part that is missing or cannot be shown safely, so it
+    /// never stops a command, and no part can pass for the host.
+    #[test]
+    fn an_actor_from_a_login_falls_back_to_unknown() {
+        let made = |user, host| Actor::from_login(user, host).as_str().to_string();
+        assert_eq!(
+            made(Some(" kurt "), Some("workstation")),
+            "kurt@workstation"
+        );
+        assert_eq!(made(None, None), "unknown@unknown");
+        let long = "a".repeat(100);
+        for bad in [
+            "",
+            " ",
+            "kurt@workstation",
+            "a\u{202E}b",
+            "a\nb",
+            long.as_str(),
+        ] {
+            assert_eq!(made(Some(bad), Some("host")), "unknown@host", "{bad:?}");
+            assert_eq!(made(Some("kurt"), Some(bad)), "kurt@unknown", "{bad:?}");
+        }
+        assert_eq!(
+            made(Some(&"a".repeat(99)), Some(&"b".repeat(99))).len(),
+            199
+        );
+    }
+
     /// An enrollment token never prints, so no log line or debug output can enroll anyone.
     #[test]
     fn an_enrollment_token_is_hidden_when_printed() {
@@ -451,7 +545,7 @@ mod tests {
         assert!(OperatorName::parse(&"é".repeat(100)).is_ok());
         let length = Err(Error::Invalid("a name has 1 to 100 characters".to_string()));
         let control = Err(Error::Invalid(
-            "a name has no control characters".to_string(),
+            "a name has no control, invisible, or direction-changing characters".to_string(),
         ));
         assert_eq!(OperatorName::parse(""), length);
         assert_eq!(OperatorName::parse("   "), length);

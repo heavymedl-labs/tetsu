@@ -5,6 +5,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use deadpool_postgres::{Object, Transaction};
+use tokio_postgres::IsolationLevel;
 
 use crate::roles::{DELIVERY_ROLE, module_role};
 
@@ -177,7 +178,13 @@ async fn open<'a>(
     client: &'a mut Object,
     values: &[&(dyn tokio_postgres::types::ToSql + Sync)],
 ) -> Result<Transaction<'a>, tokio_postgres::Error> {
-    let transaction = client.transaction().await?;
+    // Read committed, whatever the server or role defaults to: functions that lock a row and then change others,
+    // such as Identity's disable, rely on each statement seeing what was committed while it waited (ADR-0059).
+    let transaction = client
+        .build_transaction()
+        .isolation_level(IsolationLevel::ReadCommitted)
+        .start()
+        .await?;
     let statement = transaction.prepare_cached(SET_SCOPE).await?;
     transaction.query_one(&statement, values).await?;
     Ok(transaction)

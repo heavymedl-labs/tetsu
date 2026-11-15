@@ -5,7 +5,7 @@ use std::fmt::Write;
 
 use serde_json::{Value, json};
 
-use tetsu_identity::{Actor, Error, Identity, OperatorId, OperatorName, postgres_store};
+use tetsu_identity::{Actor, Disabling, Error, Identity, OperatorId, OperatorName, postgres_store};
 use tetsu_postgres::test_support::{TestDatabase, fresh_database};
 use tetsu_postgres::{ModuleTransaction, connect, migrate, pool};
 
@@ -21,6 +21,15 @@ mod support {
 
     pub fn name(name: &str) -> OperatorName {
         OperatorName::parse(name).expect("a name")
+    }
+
+    /// What a disable reports.
+    pub fn disabled(done: bool, sessions_ended: u64, links_ended: u64) -> Disabling {
+        Disabling {
+            done,
+            sessions_ended,
+            links_ended,
+        }
     }
 
     /// Who runs the operator command in these tests.
@@ -96,7 +105,7 @@ mod support {
     }
 }
 
-use support::{actor, as_admin, events, name, number, ready, waits_for_a_lock};
+use support::{actor, as_admin, disabled, events, name, number, ready, waits_for_a_lock};
 
 /// The link's token is stored only as its SHA-256 hash, is good for an hour, and a new one replaces the last; each
 /// issue is recorded with the operator's ID and nothing of the token (ADR-0040, ADR-0047).
@@ -154,10 +163,13 @@ async fn a_disabled_operator_is_signed_out_and_signs_in_nowhere() {
         operators.start_session(kurt).await.expect("starts");
     }
     operators.enroll(kurt, &actor()).await.expect("issues");
-    assert_eq!(operators.disable(kurt, &actor()).await, Ok(true));
     assert_eq!(
         operators.disable(kurt, &actor()).await,
-        Ok(false),
+        Ok(disabled(true, 2, 1))
+    );
+    assert_eq!(
+        operators.disable(kurt, &actor()).await,
+        Ok(disabled(false, 0, 0)),
         "already disabled"
     );
     for table in ["sessions", "enrollments"] {
@@ -190,7 +202,7 @@ async fn a_disabled_operator_is_signed_out_and_signs_in_nowhere() {
     assert!(listed[0].disabled_at.is_some());
 }
 
-/// No link is issued to an operator who does not exist, and each refusal or no-op is recorded with its outcome
+/// No command acts on an operator who does not exist: each says so, and is recorded as refused, never as a no-op
 /// (`v5.0.0-16.3.3`).
 #[tokio::test]
 async fn an_unknown_operator_is_issued_no_link() {
@@ -201,14 +213,29 @@ async fn an_unknown_operator_is_issued_no_link() {
         operators.enroll(nobody, &actor()).await.map(|_| ()),
         Err(Error::Invalid("no enabled operator 42".into()))
     );
-    assert_eq!(operators.disable(nobody, &actor()).await, Ok(false));
-    let recorded =
-        |outcome| json!({"operator_id": 42, "actor": "kurt@workstation", "outcome": outcome});
+    let no_operator = Err(Error::Invalid("no operator 42".into()));
+    assert_eq!(
+        operators.disable(nobody, &actor()).await.map(drop),
+        no_operator
+    );
+    assert_eq!(
+        operators.enable(nobody, &actor()).await.map(drop),
+        no_operator
+    );
+    assert_eq!(
+        operators.end_sessions(nobody, &actor()).await.map(drop),
+        no_operator
+    );
+    let refused = json!({"operator_id": 42, "actor": "kurt@workstation", "outcome": "refused"});
+    let ended = json!({"operator_id": 42, "realm": "operator", "ended": null,
+                       "actor": "kurt@workstation", "outcome": "refused"});
     assert_eq!(
         events(&database).await,
         [
-            ("identity.enrollment_issued".into(), recorded("refused")),
-            ("identity.operator_disabled".into(), recorded("unchanged")),
+            ("identity.enrollment_issued".into(), refused.clone()),
+            ("identity.operator_disabled".into(), refused.clone()),
+            ("identity.operator_enabled".into(), refused),
+            ("identity.sessions_ended".into(), ended),
         ]
     );
 }
@@ -322,7 +349,13 @@ async fn a_disable_waits_for_a_sign_in_or_link_being_written_then_ends_it() {
         let disabling = tokio::spawn(async move { operators.disable(kurt, &actor()).await });
         waits_for_a_lock(&database).await;
         writing.commit().await.expect("commits");
-        assert_eq!(disabling.await.expect("finishes"), Ok(true), "{table}");
+        assert!(
+            disabling
+                .await
+                .expect("finishes")
+                .is_ok_and(|done| done.done),
+            "{table}"
+        );
         assert_eq!(
             number(&database, &format!("SELECT count(*) FROM identity.{table}")).await,
             0,
@@ -462,7 +495,8 @@ async fn each_command_fails_as_storage_when_the_database_refuses_it() {
     as_admin(
         &database,
         "REVOKE EXECUTE ON FUNCTION identity.issue_enrollment(bytea, bigint),
-           identity.disable_operator(bigint), identity.end_operator_sessions(bigint, text),
+           identity.disable_operator(bigint), identity.enable_operator(bigint),
+           identity.end_operator_sessions(bigint, text),
            identity.end_realm_sessions(text) FROM tetsu_identity;
          REVOKE SELECT ON identity.operators FROM tetsu_identity;
          REVOKE INSERT ON identity.outbox_global FROM tetsu_identity",
@@ -471,6 +505,7 @@ async fn each_command_fails_as_storage_when_the_database_refuses_it() {
     let storage = |result: Result<(), Error>| matches!(result, Err(Error::Storage(_)));
     assert!(storage(operators.enroll(kurt, &actor()).await.map(drop)));
     assert!(storage(operators.disable(kurt, &actor()).await.map(drop)));
+    assert!(storage(operators.enable(kurt, &actor()).await.map(drop)));
     assert!(storage(
         operators.end_sessions(kurt, &actor()).await.map(drop)
     ));
@@ -559,6 +594,49 @@ async fn a_listed_column_of_the_wrong_type_is_a_storage_failure() {
         .await;
         assert!(
             matches!(operators.list().await, Err(Error::Storage(_))),
+            "{columns}"
+        );
+    }
+}
+
+/// A disable whose answer has a column of the wrong type is a storage failure, whichever column it is.
+#[tokio::test]
+async fn a_disable_answer_of_the_wrong_type_is_a_storage_failure() {
+    for (columns, answer) in [
+        (
+            "done text, sessions_ended bigint, links_ended bigint",
+            "SELECT ''yes'', 0::bigint, 0::bigint",
+        ),
+        (
+            "done boolean, sessions_ended text, links_ended bigint",
+            "SELECT true, ''none'', 0::bigint",
+        ),
+        (
+            "done boolean, sessions_ended bigint, links_ended text",
+            "SELECT true, 0::bigint, ''none''",
+        ),
+    ] {
+        let database = ready().await;
+        let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+        let kurt = operators
+            .create(&name("Kurt Medley"), &actor())
+            .await
+            .expect("creates");
+        as_admin(
+            &database,
+            &format!(
+                "DROP FUNCTION identity.disable_operator(bigint);
+                 CREATE FUNCTION identity.disable_operator(bigint) RETURNS TABLE ({columns})
+                 LANGUAGE sql AS '{answer}';
+                 GRANT EXECUTE ON FUNCTION identity.disable_operator(bigint) TO tetsu_identity"
+            ),
+        )
+        .await;
+        assert!(
+            matches!(
+                operators.disable(kurt, &actor()).await,
+                Err(Error::Storage(_))
+            ),
             "{columns}"
         );
     }

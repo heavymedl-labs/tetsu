@@ -385,3 +385,26 @@ async fn a_transaction_has_limits_on_its_length_and_idling() {
     drop(transaction);
     assert_eq!(limits(&client).await, ("0".into(), "0".into()));
 }
+
+/// Every scoped transaction reads committed rows afresh at each statement, whatever default the server or role
+/// sets, since Identity's disable and every lock-then-change function rely on it (ADR-0059): under repeatable read
+/// a statement after a lock wait would still miss what the other transaction committed.
+#[tokio::test]
+async fn every_scoped_transaction_reads_committed() {
+    let (pool, _database) = app_pool().await;
+    let mut client = pool.get().await.expect("a connection");
+    client
+        .batch_execute("SET default_transaction_isolation = 'repeatable read'")
+        .await
+        .expect("sets a stricter default");
+    let transaction = ModuleTransaction::begin(&mut client, "people")
+        .await
+        .expect("begins");
+    let isolation: String = transaction
+        .query_one("SELECT current_setting('transaction_isolation')", &[])
+        .await
+        .expect("reads")
+        .try_get(0)
+        .expect("text");
+    assert_eq!(isolation, "read committed");
+}
