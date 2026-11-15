@@ -21,7 +21,7 @@ and is the one workflow allowed secrets ([ADR-0027](0027-secrets-revised.md)).
   Render serves the image. Seeding skips businesses that exist, so a deploy that changes nothing changes no
   business, and one that resets the demo leaves it complete.
 - **The deploy reads the demo files with a read-only token,** `DEMOS_READ_TOKEN`: a fine-grained GitHub token
-  that reaches only `tetsu-demos`, with read access to its contents and nothing else, rotated yearly. It is
+  that reaches only `tetsu-demos`, with read access to its contents and nothing else, owned by the organization and expiring yearly. It is
   used only in the step that clones the files, through the environment, as ADR-0027 asks.
 - **It seeds as the application role,** whose URL it reads from the Render service and masks, as the chores do,
   so the URL is kept in one place.
@@ -37,8 +37,8 @@ and is the one workflow allowed secrets ([ADR-0027](0027-secrets-revised.md)).
 
 ## Consequences
 
-- The maintainer creates `DEMOS_READ_TOKEN` once and rotates it yearly; the renewals reminder
-  ([#136](https://github.com/heavymedl-labs/tetsu/issues/136)) warns before its rotation falls due.
+- The maintainer creates `DEMOS_READ_TOKEN` once and renews it yearly; the renewals reminder
+  ([#136](https://github.com/heavymedl-labs/tetsu/issues/136)) warns before it lapses.
 - Seeding by hand leaves the runbook, and #73 narrows to the demos repository's check.
 - Once the public API exists ([#12](https://github.com/heavymedl-labs/tetsu/issues/12)), seeding moves to it, as
   ADR-0018 plans.
