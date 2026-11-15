@@ -4,6 +4,9 @@
 - Date: 2026-11-15
 - Amends [ADR-0042](0042-tenant-isolation.md) (the server floor, keys, and grants) and
   [ADR-0011](0011-server-stack-guardrails.md) (connection timeouts)
+- Revised 2026-11-15, with the maintainer's approval, after acceptance and before deploying: TCP limits replace a
+  timer around each query, the transaction limits are set in each transaction rather than per login, and the
+  changes fold into each module's first migrations rather than new ones
 
 ## Context
 
