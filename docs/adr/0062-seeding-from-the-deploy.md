@@ -1,6 +1,6 @@
 # 0062. Seeding the demo from Tetsu's deploy
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-15
 - Amends [ADR-0018](0018-demo-businesses-as-data.md): who applies the demo businesses
 

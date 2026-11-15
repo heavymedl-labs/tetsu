@@ -67,7 +67,7 @@ number, and add a row below. Never renumber.
 | [0059](0059-session-controls-and-request-checks.md) | Session controls and cross-site request checks | Building sessions, sign-out, session lists, or checks on state-changing requests | Accepted |
 | [0060](0060-database-hardening.md) | Database hardening after the design review | Writing a migration, a table, or connection settings | Accepted |
 | [0061](0061-one-service-until-domains.md) | One service and two logins until Tetsu has domains | Deploying, adding a realm, or adding a database login | Accepted |
-| [0062](0062-seeding-from-the-deploy.md) | Seeding the demo from Tetsu's deploy | Changing how demo businesses reach the demo | Proposed |
+| [0062](0062-seeding-from-the-deploy.md) | Seeding the demo from Tetsu's deploy | Changing how demo businesses reach the demo | Accepted |
 
 ## Open decisions
 
