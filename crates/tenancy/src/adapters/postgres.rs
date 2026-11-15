@@ -19,6 +19,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 2,
         sql: include_str!("../../migrations/0002_isolation.sql"),
     },
+    Migration {
+        version: 3,
+        sql: include_str!("../../migrations/0003_rename.sql"),
+    },
 ];
 /// Tenancy's schema, which names the role its transactions act as (ADR-0042).
 const SCHEMA: &str = "tenancy";
@@ -28,6 +32,7 @@ const INSERT_LOCATION: &str = include_str!("../../sql/insert_location.sql");
 const FIND_TENANT: &str = include_str!("../../sql/find_tenant_by_address.sql");
 const FIND_LOCATIONS: &str = include_str!("../../sql/find_locations.sql");
 const FIND_ADDRESSES_IN_USE: &str = include_str!("../../sql/find_addresses_in_use.sql");
+const RENAME_TENANT: &str = include_str!("../../sql/rename_tenant.sql");
 /// Tenancy over Postgres, for the composition root. It returns the use cases, never the store itself
 /// (ADR-0021).
 ///
@@ -131,6 +136,31 @@ impl TenantStore for PostgresTenants {
         let result = addresses_in_use(&mut client, addresses).await;
         clear_if_stale(&self.pool, result)
     }
+
+    async fn rename(&self, address: &str, to: &Slug) -> Result<bool, Error> {
+        let mut client = self.pool.get().await.map_err(pool_error)?;
+        let result = rename(&mut client, address, to).await;
+        clear_if_stale(&self.pool, result)
+    }
+}
+
+/// Renames through Tenancy's function, the only way its role changes a slug or an address.
+async fn rename(client: &mut Object, address: &str, to: &Slug) -> Result<bool, Error> {
+    let transaction = ModuleTransaction::begin(client, SCHEMA)
+        .await
+        .map_err(|e| database(&e))?;
+    let statement = transaction
+        .prepare_cached(RENAME_TENANT)
+        .await
+        .map_err(|e| database(&e))?;
+    let renamed = transaction
+        .query_one(&statement, &[&address, &to.as_str()])
+        .await
+        .map_err(|e| database(&e))?
+        .try_get("renamed")
+        .map_err(|e| database(&e))?;
+    transaction.commit().await.map_err(|e| commit_error(&e))?;
+    Ok(renamed)
 }
 
 /// One statement, which still asks the lookup about one address a call, as it allows.

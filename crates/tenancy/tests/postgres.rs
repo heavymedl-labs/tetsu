@@ -516,7 +516,7 @@ async fn every_query_file_prepares() {
             .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
         prepared += 1;
     }
-    assert_eq!(prepared, 5);
+    assert_eq!(prepared, 6);
 }
 
 /// Signed in as the application role, as `tetsu serve` is, so row-level security applies (ADR-0042).
@@ -726,4 +726,45 @@ async fn the_database_takes_the_largest_tenant_the_domain_takes() {
             "{statement}"
         );
     }
+}
+
+/// A tenant whose address a release reserved moves to a new slug and its address, as the application role, and
+/// keeps everything else; a taken slug changes nothing, and an address no tenant holds is not found (#90).
+#[tokio::test]
+async fn a_tenant_on_a_reserved_address_is_renamed() {
+    let (store, settings) = app_store_and_settings().await;
+    store
+        .create(&tenant("sample-studio", &[("Denver", "America/Denver")]))
+        .await
+        .expect("creates");
+    store
+        .create(&tenant("another-studio", &[]))
+        .await
+        .expect("creates");
+    // Stands for a release reserving the slug after the tenant took it.
+    tetsu_postgres::connect(&settings)
+        .await
+        .expect("connects")
+        .batch_execute(
+            "UPDATE tenancy.addresses SET address = '/login' WHERE address = '/sample-studio';
+             UPDATE tenancy.tenants SET slug = 'login' WHERE slug = 'sample-studio'",
+        )
+        .await
+        .expect("reserves");
+    let taken = Slug::parse("another-studio").expect("slug");
+    assert_eq!(
+        store.rename("/login", &taken).await,
+        Err(Error::AddressTaken)
+    );
+    let to = Slug::parse("sample-gym").expect("slug");
+    assert_eq!(store.rename("/nobody", &to).await, Err(Error::NotFound));
+    store.rename("/login", &to).await.expect("renames");
+    let moved = store.resolve("/sample-gym").await.expect("resolves");
+    assert_eq!(moved.slug().as_str(), "sample-gym");
+    assert_eq!(moved.locations().len(), 1);
+    assert_eq!(store.resolve("/login").await, Err(Error::NotFound));
+    assert_eq!(
+        store.reserved_addresses_in_use().await.expect("checks"),
+        Vec::<String>::new()
+    );
 }

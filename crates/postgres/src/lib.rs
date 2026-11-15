@@ -19,7 +19,8 @@ pub use events::{
 };
 pub use failure::{Failure, STALE, clear_if_stale, sort, sort_commit, sort_pool};
 pub use isolation::{
-    isolation_violations, isolation_violations_for, module_schemas, rows_seen_without_a_tenant,
+    check_isolation, drop_module_schemas, isolation_violations, isolation_violations_for,
+    module_schemas, rows_seen_without_a_tenant,
 };
 pub use migrate::{
     MIGRATION_LOCK, MIN_SERVER_VERSION, migrate, migrate_with_wait, require_supported_server,

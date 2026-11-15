@@ -14,8 +14,8 @@ tool that made it into its store, never shown.
 | Secret | Store | Scope | Use | Last rotated |
 | --- | --- | --- | --- | --- |
 | `GITHUB_TOKEN` | GitHub, issued per workflow run | That run, with the permissions below | Each workflow's own API calls | automatic |
-| `MIGRATION_DATABASE_URL` | GitHub Actions, repository secret | Role `tetsu_owner` on Neon project `tetsu-demo`, direct endpoint, which owns Tetsu's schemas and creates its roles; set from a password no one kept ([runbook](demo-environment.md#moving-onto-tetsus-own-roles)) | `deploy.yml`'s Migrate step | 2026-11-12 |
-| `RENDER_API_KEY` | GitHub Actions, repository secret | The maintainer's Render account; Render offers no narrower key | `deploy.yml`'s Deploy step | 2026-11-09 |
+| `MIGRATION_DATABASE_URL` | GitHub Actions, repository secret | Role `tetsu_owner` on Neon project `tetsu-demo`, direct endpoint, which owns Tetsu's schemas and creates its roles; set from a password no one kept ([runbook](demo-environment.md#moving-onto-tetsus-own-roles)) | `deploy.yml`'s Reset, Migrate, and Check isolation steps | 2026-11-12 |
+| `RENDER_API_KEY` | GitHub Actions, repository secret | The maintainer's Render account; Render offers no narrower key | `deploy.yml`'s Deploy step, and `ops.yml`, which reads the service's `DATABASE_URL` through it and masks it | 2026-11-09 |
 | `DATABASE_URL` | Render, environment of service `tetsu-demo` | Role `tetsu_app`, which acts only as module roles, one transaction at a time | `tetsu serve` | 2026-11-09 |
 | `OTEL_EXPORTER_OTLP_HEADERS` | Render, environment of service `tetsu-demo` | Grafana Cloud token `render-tetsu-demo` on access policy `tetsu-demo-logs`: only `logs:write` on stack `regalchicken947`; it never expires, so it rotates yearly ([runbook](demo-environment.md#logs-and-alerts)) | `tetsu serve`'s log export | 2026-11-13 |
 | `ghcr-tetsu` | Render, registry credential | A GitHub classic token with only `read:packages`, expiring 2027-11-09 | Render pulling the private image | 2026-11-09 |
@@ -29,4 +29,5 @@ tool that made it into its store, never shown.
 | --- | --- |
 | `ci.yml` | `contents: read`, and `actions: read` to find the commit the last successful run checked; its publish job, which runs only GitHub's own actions after every check passes, has `packages: write` alone, to publish the image a manual run on main checked |
 | `deploy.yml` | `contents: read`, `actions: read` to find the CI run that checked the commit and download its digest, `packages: write` to pull the image and prune old ones, and `deployments: write` to record each deploy. Render's service ID is a repository variable, not a secret |
+| `ops.yml` | `contents: read`, `deployments: read` to find the image live on the demo, and `packages: read` to pull it |
 | `benchmarks.yml` | `contents: read`; its image job adds `packages: write` to push the benchmark image, and its run job `packages: read` to pull it |

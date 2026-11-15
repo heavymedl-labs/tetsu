@@ -2,8 +2,9 @@
 
 use tokio_postgres::Client;
 
-use crate::connection::Error;
-use crate::roles::APP_ROLE;
+use crate::connection::{Error, Settings, connect};
+use crate::migrate::require_supported_server;
+use crate::roles::{APP_ROLE, quoted};
 
 const VIOLATIONS: &str = include_str!("../sql/isolation_violations.sql");
 
@@ -130,4 +131,44 @@ async fn count_as_module(client: &mut Client, schema: &str, name: &str) -> Resul
         .try_get::<_, i64>(0)?;
     transaction.rollback().await?;
     Ok(counted)
+}
+
+/// Hosted test 8 (ADR-0042): checks the server version, runs the catalog checks over every module schema in the
+/// database, and confirms each module's role sees no tenant-owned row while no tenant is set. Returns each problem;
+/// none means the rules hold. Run it as the owner role, after migrating.
+///
+/// # Errors
+/// Fails if the server is too old or a query fails.
+pub async fn check_isolation(settings: &Settings) -> Result<Vec<String>, Error> {
+    require_supported_server(settings).await?;
+    let mut client = connect(settings).await?;
+    let schemas = module_schemas(&client).await?;
+    let schemas: Vec<&str> = schemas.iter().map(String::as_str).collect();
+    let mut problems = isolation_violations(&mut client, &schemas).await?;
+    problems.extend(rows_seen_without_a_tenant(&mut client, &schemas).await?);
+    Ok(problems)
+}
+
+/// Drops the named modules' schemas, with everything in them, their records of applied files included, so the
+/// next migrate builds them afresh. Only for a database holding no real business's data, such as the demo's,
+/// which the caller checks. Every name must be a module's schema here, and the server one Tetsu runs on, so a
+/// release that would refuse it never finds its schemas already gone. All or none are dropped.
+///
+/// # Errors
+/// Fails if the server is too old, a name is not a module's schema here, or the drop fails.
+pub async fn drop_module_schemas(settings: &Settings, schemas: &[String]) -> Result<(), Error> {
+    require_supported_server(settings).await?;
+    let mut client = connect(settings).await?;
+    let modules = module_schemas(&client).await?;
+    if let Some(unknown) = schemas.iter().find(|schema| !modules.contains(schema)) {
+        return Err(format!("{unknown:?} is not a module's schema here").into());
+    }
+    let transaction = client.transaction().await?;
+    for schema in schemas {
+        transaction
+            .batch_execute(&format!("DROP SCHEMA {} CASCADE", quoted(schema)))
+            .await?;
+    }
+    transaction.commit().await?;
+    Ok(())
 }

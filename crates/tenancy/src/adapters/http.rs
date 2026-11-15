@@ -280,6 +280,21 @@ mod tests {
             let held = addresses.iter().filter(|a| tenants.contains_key(*a));
             std::future::ready(Ok(held.cloned().collect()))
         }
+
+        /// Moves the tenant to the new slug's address; enough for routing, which is all these tests serve.
+        fn rename(
+            &self,
+            address: &str,
+            to: &Slug,
+        ) -> impl Future<Output = Result<bool, Error>> + Send {
+            let mut tenants = self.tenants.lock().unwrap();
+            let moved = tenants.remove(address);
+            let found = moved.is_some();
+            if let Some(tenant) = moved {
+                tenants.insert(to.address(), tenant);
+            }
+            std::future::ready(Ok(found))
+        }
     }
 
     fn tenant(slug: &str, name: &str) -> NewTenant {
@@ -351,6 +366,36 @@ mod tests {
     }
 
     /// The theme is data: its own small sheet, after the shared one, kept only briefly (ADR-0032).
+    /// A renamed tenant is served at its new address and no longer at its old one, and renaming an address no
+    /// tenant holds is not found (#90).
+    #[tokio::test]
+    async fn a_renamed_tenant_moves_to_its_new_address() {
+        let tenants = Tenants::new(Memory::default());
+        tenants
+            .create(&tenant("sample-studio", "Sample Studio"))
+            .await
+            .unwrap();
+        let to = Slug::parse("sample-gym").unwrap();
+        tenants.rename(" /Sample-Studio ", &to).await.unwrap();
+        assert_eq!(
+            tenants.rename("/sample-studio", &to).await,
+            Err(Error::NotFound)
+        );
+        assert_eq!(
+            tenants.rename("/sample\u{7}", &to).await,
+            Err(Error::NotFound)
+        );
+        let app = routes(
+            tenants,
+            true,
+            STYLESHEET,
+            Duration::from_millis(100),
+            record,
+        );
+        assert_eq!(get(app.clone(), "/sample-gym").await.0, StatusCode::OK);
+        assert_eq!(get(app, "/sample-studio").await.0, StatusCode::NOT_FOUND);
+    }
+
     #[tokio::test]
     async fn a_tenants_theme_sheet_sets_its_colors_and_is_kept_briefly() {
         let app = serving(None, &[("anvil-row", "Anvil Row Strength")]).await;

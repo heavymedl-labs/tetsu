@@ -215,6 +215,13 @@ mod tests {
         ) -> impl Future<Output = Result<Vec<String>, Error>> + Send {
             std::future::ready(Err(self.0.clone()))
         }
+        fn rename(
+            &self,
+            _: &str,
+            _: &tetsu_tenancy::Slug,
+        ) -> impl Future<Output = Result<bool, Error>> + Send {
+            std::future::ready(Err(self.0.clone()))
+        }
     }
 
     fn sample_seed() -> [Seed; 1] {

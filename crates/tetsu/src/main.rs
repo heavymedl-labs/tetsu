@@ -8,6 +8,7 @@ mod logs;
     expect(dead_code, reason = "only build.rs and the tests call it")
 )]
 mod manifest;
+mod ops;
 mod seed;
 mod serve;
 mod settings;
@@ -23,7 +24,8 @@ use tetsu_tenancy::Tenancy;
 
 /// Every module the binary runs, in the order their migrations apply.
 const MODULES: &[&dyn Module] = &[&Tenancy, &Identity, &Audit];
-const USAGE: &str = "usage: tetsu [migrate | seed [--check] <file or folder> | serve]";
+const USAGE: &str = "usage: tetsu [migrate | seed [--check] <file or folder> | serve | check | reset <schema>... \
+                     | replay <schema> <event id> | rename <address> <new slug>]";
 
 #[derive(Debug, PartialEq, Eq)]
 enum Command {
@@ -31,6 +33,10 @@ enum Command {
     Migrate,
     Seed { path: PathBuf, check_only: bool },
     Serve,
+    Check,
+    Reset { schemas: Vec<String> },
+    Replay { producer: String, id: String },
+    Rename { address: String, slug: String },
 }
 
 fn parse(args: &[String]) -> Result<Command, String> {
@@ -43,6 +49,26 @@ fn parse(args: &[String]) -> Result<Command, String> {
         "serve" if rest.is_empty() => Ok(Command::Serve),
         "serve" => Err("serve takes no arguments; set PORT to choose the port".into()),
         "seed" => parse_seed(rest),
+        "check" if rest.is_empty() => Ok(Command::Check),
+        "check" => Err("check takes no arguments".into()),
+        "reset" if !rest.is_empty() => Ok(Command::Reset {
+            schemas: rest.to_vec(),
+        }),
+        "reset" => Err("reset takes one or more module schemas".into()),
+        "replay" => match rest {
+            [producer, id] => Ok(Command::Replay {
+                producer: producer.clone(),
+                id: id.clone(),
+            }),
+            _ => Err("replay takes the recording module's schema and the event's ID".into()),
+        },
+        "rename" => match rest {
+            [address, slug] => Ok(Command::Rename {
+                address: address.clone(),
+                slug: slug.clone(),
+            }),
+            _ => Err("rename takes the tenant's address and its new slug".into()),
+        },
         _ => Err(format!("unknown command {command:?}")),
     }
 }
@@ -93,6 +119,14 @@ async fn run(command: Command) -> Result<(), String> {
         Command::Migrate => run_migrate().await?,
         Command::Seed { path, check_only } => run_seed(&path, check_only).await?,
         Command::Serve => run_serve().await?,
+        Command::Check => say_all(&ops::check(&local()?).await?)?,
+        Command::Reset { schemas } => say_all(&ops::reset(&local()?, &schemas).await?)?,
+        Command::Replay { producer, id } => {
+            say_all(&ops::replay(&local()?, MODULES, &producer, &id).await?)?;
+        }
+        Command::Rename { address, slug } => {
+            say_all(&ops::rename(&local()?, &address, &slug).await?)?;
+        }
     }
     Ok(())
 }
@@ -214,6 +248,11 @@ async fn connect(local: &settings::Local) -> Result<tetsu_postgres::Pool, String
 fn say(line: &str) -> Result<(), String> {
     writeln!(std::io::stdout(), "{}", printable(line))
         .map_err(|error| format!("could not write output: {error}"))
+}
+
+/// Writes each line to stdout.
+fn say_all(lines: &[String]) -> Result<(), String> {
+    lines.iter().try_for_each(|line| say(line))
 }
 
 /// Writes an error to stderr. If even that fails there is nowhere left to report it, so the exit code carries it.
@@ -356,6 +395,49 @@ mod tests {
             &["seed", "--check", ""],
         ] {
             assert_eq!(parse(&args(bad)), wrong, "{bad:?}");
+        }
+    }
+    /// The hosted chores take exactly what they act on (#135).
+    #[test]
+    fn hosted_chores_are_parsed_exactly() {
+        assert_eq!(parse(&args(&["check"])), Ok(Command::Check));
+        assert_eq!(
+            parse(&args(&["reset", "tenancy", "audit"])),
+            Ok(Command::Reset {
+                schemas: vec!["tenancy".into(), "audit".into()]
+            })
+        );
+        assert_eq!(
+            parse(&args(&["replay", "identity", "0190"])),
+            Ok(Command::Replay {
+                producer: "identity".into(),
+                id: "0190".into()
+            })
+        );
+        assert_eq!(
+            parse(&args(&["rename", "/login", "sample-gym"])),
+            Ok(Command::Rename {
+                address: "/login".into(),
+                slug: "sample-gym".into()
+            })
+        );
+        for (bad, why) in [
+            (&["check", "now"][..], "check takes no arguments"),
+            (&["reset"], "reset takes one or more module schemas"),
+            (
+                &["replay", "identity"],
+                "replay takes the recording module's schema and the event's ID",
+            ),
+            (
+                &["rename", "/login"],
+                "rename takes the tenant's address and its new slug",
+            ),
+            (
+                &["rename", "/login", "a", "b"],
+                "rename takes the tenant's address and its new slug",
+            ),
+        ] {
+            assert_eq!(parse(&args(bad)), Err(why.into()), "{bad:?}");
         }
     }
 }

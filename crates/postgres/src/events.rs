@@ -275,6 +275,41 @@ impl Dispatcher {
         }
     }
 
+    /// Makes an event that stopped retrying due again, with its attempts cleared, once the consumer that failed
+    /// it is fixed (ADR-0043). `producer` is the schema of the module that recorded it, which must be one of this
+    /// dispatcher's producers, so no other name reaches the SQL. It acts as the delivery role, which may settle
+    /// every tenant's events, and returns the outbox that held the event, or none if neither did, as when it was
+    /// delivered and removed.
+    ///
+    /// # Errors
+    /// Fails if `producer` records no events here, `id` is not a UUID, or the database fails.
+    pub async fn replay(&self, producer: &str, id: &str) -> Result<Option<&'static str>, Error> {
+        let Some(producer) = self.producers.iter().find(|known| *known == producer) else {
+            return Err(format!("{producer:?} records no events here").into());
+        };
+        let mut client = self.pool.get().await?;
+        let transaction = DeliveryTransaction::begin(&mut client).await?;
+        let mut found = None;
+        for outbox in [Outbox::Tenant, Outbox::Global] {
+            let place = Place::new(producer, outbox);
+            let replayed = transaction
+                .execute(
+                    &format!(
+                        "UPDATE {} SET attempts = 0, due_at = clock_timestamp() WHERE id = $1::text::uuid",
+                        place.table
+                    ),
+                    &[&id],
+                )
+                .await?;
+            if replayed > 0 {
+                found = Some(outbox.table());
+                break;
+            }
+        }
+        transaction.commit().await?;
+        Ok(found)
+    }
+
     /// The same dispatcher, giving each consumer `timeout` to apply an event, so tests need not wait out the real
     /// one.
     #[doc(hidden)]

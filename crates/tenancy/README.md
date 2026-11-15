@@ -14,4 +14,5 @@ a request reaches.
   It sets no fallback: the site sets the one axum allows. Names Tetsu's own pages need, such as `assets` and
   `login`, are reserved, so no slug can be one. `reserved_addresses_in_use` finds stored addresses a later
   release reserved, which a site route would hide, and `tetsu serve` refuses to start while any is held
-  ([#90](https://github.com/heavymedl-labs/tetsu/issues/90)).
+  ([#90](https://github.com/heavymedl-labs/tetsu/issues/90)). `rename` moves such a tenant to a new slug and its
+  address, through a lookup function that changes only those two.

@@ -37,11 +37,11 @@ async fn migrate_applies_each_module_and_a_rerun_changes_nothing() {
 
     let first = migrate(settings.url());
     assert!(first.status.success(), "{first:?}");
-    assert_eq!(applied_tenancy_migrations(&settings).await, 2);
+    assert_eq!(applied_tenancy_migrations(&settings).await, 3);
 
     let second = migrate(settings.url());
     assert!(second.status.success(), "{second:?}");
-    assert_eq!(applied_tenancy_migrations(&settings).await, 2);
+    assert_eq!(applied_tenancy_migrations(&settings).await, 3);
 }
 
 #[test]
@@ -150,7 +150,7 @@ async fn a_local_env_file_supplies_settings_and_the_environment_wins() {
         None,
     );
     assert!(from_file.status.success(), "{from_file:?}");
-    assert_eq!(applied_tenancy_migrations(&settings).await, 2);
+    assert_eq!(applied_tenancy_migrations(&settings).await, 3);
 
     let overridden = run(
         "DATABASE_URL=postgres://nobody@127.0.0.1:1/none\nDATABASE_TLS=disable\n",

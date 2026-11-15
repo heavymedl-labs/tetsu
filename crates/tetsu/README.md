@@ -13,6 +13,12 @@ names no business that uses Tetsu. Its root page names fictional customers only 
 | `tetsu seed <file or folder>` | Creates the tenants in seed files, and skips any whose slug exists |
 | `tetsu seed --check <file or folder>` | Checks seed files without a database |
 | `tetsu serve` | Serves the public pages until SIGTERM or SIGINT, then finishes open requests for up to 10 seconds. Refuses to start before `migrate`, or while a tenant holds an address now reserved for Tetsu's own pages |
+| `tetsu check` | Checks the server version, every isolation rule in the catalog, and that no module's role sees a tenant-owned row with no tenant set; fails naming each problem. Run as the owner role |
+| `tetsu reset <schema>...` | Drops module schemas so the next `migrate` builds them afresh. Only where `TETSU_DEMO` is true, and only modules' schemas; all or none |
+| `tetsu replay <schema> <event id>` | Makes an event that stopped retrying due again, from the outboxes of the module whose schema recorded it |
+| `tetsu rename <address> <new slug>` | Moves the tenant at an address, such as one a release has since reserved, to a new slug and its address |
+
+The deploy and ops workflows run the last four against the demo ([runbook](../../docs/operations/demo-environment.md)).
 
 A folder means its `.toml` files at the top level, in name order, leaving out hidden files. One that is not a
 regular file fails the run. Seeding

@@ -14,6 +14,10 @@ gh workflow run deploy                                 # once CI has passed on m
 gh workflow run deploy -f rollback_to=<older commit>   # deploys it without migrating
 ```
 
+Every deploy that migrates then runs hosted test 8, `tetsu check`, as `tetsu_owner`. It checks the server version,
+every catalog rule, `tetsu_app` included, and that each module's role sees no row with no tenant set. A problem
+fails the deploy before Render serves the new image, and the log names it.
+
 A rollback cannot cross a migration that takes rights away. Code from before
 [#106](https://github.com/heavymedl-labs/tetsu/issues/106) reads Tenancy's tables as `tetsu_app` directly, which
 Tenancy's second migration forbids, so every request it served would fail; fix forward instead. The same is true of
@@ -89,15 +93,8 @@ printf '%s' "$base" \
 ```
 
 Run CI and deploy, which migrates as `tetsu_owner`. Tenancy's second migration takes back `tetsu_app`'s rights on its
-tables, sequence, and record. Last, run hosted test 8 as `tetsu_owner`. It checks the server version and every
-catalog rule, `tetsu_app` included, and that each module's role sees no row with no tenant set, and prints any
-problem. No copy of the password is kept; to run it again later, set a fresh one the same way.
-
-```bash
-DATABASE_URL="$(printf '%s' "$base" \
-  | sed -E "s#//tetsu_migrate:[^@]*@#//tetsu_owner:${pw}@#; s/([?&])sslmode=[^&]*&?/\1/; s/[?&]\$//")" \
-  cargo run -p tetsu-postgres --example check_isolation
-```
+tables, sequence, and record. The deploy then runs hosted test 8, `tetsu check`, as `tetsu_owner`, as it does after
+every migrate. No copy of the password is kept beyond the secret; to set it again later, set a fresh one the same way.
 
 Connection strings drop Neon's `sslmode`, which `tetsu` refuses since TLS is always required, and keep
 `channel_binding=require`. Neon's certificate is public, so no `DATABASE_CA_FILE` is needed.
@@ -172,53 +169,45 @@ The leading space keeps the command out of shell history.
 
 Before the first real business, a change to a module's first migrations may be folded into those files rather than
 added as new ones, as for [ADR-0060](../adr/0060-database-hardening.md). The runner then refuses the demo's database,
-since its record holds the old text, so the demo starts over from its seed. Set a fresh `tetsu_owner` password and
-`MIGRATION_DATABASE_URL` as in [Moving onto Tetsu's own roles](#moving-onto-tetsus-own-roles), connect as
-`tetsu_owner`, and first check that the server is one the new release accepts, since after the drop the demo has
-nothing to fall back on. Then drop each changed module's schema, which takes its record of applied files with it. The
-schema's owner may drop what other roles own inside it:
+since its record holds the old text, so the changed modules start over. Deploy with their schemas named:
 
-```sql
-SHOW server_version;   -- at least the floor in migrate.rs, such as 18.7
-DROP SCHEMA tenancy, audit CASCADE;
+```bash
+gh workflow run deploy -f reset=tenancy,audit
 ```
 
-Then run CI, deploy, which migrates, and seed as in [Deploying](#deploying), and run hosted test 8 again, the only
-place the catalog check runs against the demo. The demo serves errors from the drop until the deploy finishes.
+The Reset step checks the server against the floor, then drops the named schemas, records of applied files
+included, and migrates and checks as usual; it drops nothing if any name is not a module's schema. Then seed as in
+[Deploying](#deploying). The demo serves errors from the drop until the deploy finishes.
 
 ## When `serve` refuses to start
 
 `tetsu serve` will not start while a stored tenant holds an address a release has since reserved for Tetsu's own
 pages ([#90](https://github.com/heavymedl-labs/tetsu/issues/90)), since a site route would hide that tenant. A
 forward deploy then fails at Render's start and the previous instance keeps serving; a rollback is never blocked,
-since older releases reserve fewer names. Its log names each address. Until a command for it exists, give the
-tenant a new slug and address as `tetsu_owner`, then deploy again:
+since older releases reserve fewer names. Its log names each address. Give each tenant a new slug, which moves its
+address too, then deploy again:
 
-```sql
-UPDATE tenancy.tenants SET slug = 'new-slug' WHERE slug = 'login';
-UPDATE tenancy.addresses SET address = '/new-slug' WHERE address = '/login';
+```bash
+gh workflow run ops -f chore=rename -f target=/login -f value=new-slug
 ```
 
 ## When an event stops retrying
 
 An event that fails 10 times logs an `ERROR` line, `event stopped retrying`, with its ID, type, each failing
 consumer, and `alert` set to `event_stopped`, which raises the [alert](#logs-and-alerts) ([ADR-0043](../adr/0043-domain-event-delivery.md)). A kept event logs `event keeps failing`
-instead, with the same `alert`, and goes on retrying hourly. Once the consumer is fixed and deployed, replay a stopped event by making it
-due again, with the schema of the module that recorded it. A business's events are in `outbox`, which row-level
-security hides from `tetsu_owner`, so act as the delivery role, which may settle every tenant's events, through
-the service's own connection. Paste `DATABASE_URL` at the prompt, as for seeding, so it is never shown or saved:
+instead, with the same `alert`, and goes on retrying hourly. Once the consumer is fixed and deployed, replay a stopped
+event with the schema of the module that recorded it:
 
 ```bash
-read -rs DATABASE_URL && psql "$DATABASE_URL"
+gh workflow run ops -f chore=replay -f target=identity -f value=<event ID>
 ```
 
-```sql
-BEGIN;
-SET LOCAL ROLE tetsu_delivery;
-UPDATE identity.outbox SET attempts = 0, due_at = now() WHERE id = '<event ID>';
-COMMIT;
-```
+It makes the event due again with its attempts cleared, from the business's outbox or the global one, as the
+delivery role, and says which. Not found means the schema is wrong, or the event was delivered and removed.
+Consumers skip what they already applied, so a replay repeats nothing.
 
-It reports `UPDATE 1`. `UPDATE 0` means the event is not in that table: check the schema, use `outbox_global` for
-an event that belongs to no business, or it was delivered and removed. Consumers skip what they already applied,
-so a replay repeats nothing.
+## Hosted chores
+
+The Ops workflow runs a chore from the image live on the demo, as `tetsu_app`, whose URL it reads from the Render
+service through `RENDER_API_KEY` and masks in the log. It runs only from `main`, never alongside a deploy, and
+refuses inputs that are not the shape the chore takes.

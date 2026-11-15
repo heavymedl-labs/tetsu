@@ -2,7 +2,7 @@
 
 use std::future::Future;
 
-use crate::domain::{Error, NewTenant, Tenant};
+use crate::domain::{Error, NewTenant, Slug, Tenant};
 
 /// Where tenants are kept. The Postgres adapter implements it, and tests may use their own.
 pub trait TenantStore {
@@ -20,4 +20,7 @@ pub trait TenantStore {
         &self,
         addresses: &[String],
     ) -> impl Future<Output = Result<Vec<String>, Error>> + Send;
+
+    /// Gives the tenant at a normalized address a new slug and its address, and says whether a tenant was there.
+    fn rename(&self, address: &str, to: &Slug) -> impl Future<Output = Result<bool, Error>> + Send;
 }

@@ -1,6 +1,6 @@
 //! Use cases, reached only through [`Tenants`] (ADR-0021).
 
-use crate::domain::{Error, NewTenant, Tenant};
+use crate::domain::{Error, NewTenant, Slug, Tenant};
 use crate::ports::TenantStore;
 
 /// Tenancy's use cases over a store. It offers nothing that reaches the store, so a caller outside Tenancy can
@@ -32,17 +32,27 @@ impl<S: TenantStore> Tenants<S> {
     /// Fails with [`Error::NotFound`] for an unknown address, including one holding a control character, which
     /// no address does. Fails if storage fails.
     pub async fn resolve(&self, address: &str) -> Result<Tenant, Error> {
-        if address.chars().any(char::is_control) {
-            return Err(Error::NotFound);
-        }
-        // Only ASCII whitespace, which no address holds: other whitespace, such as U+2028, makes it unknown.
-        let address = address
-            .trim_matches(|c: char| c.is_ascii_whitespace())
-            .to_ascii_lowercase();
+        let address = normalized(address).ok_or(Error::NotFound)?;
         self.store
             .find_by_address(&address)
             .await?
             .ok_or(Error::NotFound)
+    }
+
+    /// Moves the tenant at an address to a new slug and its address, such as one whose address a release has
+    /// since reserved for Tetsu's own pages (#90). The address may be reserved; the new slug may not, since it
+    /// passed [`Slug::parse`].
+    ///
+    /// # Errors
+    /// Fails with [`Error::NotFound`] when no tenant is at the address, [`Error::SlugTaken`] or
+    /// [`Error::AddressTaken`] when another tenant holds the new slug or its address, or if storage fails.
+    pub async fn rename(&self, address: &str, to: &Slug) -> Result<(), Error> {
+        let address = normalized(address).ok_or(Error::NotFound)?;
+        if self.store.rename(&address, to).await? {
+            Ok(())
+        } else {
+            Err(Error::NotFound)
+        }
     }
 
     /// The stored addresses that a name reserved for Tetsu's own pages now claims. A site route always wins
@@ -56,4 +66,17 @@ impl<S: TenantStore> Tenants<S> {
             .find_addresses_in_use(&crate::domain::reserved_addresses())
             .await
     }
+}
+
+/// An address as stored: lowercase, with ASCII whitespace trimmed, since no address holds any. One holding a
+/// control character is no address at all; other whitespace, such as U+2028, stays and makes it unknown.
+fn normalized(address: &str) -> Option<String> {
+    if address.chars().any(char::is_control) {
+        return None;
+    }
+    Some(
+        address
+            .trim_matches(|c: char| c.is_ascii_whitespace())
+            .to_ascii_lowercase(),
+    )
 }

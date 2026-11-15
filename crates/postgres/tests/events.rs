@@ -1123,3 +1123,76 @@ async fn the_outbox_refuses_a_malformed_event() {
         }
     }
 }
+
+/// A stopped event, of a business or of none, is made due again with its attempts cleared, and then delivered;
+/// an event in neither outbox is reported as not found (ADR-0043).
+#[tokio::test]
+async fn a_stopped_event_is_replayed_from_either_outbox() {
+    let World {
+        pool,
+        dispatcher,
+        database,
+        ..
+    } = world().await;
+    let tenant = record(&pool, 1, &JOINED, true).await;
+    let global = record_global(&pool, &JOINED).await;
+    run_as_owner(
+        &database,
+        &format!(
+            "UPDATE people.outbox SET attempts = {MAX_ATTEMPTS}, due_at = 'infinity';
+             UPDATE people.outbox_global SET attempts = {MAX_ATTEMPTS}, due_at = 'infinity'"
+        ),
+    )
+    .await;
+    assert_eq!(
+        dispatcher.deliver_due().await.expect("passes"),
+        0,
+        "stopped"
+    );
+    assert_eq!(
+        dispatcher.replay("people", &tenant).await.expect("replays"),
+        Some("outbox")
+    );
+    assert_eq!(
+        dispatcher.replay("people", &global).await.expect("replays"),
+        Some("outbox_global")
+    );
+    assert_eq!(
+        read::<i64>(
+            &database,
+            "SELECT ((SELECT sum(attempts) FROM people.outbox)
+                  + (SELECT sum(attempts) FROM people.outbox_global))::bigint"
+        )
+        .await,
+        0
+    );
+    assert_eq!(dispatcher.deliver_due().await.expect("delivers"), 2);
+    assert_eq!(
+        dispatcher
+            .replay("people", "0190a3d2-0000-7000-8000-00000000ffff")
+            .await
+            .expect("looks"),
+        None
+    );
+}
+
+/// Only a producer's outboxes are reached, so no other name reaches the SQL, and an ID must be a UUID.
+#[tokio::test]
+async fn a_replay_names_a_producer_and_a_uuid() {
+    let World {
+        dispatcher,
+        database: _database,
+        ..
+    } = world().await;
+    for producer in ["ledger_x", "people\".outbox; --", "pg_catalog"] {
+        let refused = dispatcher
+            .replay(producer, "0190a3d2-0000-7000-8000-000000000001")
+            .await
+            .expect_err(producer);
+        assert_eq!(
+            refused.to_string(),
+            format!("{producer:?} records no events here")
+        );
+    }
+    assert!(dispatcher.replay("people", "not-a-uuid").await.is_err());
+}
