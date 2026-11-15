@@ -7,8 +7,9 @@ gone. A date is YYYY-MM-DD, or automatic for a token GitHub issues per run. The 
 lapses on a date of its own, such as a token's expiry or a free plan's end, and a date there that has passed
 fails too.
 
-With --due, it prints instead what must be renewed within that many days, one `date<TAB>name<TAB>why` line
-each, oldest first: each secret's rotation deadline and each renewal (#136).
+With --due, which the weekly renewals workflow runs, it prints instead what must be renewed within that
+many days, one `date<TAB>name<TAB>why` line each, oldest first: each secret's rotation deadline and each
+renewal (#136).
 
 usage: scripts/check_secrets.py [--today YYYY-MM-DD] [--due DAYS]
 """

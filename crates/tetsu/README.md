@@ -18,7 +18,7 @@ names no business that uses Tetsu. Its root page names fictional customers only 
 | `tetsu replay <schema> <event id>` | Makes an event that stopped retrying due again, from the outboxes of the module whose schema recorded it |
 | `tetsu rename <address> <new slug>` | Moves the tenant at an address, such as one a release has since reserved, to a new slug and its address |
 
-The deploy and ops workflows run the last four against the demo ([runbook](../../docs/operations/demo-environment.md)).
+The deploy workflow runs the last four against the demo ([runbook](../../docs/operations/demo-environment.md)).
 
 A folder means its `.toml` files at the top level, in name order, leaving out hidden files. One that is not a
 regular file fails the run. Seeding

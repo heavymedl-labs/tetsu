@@ -516,6 +516,7 @@ async fn every_query_file_prepares() {
             .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
         prepared += 1;
     }
+    // One per use the adapter makes of the database, rename_tenant.sql the newest (#135).
     assert_eq!(prepared, 6);
 }
 

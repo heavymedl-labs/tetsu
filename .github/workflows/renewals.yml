@@ -1,7 +1,7 @@
 name: Renewals
 
-# Weekly, and on demand: opens an issue for each secret, token, or free plan the operations secrets list holds due
-# for renewal within 30 days, once per renewal (#136). It reads only the repository, and uses no secret.
+# Weekly, and on demand: opens an issue for each credential, token, or free plan docs/operations lists as due
+# for renewal within 30 days, once per renewal (#136). It reads only the repository, and uses no credential.
 on:
   schedule:
     - cron: "17 14 * * 1"
@@ -40,6 +40,6 @@ jobs:
               echo "Already open: $title"
               continue
             fi
-            body="$(printf '%s by %s: %s.\n\nSee the secrets list in docs/operations and ADR-0027. Close this once renewed and its date updated.' "$name" "$date" "$why")"
+            body="$(printf '%s by %s: %s.\n\nSee the list in docs/operations and ADR-0027. Close this once renewed and its date updated.' "$name" "$date" "$why")"
             gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body" --label task --label "area: infra"
           done <"$RUNNER_TEMP/due"

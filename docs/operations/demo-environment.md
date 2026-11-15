@@ -193,7 +193,7 @@ since older releases reserve fewer names. Its log names each address. Give each 
 address too, then deploy again:
 
 ```bash
-gh workflow run ops -f chore=rename -f target=/login -f value=new-slug
+gh workflow run deploy -f chore=rename -f target=/login -f value=new-slug
 ```
 
 ## When an event stops retrying
@@ -204,7 +204,7 @@ instead, with the same `alert`, and goes on retrying hourly. Once the consumer i
 event with the schema of the module that recorded it:
 
 ```bash
-gh workflow run ops -f chore=replay -f target=identity -f value=<event ID>
+gh workflow run deploy -f chore=replay -f target=identity -f value=<event ID>
 ```
 
 It makes the event due again with its attempts cleared, from the business's outbox or the global one, as the
@@ -213,6 +213,7 @@ Consumers skip what they already applied, so a replay repeats nothing.
 
 ## Hosted chores
 
-The Ops workflow runs a chore from the image live on the demo, as `tetsu_app`, whose URL it reads from the Render
+A chore runs instead of a deploy, in the deploy workflow's chore job, the only workflow that may read secrets
+(ADR-0027). It runs from the image live on the demo, as `tetsu_app`, whose URL it reads from the Render
 service through `RENDER_API_KEY` and masks in the log. It runs only from `main`, never alongside a deploy, and
 refuses inputs that are not the shape the chore takes.

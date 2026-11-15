@@ -31,6 +31,7 @@ mod support {
 
 use support::{applied_tenancy_migrations, migrate};
 
+/// Tenancy has three migrations: its tables, their isolation, and the rename function (#135).
 #[tokio::test]
 async fn migrate_applies_each_module_and_a_rerun_changes_nothing() {
     let settings = fresh_database().await.expect("a test database");
