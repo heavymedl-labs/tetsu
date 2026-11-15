@@ -26,7 +26,10 @@ mod support {
         let database = fresh_database().await.expect("a test database");
         migrate(&database, &[&Identity]).await.expect("migrates");
         tetsu_identity::postgres_store(pool(&database.as_app()).expect("a pool"))
-            .create(&OperatorName::parse("Kurt Medley").expect("a name"))
+            .create(
+                &OperatorName::parse("Kurt Medley").expect("a name"),
+                &tetsu_identity::Actor::parse("kurt@workstation").expect("an actor"),
+            )
             .await
             .expect("creates");
         database

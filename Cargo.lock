@@ -3969,6 +3969,7 @@ dependencies = [
  "deadpool-postgres",
  "getrandom 0.4.3",
  "proptest",
+ "serde_json",
  "sha2 0.11.1",
  "subtle",
  "tetsu-kernel",

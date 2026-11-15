@@ -3,13 +3,13 @@
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64};
 
+use serde_json::{Value, json};
 use tetsu_kernel::Migration;
 use tetsu_postgres::{Failure, ModuleTransaction, NewEvent, Pool};
 use tokio_postgres::Row;
-use tokio_postgres::error::SqlState;
 use tokio_postgres::types::{FromSql, ToSql};
 
-use crate::domain::{Error, OperatorId, OperatorName, OperatorSummary, Realm, Session};
+use crate::domain::{Actor, Error, OperatorId, OperatorName, OperatorSummary, Realm, Session};
 use crate::ports::OperatorStore;
 use crate::use_cases::Operators;
 
@@ -18,13 +18,9 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 1,
         sql: include_str!("../../migrations/0001_operators.sql"),
     },
-    Migration {
-        version: 2,
-        sql: include_str!("../../migrations/0002_operator_controls.sql"),
-    },
     // Identity records what the operator command does, for the audit record (ADR-0043, ADR-0045).
     Migration {
-        version: 3,
+        version: 2,
         sql: tetsu_postgres::OUTBOX,
     },
 ];
@@ -40,6 +36,7 @@ const DISABLE_OPERATOR: &str = include_str!("../../sql/disable_operator.sql");
 const END_OPERATOR_SESSIONS: &str = include_str!("../../sql/end_operator_sessions.sql");
 const END_REALM_SESSIONS: &str = include_str!("../../sql/end_realm_sessions.sql");
 const LIST_OPERATORS: &str = include_str!("../../sql/list_operators.sql");
+const ENABLE_OPERATOR: &str = include_str!("../../sql/enable_operator.sql");
 
 /// An event for the audit record: its type, and a payload of IDs and facts, never names or tokens (ADR-0045).
 type Recorded = Option<(&'static str, String)>;
@@ -103,6 +100,39 @@ impl PostgresOperators {
             .await
     }
 
+    /// Runs a lookup function that answers yes or no in its `done` column, and records the event `event` makes of
+    /// the answer, whatever it is, in the same transaction.
+    async fn change(
+        &self,
+        statement: &str,
+        parameters: &[&(dyn ToSql + Sync)],
+        event: impl Fn(bool) -> (&'static str, String) + Sync,
+    ) -> Result<bool, Error> {
+        let done = AtomicBool::new(false);
+        self.query_recording(statement, parameters, &|rows| {
+            done.store(flag(rows, "done")?, Relaxed);
+            Ok(Some(event(done.load(Relaxed))))
+        })
+        .await?;
+        Ok(done.load(Relaxed))
+    }
+
+    /// Runs a lookup function that ends sessions and counts them, and records the event `event` makes of the count.
+    async fn ended(
+        &self,
+        statement: &str,
+        parameters: &[&(dyn ToSql + Sync)],
+        event: impl Fn(u64) -> (&'static str, String) + Sync,
+    ) -> Result<u64, Error> {
+        let ended = AtomicU64::new(0);
+        self.query_recording(statement, parameters, &|rows| {
+            ended.store(count(rows)?, Relaxed);
+            Ok(Some(event(ended.load(Relaxed))))
+        })
+        .await?;
+        Ok(ended.load(Relaxed))
+    }
+
     /// Runs a statement, and records the event `event` makes of what it returned, if any, in the same transaction,
     /// so a change is never left unrecorded, nor an event recorded for a change that rolled back. One build of this
     /// serves every caller, so every path through it is tested once.
@@ -151,12 +181,15 @@ async fn run(
     Ok(rows)
 }
 
-/// Identity's lookup functions raise `no_data_found` for an operator who is disabled or unknown, which is the
-/// caller's mistake, not storage failing.
+/// The SQLSTATE Identity's own functions raise for an operator who is disabled or unknown: a code of Identity's,
+/// so no other error is ever taken for it.
+const NO_ENABLED_OPERATOR: &str = "TD001";
+
+/// An operator who is disabled or unknown is the caller's mistake, not storage failing.
 fn sorted(error: &tokio_postgres::Error) -> Error {
     match error.as_db_error() {
-        Some(db) if db.code() == &SqlState::NO_DATA_FOUND => {
-            Error::Invalid(db.message().to_string())
+        Some(db) if db.code().code() == NO_ENABLED_OPERATOR => {
+            Error::Invalid("no enabled operator".to_string())
         }
         _ => failed(tetsu_postgres::sort(error)),
     }
@@ -187,12 +220,21 @@ fn no_id() -> Error {
 }
 
 impl OperatorStore for PostgresOperators {
-    async fn insert_operator(&self, name: &OperatorName) -> Result<OperatorId, Error> {
+    async fn insert_operator(
+        &self,
+        name: &OperatorName,
+        actor: &Actor,
+    ) -> Result<OperatorId, Error> {
         let id = AtomicI64::new(0);
         self.query_recording(INSERT_OPERATOR, &[&name.as_str()], &|rows| {
             id.store(column(rows.first().ok_or_else(no_id)?, "id")?, Relaxed);
-            let event = format!(r#"{{"operator_id": {}}}"#, id.load(Relaxed));
-            Ok(Some(("identity.operator_created", event)))
+            let payload = json!({"operator_id": id.load(Relaxed)});
+            Ok(Some(event(
+                "identity.operator_created",
+                actor,
+                "changed",
+                payload,
+            )))
         })
         .await?;
         Ok(OperatorId::new(id.load(Relaxed)))
@@ -223,65 +265,86 @@ impl OperatorStore for PostgresOperators {
         rows.first().map_or(Ok(false), |row| column(row, "ended"))
     }
 
-    async fn issue_enrollment(&self, hash: &[u8; 32], operator: OperatorId) -> Result<bool, Error> {
+    async fn issue_enrollment(
+        &self,
+        hash: &[u8; 32],
+        operator: OperatorId,
+        actor: &Actor,
+    ) -> Result<bool, Error> {
         let id = operator.get();
         let parameters: [&(dyn ToSql + Sync); 2] = [&hash.as_slice(), &id];
-        let issued = AtomicBool::new(false);
-        self.query_recording(ISSUE_ENROLLMENT, &parameters, &|rows| {
-            issued.store(flag(rows, "issued")?, Relaxed);
-            let event = format!(r#"{{"operator_id": {id}}}"#);
-            Ok(issued
-                .load(Relaxed)
-                .then_some(("identity.enrollment_issued", event)))
+        self.change(ISSUE_ENROLLMENT, &parameters, |issued| {
+            let outcome = if issued { "changed" } else { "refused" };
+            event(
+                "identity.enrollment_issued",
+                actor,
+                outcome,
+                json!({"operator_id": id}),
+            )
         })
-        .await?;
-        Ok(issued.load(Relaxed))
+        .await
     }
 
-    async fn disable_operator(&self, operator: OperatorId) -> Result<bool, Error> {
+    async fn disable_operator(&self, operator: OperatorId, actor: &Actor) -> Result<bool, Error> {
         let id = operator.get();
-        let disabled = AtomicBool::new(false);
-        self.query_recording(DISABLE_OPERATOR, &[&id], &|rows| {
-            disabled.store(flag(rows, "disabled")?, Relaxed);
-            let event = format!(r#"{{"operator_id": {id}}}"#);
-            Ok(disabled
-                .load(Relaxed)
-                .then_some(("identity.operator_disabled", event)))
+        self.change(DISABLE_OPERATOR, &[&id], |disabled| {
+            let payload = json!({"operator_id": id});
+            event(
+                "identity.operator_disabled",
+                actor,
+                changed(disabled),
+                payload,
+            )
         })
-        .await?;
-        Ok(disabled.load(Relaxed))
+        .await
+    }
+
+    async fn enable_operator(&self, operator: OperatorId, actor: &Actor) -> Result<bool, Error> {
+        let id = operator.get();
+        self.change(ENABLE_OPERATOR, &[&id], |enabled| {
+            let payload = json!({"operator_id": id});
+            event(
+                "identity.operator_enabled",
+                actor,
+                changed(enabled),
+                payload,
+            )
+        })
+        .await
     }
 
     async fn end_operator_sessions(
         &self,
         operator: OperatorId,
         realm: Realm,
+        actor: &Actor,
     ) -> Result<u64, Error> {
         let (id, name) = (operator.get(), realm.as_str());
         let parameters: [&(dyn ToSql + Sync); 2] = [&id, &name];
-        let ended = AtomicU64::new(0);
-        self.query_recording(END_OPERATOR_SESSIONS, &parameters, &|rows| {
-            ended.store(count(rows)?, Relaxed);
-            let event = format!(
-                r#"{{"operator_id": {id}, "realm": "{name}", "ended": {}}}"#,
-                ended.load(Relaxed)
-            );
-            Ok(Some(("identity.sessions_ended", event)))
+        self.ended(END_OPERATOR_SESSIONS, &parameters, |ended| {
+            let payload = json!({"operator_id": id, "realm": name, "ended": ended});
+            event(
+                "identity.sessions_ended",
+                actor,
+                changed(ended > 0),
+                payload,
+            )
         })
-        .await?;
-        Ok(ended.load(Relaxed))
+        .await
     }
 
-    async fn end_realm_sessions(&self, realm: Realm) -> Result<u64, Error> {
+    async fn end_realm_sessions(&self, realm: Realm, actor: &Actor) -> Result<u64, Error> {
         let name = realm.as_str();
-        let ended = AtomicU64::new(0);
-        self.query_recording(END_REALM_SESSIONS, &[&name], &|rows| {
-            ended.store(count(rows)?, Relaxed);
-            let event = format!(r#"{{"realm": "{name}", "ended": {}}}"#, ended.load(Relaxed));
-            Ok(Some(("identity.sessions_ended", event)))
+        self.ended(END_REALM_SESSIONS, &[&name], |ended| {
+            let payload = json!({"realm": name, "ended": ended});
+            event(
+                "identity.sessions_ended",
+                actor,
+                changed(ended > 0),
+                payload,
+            )
         })
-        .await?;
-        Ok(ended.load(Relaxed))
+        .await
     }
 
     async fn list_operators(&self) -> Result<Vec<OperatorSummary>, Error> {
@@ -298,6 +361,23 @@ impl OperatorStore for PostgresOperators {
             })
             .collect()
     }
+}
+
+/// An audit event: its type, and a payload of IDs, counts, and facts, never names or tokens, with who ran the
+/// command and what came of it: `changed`, `unchanged`, or `refused` (ADR-0045, `v5.0.0-16.2.1`).
+fn event(
+    kind: &'static str,
+    actor: &Actor,
+    outcome: &str,
+    mut payload: Value,
+) -> (&'static str, String) {
+    payload["actor"] = json!(actor.as_str());
+    payload["outcome"] = json!(outcome);
+    (kind, payload.to_string())
+}
+
+fn changed(done: bool) -> &'static str {
+    if done { "changed" } else { "unchanged" }
 }
 
 /// The boolean a lookup function returns, which says it did nothing when there is no row, as for `delete_session`.
@@ -345,6 +425,11 @@ mod tests {
             let pool = tetsu_postgres::pool(&database.as_app()).expect("a pool");
             (pool, database)
         }
+
+        /// Who runs the operator command in these tests.
+        pub fn actor() -> crate::Actor {
+            crate::Actor::parse("kurt@workstation").expect("an actor")
+        }
     }
 
     /// A commit Postgres refused was rolled back, so it is never sorted as worth retrying.
@@ -369,7 +454,10 @@ mod tests {
             Err(getrandom::Error::UNSUPPORTED)
         });
         let kurt = operators
-            .create(&OperatorName::parse("Kurt Medley").expect("a name"))
+            .create(
+                &OperatorName::parse("Kurt Medley").expect("a name"),
+                &support::actor(),
+            )
             .await
             .expect("creates");
         assert_eq!(
@@ -385,7 +473,7 @@ mod tests {
         assert!(working.start_session(kurt).await.is_ok());
         assert_eq!(
             working.start_session(OperatorId::new(i64::MAX)).await,
-            Err(Error::Invalid("no enabled operator".to_string())),
+            Err(Error::Invalid(format!("no enabled operator {}", i64::MAX))),
             "an unknown operator starts no session"
         );
     }
@@ -420,20 +508,26 @@ mod tests {
             Err(getrandom::Error::UNSUPPORTED)
         });
         let kurt = failing
-            .create(&OperatorName::parse("Kurt Medley").expect("a name"))
+            .create(
+                &OperatorName::parse("Kurt Medley").expect("a name"),
+                &support::actor(),
+            )
             .await
             .expect("creates");
         assert_eq!(
-            failing.enroll(kurt).await.map(drop),
+            failing.enroll(kurt, &support::actor()).await.map(drop),
             Err(Error::Unavailable(format!(
                 "no secure random source: {}",
                 getrandom::Error::UNSUPPORTED
             )))
         );
         let working = Operators::with_fill(PostgresOperators { pool }, getrandom::fill);
-        assert!(working.enroll(kurt).await.is_ok());
+        assert!(working.enroll(kurt, &support::actor()).await.is_ok());
         assert_eq!(
-            working.enroll(OperatorId::new(i64::MAX)).await.map(drop),
+            working
+                .enroll(OperatorId::new(i64::MAX), &support::actor())
+                .await
+                .map(drop),
             Err(Error::Invalid(format!("no enabled operator {}", i64::MAX)))
         );
         tetsu_postgres::connect(&database)
@@ -445,7 +539,7 @@ mod tests {
             .await
             .expect("revokes");
         assert_eq!(
-            working.enroll(kurt).await.map(drop),
+            working.enroll(kurt, &support::actor()).await.map(drop),
             Err(Error::Storage(
                 "permission denied for function issue_enrollment".to_string()
             ))

@@ -258,6 +258,33 @@ impl std::fmt::Debug for EnrollmentToken {
     }
 }
 
+/// Who ran an operator command, as the audit record names them, such as `kurt@workstation`. It is asserted by the
+/// command, not proven: every command signs in as one database login (ADR-0061), so database access is the trust
+/// boundary, and this says which person used it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Actor(String);
+
+const MAX_ACTOR: usize = 200;
+
+impl Actor {
+    /// # Errors
+    /// Fails on an empty or overlong actor, or one holding a control character.
+    pub fn parse(text: &str) -> Result<Self, Error> {
+        if text.is_empty() || text.chars().count() > MAX_ACTOR || text.chars().any(char::is_control)
+        {
+            return Err(Error::Invalid(format!(
+                "an actor must be 1 to {MAX_ACTOR} characters with no control characters"
+            )));
+        }
+        Ok(Self(text.to_string()))
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// An operator as the operator command lists them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OperatorSummary {
@@ -345,6 +372,18 @@ impl std::error::Error for Error {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_actor_is_plain_text_of_bounded_length() {
+        assert_eq!(
+            Actor::parse("kurt@workstation").map(|actor| actor.as_str().to_string()),
+            Ok("kurt@workstation".into())
+        );
+        assert!(Actor::parse(&"é".repeat(200)).is_ok());
+        for bad in [String::new(), "é".repeat(201), "kurt\nforged".into()] {
+            assert!(Actor::parse(&bad).is_err(), "{bad:?}");
+        }
+    }
 
     /// An enrollment token never prints, so no log line or debug output can enroll anyone.
     #[test]

@@ -2,7 +2,7 @@
 
 use crate::browser::{Change, ForChange, Origins, SignOut};
 use crate::domain::{
-    EnrollmentToken, Error, Fill, OperatorId, OperatorName, OperatorSummary, Realm, Session,
+    Actor, EnrollmentToken, Error, Fill, OperatorId, OperatorName, OperatorSummary, Realm, Session,
     SessionToken,
 };
 use crate::ports::OperatorStore;
@@ -33,19 +33,27 @@ impl<S: OperatorStore> Operators<S> {
     ///
     /// # Errors
     /// Fails if storage fails.
-    pub async fn create(&self, name: &OperatorName) -> Result<OperatorId, Error> {
-        self.store.insert_operator(name).await
+    pub async fn create(&self, name: &OperatorName, actor: &Actor) -> Result<OperatorId, Error> {
+        self.store.insert_operator(name, actor).await
     }
 
     /// Issues an operator's enrollment link token, good once and for an hour, replacing any earlier link, and
-    /// records that one was issued, never the token (ADR-0040). The command prints it only to its own terminal.
+    /// records whether one was issued, never the token (ADR-0040). The command prints it only to its own terminal.
     ///
     /// # Errors
     /// Fails with [`Error::Invalid`] for a disabled or unknown operator, if no secure random source can be read,
     /// or if storage fails.
-    pub async fn enroll(&self, operator: OperatorId) -> Result<EnrollmentToken, Error> {
+    pub async fn enroll(
+        &self,
+        operator: OperatorId,
+        actor: &Actor,
+    ) -> Result<EnrollmentToken, Error> {
         let token = EnrollmentToken::generate(self.fill)?;
-        if self.store.issue_enrollment(&token.hash(), operator).await? {
+        if self
+            .store
+            .issue_enrollment(&token.hash(), operator, actor)
+            .await?
+        {
             Ok(token)
         } else {
             Err(no_enabled(operator))
@@ -57,17 +65,26 @@ impl<S: OperatorStore> Operators<S> {
     ///
     /// # Errors
     /// Fails if storage fails.
-    pub async fn disable(&self, operator: OperatorId) -> Result<bool, Error> {
-        self.store.disable_operator(operator).await
+    pub async fn disable(&self, operator: OperatorId, actor: &Actor) -> Result<bool, Error> {
+        self.store.disable_operator(operator, actor).await
+    }
+
+    /// Enables a disabled operator again, and says whether they were disabled. Their sessions stay ended, so they
+    /// sign in afresh.
+    ///
+    /// # Errors
+    /// Fails if storage fails.
+    pub async fn enable(&self, operator: OperatorId, actor: &Actor) -> Result<bool, Error> {
+        self.store.enable_operator(operator, actor).await
     }
 
     /// Ends every session one operator holds, as an administrator may (`v5.0.0-7.4.5`), and says how many.
     ///
     /// # Errors
     /// Fails if storage fails.
-    pub async fn end_sessions(&self, operator: OperatorId) -> Result<u64, Error> {
+    pub async fn end_sessions(&self, operator: OperatorId, actor: &Actor) -> Result<u64, Error> {
         self.store
-            .end_operator_sessions(operator, Realm::Operator)
+            .end_operator_sessions(operator, Realm::Operator, actor)
             .await
     }
 
@@ -75,8 +92,8 @@ impl<S: OperatorStore> Operators<S> {
     ///
     /// # Errors
     /// Fails if storage fails.
-    pub async fn end_all_sessions(&self) -> Result<u64, Error> {
-        self.store.end_realm_sessions(Realm::Operator).await
+    pub async fn end_all_sessions(&self, actor: &Actor) -> Result<u64, Error> {
+        self.store.end_realm_sessions(Realm::Operator, actor).await
     }
 
     /// Every operator, oldest first.
@@ -99,7 +116,11 @@ impl<S: OperatorStore> Operators<S> {
         let realm = Realm::Operator;
         self.store
             .insert_session(&token.hash(), realm, operator)
-            .await?;
+            .await
+            .map_err(|error| match error {
+                Error::Invalid(_) => no_enabled(operator),
+                other => other,
+            })?;
         Ok(token)
     }
 

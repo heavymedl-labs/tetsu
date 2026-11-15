@@ -21,6 +21,7 @@ names no business that uses Tetsu. Its root page names fictional customers only 
 | `tetsu operator enroll <id>` | Prints a new enrollment link for an operator, replacing the last. Only to a terminal |
 | `tetsu operator list` | Lists operators: ID, name, and whether they are enabled |
 | `tetsu operator disable <id>` | Disables an operator, ending their sessions and enrollment link |
+| `tetsu operator enable <id>` | Enables a disabled operator again; their sessions stay ended |
 | `tetsu operator end-sessions <id \| --all>` | Ends one operator's sessions, or every operator's |
 
 The deploy workflow runs `check`, `reset`, `replay`, and `rename` against the demo ([runbook](../../docs/operations/demo-environment.md)).

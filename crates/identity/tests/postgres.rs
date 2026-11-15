@@ -5,7 +5,7 @@
 use std::time::Duration;
 
 use tetsu_identity::{
-    Change, Error, ForChange, Identity, OperatorName, Origins, Realm, SessionToken, SignOut,
+    Actor, Change, Error, ForChange, Identity, OperatorName, Origins, Realm, SessionToken, SignOut,
     postgres_store,
 };
 use tetsu_postgres::test_support::{TestDatabase, fresh_database};
@@ -26,6 +26,11 @@ mod support {
 
     pub fn name(name: &str) -> OperatorName {
         OperatorName::parse(name).expect("a name")
+    }
+
+    /// Who runs the operator command in these tests.
+    pub fn actor() -> Actor {
+        Actor::parse("kurt@workstation").expect("an actor")
     }
 
     /// The operator realm's idle limit, which the database keeps too; tests age sessions by it, so the two must agree.
@@ -123,8 +128,8 @@ mod support {
 }
 
 use support::{
-    as_admin, cookie, count, idle_seconds, name, origins, ready, replaced_use_session, stored,
-    text, use_session_with_wrong,
+    actor, as_admin, cookie, count, idle_seconds, name, origins, ready, replaced_use_session,
+    stored, text, use_session_with_wrong,
 };
 
 /// Identity keeps its tables in the one schema it owns, under its own name (ADR-0003, ADR-0042).
@@ -156,7 +161,7 @@ async fn a_started_session_is_found_by_its_token_and_records_each_request() {
     let database = ready().await;
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
     let kurt = operators
-        .create(&name("Kurt Medley"))
+        .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
     let token = operators.start_session(kurt).await.expect("starts");
@@ -198,11 +203,11 @@ async fn each_operator_gets_their_own_id_and_a_random_user_handle() {
     let database = ready().await;
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
     let first = operators
-        .create(&name("Kurt Medley"))
+        .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
     let second = operators
-        .create(&name("Kurt Medley"))
+        .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
     assert_ne!(first, second);
@@ -224,7 +229,7 @@ async fn only_the_tokens_hash_is_stored() {
     let database = ready().await;
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
     let kurt = operators
-        .create(&name("Kurt Medley"))
+        .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
     let token = operators.start_session(kurt).await.expect("starts");
@@ -245,7 +250,7 @@ async fn an_idle_session_ends_and_is_removed() {
     let database = ready().await;
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
     let kurt = operators
-        .create(&name("Kurt Medley"))
+        .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
     let token = operators.start_session(kurt).await.expect("starts");
@@ -286,7 +291,7 @@ async fn a_busy_session_still_ends_at_its_absolute_limit() {
     let database = ready().await;
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
     let kurt = operators
-        .create(&name("Kurt Medley"))
+        .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
     let token = operators.start_session(kurt).await.expect("starts");
@@ -304,7 +309,7 @@ async fn the_last_request_never_moves_back() {
     let database = ready().await;
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
     let kurt = operators
-        .create(&name("Kurt Medley"))
+        .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
     let token = operators.start_session(kurt).await.expect("starts");
@@ -327,7 +332,7 @@ async fn requests_at_the_same_moment_never_end_a_live_session() {
     let database = ready().await;
     let operators = std::sync::Arc::new(postgres_store(pool(&database.as_app()).expect("a pool")));
     let kurt = operators
-        .create(&name("Kurt Medley"))
+        .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
     let token = text(&operators.start_session(kurt).await.expect("starts"));
@@ -363,7 +368,7 @@ async fn signing_out_ends_the_session_once_its_checks_pass() {
     let database = ready().await;
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
     let kurt = operators
-        .create(&name("Kurt Medley"))
+        .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
     let token = operators.start_session(kurt).await.expect("starts");
@@ -401,7 +406,7 @@ async fn signing_out_leaves_the_operators_other_sessions() {
     let database = ready().await;
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
     let kurt = operators
-        .create(&name("Kurt Medley"))
+        .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
     let token = operators.start_session(kurt).await.expect("starts");
@@ -426,13 +431,13 @@ async fn a_session_for_no_operator_is_refused() {
     let database = ready().await;
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
     let kurt = operators
-        .create(&name("Kurt Medley"))
+        .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
     as_admin(&database, "DELETE FROM identity.operators").await;
     assert!(matches!(
         operators.start_session(kurt).await,
-        Err(Error::Invalid(why)) if why == "no enabled operator"
+        Err(Error::Invalid(why)) if why == format!("no enabled operator {}", kurt.get())
     ));
 }
 
@@ -463,7 +468,7 @@ async fn another_realms_session_is_neither_used_nor_ended() {
     let database = ready().await;
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
     let kurt = operators
-        .create(&name("Kurt Medley"))
+        .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
     let token = operators.start_session(kurt).await.expect("starts");
@@ -545,7 +550,7 @@ async fn an_insert_that_returns_no_id_is_an_error() {
     )
     .await;
     assert_eq!(
-        operators.create(&name("Kurt Medley")).await,
+        operators.create(&name("Kurt Medley"), &actor()).await,
         Err(Error::Storage("no operator id returned".to_string()))
     );
 }
@@ -557,7 +562,7 @@ async fn a_stale_cached_statement_is_temporary_and_cleared() {
     let database = ready().await;
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
     let kurt = operators
-        .create(&name("Kurt Medley"))
+        .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
     operators
@@ -591,7 +596,7 @@ async fn an_unreachable_database_is_an_error() {
     let operators =
         postgres_store(pool(&Settings::from_values(&url, Some("disable"))).expect("a pool"));
     assert!(matches!(
-        operators.create(&name("Kurt Medley")).await,
+        operators.create(&name("Kurt Medley"), &actor()).await,
         Err(Error::Storage(_))
     ));
 }
@@ -610,7 +615,7 @@ async fn an_operator_id_of_the_wrong_type_is_an_error() {
     )
     .await;
     assert!(matches!(
-        operators.create(&name("Kurt Medley")).await,
+        operators.create(&name("Kurt Medley"), &actor()).await,
         Err(Error::Storage(_))
     ));
 }
@@ -627,7 +632,7 @@ async fn a_transaction_that_cannot_begin_is_an_error() {
         .replacen("postgres@", &format!("{outsider}@"), 1);
     let operators =
         postgres_store(pool(&Settings::from_values(&url, Some("disable"))).expect("a pool"));
-    let refused = operators.create(&name("Kurt Medley")).await;
+    let refused = operators.create(&name("Kurt Medley"), &actor()).await;
     drop(operators);
     as_admin(&database, &format!("DROP ROLE {outsider}")).await;
     assert!(matches!(refused, Err(Error::Storage(_))), "{refused:?}");
@@ -638,7 +643,7 @@ async fn a_statement_that_cannot_be_prepared_is_an_error() {
     let database = ready().await;
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
     let kurt = operators
-        .create(&name("Kurt Medley"))
+        .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
     let token = operators.start_session(kurt).await.expect("starts");
@@ -666,7 +671,7 @@ async fn a_refused_commit_starts_no_session() {
     let database = ready().await;
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
     let kurt = operators
-        .create(&name("Kurt Medley"))
+        .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
     as_admin(
@@ -692,7 +697,7 @@ async fn a_change_needs_the_realms_origin_and_the_sessions_form_token() {
     let database = ready().await;
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
     let kurt = operators
-        .create(&name("Kurt Medley"))
+        .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
     let token = operators.start_session(kurt).await.expect("starts");
@@ -759,7 +764,7 @@ async fn requests_at_the_same_moment_never_revive_a_spent_session() {
     let database = ready().await;
     let operators = std::sync::Arc::new(postgres_store(pool(&database.as_app()).expect("a pool")));
     let kurt = operators
-        .create(&name("Kurt Medley"))
+        .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
     let token = text(&operators.start_session(kurt).await.expect("starts"));
@@ -790,10 +795,13 @@ async fn starting_a_session_removes_only_the_operators_spent_ones() {
     let database = ready().await;
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
     let kurt = operators
-        .create(&name("Kurt Medley"))
+        .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
-    let ana = operators.create(&name("Ana Ortiz")).await.expect("creates");
+    let ana = operators
+        .create(&name("Ana Ortiz"), &actor())
+        .await
+        .expect("creates");
     for operator in [kurt, kurt, kurt, ana] {
         operators.start_session(operator).await.expect("starts");
     }
@@ -836,7 +844,7 @@ async fn a_spent_session_refreshed_meanwhile_is_not_removed() {
     let database = ready().await;
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
     let kurt = operators
-        .create(&name("Kurt Medley"))
+        .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
     let token = text(&operators.start_session(kurt).await.expect("starts"));
@@ -878,7 +886,7 @@ async fn signing_out_a_spent_session_has_nothing_to_end() {
     let database = ready().await;
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
     let kurt = operators
-        .create(&name("Kurt Medley"))
+        .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
     let token = operators.start_session(kurt).await.expect("starts");
@@ -921,7 +929,7 @@ async fn an_end_that_returns_nothing_ended_nothing() {
     let database = ready().await;
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
     let kurt = operators
-        .create(&name("Kurt Medley"))
+        .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
     let token = operators.start_session(kurt).await.expect("starts");
@@ -947,7 +955,7 @@ async fn each_session_has_a_random_public_id() {
     let database = ready().await;
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
     let kurt = operators
-        .create(&name("Kurt Medley"))
+        .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
     for _ in 0..3 {
@@ -969,7 +977,10 @@ async fn the_database_takes_the_longest_name_the_domain_takes() {
     let database = ready().await;
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
     let longest = "é".repeat(100);
-    operators.create(&name(&longest)).await.expect("fits");
+    operators
+        .create(&name(&longest), &actor())
+        .await
+        .expect("fits");
     for refused in [String::new(), "é".repeat(101)] {
         let error = connect(&database)
             .await
@@ -1001,7 +1012,7 @@ async fn a_change_whose_event_cannot_be_recorded_is_undone() {
     )
     .await;
     assert!(matches!(
-        operators.create(&name("Kurt Medley")).await,
+        operators.create(&name("Kurt Medley"), &actor()).await,
         Err(Error::Storage(why)) if why.contains("outbox_global")
     ));
     let client = connect(&database).await.expect("connects");
@@ -1012,4 +1023,23 @@ async fn a_change_whose_event_cannot_be_recorded_is_undone() {
         .try_get(0)
         .expect("a count");
     assert_eq!(stored, 0);
+}
+
+/// A session whose operator was disabled is never used, however it survived, and is removed when presented.
+#[tokio::test]
+async fn a_disabled_operators_session_is_refused_and_removed() {
+    let database = ready().await;
+    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    let kurt = operators
+        .create(&name("Kurt Medley"), &actor())
+        .await
+        .expect("creates");
+    let token = operators.start_session(kurt).await.expect("starts");
+    as_admin(
+        &database,
+        "UPDATE identity.operators SET disabled_at = now()",
+    )
+    .await;
+    assert_eq!(operators.session([text(&token).as_str()]).await, Ok(None));
+    assert_eq!(count(&database, "true").await, 0, "removed");
 }

@@ -1,16 +1,18 @@
 //! The driven port Identity calls out through.
 
-use crate::domain::{Error, OperatorId, OperatorName, OperatorSummary, Realm, Session};
+use crate::domain::{Actor, Error, OperatorId, OperatorName, OperatorSummary, Realm, Session};
 use std::future::Future;
 
 /// Where operators and their sessions are kept. A session is reached only by its token's hash and realm, one at a
 /// time (ADR-0048), and the store keeps each realm's limits beside its own clock, so no caller can stretch a
 /// session. The Postgres adapter implements it, and tests may use their own.
 pub trait OperatorStore {
-    /// Stores a new operator, with no passkey yet.
+    /// Stores a new operator, with no passkey yet. Each change below records an audit event naming `actor`, with
+    /// its outcome, in the same transaction.
     fn insert_operator(
         &self,
         name: &OperatorName,
+        actor: &Actor,
     ) -> impl Future<Output = Result<OperatorId, Error>> + Send;
 
     /// Stores a session under its token's hash, starting now, and removes the operator's spent sessions in the
@@ -45,6 +47,7 @@ pub trait OperatorStore {
         &self,
         hash: &[u8; 32],
         operator: OperatorId,
+        actor: &Actor,
     ) -> impl Future<Output = Result<bool, Error>> + Send;
 
     /// Disables an operator, ending every session and enrollment link they hold in the same step, and says whether
@@ -52,6 +55,14 @@ pub trait OperatorStore {
     fn disable_operator(
         &self,
         operator: OperatorId,
+        actor: &Actor,
+    ) -> impl Future<Output = Result<bool, Error>> + Send;
+
+    /// Enables a disabled operator again, and says whether they were disabled. Their sessions stay ended.
+    fn enable_operator(
+        &self,
+        operator: OperatorId,
+        actor: &Actor,
     ) -> impl Future<Output = Result<bool, Error>> + Send;
 
     /// Ends every session one operator holds in a realm, and says how many.
@@ -59,10 +70,15 @@ pub trait OperatorStore {
         &self,
         operator: OperatorId,
         realm: Realm,
+        actor: &Actor,
     ) -> impl Future<Output = Result<u64, Error>> + Send;
 
     /// Ends every session in a realm, and says how many.
-    fn end_realm_sessions(&self, realm: Realm) -> impl Future<Output = Result<u64, Error>> + Send;
+    fn end_realm_sessions(
+        &self,
+        realm: Realm,
+        actor: &Actor,
+    ) -> impl Future<Output = Result<u64, Error>> + Send;
 
     /// Every operator, oldest first.
     fn list_operators(&self) -> impl Future<Output = Result<Vec<OperatorSummary>, Error>> + Send;

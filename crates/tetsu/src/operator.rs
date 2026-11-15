@@ -1,11 +1,15 @@
 //! The operator command (ADR-0040, ADR-0059): creates operators and issues their enrollment links, lists them,
-//! disables them, and ends their sessions. Each change is recorded for the audit record by Identity.
+//! disables and enables them, and ends their sessions. Identity records each change for the audit record, with
+//! who ran the command and what came of it.
 //!
-//! An enrollment link is printed only to a terminal, never to a log, a pipe, or CI's output, so whoever ran the
-//! command is the only one who sees it (ADR-0040, `v5.0.0-6.4.1`).
+//! An enrollment link is printed only to a terminal, never to a pipe, so it cannot land in CI's output or a log by
+//! accident. That guards against mistakes; the trust boundary is access to the database, which this command
+//! signs in to directly (ADR-0040, `v5.0.0-6.4.1`).
+
+use std::env::VarError;
 
 use tetsu_identity::{
-    EnrollmentToken, OperatorId, OperatorName, OperatorStore, OperatorSummary, Operators,
+    Actor, EnrollmentToken, OperatorId, OperatorName, OperatorStore, OperatorSummary, Operators,
 };
 
 use crate::settings::{self, Local};
@@ -17,12 +21,13 @@ pub enum Operator {
     Enroll { id: OperatorId },
     List,
     Disable { id: OperatorId },
+    Enable { id: OperatorId },
     EndSessions { id: OperatorId },
     EndAllSessions,
 }
 
-const USAGE: &str =
-    "operator takes create <name>, enroll <id>, list, disable <id>, or end-sessions <id | --all>";
+const USAGE: &str = "operator takes create <name>, enroll <id>, list, disable <id>, enable <id>, or end-sessions <id \
+                     | --all>";
 
 /// The operator command its words name, with its arguments checked.
 pub fn parse(rest: &[String]) -> Result<Operator, String> {
@@ -45,6 +50,7 @@ fn with_id(command: &str, text: &str) -> Result<Operator, String> {
     let named: fn(OperatorId) -> Operator = match command {
         "enroll" => |id| Operator::Enroll { id },
         "disable" => |id| Operator::Disable { id },
+        "enable" => |id| Operator::Enable { id },
         "end-sessions" => |id| Operator::EndSessions { id },
         _ => return Err(USAGE.into()),
     };
@@ -68,9 +74,29 @@ pub async fn run(operator: Operator, local: &Local, terminal: bool) -> Result<Ve
     } else {
         String::new()
     };
+    let hostname = std::fs::read_to_string("/etc/hostname").ok();
+    let by = actor(|name| local.var(name), hostname.as_deref())?;
     let operators = tetsu_identity::postgres_store(crate::connect(local).await?);
-    act(&operators, operator, &origin)
-        .await
+    act(&operators, operator, &origin, &by).await
+}
+
+/// Who runs the command, as `user@host`, from the login's `USER` or `LOGNAME` and the machine's host name, with
+/// `unknown` for either that is missing. It is asserted, not proven: database access is what grants the command
+/// (ADR-0061).
+fn actor(
+    var: impl Fn(&str) -> Result<String, VarError>,
+    hostname: Option<&str>,
+) -> Result<Actor, String> {
+    let user = var("USER").or_else(|_| var("LOGNAME")).unwrap_or_default();
+    let host = hostname.map(str::trim).unwrap_or_default();
+    let known = |part: &str| {
+        if part.is_empty() {
+            "unknown".to_string()
+        } else {
+            part.to_string()
+        }
+    };
+    Actor::parse(&format!("{}@{}", known(user.trim()), known(host)))
         .map_err(|error| error.to_string())
 }
 
@@ -79,56 +105,73 @@ async fn act(
     operators: &Operators<impl OperatorStore>,
     operator: Operator,
     origin: &str,
-) -> Result<Vec<String>, tetsu_identity::Error> {
-    match operator {
-        Operator::Create { name } => create(operators, &name, origin).await,
+    by: &Actor,
+) -> Result<Vec<String>, String> {
+    let said = match operator {
+        Operator::Create { name } => return create(operators, &name, origin, by).await,
         Operator::Enroll { id } => operators
-            .enroll(id)
+            .enroll(id, by)
             .await
             .map(|token| vec![link(origin, &token)]),
         Operator::List => operators
             .list()
             .await
             .map(|all| all.iter().map(listed).collect()),
-        Operator::Disable { id } => operators
-            .disable(id)
+        Operator::Disable { id } => operators.disable(id, by).await.map(|done| {
+            vec![changed(
+                id,
+                done,
+                "disabled",
+                "and ended their sessions and enrollment link",
+            )]
+        }),
+        Operator::Enable { id } => operators
+            .enable(id, by)
             .await
-            .map(|done| vec![disabled(id, done)]),
+            .map(|done| vec![changed(id, done, "enabled", "who signs in afresh")]),
         Operator::EndSessions { id } => operators
-            .end_sessions(id)
+            .end_sessions(id, by)
             .await
             .map(|ended| vec![format!("ended {ended} sessions of operator {}", id.get())]),
         Operator::EndAllSessions => operators
-            .end_all_sessions()
+            .end_all_sessions(by)
             .await
             .map(|ended| vec![format!("ended {ended} operator sessions")]),
-    }
+    };
+    said.map_err(|error| error.to_string())
 }
 
-/// Creates an operator and issues their first enrollment link.
+/// Creates an operator and issues their first enrollment link. These are two steps, so if the second fails the
+/// operator exists without a link, and the error names them so the link can be issued again.
 async fn create(
     operators: &Operators<impl OperatorStore>,
     name: &OperatorName,
     origin: &str,
-) -> Result<Vec<String>, tetsu_identity::Error> {
-    let id = operators.create(name).await?;
-    let token = operators.enroll(id).await?;
+    by: &Actor,
+) -> Result<Vec<String>, String> {
+    let id = operators
+        .create(name, by)
+        .await
+        .map_err(|error| error.to_string())?;
+    let token = operators.enroll(id, by).await.map_err(|error| {
+        format!(
+            "created operator {id}, but could not issue their enrollment link: {error}; run tetsu operator enroll {id}",
+            id = id.get()
+        )
+    })?;
     Ok(vec![
         format!("created operator {}, {}", id.get(), name.as_str()),
         link(origin, &token),
     ])
 }
 
-/// What disabling an operator did.
-fn disabled(id: OperatorId, done: bool) -> String {
+/// What disabling or enabling an operator did.
+fn changed(id: OperatorId, done: bool, state: &str, then: &str) -> String {
     if done {
-        format!(
-            "disabled operator {}, and ended their sessions and enrollment link",
-            id.get()
-        )
+        format!("{state} operator {}, {then}", id.get())
     } else {
         format!(
-            "operator {} was already disabled, or does not exist",
+            "operator {} was already {state}, or does not exist",
             id.get()
         )
     }
@@ -172,6 +215,7 @@ mod tests {
             (&["enroll", "7"], Operator::Enroll { id: kurt }),
             (&["list"], Operator::List),
             (&["disable", "7"], Operator::Disable { id: kurt }),
+            (&["enable", "7"], Operator::Enable { id: kurt }),
             (&["end-sessions", "7"], Operator::EndSessions { id: kurt }),
             (&["end-sessions", "--all"], Operator::EndAllSessions),
         ] {
@@ -227,6 +271,42 @@ mod tests {
         assert_eq!(refused, Err("TETSU_ORIGIN must be set".into()));
     }
 
+    /// Who runs the command comes from the login and the host, with `unknown` for what is missing, and never holds
+    /// a control character, so it cannot forge another line of the audit record.
+    #[test]
+    fn the_actor_is_the_login_at_the_host() {
+        let named =
+            |user: Option<&'static str>, logname: Option<&'static str>, host: Option<&str>| {
+                actor(
+                    |name| match name {
+                        "USER" => user.map(String::from).ok_or(VarError::NotPresent),
+                        "LOGNAME" => logname.map(String::from).ok_or(VarError::NotPresent),
+                        _ => Err(VarError::NotPresent),
+                    },
+                    host,
+                )
+                .map(|actor| actor.as_str().to_string())
+            };
+        assert_eq!(
+            named(Some("kurt"), None, Some("workstation\n")),
+            Ok("kurt@workstation".into())
+        );
+        assert_eq!(named(None, Some("kurt"), None), Ok("kurt@unknown".into()));
+        assert_eq!(named(None, None, Some(" ")), Ok("unknown@unknown".into()));
+        assert!(named(Some("kurt\nforged"), None, None).is_err());
+    }
+
+    const ORIGIN: &str = "https://ops.example.com";
+
+    fn by() -> Actor {
+        Actor::parse("kurt@workstation").unwrap()
+    }
+
+    /// What a command said, as the maintainer ran it.
+    async fn said(operators: &Operators<impl OperatorStore>, operator: Operator) -> Vec<String> {
+        act(operators, operator, ORIGIN, &by()).await.unwrap()
+    }
+
     /// Identity's use cases over a fresh, migrated database, kept while the test runs.
     async fn migrated() -> (
         Operators<impl OperatorStore>,
@@ -246,17 +326,21 @@ mod tests {
     #[tokio::test]
     async fn each_command_acts_and_says_what_it_did() {
         let (operators, _database) = migrated().await;
-        let origin = "https://ops.example.com";
         let kurt = OperatorId::parse("1").unwrap();
-        let said = async |operator| act(&operators, operator, origin).await.unwrap();
-        let created = said(Operator::Create {
-            name: OperatorName::parse("Kurt Medley").unwrap(),
-        })
+        let created = said(
+            &operators,
+            Operator::Create {
+                name: OperatorName::parse("Kurt Medley").unwrap(),
+            },
+        )
         .await;
         assert_eq!(created[0], "created operator 1, Kurt Medley");
         let prefix =
             "enrollment link, good once and for an hour: https://ops.example.com/ops/enroll#";
-        for line in [&created[1], &said(Operator::Enroll { id: kurt }).await[0]] {
+        for line in [
+            &created[1],
+            &said(&operators, Operator::Enroll { id: kurt }).await[0],
+        ] {
             let token = line
                 .strip_prefix(prefix)
                 .unwrap_or_else(|| panic!("{line}"));
@@ -265,29 +349,82 @@ mod tests {
                 "{token}"
             );
         }
-        assert_eq!(said(Operator::List).await, ["1  Kurt Medley  enabled"]);
         assert_eq!(
-            said(Operator::EndSessions { id: kurt }).await,
+            said(&operators, Operator::List).await,
+            ["1  Kurt Medley  enabled"]
+        );
+        assert_eq!(
+            said(&operators, Operator::EndSessions { id: kurt }).await,
             ["ended 0 sessions of operator 1"]
         );
         assert_eq!(
-            said(Operator::EndAllSessions).await,
+            said(&operators, Operator::EndAllSessions).await,
             ["ended 0 operator sessions"]
         );
+    }
+
+    /// Disabling and enabling say what they did, and a disabled operator is issued no link.
+    #[tokio::test]
+    async fn an_operator_is_disabled_and_enabled_again() {
+        let (operators, _database) = migrated().await;
+        let kurt = OperatorId::parse("1").unwrap();
+        said(
+            &operators,
+            Operator::Create {
+                name: OperatorName::parse("Kurt Medley").unwrap(),
+            },
+        )
+        .await;
         assert_eq!(
-            said(Operator::Disable { id: kurt }).await,
+            said(&operators, Operator::Disable { id: kurt }).await,
             ["disabled operator 1, and ended their sessions and enrollment link"]
         );
         assert_eq!(
-            said(Operator::Disable { id: kurt }).await,
+            said(&operators, Operator::Disable { id: kurt }).await,
             ["operator 1 was already disabled, or does not exist"]
         );
-        assert_eq!(said(Operator::List).await, ["1  Kurt Medley  disabled"]);
         assert_eq!(
-            act(&operators, Operator::Enroll { id: kurt }, origin).await,
-            Err(tetsu_identity::Error::Invalid(
-                "no enabled operator 1".into()
-            ))
+            said(&operators, Operator::List).await,
+            ["1  Kurt Medley  disabled"]
+        );
+        assert_eq!(
+            act(&operators, Operator::Enroll { id: kurt }, ORIGIN, &by()).await,
+            Err("invalid: no enabled operator 1".into())
+        );
+        assert_eq!(
+            said(&operators, Operator::Enable { id: kurt }).await,
+            ["enabled operator 1, who signs in afresh"]
+        );
+        assert_eq!(
+            said(&operators, Operator::Enable { id: kurt }).await,
+            ["operator 1 was already enabled, or does not exist"]
+        );
+    }
+
+    /// When the link cannot be issued after the operator is made, the error names the operator, so a link can be
+    /// issued again rather than a second operator made.
+    #[tokio::test]
+    async fn a_failed_link_after_creating_names_the_new_operator() {
+        let (operators, database) = migrated().await;
+        tetsu_postgres::connect(&database)
+            .await
+            .unwrap()
+            .batch_execute(
+                "REVOKE EXECUTE ON FUNCTION identity.issue_enrollment(bytea, bigint) FROM tetsu_identity",
+            )
+            .await
+            .unwrap();
+        let by = Actor::parse("kurt@workstation").unwrap();
+        let created = Operator::Create {
+            name: OperatorName::parse("Kurt Medley").unwrap(),
+        };
+        let refused = act(&operators, created, "https://ops.example.com", &by)
+            .await
+            .unwrap_err();
+        assert!(
+            refused.starts_with("created operator 1, but could not issue their enrollment link: ")
+                && refused.ends_with("; run tetsu operator enroll 1"),
+            "{refused}"
         );
     }
 }

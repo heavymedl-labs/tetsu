@@ -1,6 +1,7 @@
--- Operators, who work for Tetsu itself, and sessions (ADR-0040, ADR-0048).
--- Both are global: an operator belongs to no business, and a session is
--- found by its token before any business is known.
+-- Operators, who work for Tetsu itself, their sessions, and their enrollment
+-- links, and what the operator command does to them (ADR-0040, ADR-0048,
+-- ADR-0059). All are global: an operator belongs to no business, and a session
+-- or link is found by its token before any business is known.
 SET lock_timeout = '5s';
 SET statement_timeout = '30s';
 
@@ -10,7 +11,11 @@ CREATE TABLE operators (
     -- WebAuthn's user handle: random, so it says nothing about the operator
     -- (ADR-0040).
     user_handle uuid NOT NULL UNIQUE DEFAULT gen_random_uuid(),
-    created_at timestamptz NOT NULL DEFAULT now()
+    created_at timestamptz NOT NULL DEFAULT now(),
+    -- An operator is disabled rather than removed, so the audit record keeps
+    -- a name to point at. A disabled operator starts no session, uses none,
+    -- and is issued no enrollment link (ADR-0059).
+    disabled_at timestamptz
 );
 
 COMMENT ON TABLE operators IS
@@ -38,15 +43,32 @@ COMMENT ON TABLE sessions IS
 
 CREATE INDEX sessions_operator_id ON sessions (operator_id);
 
+-- Each operator's one open enrollment link, kept under its token's SHA-256
+-- hash, never the token, and good for an hour. A new link replaces the last.
+CREATE TABLE enrollments (
+    token_hash bytea PRIMARY KEY CHECK (octet_length(token_hash) = 32),
+    operator_id bigint NOT NULL UNIQUE REFERENCES operators (id),
+    issued_at timestamptz NOT NULL,
+    ends_at timestamptz NOT NULL
+);
+
+COMMENT ON TABLE enrollments IS
+'tetsu:global: found by its token before anyone is signed in';
+
 -- The runner's default privileges give Identity's role every right on a new
 -- table; each is replaced by exactly what is granted below.
-REVOKE ALL ON operators, sessions FROM tetsu_identity;
+REVOKE ALL ON operators, sessions, enrollments FROM tetsu_identity;
 REVOKE ALL ON SEQUENCE operators_id_seq FROM tetsu_identity;
 
--- Identity's role adds and reads operators, and reaches sessions only through
--- the functions below, one token's hash a call, so no caller can list them.
+-- Identity's role adds and reads operators, and reaches sessions and links
+-- only through the functions below, one token's hash a call, so no caller can
+-- list them. Those functions read whether an operator is disabled, and lock
+-- its row while they do, so a disable at the same moment never misses what
+-- they add.
 GRANT SELECT, INSERT ON operators TO tetsu_identity;
-GRANT SELECT, INSERT, UPDATE, DELETE ON sessions TO tetsu_identity_lookup;
+GRANT SELECT, INSERT, UPDATE, DELETE ON sessions, enrollments
+TO tetsu_identity_lookup;
+GRANT SELECT, UPDATE (disabled_at) ON operators TO tetsu_identity_lookup;
 
 -- Each realm's limits live here, beside the clock that applies them, so no
 -- caller can lengthen a session by passing other numbers (ADR-0048). Every
@@ -55,43 +77,44 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON sessions TO tetsu_identity_lookup;
 -- statement that waits for another's lock on the same row is judged as of its
 -- own start, a wait no longer than the lock timeout.
 
--- Starts a session now, and removes the operator's spent sessions in the
--- realm, so sessions never presented again do not pile up.
+-- Starts a session now, only for an enabled operator, and removes the
+-- operator's spent sessions in the realm, so they do not pile up. One
+-- disabled or unknown raises TD001, Identity's own code, which it reads as
+-- invalid. It holds the operator's row until it commits, so a disable waits
+-- for it and then ends the session it started.
 CREATE FUNCTION start_session(
     wanted_hash bytea, wanted_realm text, wanted_operator bigint
 )
 RETURNS void
-LANGUAGE sql VOLATILE SECURITY DEFINER
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
 AS $$
-    WITH clock AS (
-        SELECT
-            clock_timestamp() AS at,
-            CASE wanted_realm WHEN 'operator' THEN interval '8 hours' END
-                AS absolute,
-            CASE wanted_realm WHEN 'operator' THEN interval '15 minutes' END
-                AS idle
-    ),
-
-    spent AS (
-        DELETE FROM identity.sessions AS s
-        USING clock
-        WHERE
-            s.operator_id = wanted_operator
-            AND s.realm = wanted_realm
-            AND (clock.at >= s.ends_at OR clock.at >= s.last_seen_at + clock.idle)
-    )
-
+DECLARE
+    at timestamptz := clock_timestamp();
+    absolute interval := CASE wanted_realm
+        WHEN 'operator' THEN interval '8 hours'
+    END;
+    idle interval := CASE wanted_realm
+        WHEN 'operator' THEN interval '15 minutes'
+    END;
+BEGIN
+    PERFORM
+    FROM identity.operators AS o
+    WHERE o.id = wanted_operator AND o.disabled_at IS NULL
+    FOR SHARE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'no enabled operator' USING ERRCODE = 'TD001';
+    END IF;
+    DELETE FROM identity.sessions AS s
+    WHERE
+        s.operator_id = wanted_operator
+        AND s.realm = wanted_realm
+        AND (at >= s.ends_at OR at >= s.last_seen_at + idle);
     INSERT INTO identity.sessions
         (token_hash, realm, operator_id, started_at, last_seen_at, ends_at)
-    SELECT
-        wanted_hash,
-        wanted_realm,
-        wanted_operator,
-        clock.at,
-        clock.at,
-        clock.at + clock.absolute
-    FROM clock
+    VALUES
+        (wanted_hash, wanted_realm, wanted_operator, at, at, at + absolute);
+END
 $$;
 
 -- Records a request on the live session a token's hash names in a realm, and
@@ -102,6 +125,9 @@ $$;
 -- find live is removed, and only if it is spent, so none is revived, and the
 -- last request never moves back. Only the realm asked for counts, so a token
 -- from another realm never passes as this one's (ADR-0040, ADR-0048).
+-- A session of a disabled operator is never used, and is removed when
+-- presented: a disable ends its operator's sessions, and this keeps any it
+-- could miss from acting for them.
 CREATE FUNCTION use_session(wanted_hash bytea, wanted_realm text)
 RETURNS TABLE (
     realm text,
@@ -122,18 +148,27 @@ BEGIN
     RETURN QUERY
     UPDATE identity.sessions AS s
     SET last_seen_at = greatest(s.last_seen_at, at)
+    FROM identity.operators AS o
     WHERE
         s.token_hash = wanted_hash
         AND s.realm = wanted_realm
         AND at < s.ends_at
         AND at < s.last_seen_at + idle
+        AND o.id = s.operator_id
+        AND o.disabled_at IS NULL
     RETURNING s.realm, s.operator_id, s.started_at, s.last_seen_at, s.ends_at;
     IF NOT FOUND THEN
         DELETE FROM identity.sessions AS s
+        USING identity.operators AS o
         WHERE
             s.token_hash = wanted_hash
             AND s.realm = wanted_realm
-            AND (at >= s.ends_at OR at >= s.last_seen_at + idle);
+            AND o.id = s.operator_id
+            AND (
+                at >= s.ends_at
+                OR at >= s.last_seen_at + idle
+                OR o.disabled_at IS NOT NULL
+            );
     END IF;
 END
 $$;
@@ -163,10 +198,133 @@ AS $$
     SELECT coalesce(bool_or(ended.live), false) FROM ended
 $$;
 
+-- Issues an operator's enrollment link, replacing any earlier one, and says
+-- whether it did: a disabled or unknown operator is issued none. It reads the
+-- clock once, so every link lasts exactly an hour.
+CREATE FUNCTION issue_enrollment(wanted_hash bytea, wanted_operator bigint)
+RETURNS boolean
+LANGUAGE sql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+    WITH clock AS (SELECT clock_timestamp() AS at),
+
+    enabled AS (
+        SELECT o.id
+        FROM identity.operators AS o
+        WHERE o.id = wanted_operator AND o.disabled_at IS NULL
+        FOR SHARE
+    ),
+
+    issued AS (
+        INSERT INTO identity.enrollments
+            (token_hash, operator_id, issued_at, ends_at)
+        SELECT
+            wanted_hash,
+            enabled.id,
+            clock.at,
+            clock.at + interval '1 hour'
+        FROM enabled, clock
+        ON CONFLICT (operator_id) DO UPDATE
+            SET
+                token_hash = excluded.token_hash,
+                issued_at = excluded.issued_at,
+                ends_at = excluded.ends_at
+        RETURNING operator_id
+    )
+
+    SELECT EXISTS (SELECT FROM issued)
+$$;
+
+-- Disables an operator, then ends every session it holds in any realm and its
+-- enrollment link (v5.0.0-7.4.2), and says whether it was enabled. Each step
+-- is its own statement, so the deletes see what a sign-in or link committed
+-- while the update waited on the operator's row; one statement would not.
+CREATE FUNCTION disable_operator(wanted_operator bigint)
+RETURNS boolean
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+BEGIN
+    UPDATE identity.operators AS o
+    SET disabled_at = clock_timestamp()
+    WHERE o.id = wanted_operator AND o.disabled_at IS NULL;
+    IF NOT FOUND THEN
+        RETURN false;
+    END IF;
+    DELETE FROM identity.sessions AS s WHERE s.operator_id = wanted_operator;
+    DELETE FROM identity.enrollments AS e
+    WHERE e.operator_id = wanted_operator;
+    RETURN true;
+END
+$$;
+
+-- Enables a disabled operator again, and says whether it was disabled. Their
+-- sessions stay ended, and they sign in afresh.
+CREATE FUNCTION enable_operator(wanted_operator bigint)
+RETURNS boolean
+LANGUAGE sql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+    WITH enabled AS (
+        UPDATE identity.operators AS o
+        SET disabled_at = NULL
+        WHERE o.id = wanted_operator AND o.disabled_at IS NOT NULL
+        RETURNING o.id
+    )
+
+    SELECT EXISTS (SELECT FROM enabled)
+$$;
+
+-- Ends every session one operator holds in a realm, and says how many
+-- (v5.0.0-7.4.5). It first takes the operator's row, so a sign-in under way
+-- finishes before the delete, which then ends it too.
+CREATE FUNCTION end_operator_sessions(wanted_operator bigint, wanted_realm text)
+RETURNS bigint
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    ended bigint;
+BEGIN
+    PERFORM
+    FROM identity.operators AS o
+    WHERE o.id = wanted_operator
+    FOR NO KEY UPDATE;
+    DELETE FROM identity.sessions AS s
+    WHERE s.operator_id = wanted_operator AND s.realm = wanted_realm;
+    GET DIAGNOSTICS ended = ROW_COUNT;
+    RETURN ended;
+END
+$$;
+
+-- Ends every session in a realm, and says how many (v5.0.0-7.4.5). It first
+-- takes every operator's row, so sign-ins under way finish before the delete.
+-- Operators are few, so this holds little.
+CREATE FUNCTION end_realm_sessions(wanted_realm text)
+RETURNS bigint
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    ended bigint;
+BEGIN
+    PERFORM FROM identity.operators AS o FOR NO KEY UPDATE;
+    DELETE FROM identity.sessions AS s WHERE s.realm = wanted_realm;
+    GET DIAGNOSTICS ended = ROW_COUNT;
+    RETURN ended;
+END
+$$;
+
 REVOKE EXECUTE ON FUNCTION start_session(bytea, text, bigint),
-use_session(bytea, text), end_session(bytea, text) FROM public;
+use_session(bytea, text), end_session(bytea, text),
+issue_enrollment(bytea, bigint), disable_operator(bigint),
+enable_operator(bigint), end_operator_sessions(bigint, text),
+end_realm_sessions(text) FROM public;
 GRANT EXECUTE ON FUNCTION start_session(bytea, text, bigint),
-use_session(bytea, text), end_session(bytea, text) TO tetsu_identity;
+use_session(bytea, text), end_session(bytea, text),
+issue_enrollment(bytea, bigint), disable_operator(bigint),
+enable_operator(bigint), end_operator_sessions(bigint, text),
+end_realm_sessions(text) TO tetsu_identity;
 
 -- A new owner needs CREATE on the schema at the moment it takes a function,
 -- and no longer after.
@@ -175,4 +333,10 @@ ALTER FUNCTION start_session(bytea, text, bigint)
 OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION use_session(bytea, text) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION end_session(bytea, text) OWNER TO tetsu_identity_lookup;
+ALTER FUNCTION issue_enrollment(bytea, bigint) OWNER TO tetsu_identity_lookup;
+ALTER FUNCTION disable_operator(bigint) OWNER TO tetsu_identity_lookup;
+ALTER FUNCTION enable_operator(bigint) OWNER TO tetsu_identity_lookup;
+ALTER FUNCTION end_operator_sessions(bigint, text)
+OWNER TO tetsu_identity_lookup;
+ALTER FUNCTION end_realm_sessions(text) OWNER TO tetsu_identity_lookup;
 REVOKE CREATE ON SCHEMA identity FROM tetsu_identity_lookup;

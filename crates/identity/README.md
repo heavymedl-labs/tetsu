@@ -49,16 +49,21 @@ ends their sessions. `postgres_store(pool)` returns it over Postgres.
 `tetsu operator` ([ADR-0040](../../docs/adr/0040-identity-and-sign-in.md),
 [ADR-0059](../../docs/adr/0059-session-controls-and-request-checks.md)) works through these use cases:
 
-- **An enrollment link** carries 256 random bits, stored only as their hash, good once and for an hour. Each
-  operator has one open link at most; a new one replaces the last. The command prints it only to a terminal, and
-  the token sits in the link's fragment, which a browser never sends to a server.
-- **Disabling an operator** ends every session and the open link they hold in the same statement
-  (`v5.0.0-7.4.2`). A disabled operator starts no session and is issued no link. `start_session` holds the
-  operator's row until it commits, so a disable at the same moment ends what it started.
-- **Ending sessions,** one operator's or every operator's, is the administrator's control (`v5.0.0-7.4.5`).
-- **Every change records an audit event** in Identity's outbox, in the same transaction, with IDs and counts only:
-  `identity.operator_created`, `identity.enrollment_issued`, `identity.operator_disabled`, and
-  `identity.sessions_ended`.
+- **An enrollment link** carries 256 random bits, stored only as their hash, good once and for an hour, by one
+  reading of the clock. Each operator has one open link at most; a new one replaces the last. The command prints
+  it only to a terminal, a guard against it landing in a log by accident; the trust boundary is access to the
+  database. The token sits in the link's fragment, which a browser never sends to a server.
+- **Disabling an operator** ends every session and the open link they hold (`v5.0.0-7.4.2`), in separate statements
+  after the update, so they see a sign-in or link committed while the update waited on the operator's row. A
+  disabled operator starts no session, uses none, and is issued no link. Enabling them again leaves their sessions
+  ended.
+- **Ending sessions,** one operator's or every operator's, is the administrator's control (`v5.0.0-7.4.5`). It
+  takes the operators' rows first, so a sign-in under way finishes and is ended too.
+- **Every command records one audit event** in Identity's outbox, in the same transaction, with IDs and counts,
+  never names or tokens, plus who ran it (`user@host`, asserted, since every command shares one database login)
+  and its outcome, `changed`, `unchanged`, or `refused` (`v5.0.0-16.2.1`, `v5.0.0-16.3.3`):
+  `identity.operator_created`, `identity.enrollment_issued`, `identity.operator_disabled`,
+  `identity.operator_enabled`, and `identity.sessions_ended`.
 
 ## Not yet
 
