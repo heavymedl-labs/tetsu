@@ -1,5 +1,6 @@
 //! The audit record, built from events the dispatcher delivers (ADR-0043, ADR-0045). Events arrive twice and in
-//! shuffled order, as delivery allows, and each is recorded once, for its own tenant alone.
+//! shuffled order, as delivery allows, and each is recorded once, for its own tenant alone. Each test copies a
+//! database migrated once for these modules.
 
 use tetsu_audit::{Audit, consumer};
 use tetsu_kernel::{Migration, Module, Storage};

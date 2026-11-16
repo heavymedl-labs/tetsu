@@ -122,7 +122,7 @@ pub(crate) async fn authenticate(
     serde_json::to_string(&asserted).expect("JSON")
 }
 
-/// Identity's use cases over a fresh, migrated database, with Kurt Medley as operator 1 and his link issued.
+/// Identity's use cases over a fresh copy of a migrated database, with Kurt Medley as operator 1 and his link issued.
 pub(crate) async fn with_link() -> (
     Operators<PostgresOperators>,
     TestDatabase,

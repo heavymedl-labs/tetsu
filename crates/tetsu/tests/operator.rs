@@ -1,4 +1,5 @@
-//! `tetsu operator` against a real Postgres, its output piped as CI or a log would take it (ADR-0040).
+//! `tetsu operator` against a real Postgres, migrated once and copied for each test, its output piped as CI or a
+//! log would take it (ADR-0040).
 
 use std::path::Path;
 use std::process::{Command, Output};

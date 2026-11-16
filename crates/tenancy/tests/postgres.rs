@@ -1,4 +1,4 @@
-//! Tenancy against a real Postgres.
+//! Tenancy against a real Postgres, each test on a copy of a database migrated once.
 
 use tetsu_postgres::test_support::{TestDatabase, fresh_database, migrated_database};
 use tetsu_postgres::{migrate, pool};

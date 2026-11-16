@@ -1,6 +1,6 @@
 //! Operators and their sessions in Postgres (ADR-0040, ADR-0047, ADR-0048), signed in as the application role, as
 //! `tetsu serve` is. Postgres's clock is the only one a session follows, so tests move a stored session's times
-//! rather than pass a time in.
+//! rather than pass a time in. Their shared setup is in `common`.
 
 use std::time::Duration;
 

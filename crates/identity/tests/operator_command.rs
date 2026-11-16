@@ -1,5 +1,6 @@
 //! What the operator command does to operators and sessions (ADR-0040, ADR-0059), in Postgres, signed in as the
 //! application role: enrollment links, disabling an operator, ending sessions, and the audit events each records.
+//! Their shared setup is in `common`.
 
 use std::fmt::Write;
 
