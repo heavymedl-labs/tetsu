@@ -305,10 +305,10 @@ fn without_verification(options: &str) -> String {
 }
 
 /// A registration is refused when it does not verify the user, or comes from another port or a subdomain of the
-/// realm's origin, and so is one that is not a registration at all, or not even JSON (#109). Each refusal leaves
-/// the link open, so the operator can try again, and is recorded with its reason. These are honest clients set up wrong: with no attestation, the
-/// flags and origin a registration reports are the client's word, which a hostile client could forge, so the
-/// guarantees that bind a person to a passkey come at sign-in, where the authenticator signs.
+/// realm's origin. Each refusal leaves the link open, so the operator can try again, and is recorded with its
+/// reason. These are honest clients set up wrong: with no attestation, the flags and origin a registration reports
+/// are the client's word, which a hostile client could forge, so the guarantees that bind a person to a passkey
+/// come at sign-in, where the authenticator signs.
 #[tokio::test]
 async fn hostile_clients_are_refused_and_the_link_stays_open() {
     let (operators, database, _, link) = with_link().await;
@@ -336,26 +336,45 @@ async fn hostile_clients_are_refused_and_the_link_stays_open() {
             "{origin}, verifies: {verifies}"
         );
     }
-    for response in ["not a registration", "{}"] {
-        let ceremony = operators.begin_enrollment(&party, &link).await;
-        let token = ceremony.expect("begins").token.to_text();
-        let finished = operators
-            .finish_enrollment(&party, &token, response, &actor())
-            .await;
-        assert_eq!(finished, not_enrolling());
-    }
-    let reasons = [
-        "not_verified",
-        "not_verified",
-        "not_verified",
-        "malformed",
-        "malformed",
-    ];
-    let kept =
-        "SELECT (SELECT count(*) FROM identity.passkeys) * 10 + count(*) FROM identity.enrollments";
     assert_eq!(
-        (redemptions(&database).await, number(&database, kept).await),
-        (reasons.map(|reason| json!(["refused", reason])).to_vec(), 1)
+        redemptions(&database).await,
+        vec![json!(["refused", "not_verified"]); 3]
+    );
+    assert_eq!(
+        number(&database, "SELECT count(*) FROM identity.passkeys").await,
+        0
+    );
+    assert_eq!(
+        number(&database, "SELECT count(*) FROM identity.enrollments").await,
+        1
+    );
+}
+
+/// A registration that is not one at all, or not even JSON, is refused (#109), recorded as malformed, and leaves
+/// the link open.
+#[tokio::test]
+async fn a_malformed_registration_is_refused_and_recorded() {
+    let (operators, database, _, link) = with_link().await;
+    let party = party();
+    for response in ["not a registration", "{}"] {
+        let ceremony = operators
+            .begin_enrollment(&party, &link)
+            .await
+            .expect("begins");
+        assert_eq!(
+            operators
+                .finish_enrollment(&party, &ceremony.token.to_text(), response, &actor())
+                .await,
+            not_enrolling()
+        );
+    }
+    assert_eq!(
+        redemptions(&database).await,
+        vec![json!(["refused", "malformed"]); 2]
+    );
+    assert_eq!(
+        number(&database, "SELECT count(*) FROM identity.enrollments").await,
+        1
     );
 }
 
