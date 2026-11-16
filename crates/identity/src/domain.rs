@@ -510,6 +510,57 @@ impl Redemption {
     }
 }
 
+/// A coarse name for the device a request came from, such as `Firefox on Linux`: the browser's family and the system
+/// it runs on, read from the `User-Agent`, never a version, so the audit record and a list of sessions can say which
+/// device without keeping a fingerprint (ADR-0059). It holds only fixed names, so it always shows safely.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Device {
+    browser: &'static str,
+    system: &'static str,
+}
+
+impl Device {
+    /// The device a `User-Agent` names, if the request sent one. Either part it cannot tell reads `another
+    /// browser` or `another system`.
+    #[must_use]
+    pub fn from_user_agent(user_agent: Option<&str>) -> Option<Self> {
+        // Order matters: Edge and Opera name Chrome too, Chrome names Safari, and Android names Linux.
+        const BROWSERS: [(&str, &str); 5] = [
+            ("Edg/", "Edge"),
+            ("OPR/", "Opera"),
+            ("Firefox/", "Firefox"),
+            ("Chrome/", "Chrome"),
+            ("Safari/", "Safari"),
+        ];
+        const SYSTEMS: [(&str, &str); 7] = [
+            ("iPhone", "iOS"),
+            ("iPad", "iPadOS"),
+            ("Android", "Android"),
+            ("CrOS", "ChromeOS"),
+            ("Windows", "Windows"),
+            ("Mac OS X", "macOS"),
+            ("Linux", "Linux"),
+        ];
+        let agent = user_agent?;
+        let first = |names: &[(&str, &'static str)], other: &'static str| {
+            names
+                .iter()
+                .find(|(mark, _)| agent.contains(mark))
+                .map_or(other, |(_, name)| name)
+        };
+        Some(Self {
+            browser: first(&BROWSERS, "another browser"),
+            system: first(&SYSTEMS, "another system"),
+        })
+    }
+}
+
+impl std::fmt::Display for Device {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} on {}", self.browser, self.system)
+    }
+}
+
 /// Who ran an operator command, as the audit record names them, such as `kurt@workstation`. It is asserted by the
 /// command, not proven: every command signs in as one database login (ADR-0061), so database access is the trust
 /// boundary, and this says which person used it.
@@ -604,6 +655,18 @@ impl Actor {
                 .to_string()
         };
         Self(format!("{}@{}", part(user), part(host)))
+    }
+
+    /// Who acted from a browser, as the audit record names them: `operator-<id>@<device>` once signed in, or
+    /// `browser@<device>` before, where a device the request did not name reads `unknown`, as for a command.
+    #[must_use]
+    pub fn browser(operator: Option<OperatorId>, device: Option<Device>) -> Self {
+        let user = operator.map_or_else(
+            || "browser".to_string(),
+            |id| format!("operator-{}", id.get()),
+        );
+        let device = device.map_or_else(|| "unknown".to_string(), |device| device.to_string());
+        Self(format!("{user}@{device}"))
     }
 
     #[must_use]
@@ -823,6 +886,58 @@ mod tests {
                 "TakenAddition { operator: OperatorId(1), .. }"
             ]
         );
+    }
+
+    /// A browser's actor names the operator once signed in, or a browser before, at its device, and a device the
+    /// request did not name reads `unknown`.
+    #[test]
+    fn a_browsers_actor_names_the_operator_and_device() {
+        let linux = Device::from_user_agent(Some("Mozilla/5.0 (X11; Linux x86_64) Firefox/140.0"));
+        let named = [
+            Actor::browser(Some(OperatorId::new(3)), linux),
+            Actor::browser(None, linux),
+            Actor::browser(Some(OperatorId::new(3)), None),
+        ];
+        assert_eq!(
+            named.each_ref().map(Actor::as_str),
+            [
+                "operator-3@Firefox on Linux",
+                "browser@Firefox on Linux",
+                "operator-3@unknown"
+            ]
+        );
+    }
+
+    /// A device is named by its browser's family and its system, never a version, and what cannot be told is said
+    /// plainly.
+    #[test]
+    fn a_device_is_named_coarsely() {
+        let agents = [
+            "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15",
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0",
+            "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36",
+            "Mozilla/5.0 (X11; CrOS x86_64 16000.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 OPR/120.0.0.0",
+            "Mozilla/5.0 (iPad; CPU OS 26_0 like Mac OS X)",
+            "curl/8.15.0",
+        ];
+        assert_eq!(
+            agents.map(|agent| Device::from_user_agent(Some(agent))
+                .map(|device| device.to_string())
+                .unwrap_or_default()),
+            [
+                "Firefox on Linux",
+                "Safari on macOS",
+                "Safari on iOS",
+                "Edge on Windows",
+                "Chrome on Android",
+                "Opera on ChromeOS",
+                "another browser on iPadOS",
+                "another browser on another system"
+            ]
+        );
+        assert_eq!(Device::from_user_agent(None), None);
     }
 
     #[test]

@@ -21,7 +21,7 @@ mod sign_in_tests;
 pub use adapters::postgres::postgres_store;
 pub use browser::{Change, CheckedSession, ForChange, Origins, SignOut};
 pub use domain::{
-    Account, Actor, Addition, Answer, Ceremony, CeremonyToken, Disabling, Enrollee,
+    Account, Actor, Addition, Answer, Ceremony, CeremonyToken, Device, Disabling, Enrollee,
     EnrollmentToken, Error, Issue, Limits, NewPasskey, OperatorId, OperatorName, OperatorSummary,
     Realm, Redemption, Removal, Session, SessionStart, SessionToken, SignIn, Signer, TakenAddition,
     TakenCeremony,
