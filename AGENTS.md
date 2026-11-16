@@ -87,7 +87,9 @@ unless `TEST_DATABASE_URL` names another. `scripts/check.sh --fast` runs only fo
 and linters, as the pre-commit hook does. Outside CI, a run skips coverage and mutation testing
 when the Rust is unchanged since its last full pass, and says so. CI runs the same script on demand and on pull
 requests, and also builds the image, checks links, and lints workflows
-([ADR-0023](docs/adr/0023-ci-on-demand.md)). Start a run with `gh workflow run CI` after
+([ADR-0023](docs/adr/0023-ci-on-demand.md)). It skips each group of checks unchanged since the commit the last
+passing run checked, and a run on that same commit stops at once
+([ADR-0064](docs/adr/0064-ci-skips-unchanged-work.md)). Start a run with `gh workflow run CI` after
 a batch of pushes, and before ending a session that pushed code.
 
 ## Writing

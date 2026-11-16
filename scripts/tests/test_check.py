@@ -62,9 +62,13 @@ class CheckScript(unittest.TestCase):
             f'echo "python $1 $2 $3" >> "{self.log}"\n'
             'if [ "$1 $3" = "scripts/check_npm.py --audit" ]; then exit "${NPM_CHECK-0}"; fi',
         )
+        # git diff --quiet answers as the environment says: 0, unchanged since the base, unless a test says.
         self.stub(
             "git",
-            'if [ "$1" = merge-base ]; then echo abc; else echo "$@" >> "'
+            'if [ "$1" = merge-base ]; then echo abc; '
+            'elif [ "$1 $2" = "diff --quiet" ]; then echo "$@" >> "'
+            + str(self.log)
+            + '"; exit "${DIFF_QUIET-0}"; else echo "$@" >> "'
             + str(self.log)
             + '"; echo changed; fi',
         )
@@ -405,11 +409,42 @@ class CheckScript(unittest.TestCase):
             self.assertEqual(self.check().returncode, 0)
             self.assertEqual(self.slow_stages_ran(), (True, True), changed)
 
-    def test_ci_never_reuses_a_pass(self):
+    def test_ci_never_reuses_a_machines_pass(self):
         self.assertEqual(self.check().returncode, 0)
         self.slow_stages_ran()
-        self.assertEqual(self.check(CI="true").returncode, 0)
+        self.assertEqual(self.check(CI="true", DIFF_QUIET="1").returncode, 0)
         self.assertEqual(self.slow_stages_ran(), (True, True))
+
+    def test_ci_skips_each_group_unchanged_since_the_base_and_says_so(self):
+        result = self.check("--base", "abc123", CI="true")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        log = self.log.read_text()
+        for skipped in (
+            "parallel_unittest.py",
+            "cargo llvm-cov",
+            "--doc",
+            "cargo mutants",
+            "vitest run",
+            "stryker run",
+        ):
+            self.assertNotIn(skipped, log)
+        for always in ("floor_guard.py", "cargo clippy", "cargo deny", "lizard", "jscpd"):
+            self.assertIn(always, log)
+        for said in (
+            "script tests are skipped",
+            "coverage, the doc tests, and mutation testing",
+            "front end",
+        ):
+            self.assertIn(said, result.stderr)
+        # The Rust group asks about exactly the inputs the fingerprint reads.
+        self.assertIn("diff --quiet abc -- crates Cargo.toml Cargo.lock rust-toolchain.toml", log)
+
+    def test_ci_runs_a_group_whose_inputs_changed(self):
+        result = self.check("--base", "abc123", CI="true", DIFF_QUIET="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        log = self.log.read_text()
+        for ran in ("parallel_unittest.py", "cargo llvm-cov", "vitest run", "stryker run"):
+            self.assertIn(ran, log)
 
     def test_a_failed_run_records_no_pass(self):
         self.stub(

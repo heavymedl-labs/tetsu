@@ -130,10 +130,29 @@ if [[ -z "${TEST_DATABASE_URL:-}" ]]; then
   fi
 fi
 
+base="origin/main"
+if [[ "${1:-}" == "--base" ]]; then
+  base="$2"
+fi
+# cargo-mutants reads only plain text diffs with a/ and b/ paths and every changed line, so override each
+# setting that changes them. It mutates the files on disk, so the diff compares them with the base.
+plain=(--text --no-ext-diff --no-textconv --no-color --no-renames --src-prefix=a/ --dst-prefix=b/)
+merge="$(git merge-base "$base" HEAD)"
+# In CI, whether anything in the given paths changed since the base, which a successful run already checked: a
+# group of checks whose inputs are unchanged is skipped, and says so (ADR-0064). Outside CI every group runs.
+changed() {
+  [[ -z "${CI:-}" ]] || ! git diff --quiet "$merge" -- "$@"
+}
+
 python3 scripts/floor_guard.py "$@"
 scripts/scan-secrets.sh --history
-# Each script test in its own process, one per core, so the slowest one sets the time.
-python3 scripts/parallel_unittest.py scripts/tests .
+# Each script test in its own process, one per core, so the slowest one sets the time. They read scripts/ and the
+# repository's settings, workflows, and docs, never the Rust or the front end.
+if changed . ':(exclude)crates' ':(exclude)web'; then
+  python3 scripts/parallel_unittest.py scripts/tests .
+else
+  echo "Nothing outside crates/ and web/ changed since $base, so the script tests are skipped" >&2
+fi
 scripts/check-adrs.sh
 python3 scripts/check_doc_sizes.py
 python3 scripts/check_secrets.py
@@ -196,14 +215,6 @@ elif ((npm_status == 3)); then
 else
   exit "$npm_status"
 fi
-base="origin/main"
-if [[ "${1:-}" == "--base" ]]; then
-  base="$2"
-fi
-# cargo-mutants reads only plain text diffs with a/ and b/ paths and every changed line, so override each
-# setting that changes them. It mutates the files on disk, so the diff compares them with the base.
-plain=(--text --no-ext-diff --no-textconv --no-color --no-renames --src-prefix=a/ --dst-prefix=b/)
-merge="$(git merge-base "$base" HEAD)"
 # Coverage and mutation testing give the same result for the same Rust, so a pass is recorded against a
 # fingerprint of every input they read: the Rust and its build settings, the checks themselves, and the base the
 # mutants are drawn against. A later run outside CI that finds the same fingerprint skips both and says so.
@@ -220,6 +231,9 @@ reuse=false
 if [[ -z "${CI:-}" && "$(cat "$pass_stamp" 2>/dev/null)" == "$fingerprint" ]]; then
   reuse=true
   echo "Rust is unchanged since the last full pass, so coverage and mutation testing are skipped" >&2
+elif ! changed "${rust_inputs[@]}"; then
+  reuse=true
+  echo "Rust is unchanged since $base, so coverage, the doc tests, and mutation testing are skipped" >&2
 fi
 if [[ "$reuse" == false ]]; then
   cargo llvm-cov --json --summary-only --output-path "$work/coverage.json"
@@ -237,9 +251,14 @@ if [[ "$reuse" == false ]]; then
   python3 scripts/check_coverage.py --branches "$work/metadata.json" "$work/branches.json"
 fi
 # TypeScript in web/ (ADR-0056): unit tests under coverage limits, then mutation testing, where a surviving mutant
-# fails. Both take seconds, so they always run.
-npx --no-install vitest run --coverage --config web/vitest.config.ts
-npx --no-install stryker run .config/stryker.config.json
+# fails.
+web_inputs=(web package.json package-lock.json tsconfig.json .nvmrc .config/stryker.config.json scripts/check.sh)
+if changed "${web_inputs[@]}"; then
+  npx --no-install vitest run --coverage --config web/vitest.config.ts
+  npx --no-install stryker run .config/stryker.config.json
+else
+  echo "The front end is unchanged since $base, so its tests and mutation testing are skipped" >&2
+fi
 .tools/bin/lizard -l rust -C 10 -L 50 -a 5 -w crates
 .tools/bin/lizard -l typescript -C 10 -L 50 -a 5 -w web
 npx --no-install jscpd crates web --threshold 0 --ignore "**/tests/**,**/assets/build/**" --reporters console

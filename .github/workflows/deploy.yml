@@ -104,13 +104,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           COMMIT: ${{ steps.commit.outputs.commit }}
         run: |
-          run="$(gh run list --workflow ci.yml --branch main --event workflow_dispatch --commit "$COMMIT" \
-            --status success --limit 1 --json databaseId --jq '.[0].databaseId // ""')"
+          # A run whose base was its own commit checked and published nothing (ADR-0064), so the newest passing run
+          # that recorded a digest is the one deployed.
+          runs="$(gh run list --workflow ci.yml --branch main --event workflow_dispatch --commit "$COMMIT" \
+            --status success --limit 10 --json databaseId --jq '.[].databaseId')"
+          run=""
+          for candidate in $runs; do
+            if gh run download "$candidate" --name image-digest --dir "$RUNNER_TEMP/digest" 2>/dev/null; then
+              run="$candidate"
+              break
+            fi
+          done
           if [[ -z "$run" ]]; then
-            echo "::error::No CI run passed on $COMMIT. Run gh workflow run CI on it first (ADR-0023)."
+            echo "::error::No CI run that passed on $COMMIT recorded its image. Run CI on it (ADR-0023)."
             exit 1
           fi
-          gh run download "$run" --name image-digest --dir "$RUNNER_TEMP/digest"
           digest="$(<"$RUNNER_TEMP/digest/digest")"
           if [[ ! "$digest" =~ ^ghcr\.io/heavymedl-labs/tetsu@sha256:[0-9a-f]{64}$ ]]; then
             echo "::error::CI run $run recorded no usable digest."
