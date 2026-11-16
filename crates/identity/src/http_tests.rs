@@ -278,6 +278,33 @@ async fn an_operator_enrolls_signs_in_and_adds_a_passkey() {
     );
 }
 
+/// Ten minutes after signing in, the page no longer offers to add a passkey, which the server would refuse, and
+/// says how to get it back.
+#[tokio::test]
+async fn a_stale_sign_in_is_told_to_sign_in_again_to_add_a_passkey() {
+    let (address, database, cookie, _) = signed_in().await;
+    as_admin(
+        &database,
+        "UPDATE identity.sessions SET started_at = now() - interval '11 minutes'",
+    )
+    .await;
+    let page = get(address, "/ops", &cookie).await;
+    assert!(!page.body.contains("data-passkey=\"add\""), "{}", page.body);
+    assert!(page.body.contains("sign out and sign in"), "{}", page.body);
+}
+
+/// A sign-in counts as fresh for ten minutes, by this server's clock, and one it puts in the future counts too.
+#[test]
+fn a_sign_in_is_fresh_for_ten_minutes() {
+    use std::time::{Duration, SystemTime};
+    let ago = |seconds| SystemTime::now() - Duration::from_secs(seconds);
+    let ahead = SystemTime::now() + Duration::from_secs(60);
+    assert_eq!(
+        [ago(0), ago(9 * 60), ago(11 * 60), ahead].map(crate::adapters::http::fresh),
+        [true, true, false, true]
+    );
+}
+
 /// Signing out clears the cookie and sends the browser to sign in, and the operator's page then does the same.
 #[tokio::test]
 async fn signing_out_clears_the_cookie() {
@@ -312,6 +339,12 @@ async fn the_pages_run_only_tetsus_own_script() {
             page.body
                 .contains(&format!("<script type=\"module\" src=\"{SCRIPT}\">")),
             "{path}"
+        ); // The button takes the shared button's look, in one class attribute.
+        assert!(
+            page.body
+                .contains("disabled:opacity-50 rounded-full font-medium focus-visible:outline-2"),
+            "{}",
+            page.body
         );
     }
     let unknown = format!("__Host-tetsu-operator={}", "ab".repeat(32));

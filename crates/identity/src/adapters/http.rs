@@ -3,6 +3,7 @@
 //! [`Operators::session_for_change`], so no other site can act through a signed-in browser.
 
 use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
 use askama::Template;
 use axum::Router;
@@ -97,6 +98,7 @@ struct AccountPage {
     credentials: String,
     passkeys: Vec<&'static str>,
     can_add: bool,
+    fresh: bool,
     form: String,
 }
 
@@ -227,11 +229,24 @@ async fn shown<S: OperatorStore>(
                     .collect::<Vec<_>>()
                     .join(" "),
                 can_add: account.passkeys.len() < 2,
+                fresh: fresh(session.started_at()),
                 passkeys: account.passkeys.iter().map(described).collect(),
                 form,
             })
         })
     })
+}
+
+/// How long after signing in an operator may add a passkey, which the database decides (ADR-0048, `v5.0.0-7.5.1`).
+/// The page uses it only to offer the button, or say why it does not.
+const FRESH: Duration = Duration::from_mins(10);
+
+/// Whether a session began recently enough to add a passkey. A start this server's clock puts in the future counts
+/// as fresh, and the database refuses it if the clocks disagree.
+pub(crate) fn fresh(started: SystemTime) -> bool {
+    SystemTime::now()
+        .duration_since(started)
+        .map_or(true, |age| age < FRESH)
 }
 
 /// How the operator's page lists a passkey: whether it is synced to their other devices, as the authenticator

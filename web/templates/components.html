@@ -20,10 +20,16 @@
 </svg>
 {% endmacro %}
 
-{#- A link drawn as a button, around what the caller writes: solid, or outlined when `secondary`, and tighter when
-    `small`. It sets no margin or display beyond inline-block, so a wrapper places it. -#}
+{#- A button's look, for a link or a button element: solid, or outlined when `secondary`, and tighter when `small`.
+    It sets no margin or display, so the caller places it. -#}
+{% macro button_style(secondary = false, small = false) -%}
+rounded-full font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent {% if secondary %}border border-line text-ink transition-colors hover:bg-surface{% else %}bg-ink text-canvas transition-opacity hover:opacity-85{% endif %} {% if small %}px-3.5 py-1.5 whitespace-nowrap{% else %}px-5 py-2.5 text-sm{% endif %}
+{%- endmacro %}
+
+{#- A link drawn as a button, around what the caller writes, as `button_style` draws it. It sets no margin or
+    display beyond inline-block, so a wrapper places it. -#}
 {% macro button(href, secondary = false, small = false) %}
-<a href="{{ href }}" class="inline-block rounded-full font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent {% if secondary %}border border-line text-ink transition-colors hover:bg-surface{% else %}bg-ink text-canvas transition-opacity hover:opacity-85{% endif %} {% if small %}px-3.5 py-1.5 whitespace-nowrap{% else %}px-5 py-2.5 text-sm{% endif %}">{{ caller() }}</a>
+<a href="{{ href }}" class="inline-block {% call button_style(secondary, small) %}{% endcall %}">{{ caller() }}</a>
 {% endmacro %}
 
 {#- A page that says why there is nothing to show, after HyperUI's empty content 1 (MIT). -#}
