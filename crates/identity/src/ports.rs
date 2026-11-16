@@ -2,7 +2,7 @@
 
 use crate::domain::{
     Actor, Disabling, Enrollee, Error, Issue, NewPasskey, OperatorId, OperatorName,
-    OperatorSummary, Realm, Redemption, Removal, Session, TakenCeremony,
+    OperatorSummary, Realm, Redemption, Removal, Session, SignIn, Signer, TakenCeremony,
 };
 use std::future::Future;
 
@@ -95,6 +95,37 @@ pub trait OperatorStore {
         operator: OperatorId,
         actor: &Actor,
     ) -> impl Future<Output = Result<Option<Disabling>, Error>> + Send;
+
+    /// Keeps a sign-in ceremony's state for ten minutes under its token's hash, and says whether it did: not while
+    /// too many sign-ins are open at once.
+    fn begin_sign_in(
+        &self,
+        token: &[u8; 32],
+        state: &str,
+    ) -> impl Future<Output = Result<bool, Error>> + Send;
+
+    /// Takes a sign-in ceremony's state by its token's hash, once, if it was still open.
+    fn take_sign_in(
+        &self,
+        token: &[u8; 32],
+    ) -> impl Future<Output = Result<Option<String>, Error>> + Send;
+
+    /// The passkey a credential ID names, if its operator is enabled.
+    fn signer(
+        &self,
+        credential: &[u8],
+    ) -> impl Future<Output = Result<Option<Signer>, Error>> + Send;
+
+    /// Stores a passkey's verified new state, if no other sign-in changed it meanwhile, and starts the operator's
+    /// session under a token's hash, in one transaction, recording it; says what came of it, or none for a passkey
+    /// that no longer exists.
+    fn sign_in(
+        &self,
+        signer: &Signer,
+        passkey: &str,
+        session: &[u8; 32],
+        actor: &Actor,
+    ) -> impl Future<Output = Result<Option<SignIn>, Error>> + Send;
 
     /// Removes every passkey an operator holds, ending their sessions and any ceremony, and says what it did, or none
     /// for an operator who does not exist.

@@ -705,6 +705,7 @@ async fn changes_that_wait_on_an_operator_need_read_committed() {
         "SELECT identity.begin_enrollment(sha256('t'::bytea), 1, sha256('a'::bytea), '{}')",
         "SELECT identity.enable_operator(1)",
         "SELECT * FROM identity.remove_passkeys(1)",
+        "SELECT identity.sign_in(sha256('c'::bytea), '{}', '{}', sha256('s'::bytea))",
     ] {
         let transaction = client
             .build_transaction()

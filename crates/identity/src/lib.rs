@@ -13,13 +13,15 @@ mod use_cases;
 
 #[cfg(test)]
 mod enrollment_tests;
+#[cfg(test)]
+mod sign_in_tests;
 
 pub use adapters::postgres::postgres_store;
 pub use browser::{Change, ForChange, Origins, SignOut};
 pub use domain::{
     Actor, Ceremony, CeremonyToken, Disabling, Enrollee, EnrollmentToken, Error, Issue, Limits,
     NewPasskey, OperatorId, OperatorName, OperatorSummary, Realm, Redemption, Removal, Session,
-    SessionToken, TakenCeremony,
+    SessionToken, SignIn, Signer, TakenCeremony,
 };
 pub use passkeys::RelyingParty;
 pub use ports::OperatorStore;

@@ -85,12 +85,15 @@ CREATE INDEX passkeys_operator_id ON passkeys (operator_id);
 -- link it will redeem, which is used up only when the passkey is stored.
 CREATE TABLE ceremonies (
     token_hash bytea PRIMARY KEY CHECK (octet_length(token_hash) = 32),
-    kind text NOT NULL CHECK (kind IN ('enroll')),
-    operator_id bigint NOT NULL REFERENCES operators (id),
+    kind text NOT NULL CHECK (kind IN ('enroll', 'sign_in')),
+    -- An enrollment knows its operator and link; a sign-in knows neither until
+    -- the browser answers with a passkey.
+    operator_id bigint REFERENCES operators (id),
     link_hash bytea CHECK (octet_length(link_hash) = 32),
     state jsonb NOT NULL CHECK (octet_length(state::text) <= 16384),
     ends_at timestamptz NOT NULL,
-    CHECK (kind <> 'enroll' OR link_hash IS NOT NULL)
+    CHECK ((kind = 'enroll') = (operator_id IS NOT NULL)),
+    CHECK ((kind = 'enroll') = (link_hash IS NOT NULL))
 );
 
 COMMENT ON TABLE ceremonies IS
@@ -100,6 +103,9 @@ CREATE INDEX ceremonies_operator_id ON ceremonies (operator_id);
 
 -- A link holds one ceremony at most, however many begin at once.
 CREATE UNIQUE INDEX ceremonies_link_hash ON ceremonies (link_hash);
+
+-- Anyone may begin a sign-in, so ended ceremonies are swept by when they end.
+CREATE INDEX ceremonies_ends_at ON ceremonies (ends_at);
 
 -- The runner's default privileges give Identity's role every right on a new
 -- table; each is replaced by exactly what is granted below.
@@ -126,8 +132,9 @@ TO tetsu_identity_lookup;
 GRANT SELECT (id, name, user_handle, created_at, disabled_at),
 UPDATE (disabled_at)
 ON operators TO tetsu_identity_lookup;
-GRANT SELECT (operator_id),
+GRANT SELECT (credential_id, operator_id, passkey),
 INSERT (credential_id, operator_id, passkey, created_at),
+UPDATE (passkey, last_used_at),
 DELETE
 ON passkeys TO tetsu_identity_lookup;
 GRANT SELECT, INSERT, DELETE ON ceremonies TO tetsu_identity_lookup;
@@ -463,6 +470,103 @@ BEGIN
 END
 $$;
 
+-- Keeps a sign-in ceremony's state for ten minutes under its token's hash, and
+-- says whether it did. Anyone may begin one, so until step 5's rate limits two
+-- bounds keep the table small: each begin sweeps up to a hundred ended
+-- ceremonies, skipping any another transaction holds, so begins never wait on
+-- each other; and no more than a thousand sign-ins may be open at once.
+CREATE FUNCTION begin_sign_in(wanted_hash bytea, wanted_state jsonb)
+RETURNS boolean
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    at timestamptz := clock_timestamp();
+BEGIN
+    DELETE FROM identity.ceremonies AS c
+    WHERE c.ctid = any(array(
+        SELECT ended.ctid
+        FROM identity.ceremonies AS ended
+        WHERE ended.ends_at <= at
+        ORDER BY ended.ends_at
+        LIMIT 100
+        FOR UPDATE SKIP LOCKED
+    ));
+    IF (
+        SELECT count(*) FROM identity.ceremonies AS c
+        WHERE c.kind = 'sign_in' AND c.ends_at > at
+    ) >= 1000 THEN
+        RETURN false;
+    END IF;
+    INSERT INTO identity.ceremonies (token_hash, kind, state, ends_at)
+    VALUES (wanted_hash, 'sign_in', wanted_state, at + interval '10 minutes');
+    RETURN true;
+END
+$$;
+
+-- The passkey a credential ID names, with its operator and their user handle,
+-- if the operator is enabled; nothing otherwise. Reading it changes nothing.
+CREATE FUNCTION signer(wanted_credential bytea)
+RETURNS TABLE (operator_id bigint, user_handle bytea, passkey text)
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+    SELECT
+        o.id,
+        uuid_send(o.user_handle),
+        p.passkey::text
+    FROM identity.passkeys AS p
+    INNER JOIN identity.operators AS o ON p.operator_id = o.id
+    WHERE p.credential_id = wanted_credential AND o.disabled_at IS NULL
+$$;
+
+-- Signs an operator in with a passkey a sign-in verified, and says what came
+-- of it: signed_in; disabled, for an operator disabled since the passkey was
+-- read; raced, for a passkey another sign-in changed meanwhile, whose counter
+-- this one must not overwrite; or null for a passkey that no longer exists.
+-- It takes the operator's row as a sign-in does, so a disable waits for it
+-- and then ends the session it starts, stores the passkey's new counter only
+-- if it is still the one verified against, and starts the session, all in one
+-- transaction, under read committed only (TD002).
+CREATE FUNCTION sign_in(
+    wanted_credential bytea,
+    wanted_old jsonb,
+    wanted_new jsonb,
+    wanted_session bytea
+)
+RETURNS text
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    who bigint;
+    was timestamptz;
+BEGIN
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'signing in needs read committed'
+        USING ERRCODE = 'TD002';
+    END IF;
+    SELECT o.id, o.disabled_at INTO who, was
+    FROM identity.passkeys AS p
+    INNER JOIN identity.operators AS o ON p.operator_id = o.id
+    WHERE p.credential_id = wanted_credential
+    FOR SHARE OF o;
+    IF NOT FOUND THEN
+        RETURN null;
+    ELSIF was IS NOT NULL THEN
+        RETURN 'disabled';
+    END IF;
+    UPDATE identity.passkeys AS p
+    SET passkey = wanted_new, last_used_at = clock_timestamp()
+    WHERE p.credential_id = wanted_credential AND p.passkey = wanted_old;
+    IF NOT FOUND THEN
+        RETURN 'raced';
+    END IF;
+    PERFORM identity.start_session(wanted_session, 'operator', who);
+    RETURN 'signed_in';
+END
+$$;
+
 -- Takes a ceremony of a kind by its token's hash, once: it is removed whether
 -- or not it is still open, and returned only if it is.
 CREATE FUNCTION take_ceremony(wanted_hash bytea, wanted_kind text)
@@ -737,6 +841,7 @@ GRANT EXECUTE ON FUNCTION start_session(bytea, text, bigint),
 use_session(bytea, text), end_session(bytea, text),
 issue_enrollment(bytea, bigint), list_operators(), enrollee(bytea),
 begin_enrollment(bytea, bigint, bytea, jsonb), take_ceremony(bytea, text),
+begin_sign_in(bytea, jsonb), signer(bytea), sign_in(bytea, jsonb, jsonb, bytea),
 redeem_enrollment(bytea, bigint, bytea, jsonb), disable_operator(bigint),
 enable_operator(bigint), remove_passkeys(bigint), end_sessions(text, bigint)
 TO tetsu_identity;
@@ -757,6 +862,10 @@ ALTER FUNCTION enrollee(bytea) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION begin_enrollment(bytea, bigint, bytea, jsonb)
 OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION take_ceremony(bytea, text) OWNER TO tetsu_identity_lookup;
+ALTER FUNCTION begin_sign_in(bytea, jsonb) OWNER TO tetsu_identity_lookup;
+ALTER FUNCTION signer(bytea) OWNER TO tetsu_identity_lookup;
+ALTER FUNCTION sign_in(bytea, jsonb, jsonb, bytea)
+OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION redeem_enrollment(bytea, bigint, bytea, jsonb)
 OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION disable_operator(bigint) OWNER TO tetsu_identity_lookup;

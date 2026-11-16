@@ -3,7 +3,8 @@
 use crate::browser::{Change, ForChange, Origins, SignOut};
 use crate::domain::{
     Actor, Ceremony, CeremonyToken, Disabling, EnrollmentToken, Error, Fill, Issue, OperatorId,
-    OperatorName, OperatorSummary, Realm, Redemption, Removal, Session, SessionToken,
+    OperatorName, OperatorSummary, Realm, Redemption, Removal, Session, SessionToken, SignIn,
+    Signer,
 };
 use crate::passkeys::RelyingParty;
 use crate::ports::OperatorStore;
@@ -146,6 +147,69 @@ impl<S: OperatorStore> Operators<S> {
             .disable_operator(operator, actor)
             .await?
             .ok_or_else(|| no_operator(operator))
+    }
+
+    /// Begins a passkey sign-in: a ceremony token for the browser to keep, and options that let it offer any of the
+    /// person's passkeys. The ceremony lasts ten minutes, and its state never leaves the store.
+    ///
+    /// # Errors
+    /// Fails with [`Error::Invalid`] while too many sign-ins are open; with [`Error::Unavailable`] if no secure
+    /// random source can be read; or if storage fails.
+    pub async fn begin_sign_in(&self, party: &RelyingParty) -> Result<Ceremony, Error> {
+        // Starting a discoverable sign-in cannot fail in webauthn-rs, so its failure joins the random source's.
+        let (token, (options, state)) = CeremonyToken::generate(self.fill)
+            .and_then(|token| party.begin_authentication().map(|begun| (token, begun)))?;
+        let begun = self.store.begin_sign_in(&token.hash(), &state).await?;
+        begun
+            .then_some(Ceremony { token, options })
+            .ok_or_else(not_signing_in)
+    }
+
+    /// Finishes a passkey sign-in and starts the operator's session, returning its token. The ceremony is used up
+    /// whatever happens. The passkey must belong to an enabled operator whose user handle the answer names
+    /// (`WebAuthn` L3 §7.2), and must verify, user verification included; its new counter is stored only if no other
+    /// sign-in changed it meanwhile, in the transaction that starts the session, which is recorded.
+    ///
+    /// # Errors
+    /// Fails with [`Error::Invalid`], the same for every cause, for a ceremony that is malformed, unknown, or ended,
+    /// an answer that names no enabled operator's passkey or does not verify, or a sign-in that lost a race; with
+    /// [`Error::Unavailable`] if no secure random source can be read; or if storage fails.
+    pub async fn finish_sign_in(
+        &self,
+        party: &RelyingParty,
+        ceremony: &str,
+        response: &str,
+        actor: &Actor,
+    ) -> Result<SessionToken, Error> {
+        let held = CeremonyToken::parse(ceremony).ok_or_else(not_signing_in)?;
+        let state = self
+            .store
+            .take_sign_in(&held.hash())
+            .await?
+            .ok_or_else(not_signing_in)?;
+        let signer = self.signer_for(party, response).await?;
+        let passkey = party
+            .finish_authentication(response, &state, &signer.passkey)
+            .map_err(as_sign_in_refusal)?;
+        let token = SessionToken::generate(self.fill)?;
+        let outcome = self
+            .store
+            .sign_in(&signer, &passkey, &token.hash(), actor)
+            .await?;
+        outcome
+            .filter(|answer| *answer == SignIn::SignedIn)
+            .map(|_| token)
+            .ok_or_else(not_signing_in)
+    }
+
+    /// The passkey a sign-in's answer names, if it belongs to an enabled operator whose user handle the answer gives.
+    async fn signer_for(&self, party: &RelyingParty, response: &str) -> Result<Signer, Error> {
+        let (credential, handle) = party.identify(response).ok_or_else(not_signing_in)?;
+        self.store
+            .signer(&credential)
+            .await?
+            .filter(|signer| signer.user_handle == handle)
+            .ok_or_else(not_signing_in)
     }
 
     /// Removes every passkey an operator holds, so they can be issued a link and enroll again, as when their only
@@ -307,6 +371,20 @@ fn not_enrolling() -> Error {
 fn as_one_refusal(error: Error) -> Error {
     match error {
         Error::Invalid(_) => not_enrolling(),
+        other => other,
+    }
+}
+
+/// One answer for every way a sign-in can fail, so a browser learns nothing about which passkeys or operators
+/// exist (`v5.0.0-6.3.8`).
+fn not_signing_in() -> Error {
+    Error::Invalid("this sign-in could not be completed".to_string())
+}
+
+/// A refusal on the way through a sign-in reads as the one answer; a failure that is not a refusal stays itself.
+fn as_sign_in_refusal(error: Error) -> Error {
+    match error {
+        Error::Invalid(_) => not_signing_in(),
         other => other,
     }
 }

@@ -4,7 +4,8 @@
 
 use serde_json::{Value, json};
 use webauthn_rs::prelude::{
-    PasskeyRegistration, RegisterPublicKeyCredential, Url, Uuid, Webauthn, WebauthnBuilder,
+    DiscoverableAuthentication, Passkey, PasskeyRegistration, PublicKeyCredential,
+    RegisterPublicKeyCredential, Url, Uuid, Webauthn, WebauthnBuilder, WebauthnError,
 };
 
 use crate::browser::Origins;
@@ -60,12 +61,69 @@ impl RelyingParty {
                 name,
                 None,
             )
-            .map_err(|error| Error::Storage(format!("no ceremony could start: {error}")))?;
+            .map_err(Error::from)?;
         // Serialising these types cannot fail, so json! takes the place of a Result no test could reach.
         let mut options = json!(options);
         options["publicKey"]["authenticatorSelection"]["residentKey"] = json!("required");
         options["publicKey"]["authenticatorSelection"]["requireResidentKey"] = Value::Bool(true);
         Ok((options.to_string(), json!(state).to_string()))
+    }
+
+    /// Starts a sign-in: the options for the browser, and the state to keep until it answers. They name no passkey,
+    /// so the browser offers the person's own, discoverable ones, and they ask for the prompt a button opens rather
+    /// than the autofill `webauthn-rs` sets, which is easy to miss.
+    pub(crate) fn begin_authentication(&self) -> Result<(String, String), Error> {
+        self.webauthn
+            .start_discoverable_authentication()
+            .map(|(options, state)| {
+                let mut options = json!(options);
+                let _ = options
+                    .as_object_mut()
+                    .map(|fields| fields.remove("mediation"));
+                (options.to_string(), json!(state).to_string())
+            })
+            .map_err(Error::from)
+    }
+
+    /// The credential ID and user handle a sign-in's answer names, so its passkey can be found and checked, or none
+    /// for an answer that is not one.
+    pub(crate) fn identify(&self, response: &str) -> Option<(Vec<u8>, [u8; 16])> {
+        let response: PublicKeyCredential = serde_json::from_str(response).ok()?;
+        self.webauthn
+            .identify_discoverable_authentication(&response)
+            .ok()
+            .map(|(handle, credential)| (credential.to_vec(), *handle.as_bytes()))
+    }
+
+    /// Verifies a sign-in's answer against the state its ceremony began with and the passkey it names, and returns
+    /// the passkey as it should now be stored, with its counter and backup flags moved on. `webauthn-rs` refuses a
+    /// counter that does not move forward, as a cloned authenticator's would not.
+    pub(crate) fn finish_authentication(
+        &self,
+        response: &str,
+        state: &str,
+        passkey: &str,
+    ) -> Result<String, Error> {
+        let state: DiscoverableAuthentication = serde_json::from_str(state).map_err(|error| {
+            Error::Storage(format!(
+                "a stored sign-in ceremony could not be read: {error}"
+            ))
+        })?;
+        let mut passkey: Passkey = serde_json::from_str(passkey).map_err(|error| {
+            Error::Storage(format!("a stored passkey could not be read: {error}"))
+        })?;
+        serde_json::from_str::<PublicKeyCredential>(response)
+            .ok()
+            .and_then(|response| {
+                self.webauthn
+                    .finish_discoverable_authentication_v2(&response, state, &passkey)
+                    .ok()
+            })
+            .map(|result| {
+                let _ = passkey.update_credential(&result);
+                json!(passkey).to_string()
+            })
+            .ok_or_else(|| Error::Invalid("the passkey could not be verified".to_string()))
     }
 
     /// Verifies a browser's registration against the state its ceremony began with, and returns the passkey. A
@@ -110,6 +168,14 @@ fn plausible(response: &RegisterPublicKeyCredential) -> bool {
         .as_ref()
         .and_then(|props| props.rk)
         != Some(false)
+}
+
+/// A ceremony `webauthn-rs` could not start: a fault of what Identity stored, such as an operator with no name,
+/// never the browser's. Only starting a ceremony converts its errors this way; finishing one maps each itself.
+impl From<WebauthnError> for Error {
+    fn from(error: WebauthnError) -> Self {
+        Self::Storage(format!("no ceremony could start: {error}"))
+    }
 }
 
 /// The name an account picker shows for an operator's passkey: the label, then their name, cut to the 64 bytes an

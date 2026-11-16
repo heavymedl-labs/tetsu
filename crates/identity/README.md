@@ -5,7 +5,8 @@ Who signs in to Tetsu, their passkeys, and their sessions ([ADR-0040](../../docs
 in slice 5 ([#110](https://github.com/heavymedl-labs/tetsu/issues/110)); staff and customers follow.
 
 So far, `Operators` creates, lists, disables, and enables operators, issues their enrollment links, begins and
-finishes enrolling their first passkey, removes their passkeys, and starts, finds, and ends their sessions. `postgres_store(pool)` returns it over Postgres.
+finishes enrolling their first passkey, signs them in with it, removes their passkeys, and starts, finds, and
+ends their sessions. `postgres_store(pool)` returns it over Postgres.
 
 - **Session tokens are 256 random bits** from the operating system's source, written as 64 lowercase hexadecimal
   digits. Only their SHA-256 hash is stored ([ADR-0047](../../docs/adr/0047-sign-in-libraries.md)), and a token
@@ -78,6 +79,15 @@ finishes enrolling their first passkey, removes their passkeys, and starts, find
   shows each as "Tetsu operator · Name", the label first, where an authenticator's 64-byte cut never reaches it.
   The AAGUID, which names a passkey's provider but is unverified without attestation, is kept from step 4d, when
   the browser's authenticator data arrives.
+- **Signing in with a passkey** takes two requests. Beginning names no passkey, so the browser offers the
+  person's own, and asks for the prompt a button opens; it keeps a ceremony for ten minutes, like enrollment's.
+  Anyone may begin one, so until step 5's rate limits each begin sweeps up to a hundred ended ceremonies without
+  waiting on any, and no more than a thousand sign-ins may be open at once. Finishing takes the ceremony once,
+  finds the passkey the answer names, refuses it unless its enabled operator's user handle is the one the answer
+  gives (`WebAuthn` L3 §7.2), and verifies it through `webauthn-rs`, user verification included, which refuses a
+  counter that does not move forward. Then, in one transaction holding the operator's row, it stores the passkey's
+  new counter only if no other sign-in changed it meanwhile, and starts the session. Each is recorded as
+  `identity.signed_in`, with its reason when refused, and every refusal reads the same to the browser.
 - **Removing an operator's passkeys** lets them be issued a link and enroll again, as when their only passkey is
   lost or unusable. It ends their sessions and any ceremony too, since a session begun with a removed passkey must
   not outlive it (`v5.0.0-7.4.3`), takes their row for update as a disable does, and records
@@ -132,10 +142,9 @@ finishes enrolling their first passkey, removes their passkeys, and starts, find
 
 ## Not yet
 
-Signing in with a passkey, the pages and script that run enrollment in a browser, recording a registration
-that fails to verify (with the sign-in rate limits), revoking a link on its own
-(today a new link or a disable ends it), the sign-in
-pages, the `Sec-Fetch-Site` check, the headers that apply these checks, the session list
-([ADR-0059](../../docs/adr/0059-session-controls-and-request-checks.md)), rate limits, the `identity.signed_in`
-event, and running the dispatcher that carries Identity's events to the audit record arrive in later steps of
+A second passkey after a fresh sign-in; the pages and script that run enrollment and sign-in in a browser;
+recording registrations and sign-ins that fail to verify, with the request's address; rate limits; revoking a link
+on its own (today a new link or a disable ends it); the `Sec-Fetch-Site` check and the headers that apply these
+checks; the session list ([ADR-0059](../../docs/adr/0059-session-controls-and-request-checks.md)); and running the
+dispatcher that carries Identity's events to the audit record arrive in later steps of
 [#110](https://github.com/heavymedl-labs/tetsu/issues/110).

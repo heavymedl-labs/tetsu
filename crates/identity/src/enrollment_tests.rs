@@ -9,7 +9,7 @@ use passkey::authenticator::{Authenticator, UiHint, UserCheck, UserValidationMet
 use passkey::client::{Client, DefaultClientData};
 use passkey::types::Passkey;
 use passkey::types::ctap2::{Aaguid, Ctap2Error};
-use passkey::types::webauthn::CredentialCreationOptions;
+use passkey::types::webauthn::{CredentialCreationOptions, CredentialRequestOptions};
 use serde_json::{Value, json};
 use tetsu_postgres::test_support::{TestDatabase, fresh_database};
 use tetsu_postgres::{Pool, connect, migrate, pool};
@@ -22,12 +22,12 @@ use crate::domain::{NewPasskey, Redemption, TakenCeremony};
 use crate::ports::OperatorStore;
 use crate::{Actor, Error, Identity, OperatorId, OperatorName, Operators, RelyingParty};
 
-const ORIGIN: &str = "https://ops.example.com";
+pub(crate) const ORIGIN: &str = "https://ops.example.com";
 
 /// A person at their device, who confirms they are present, and verifies themselves unless told not to, as a
 /// hostile client might.
-struct Person {
-    verifies: bool,
+pub(crate) struct Person {
+    pub(crate) verifies: bool,
 }
 
 type Checked<'b> = Pin<Box<dyn Future<Output = Result<UserCheck, Ctap2Error>> + Send + 'b>>;
@@ -67,7 +67,16 @@ impl UserValidationMethod for Person {
 }
 
 /// What a browser at `origin` sends back after its authenticator registers a passkey for the options given, as JSON.
-async fn register(options: &str, origin: &str, verifies: bool) -> String {
+pub(crate) async fn register(options: &str, origin: &str, verifies: bool) -> String {
+    register_keeping(options, origin, verifies).await.0
+}
+
+/// What [`register`] sends back, and the passkey the device keeps, so it can sign in with it later.
+pub(crate) async fn register_keeping(
+    options: &str,
+    origin: &str,
+    verifies: bool,
+) -> (String, Passkey) {
     let authenticator = Authenticator::new(
         Aaguid::new_empty(),
         None::<Passkey>,
@@ -81,11 +90,40 @@ async fn register(options: &str, origin: &str, verifies: bool) -> String {
         .register(&origin, options, DefaultClientData)
         .await
         .expect("registers");
-    serde_json::to_string(&created).expect("JSON")
+    let kept = client
+        .authenticator()
+        .store()
+        .clone()
+        .expect("a passkey kept");
+    (serde_json::to_string(&created).expect("JSON"), kept)
+}
+
+/// What a browser at `origin` sends back after the device holding `passkey` signs in for the options given, as
+/// JSON.
+pub(crate) async fn authenticate(
+    options: &str,
+    origin: &str,
+    passkey: Passkey,
+    verifies: bool,
+) -> String {
+    let authenticator = Authenticator::new(
+        Aaguid::new_empty(),
+        Some(passkey),
+        Person { verifies },
+        passkey::crypto::AvailableBackend,
+    );
+    let mut client = Client::new(authenticator);
+    let options: CredentialRequestOptions = serde_json::from_str(options).expect("options");
+    let origin = Url::parse(origin).expect("an origin");
+    let asserted = client
+        .authenticate(&origin, options, DefaultClientData)
+        .await
+        .expect("signs in");
+    serde_json::to_string(&asserted).expect("JSON")
 }
 
 /// Identity's use cases over a fresh, migrated database, with Kurt Medley as operator 1 and his link issued.
-async fn with_link() -> (
+pub(crate) async fn with_link() -> (
     Operators<PostgresOperators>,
     TestDatabase,
     OperatorId,
@@ -107,21 +145,21 @@ async fn with_link() -> (
     (operators, database, kurt, link.to_text())
 }
 
-fn app_pool(database: &TestDatabase) -> Pool {
+pub(crate) fn app_pool(database: &TestDatabase) -> Pool {
     pool(&database.as_app()).expect("a pool")
 }
 
-fn party() -> RelyingParty {
+pub(crate) fn party() -> RelyingParty {
     RelyingParty::new(ORIGIN).expect("a relying party")
 }
 
-fn actor() -> Actor {
+pub(crate) fn actor() -> Actor {
     Actor::parse("operator-1@browser").expect("an actor")
 }
 
 /// What a failure says, as `category: message`, or nothing for a success, so a test compares text rather than
 /// matching a pattern whose other arm no test takes.
-fn failure(result: Result<(), Error>) -> String {
+pub(crate) fn failure(result: Result<(), Error>) -> String {
     result
         .err()
         .map(|error| error.to_string())
@@ -135,7 +173,7 @@ fn not_enrolling() -> Result<OperatorId, Error> {
 }
 
 /// One number the database answers, read as the test's own superuser.
-async fn number(database: &TestDatabase, sql: &str) -> i64 {
+pub(crate) async fn number(database: &TestDatabase, sql: &str) -> i64 {
     connect(database)
         .await
         .expect("connects")
@@ -146,7 +184,7 @@ async fn number(database: &TestDatabase, sql: &str) -> i64 {
         .expect("a number")
 }
 
-async fn as_admin(database: &TestDatabase, sql: &str) {
+pub(crate) async fn as_admin(database: &TestDatabase, sql: &str) {
     connect(database)
         .await
         .expect("connects")
@@ -155,15 +193,15 @@ async fn as_admin(database: &TestDatabase, sql: &str) {
         .expect("runs");
 }
 
-/// What each enrollment recorded, oldest first: its outcome and reason.
-async fn redemptions(database: &TestDatabase) -> Vec<Value> {
+/// What each event of a kind recorded, oldest first: its outcome and reason.
+pub(crate) async fn recorded(database: &TestDatabase, kind: &str) -> Vec<Value> {
     connect(database)
         .await
         .expect("connects")
         .query(
             "SELECT payload::text FROM identity.outbox_global
-             WHERE event_type = 'identity.enrollment_redeemed' ORDER BY occurred_at, id",
-            &[],
+             WHERE event_type = $1 ORDER BY occurred_at, id",
+            &[&kind],
         )
         .await
         .expect("reads")
@@ -176,8 +214,13 @@ async fn redemptions(database: &TestDatabase) -> Vec<Value> {
         .collect()
 }
 
+/// What each enrollment recorded, oldest first: its outcome and reason.
+async fn redemptions(database: &TestDatabase) -> Vec<Value> {
+    recorded(database, "identity.enrollment_redeemed").await
+}
+
 /// How many passkeys, links, ceremonies, and sessions are stored, in that order.
-async fn held(database: &TestDatabase) -> [i64; 4] {
+pub(crate) async fn held(database: &TestDatabase) -> [i64; 4] {
     let mut counts = [0; 4];
     for (count, table) in
         counts
@@ -851,7 +894,7 @@ async fn each_enrollment_step_fails_as_storage_when_refused() {
 }
 
 /// Replaces one of Identity's functions with another of the same arguments, as Identity's role may run it.
-async fn replace(database: &TestDatabase, function: &str, returns: &str, body: &str) {
+pub(crate) async fn replace(database: &TestDatabase, function: &str, returns: &str, body: &str) {
     let arguments = &function[function.find('(').unwrap_or_default()..];
     let name = &function[..function.find('(').unwrap_or_default()];
     as_admin(

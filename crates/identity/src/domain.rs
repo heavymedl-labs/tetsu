@@ -320,6 +320,38 @@ pub struct NewPasskey {
     pub passkey: String,
 }
 
+/// A passkey found by the credential ID a sign-in names, with its enabled operator, their user handle, and the
+/// passkey as `webauthn-rs` keeps it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Signer {
+    pub credential: Vec<u8>,
+    pub operator: OperatorId,
+    pub user_handle: [u8; 16],
+    pub passkey: String,
+}
+
+/// What signing in came to for a passkey that exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignIn {
+    SignedIn,
+    /// The operator was disabled after the passkey was read.
+    Disabled,
+    /// Another sign-in changed the passkey meanwhile, so this one's counter must not be stored.
+    Raced,
+}
+
+impl SignIn {
+    /// The answer as Identity's database writes it, or none for one it never writes.
+    pub(crate) fn parse(text: &str) -> Option<Self> {
+        match text {
+            "signed_in" => Some(Self::SignedIn),
+            "disabled" => Some(Self::Disabled),
+            "raced" => Some(Self::Raced),
+            _ => None,
+        }
+    }
+}
+
 /// What redeeming an enrollment link came to for an operator who exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Redemption {

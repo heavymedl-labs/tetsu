@@ -11,7 +11,7 @@ use tokio_postgres::types::{FromSql, ToSql};
 
 use crate::domain::{
     Actor, Disabling, Enrollee, Error, Issue, NewPasskey, OperatorId, OperatorName,
-    OperatorSummary, Realm, Redemption, Removal, Session, TakenCeremony,
+    OperatorSummary, Realm, Redemption, Removal, Session, SignIn, Signer, TakenCeremony,
 };
 use crate::ports::OperatorStore;
 use crate::use_cases::Operators;
@@ -42,6 +42,10 @@ const LIST_OPERATORS: &str = include_str!("../../sql/list_operators.sql");
 const ENABLE_OPERATOR: &str = include_str!("../../sql/enable_operator.sql");
 const ENROLLEE: &str = include_str!("../../sql/enrollee.sql");
 const REMOVE_PASSKEYS: &str = include_str!("../../sql/remove_passkeys.sql");
+const BEGIN_SIGN_IN: &str = include_str!("../../sql/begin_sign_in.sql");
+const TAKE_SIGN_IN: &str = include_str!("../../sql/take_sign_in.sql");
+const SIGNER: &str = include_str!("../../sql/signer.sql");
+const SIGN_IN: &str = include_str!("../../sql/sign_in.sql");
 const BEGIN_ENROLLMENT: &str = include_str!("../../sql/begin_enrollment.sql");
 const TAKE_CEREMONY: &str = include_str!("../../sql/take_ceremony.sql");
 const REDEEM_ENROLLMENT: &str = include_str!("../../sql/redeem_enrollment.sql");
@@ -333,6 +337,45 @@ impl OperatorStore for PostgresOperators {
         Ok(redeemed.get().copied().flatten())
     }
 
+    async fn begin_sign_in(&self, token: &[u8; 32], state: &str) -> Result<bool, Error> {
+        begun(
+            &self
+                .query(BEGIN_SIGN_IN, &[&token.as_slice(), &state])
+                .await?,
+        )
+    }
+
+    async fn take_sign_in(&self, token: &[u8; 32]) -> Result<Option<String>, Error> {
+        taken_state(&self.query(TAKE_SIGN_IN, &[&token.as_slice()]).await?)
+    }
+
+    async fn signer(&self, credential: &[u8]) -> Result<Option<Signer>, Error> {
+        self.query(SIGNER, &[&credential])
+            .await?
+            .first()
+            .map(|row| signer_from(row, credential))
+            .transpose()
+    }
+
+    async fn sign_in(
+        &self,
+        signer: &Signer,
+        passkey: &str,
+        session: &[u8; 32],
+        actor: &Actor,
+    ) -> Result<Option<SignIn>, Error> {
+        let id = signer.operator.get();
+        let credential = signer.credential.as_slice();
+        let parameters: [&(dyn ToSql + Sync); 4] =
+            [&credential, &signer.passkey, &passkey, &session.as_slice()];
+        let answer = OnceLock::new();
+        self.query_recording(SIGN_IN, &parameters, &|rows| {
+            signing(rows, id, credential, actor, &answer)
+        })
+        .await?;
+        Ok(answer.get().copied().flatten())
+    }
+
     async fn remove_passkeys(
         &self,
         operator: OperatorId,
@@ -610,10 +653,7 @@ fn redemption_event(
     } else {
         "refused"
     };
-    let credential = credential.iter().fold(String::new(), |mut text, byte| {
-        let _ = write!(text, "{byte:02x}");
-        text
-    });
+    let credential = hex(credential);
     event(
         "identity.enrollment_redeemed",
         actor,
@@ -673,6 +713,69 @@ fn removing(
             "sessions_ended": removal.map(|removal| removal.sessions_ended),
         }),
     )))
+}
+
+/// A sign-in ceremony's state, if one was taken.
+fn taken_state(rows: &[Row]) -> Result<Option<String>, Error> {
+    rows.first().map(|row| column(row, "state")).transpose()
+}
+
+/// The passkey a credential names, with its operator and their user handle, which must be 16 bytes.
+fn signer_from(row: &Row, credential: &[u8]) -> Result<Signer, Error> {
+    let bytes: Vec<u8> = column(row, "user_handle")?;
+    Ok(Signer {
+        credential: credential.to_vec(),
+        operator: OperatorId::new(column(row, "operator_id")?),
+        user_handle: bytes
+            .try_into()
+            .map_err(|_| Error::Storage("a user handle is not 16 bytes".to_string()))?,
+        passkey: column(row, "passkey")?,
+    })
+}
+
+/// Reads what signing in came to, keeps it in `signed`, and makes the event it records: changed when a session
+/// started, and refused otherwise, with the reason and the credential ID, which is public.
+fn signing(
+    rows: &[Row],
+    id: i64,
+    credential: &[u8],
+    actor: &Actor,
+    signed: &OnceLock<Option<SignIn>>,
+) -> Result<Option<(&'static str, String)>, Error> {
+    let sign_in = rows
+        .first()
+        .map_or(Ok(None), |row| column::<Option<String>>(row, "signed"))
+        .and_then(|answer| answer.as_deref().map(sign_in_from).transpose())?;
+    let _ = signed.set(sign_in);
+    let reason = match sign_in {
+        Some(SignIn::SignedIn) => None,
+        Some(SignIn::Disabled) => Some("disabled"),
+        Some(SignIn::Raced) => Some("raced"),
+        None => Some("unknown"),
+    };
+    Ok(Some(event(
+        "identity.signed_in",
+        actor,
+        if reason.is_none() {
+            "changed"
+        } else {
+            "refused"
+        },
+        json!({"operator_id": id, "credential": hex(credential), "reason": reason}),
+    )))
+}
+
+/// An answer Identity's database never writes is a storage failure, never a guess.
+fn sign_in_from(text: &str) -> Result<SignIn, Error> {
+    SignIn::parse(text).ok_or_else(|| Error::Storage(format!("signing in answered {text:?}")))
+}
+
+/// Bytes as lowercase hexadecimal, as events record credential IDs.
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().fold(String::new(), |mut text, byte| {
+        let _ = write!(text, "{byte:02x}");
+        text
+    })
 }
 
 /// What removing passkeys did, from its answer.
