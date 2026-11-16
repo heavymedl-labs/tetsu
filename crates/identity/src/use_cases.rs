@@ -2,8 +2,8 @@
 
 use crate::browser::{Change, CheckedSession, ForChange, Origins, SignOut};
 use crate::domain::{
-    Actor, Addition, Answer, Ceremony, CeremonyToken, Disabling, EnrollmentToken, Error, Fill,
-    Issue, OperatorId, OperatorName, OperatorSummary, Realm, Redemption, Removal, Session,
+    Account, Actor, Addition, Answer, Ceremony, CeremonyToken, Disabling, EnrollmentToken, Error,
+    Fill, Issue, OperatorId, OperatorName, OperatorSummary, Realm, Redemption, Removal, Session,
     SessionStart, SessionToken, SignIn, Signer,
 };
 use crate::passkeys::RelyingParty;
@@ -241,6 +241,16 @@ impl<S: OperatorStore> Operators<S> {
             .refuse_sign_in(operator, credential.as_deref(), &reason, actor)
             .await?;
         Err(not_signing_in())
+    }
+
+    /// The account a live session names: the operator, their user handle and name, and every credential they hold,
+    /// as the operator's page and the browser's list of their passkeys need; none if the session has ended or the
+    /// operator is disabled. Reading it changes nothing, not even the session's last request.
+    ///
+    /// # Errors
+    /// Fails if storage fails.
+    pub async fn account(&self, session: &Session) -> Result<Option<Account>, Error> {
+        self.store.account(&session.hash).await
     }
 
     /// Begins adding an operator's second passkey (ADR-0057), from a session that began with a passkey sign-in

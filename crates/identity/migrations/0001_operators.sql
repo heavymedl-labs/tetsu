@@ -700,12 +700,11 @@ BEGIN
 END
 $$;
 
--- The operator a live session names, if it began within ten minutes, which
--- makes it a fresh sign-in (ADR-0048, v5.0.0-7.5.1), the operator is enabled,
--- and they hold fewer than two passkeys (ADR-0057); with what adding a passkey
--- needs: their user handle and name, and the credential IDs they hold, so a
--- device that has one makes no second. Reading it changes nothing.
-CREATE FUNCTION adder(wanted_session bytea)
+-- The account a live operator session names, if the operator is enabled: their
+-- user handle and name, and the credential IDs they hold, as the operator's
+-- page and the browser's list of their passkeys need. Reading it changes
+-- nothing, not even the session's last request.
+CREATE FUNCTION account(wanted_session bytea)
 RETURNS TABLE (
     operator_id bigint, user_handle bytea, name text, credentials bytea[]
 )
@@ -729,12 +728,31 @@ AS $$
         AND s.realm = 'operator'
         AND statement_timestamp() < s.ends_at
         AND statement_timestamp() < s.last_seen_at + interval '15 minutes'
-        AND s.started_at > statement_timestamp() - interval '10 minutes'
         AND o.disabled_at IS NULL
-        AND (
-            SELECT count(*) FROM identity.passkeys AS p
-            WHERE p.operator_id = o.id
-        ) < 2
+$$;
+
+-- The account a session names, as account finds it, if the session began
+-- within ten minutes, which makes it a fresh sign-in (ADR-0048, v5.0.0-7.5.1),
+-- and the operator holds fewer than two passkeys (ADR-0057): what adding a
+-- passkey needs, with the credential IDs they hold, so a device that has one
+-- makes no second. Reading it changes nothing.
+CREATE FUNCTION adder(wanted_session bytea)
+RETURNS TABLE (
+    operator_id bigint, user_handle bytea, name text, credentials bytea[]
+)
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+    SELECT
+        a.operator_id,
+        a.user_handle,
+        a.name,
+        a.credentials
+    FROM identity.account(wanted_session) AS a
+    INNER JOIN identity.sessions AS s ON s.token_hash = wanted_session
+    WHERE
+        s.started_at > statement_timestamp() - interval '10 minutes'
+        AND cardinality(a.credentials) < 2
 $$;
 
 -- Keeps a ceremony for adding a passkey under its token's hash, for ten
@@ -1196,7 +1214,7 @@ REVOKE EXECUTE ON ALL ROUTINES IN SCHEMA identity FROM public;
 GRANT EXECUTE ON FUNCTION use_session(bytea, text), end_session(bytea, text),
 issue_enrollment(bytea, bigint), list_operators(), enrollee(bytea),
 begin_enrollment(bytea, bigint, bytea, jsonb), take_ceremony(bytea, text),
-begin_sign_in(bytea, jsonb), signer(bytea),
+begin_sign_in(bytea, jsonb), signer(bytea), account(bytea),
 sign_in(bytea, bigint, jsonb, jsonb, bytea, bytea), adder(bytea),
 begin_addition(bytea, bytea, bigint, jsonb), take_addition(bytea, bytea),
 add_passkey(bytea, bytea, bigint, bytea, jsonb),
@@ -1223,6 +1241,7 @@ ALTER FUNCTION begin_enrollment(bytea, bigint, bytea, jsonb)
 OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION take_ceremony(bytea, text) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION begin_sign_in(bytea, jsonb) OWNER TO tetsu_identity_lookup;
+ALTER FUNCTION account(bytea) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION adder(bytea) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION begin_addition(bytea, bytea, bigint, jsonb)
 OWNER TO tetsu_identity_lookup;

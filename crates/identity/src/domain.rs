@@ -394,10 +394,11 @@ impl std::fmt::Debug for Answer<'_> {
     }
 }
 
-/// An operator a fresh session names who may add a passkey, with what a registration needs: their user handle and
-/// name, and the credential IDs they hold, so a device that has one makes no second.
+/// The account a live session names: the operator, their user handle and name, and the credential IDs they hold, as
+/// the operator's page, the browser's list of their passkeys, and a registration that must make no second passkey
+/// on a device that has one all need.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Adder {
+pub struct Account {
     pub operator: OperatorId,
     pub user_handle: [u8; 16],
     pub name: String,

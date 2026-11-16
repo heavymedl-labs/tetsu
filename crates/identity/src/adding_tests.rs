@@ -119,6 +119,59 @@ async fn add(
     )
 }
 
+/// A live session finds its account: the operator, their user handle and name, and every credential they hold, as
+/// the operator's page and the browser's passkey list need, however long ago it began. A session that ended, or
+/// whose operator is disabled, finds none.
+#[tokio::test]
+async fn a_live_session_finds_its_account() {
+    let (operators, database, kurt, session) = signed_in().await;
+    as_admin(
+        &database,
+        "UPDATE identity.sessions SET started_at = now() - interval '2 hours'",
+    )
+    .await;
+    let account = operators
+        .account(session.session())
+        .await
+        .expect("reads")
+        .expect("an account");
+    let handle = "SELECT count(*) FROM identity.operators WHERE uuid_send(user_handle) = $1";
+    let found: i64 = tetsu_postgres::connect(&database)
+        .await
+        .expect("connects")
+        .query_one(handle, &[&account.user_handle.as_slice()])
+        .await
+        .expect("counts")
+        .try_get(0)
+        .expect("a count");
+    assert_eq!(
+        (
+            account.operator,
+            account.name.as_str(),
+            account.credentials.len(),
+            found
+        ),
+        (kurt, "Kurt Medley", 1, 1)
+    );
+    operators.disable(kurt, &actor()).await.expect("disables");
+    assert_eq!(operators.account(session.session()).await, Ok(None));
+}
+
+/// Reading an account fails as storage when the database refuses its lookup.
+#[tokio::test]
+async fn an_account_that_cannot_be_read_is_a_storage_failure() {
+    let (operators, database, _, session) = signed_in().await;
+    as_admin(
+        &database,
+        "REVOKE EXECUTE ON FUNCTION identity.account(bytea) FROM tetsu_identity",
+    )
+    .await;
+    assert_eq!(
+        failure(operators.account(session.session()).await.map(drop)),
+        "storage failed: permission denied for function account"
+    );
+}
+
 /// A freshly signed-in operator adds a second passkey: the device is told which passkey they hold, so it makes no
 /// second on a device that has one, and the addition is recorded. A third is refused, as ADR-0057 allows two.
 #[tokio::test]

@@ -1,7 +1,7 @@
 //! The driven port Identity calls out through.
 
 use crate::domain::{
-    Actor, Adder, Addition, Disabling, Enrollee, Error, Issue, NewPasskey, OperatorId,
+    Account, Actor, Addition, Disabling, Enrollee, Error, Issue, NewPasskey, OperatorId,
     OperatorName, OperatorSummary, Realm, Redemption, Removal, Session, SessionStart, SignIn,
     Signer, TakenAddition, TakenCeremony,
 };
@@ -131,12 +131,18 @@ pub trait OperatorStore {
         actor: &Actor,
     ) -> impl Future<Output = Result<Option<SignIn>, Error>> + Send;
 
-    /// The operator a live session's hash names, if it began within ten minutes, the operator is enabled, and they
-    /// hold fewer than two passkeys.
+    /// The account a live session's hash names, if the operator is enabled. Reading it changes nothing.
+    fn account(
+        &self,
+        session: &[u8; 32],
+    ) -> impl Future<Output = Result<Option<Account>, Error>> + Send;
+
+    /// The account a live session's hash names, as [`Self::account`] finds it, if the session began within ten
+    /// minutes and the operator holds fewer than two passkeys.
     fn adder(
         &self,
         session: &[u8; 32],
-    ) -> impl Future<Output = Result<Option<Adder>, Error>> + Send;
+    ) -> impl Future<Output = Result<Option<Account>, Error>> + Send;
 
     /// Keeps a ceremony for adding a passkey for ten minutes, if the session still allows it, replacing the
     /// operator's earlier one; says whether it did.

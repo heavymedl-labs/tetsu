@@ -10,7 +10,7 @@ use tokio_postgres::Row;
 use tokio_postgres::types::{FromSql, ToSql};
 
 use crate::domain::{
-    Actor, Adder, Addition, Disabling, Enrollee, Error, Issue, NewPasskey, OperatorId,
+    Account, Actor, Addition, Disabling, Enrollee, Error, Issue, NewPasskey, OperatorId,
     OperatorName, OperatorSummary, Realm, Redemption, Removal, Session, SessionStart, SignIn,
     Signer, TakenAddition, TakenCeremony,
 };
@@ -46,6 +46,7 @@ const BEGIN_SIGN_IN: &str = include_str!("../../sql/begin_sign_in.sql");
 const TAKE_SIGN_IN: &str = include_str!("../../sql/take_sign_in.sql");
 const SIGNER: &str = include_str!("../../sql/signer.sql");
 const SIGN_IN: &str = include_str!("../../sql/sign_in.sql");
+const ACCOUNT: &str = include_str!("../../sql/account.sql");
 const ADDER: &str = include_str!("../../sql/adder.sql");
 const BEGIN_ADDITION: &str = include_str!("../../sql/begin_addition.sql");
 const TAKE_ADDITION: &str = include_str!("../../sql/take_addition.sql");
@@ -399,11 +400,19 @@ impl OperatorStore for PostgresOperators {
         .await
     }
 
-    async fn adder(&self, session: &[u8; 32]) -> Result<Option<Adder>, Error> {
+    async fn account(&self, session: &[u8; 32]) -> Result<Option<Account>, Error> {
+        self.query(ACCOUNT, &[&session.as_slice()])
+            .await?
+            .first()
+            .map(account_from)
+            .transpose()
+    }
+
+    async fn adder(&self, session: &[u8; 32]) -> Result<Option<Account>, Error> {
         self.query(ADDER, &[&session.as_slice()])
             .await?
             .first()
-            .map(adder_from)
+            .map(account_from)
             .transpose()
     }
 
@@ -869,10 +878,10 @@ fn hex(bytes: &[u8]) -> String {
     })
 }
 
-/// An operator who may add a passkey: an enrollee's columns, and the credentials they hold.
-fn adder_from(row: &Row) -> Result<Adder, Error> {
+/// An account: an enrollee's columns, and the credentials the operator holds.
+fn account_from(row: &Row) -> Result<Account, Error> {
     let enrollee = enrollee_from(row)?;
-    Ok(Adder {
+    Ok(Account {
         operator: enrollee.operator,
         user_handle: enrollee.user_handle,
         name: enrollee.name,
