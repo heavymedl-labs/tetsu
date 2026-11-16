@@ -4,8 +4,8 @@ Who signs in to Tetsu, their passkeys, and their sessions ([ADR-0040](../../docs
 [ADR-0048](../../docs/adr/0048-sign-in-design.md)). Tier 1, since it is identity and access. Operators come first,
 in slice 5 ([#110](https://github.com/heavymedl-labs/tetsu/issues/110)); staff and customers follow.
 
-So far, `Operators` creates, lists, and disables operators, issues their enrollment links, and starts, finds, and
-ends their sessions. `postgres_store(pool)` returns it over Postgres.
+So far, `Operators` creates, lists, disables, and enables operators, issues their enrollment links, begins and
+finishes enrolling their first passkey, and starts, finds, and ends their sessions. `postgres_store(pool)` returns it over Postgres.
 
 - **Session tokens are 256 random bits** from the operating system's source, written as 64 lowercase hexadecimal
   digits. Only their SHA-256 hash is stored ([ADR-0047](../../docs/adr/0047-sign-in-libraries.md)), and a token
@@ -23,9 +23,10 @@ ends their sessions. `postgres_store(pool)` returns it over Postgres.
   it is refused. A refusal is told apart, so the page adapter can answer it as forbidden and record it
   (`ForChange`, `SignOut`).
 - **Session tokens compare in constant time,** as form tokens do.
-- **Both tables are global** ([ADR-0042](../../docs/adr/0042-tenant-isolation.md)): `identity.operators`, which
-  Identity's role adds to and reads, and `identity.sessions`, which it reaches only through lookup functions that
-  take one token's hash and realm a call, so nothing can list sessions, and no realm uses or ends another's.
+- **Every table is global** ([ADR-0042](../../docs/adr/0042-tenant-isolation.md)): `identity.operators`, which
+  Identity's role adds to and reads, and `identity.sessions`, `enrollments`, `passkeys`, and `ceremonies`, which
+  it reaches only through lookup functions that take one hash a call, so nothing can list sessions or links, and
+  no realm uses or ends another's.
 - **Each operator has a random WebAuthn user handle,** which says nothing about them, and each session a random
   public id, for a list of sessions to show and end them by without the token's hash.
 - **Each realm's session cookie** is `__Host-` prefixed, `Secure`, `HttpOnly`, and `SameSite=Lax`, with path `/`
@@ -62,18 +63,29 @@ ends their sessions. `postgres_store(pool)` returns it over Postgres.
   and name an enabled operator with no passkey, and keeps a ceremony under a token only the browser holds, for ten
   minutes but never past the link. Beginning takes the operator's row, so a disable at the same moment ends what
   it stores, and a new link waits for it and then ends it. A link holds one ceremony, by a unique index; a newer
-  one replaces it. Nothing is used up, so a scanner that opens the link, or an abandoned attempt, costs nothing.
+  one replaces it. Nothing is used up, so a scanner that opens the link, or an abandoned attempt, costs the link
+  nothing.
   Finishing takes the ceremony once, verifies the registration through `webauthn-rs` against the realm's origin,
   its scheme, host, and port alike, with user verification, and then, in one transaction holding the operator's
   row, stores the passkey and uses up the link. It refuses an operator disabled, given a new link, or enrolled by
-  another tab meanwhile; a credential another passkey has; a passkey its browser says is not discoverable, or that
-  lists a transport twice or one `WebAuthn` does not name; and one larger than the table keeps, measured as the
-  table measures it. Each is recorded as `identity.enrollment_redeemed` with the outcome, the reason, and the
-  credential ID. Every refusal reads the same to the browser. The operator is not signed in: signing in with the
+  another tab meanwhile; a credential another passkey has; and one larger than the table keeps, measured as the
+  table measures it. Each of those is recorded as `identity.enrollment_redeemed` with the outcome, the reason,
+  and the credential ID. Before that, it refuses a registration that does not verify, or whose browser says the
+  passkey is not discoverable; recording those, with the request's address, waits for step 4d. Transports are
+  taken as listed, as `WebAuthn` asks. Every refusal reads the same to the browser, whichever part of Identity
+  refuses it. The operator is not signed in: signing in with the
   new passkey proves it works. Passkeys are discoverable, so signing in needs no name, and the account picker
   shows each as "Tetsu operator · Name", the label first, where an authenticator's 64-byte cut never reaches it.
   The AAGUID, which names a passkey's provider but is unverified without attestation, is kept from step 4d, when
   the browser's authenticator data arrives.
+- **What one database login allows.** Identity's role, which the web app shares with the operator command
+  (ADR-0061), can issue a link for an operator with no passkey, so code that runs SQL as that role could enroll a
+  passkey of its own for one. Database access is the trust boundary, as for every operator command.
+- **A device can keep a passkey Tetsu does not.** Every attempt registers under the operator's one user handle,
+  and an authenticator replaces a discoverable passkey with a newer one for the same handle. If two tabs begin,
+  the newer finishes, and the older then creates its passkey anyway, the device holds a passkey whose finish was
+  refused. Nothing on the server can prevent it; recovering such an operator is the open question in the
+  [enrollment review](../../docs/research/identity/passkey-enrollment-review.md#a-decision-for-the-maintainer).
 - **What `webauthn-rs` owns.** Its challenge comes from its own random source, which panics rather than failing
   cleanly if the operating system's cannot be read; and serialising a passkey can panic inside the library on a
   malformed attestation certificate. A stored ceremony that reads but holds the wrong state fails as the browser's

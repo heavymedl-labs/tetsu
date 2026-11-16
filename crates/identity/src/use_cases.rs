@@ -83,14 +83,16 @@ impl<S: OperatorStore> Operators<S> {
         let enrollee = self
             .store
             .enrollee(&link.hash())
-            .await?
+            .await
+            .map_err(as_one_refusal)?
             .ok_or_else(not_enrolling)?;
         let (options, state) = party.begin_registration(enrollee.user_handle, &enrollee.name)?;
         let token = CeremonyToken::generate(self.fill)?;
         let begun = self
             .store
             .begin_enrollment(&token.hash(), enrollee.operator, &link.hash(), &state)
-            .await?;
+            .await
+            .map_err(as_one_refusal)?;
         if begun {
             Ok(Ceremony { token, options })
         } else {
@@ -116,19 +118,17 @@ impl<S: OperatorStore> Operators<S> {
         let taken = self
             .store
             .take_enrollment(&held.hash())
-            .await?
+            .await
+            .map_err(as_one_refusal)?
             .ok_or_else(not_enrolling)?;
-        let passkey =
-            party
-                .finish_registration(response, &taken.state)
-                .map_err(|error| match error {
-                    Error::Invalid(_) => not_enrolling(),
-                    other => other,
-                })?;
+        let passkey = party
+            .finish_registration(response, &taken.state)
+            .map_err(as_one_refusal)?;
         match self
             .store
             .redeem_enrollment(&taken, &passkey, actor)
-            .await?
+            .await
+            .map_err(as_one_refusal)?
         {
             Some(Redemption::Redeemed) => Ok(taken.operator),
             _ => Err(not_enrolling()),
@@ -282,6 +282,15 @@ impl<S: OperatorStore> Operators<S> {
 /// exist.
 fn not_enrolling() -> Error {
     Error::Invalid("this enrollment link has ended or is not valid".to_string())
+}
+
+/// Any refusal on the way through an enrollment, whoever reports it, reads as the one answer; a failure that is
+/// not a refusal stays itself.
+fn as_one_refusal(error: Error) -> Error {
+    match error {
+        Error::Invalid(_) => not_enrolling(),
+        other => other,
+    }
 }
 
 fn no_operator(operator: OperatorId) -> Error {

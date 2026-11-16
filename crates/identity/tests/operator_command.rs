@@ -677,8 +677,9 @@ async fn a_disable_answer_of_the_wrong_type_is_a_storage_failure() {
     }
 }
 
-/// Disabling, ending sessions, issuing a link, and storing a passkey refuse to run under repeatable read, where a
-/// row committed while they waited would escape their checks, whoever starts the transaction.
+/// Disabling, enabling, ending sessions, issuing a link, and beginning or finishing an enrollment refuse to run
+/// under repeatable read, where a row committed while they waited would escape their checks, whoever starts the
+/// transaction.
 #[tokio::test]
 async fn changes_that_wait_on_an_operator_need_read_committed() {
     let database = ready().await;
@@ -695,6 +696,7 @@ async fn changes_that_wait_on_an_operator_need_read_committed() {
         "SELECT identity.issue_enrollment(sha256('a'::bytea), 1)",
         "SELECT identity.redeem_enrollment(sha256('a'::bytea), 1, sha256('c'::bytea), '{}')",
         "SELECT identity.begin_enrollment(sha256('t'::bytea), 1, sha256('a'::bytea), '{}')",
+        "SELECT identity.enable_operator(1)",
     ] {
         let transaction = client
             .build_transaction()

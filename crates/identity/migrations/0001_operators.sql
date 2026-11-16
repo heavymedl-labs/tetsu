@@ -536,6 +536,8 @@ BEGIN
     EXCEPTION WHEN unique_violation THEN
         RETURN 'taken';
     END;
+    -- Any other ceremony of theirs could only be refused now; it goes too.
+    DELETE FROM identity.ceremonies AS c WHERE c.operator_id = wanted_operator;
     RETURN 'redeemed';
 END
 $$;
@@ -547,8 +549,8 @@ $$;
 -- disabled, and null for one that does not exist. Each step is its own
 -- statement, so the deletes see what a sign-in or link committed while the
 -- lock waited on the operator's row. One statement would not, and nor would
--- repeatable read, which it refuses with TD002, as do the functions that end
--- sessions.
+-- repeatable read, which it refuses with TD002, as do enable, end_sessions,
+-- and the enrollment functions.
 CREATE FUNCTION disable_operator(wanted_operator bigint)
 RETURNS TABLE (done boolean, sessions_ended bigint, links_ended bigint)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
@@ -603,7 +605,8 @@ $$;
 
 -- Enables a disabled operator again, and says whether it acted: false for an
 -- operator already enabled, null for one that does not exist. Like a disable,
--- it takes the row first, so its answer is the state it leaves. Their
+-- it takes the row first, so its answer is the state it leaves, which holds
+-- only under read committed, so it refuses any other level with TD002. Their
 -- sessions stay ended, and they sign in afresh.
 CREATE FUNCTION enable_operator(wanted_operator bigint)
 RETURNS boolean
@@ -613,6 +616,10 @@ AS $$
 DECLARE
     was timestamptz;
 BEGIN
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'enabling needs read committed'
+        USING ERRCODE = 'TD002';
+    END IF;
     SELECT o.disabled_at INTO was
     FROM identity.operators AS o
     WHERE o.id = wanted_operator

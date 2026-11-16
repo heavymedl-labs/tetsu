@@ -100,43 +100,48 @@ impl RelyingParty {
     }
 }
 
-/// Whether a registration could be a usable passkey: not one its client says is not discoverable, and listing only
-/// transports `WebAuthn` names, each once, so at most six.
+/// Whether a registration could be a usable passkey: not one its client says is not discoverable. Its transports
+/// are not checked: `WebAuthn` asks relying parties to accept values it does not name, and with no attestation
+/// `webauthn-rs` stores none.
 fn plausible(response: &RegisterPublicKeyCredential) -> bool {
-    let discoverable = response
+    response
         .extensions
         .cred_props
         .as_ref()
         .and_then(|props| props.rk)
-        != Some(false);
-    let transports = response.response.transports.as_deref().unwrap_or_default();
-    let known = transports.iter().enumerate().all(|(at, transport)| {
-        transport.to_string() != "unknown" && !transports[..at].contains(transport)
-    });
-    discoverable && known
+        != Some(false)
 }
 
 /// The name an account picker shows for an operator's passkey: the label, then their name, cut to the 64 bytes an
-/// authenticator may keep, at a character's end.
+/// authenticator may keep. A name that does not fit is cut after its last whole word that does, so the cut splits no
+/// accent from its letter; a single word too long for that is cut at a character's end.
 fn account_name(name: &str) -> String {
-    let mut shown = String::from(LABEL);
-    for character in name.chars() {
-        if shown.len() + character.len_utf8() > 64 {
-            break;
-        }
-        shown.push(character);
-    }
-    shown
+    let fits = name.floor_char_boundary(64 - LABEL.len());
+    // Operator names are trimmed, so a space is never first, and cutting at one keeps at least a word.
+    let end = if fits < name.len() {
+        name[..fits].rfind(' ').unwrap_or(fits)
+    } else {
+        fits
+    };
+    format!("{LABEL}{}", &name[..end])
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// The label always survives, and a long name is cut at a character's end, within 64 bytes.
+    /// The label always survives, and a long name is cut after a whole word, or at a character's end, within 64
+    /// bytes.
     #[test]
     fn an_account_name_keeps_its_label_within_64_bytes() {
         assert_eq!(account_name("Kurt Medley"), "Tetsu operator · Kurt Medley");
+        let words = "Maximiliana Alexandrovna Worthington-Fairweathers";
+        assert_eq!(
+            account_name(words),
+            "Tetsu operator · Maximiliana Alexandrovna"
+        );
+        let exactly = "a".repeat(46);
+        assert_eq!(account_name(&exactly), format!("{LABEL}{exactly}"));
         // The label is 18 bytes, leaving 46: fifteen three-byte characters fill 45, and a sixteenth would not fit.
         let long = account_name(&"あ".repeat(100));
         assert_eq!((long.len(), long.starts_with(LABEL)), (63, true));

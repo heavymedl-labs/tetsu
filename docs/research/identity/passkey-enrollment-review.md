@@ -74,8 +74,9 @@ waits (`FOR UPDATE SKIP LOCKED` with a limit), an index on `ends_at`, and a glob
   hands could make a registration that verifies and then fails the table's check. Both bounds are now checked
   where the passkey is stored, as a recorded `oversized` refusal. A first attempt checked them in Rust, on the
   compact JSON, which jsonb writes back longer, with a space after each colon and comma, so a padded passkey
-  still slipped past it; the doubt-driven review that followed caught it, along with registrations padded with
-  transports, now limited to the seven that exist.
+  still slipped past it; the doubt-driven review that followed caught it. A check on transports added then was
+  removed in the third cycle: it refused `smart-card`, which WebAuthn names, accepted `test`, which it does not,
+  and protected nothing, since with no attestation `webauthn-rs` stores no transports.
 
 ## A passkey signing in could never find
 

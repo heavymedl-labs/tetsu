@@ -486,10 +486,10 @@ async fn finish_rewritten(
 }
 
 /// A registration whose client says the passkey is not discoverable is refused, under either name webauthn-rs reads
-/// it by, since signing in could never find it; so is one listing a transport twice or one `WebAuthn` does not
-/// name. The link stays open for another try, and a registration listing all six transports there are is stored.
+/// it by, since signing in could never find it, and the link stays open for another try. Transports are taken as
+/// listed, as `WebAuthn` asks, even ones it does not name or names twice.
 #[tokio::test]
-async fn an_undiscoverable_or_padded_registration_is_refused() {
+async fn an_undiscoverable_registration_is_refused() {
     let (operators, database, _, link) = with_link().await;
     let party = party();
     let mut finished = Vec::new();
@@ -499,30 +499,49 @@ async fn an_undiscoverable_or_padded_registration_is_refused() {
             json!({"credProps": {"rk": false}}),
         ),
         ("extensions", json!({"credProps": {"rk": false}})),
-        ("transports", json!(["usb", "usb"])),
-        ("transports", json!(["made-up"])),
-        (
-            "transports",
-            json!(["usb", "nfc", "ble", "internal", "hybrid", "test"]),
-        ),
+        ("transports", json!(["smart-card", "cable", "usb", "usb"])),
     ] {
         finished.push(finish_rewritten(&operators, &party, &link, field, value).await);
     }
     let refused = not_enrolling();
-    assert_eq!(
-        finished,
-        [
-            refused.clone(),
-            refused.clone(),
-            refused.clone(),
-            refused,
-            Ok(OperatorId::new(1))
-        ]
-    );
+    assert_eq!(finished, [refused.clone(), refused, Ok(OperatorId::new(1))]);
     assert_eq!(
         number(&database, "SELECT count(*) FROM identity.passkeys").await,
         1
     );
+}
+
+/// Storing a passkey ends every other ceremony of the operator's, such as one begun after this one was taken, which
+/// could only be refused now.
+#[tokio::test]
+async fn an_enrollment_ends_the_operators_other_ceremonies() {
+    let (operators, database, _, link) = with_link().await;
+    let party = party();
+    let store = PostgresOperators {
+        pool: app_pool(&database),
+    };
+    let first = operators
+        .begin_enrollment(&party, &link)
+        .await
+        .expect("begins");
+    let response = register(&first.options, ORIGIN, true).await;
+    let taken = store
+        .take_enrollment(&first.token.hash())
+        .await
+        .expect("takes")
+        .expect("a ceremony");
+    operators
+        .begin_enrollment(&party, &link)
+        .await
+        .expect("begins again");
+    let passkey = party
+        .finish_registration(&response, &taken.state)
+        .expect("verifies");
+    assert_eq!(
+        store.redeem_enrollment(&taken, &passkey, &actor()).await,
+        Ok(Some(Redemption::Redeemed))
+    );
+    assert_eq!(held(&database).await, [1, 0, 0, 0]);
 }
 
 /// A new link ends any ceremony begun from the one it replaces.
@@ -771,18 +790,28 @@ async fn an_enrolled_or_disabled_operator_stores_nothing() {
 /// A relying party needs an origin whose host is a domain: passkeys cannot belong to an address.
 #[test]
 fn a_relying_party_needs_an_origin_with_a_domain() {
-    let refused: Vec<String> = ["not an origin", "data:text/plain,x", "https://127.0.0.1"]
+    // The first three fail as URLs or as relying parties; the rest parse and would pass webauthn-rs, and only the
+    // rules for writing an origin as browsers send it refuse them.
+    let bad = [
+        "not an origin",
+        "data:text/plain,x",
+        "https://127.0.0.1",
+        "http://ops.example.com",
+        "https://ops.example.com/some/path",
+        "https://OPS.example.com",
+        "https://ops.example.com:443",
+        "https://user@ops.example.com",
+    ];
+    let refused: Vec<String> = bad
         .into_iter()
-        .map(|bad| failure(RelyingParty::new(bad).map(drop)))
+        .map(|origin| failure(RelyingParty::new(origin).map(drop)))
         .collect();
-    assert_eq!(
-        refused,
-        [
-            "invalid: \"not an origin\" is not an origin",
-            "invalid: \"data:text/plain,x\" is not an origin",
-            "invalid: \"https://127.0.0.1\" is not an origin",
-        ]
-    );
+    let expected: Vec<String> = bad
+        .into_iter()
+        .map(|origin| format!("invalid: {origin:?} is not an origin"))
+        .collect();
+    assert_eq!(refused, expected);
+    assert!(RelyingParty::new("http://localhost:8080").is_ok());
 }
 
 /// Each step of an enrollment fails as storage when the database refuses its function, never as the browser's
