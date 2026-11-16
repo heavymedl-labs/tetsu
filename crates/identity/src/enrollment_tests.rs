@@ -71,7 +71,7 @@ pub(crate) async fn register(options: &str, origin: &str, verifies: bool) -> Str
     register_keeping(options, origin, verifies).await.0
 }
 
-/// What [`register`] sends back, and the passkey the device keeps, so it can sign in with it later.
+/// What [`register`] sends back, as JSON, and the passkey the device keeps, so it can sign in with it later.
 pub(crate) async fn register_keeping(
     options: &str,
     origin: &str,
