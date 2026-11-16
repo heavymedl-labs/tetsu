@@ -119,7 +119,8 @@ jobs:
           persist-credentials: false
       # The image's Rust dependencies are a layer of their own, which lasts until a manifest or the lockfile changes
       # (Dockerfile), so it is kept between runs and imported rather than built again: a new cache is exported only
-      # when the key changes. A builder of Docker's own BuildKit is needed to import and export one.
+      # when the key changes. A builder of Docker's own BuildKit, pinned as every image here is, imports and exports
+      # one (ADR-0063).
       - id: image-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -130,7 +131,8 @@ jobs:
           CACHE: ${{ runner.temp }}/image-cache
           HIT: ${{ steps.image-cache.outputs.cache-hit }}
         run: |
-          docker buildx create --use --driver docker-container
+          docker buildx create --use --driver docker-container \
+            --driver-opt image=moby/buildkit:v0.34.2@sha256:c5f8862f52499773af85bc07695b2379ef08e8002352b0df2c4864c91d78dabe
           export=()
           if [[ "$HIT" != true ]]; then export=(--cache-to "type=local,dest=$CACHE-new,mode=max"); fi
           docker buildx build --load -t tetsu:ci --cache-from "type=local,src=$CACHE" "${export[@]}" .

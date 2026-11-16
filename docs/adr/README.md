@@ -68,6 +68,7 @@ number, and add a row below. Never renumber.
 | [0060](0060-database-hardening.md) | Database hardening after the design review | Writing a migration, a table, or connection settings | Accepted |
 | [0061](0061-one-service-until-domains.md) | One service and two logins until Tetsu has domains | Deploying, adding a realm, or adding a database login | Accepted |
 | [0062](0062-seeding-from-the-deploy.md) | Seeding the demo from Tetsu's deploy | Changing how demo businesses reach the demo | Accepted |
+| [0063](0063-ci-minutes-per-run.md) | CI minutes per run | Changing what a CI run builds or caches | Proposed |
 
 ## Open decisions
 
