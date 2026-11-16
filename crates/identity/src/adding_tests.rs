@@ -416,13 +416,17 @@ async fn failures_of_the_server_are_told_apart() {
         "storage failed: adding a passkey answered \"maybe\""
     );
     assert_eq!(
-        said[10],
-        "storage failed: a lookup that always answers answered nothing"
+        said[10..],
+        [
+            "storage failed: a lookup that always answers answered nothing",
+            "storage failed: a lookup that acted for a session named none",
+            "storage failed: a count of sessions ended is negative"
+        ]
     );
 }
 
 /// Each function replaced, what it returns instead, and what it answers.
-const UNREADABLE: [(&str, &str, &str); 11] = [
+const UNREADABLE: [(&str, &str, &str); 13] = [
     (
         "adder(bytea)",
         "TABLE (operator_id text, user_handle bytea, name text, credentials bytea[])",
@@ -477,6 +481,16 @@ const UNREADABLE: [(&str, &str, &str); 11] = [
         "add_passkey(bytea, bytea, bigint, bytea, jsonb)",
         "TABLE (added text, sessions_ended bigint, session_id text)",
         "SELECT 'added', 0::bigint, 'x' WHERE false",
+    ),
+    (
+        "add_passkey(bytea, bytea, bigint, bytea, jsonb)",
+        "TABLE (added text, sessions_ended bigint, session_id text)",
+        "SELECT 'added', 0::bigint, null::text",
+    ),
+    (
+        "add_passkey(bytea, bytea, bigint, bytea, jsonb)",
+        "TABLE (added text, sessions_ended bigint, session_id text)",
+        "SELECT 'added', -1::bigint, 'x'",
     ),
 ];
 

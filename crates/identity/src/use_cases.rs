@@ -212,19 +212,9 @@ impl<S: OperatorStore> Operators<S> {
         actor: &Actor,
     ) -> Result<(Signer, String), Error> {
         let (operator, credential, reason) = match party.identify(response) {
-            None => (None, None, "malformed".to_string()),
-            Some(answer) => match self.store.signer(&answer.credential).await? {
-                None => (
-                    None,
-                    Some(answer.credential),
-                    "unknown_credential".to_string(),
-                ),
-                Some(signer) if signer.user_handle != answer.handle => (
-                    Some(signer.operator),
-                    Some(answer.credential),
-                    "handle_mismatch".to_string(),
-                ),
-                Some(signer) => {
+            Err(credential) => (None, credential, "malformed".to_string()),
+            Ok(answer) => match self.store.signer(&answer.credential).await? {
+                Some(signer) if !signer.disabled && signer.user_handle == answer.handle => {
                     match party.finish_authentication(&answer, state, &signer.passkey) {
                         Ok(passkey) => return Ok((signer, passkey)),
                         Err(Error::Invalid(reason)) => {
@@ -232,6 +222,10 @@ impl<S: OperatorStore> Operators<S> {
                         }
                         Err(other) => return Err(other),
                     }
+                }
+                found => {
+                    let (operator, reason) = refused_before_verifying(found.as_ref());
+                    (operator, Some(answer.credential), reason.to_string())
                 }
             },
         };
@@ -449,6 +443,16 @@ fn not_signing_in() -> Error {
 /// One answer for every way adding a passkey can fail.
 fn not_adding() -> Error {
     Error::Invalid("this passkey could not be added".to_string())
+}
+
+/// Why a sign-in was refused before its passkey was verified: no operator holds the credential, theirs is
+/// disabled, or the answer gives another user handle.
+fn refused_before_verifying(found: Option<&Signer>) -> (Option<OperatorId>, &'static str) {
+    match found {
+        None => (None, "unknown_credential"),
+        Some(signer) if signer.disabled => (Some(signer.operator), "disabled"),
+        Some(signer) => (Some(signer.operator), "handle_mismatch"),
+    }
 }
 
 /// A refusal on the way through a ceremony reads as that ceremony's one answer, whoever reports it, so a browser

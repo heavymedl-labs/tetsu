@@ -68,7 +68,7 @@ impl RelyingParty {
                 name,
                 exclude,
             )
-            .map_err(Error::from)?;
+            .map_err(not_started)?;
         // Serialising these types cannot fail, so json! takes the place of a Result no test could reach.
         let mut options = json!(options);
         options["publicKey"]["authenticatorSelection"]["residentKey"] = json!("required");
@@ -89,24 +89,28 @@ impl RelyingParty {
                     .map(|fields| fields.remove("mediation"));
                 (options.to_string(), json!(state).to_string())
             })
-            .map_err(Error::from)
+            .map_err(not_started)
     }
 
     /// A sign-in's answer, read once, with the credential ID and user handle it names, so its passkey can be found
-    /// and checked; or none for an answer that is not one, including a credential ID longer than the 1023 bytes
-    /// `WebAuthn` allows, which no record could keep.
-    pub(crate) fn identify(&self, response: &str) -> Option<Identified> {
-        let response: PublicKeyCredential = serde_json::from_str(response).ok()?;
-        let (handle, credential) = self
+    /// and checked. An answer that is not one fails with the credential ID it names, if it names one the record can
+    /// keep: none past the 1023 bytes `WebAuthn` allows.
+    pub(crate) fn identify(&self, response: &str) -> Result<Identified, Option<Vec<u8>>> {
+        let response: PublicKeyCredential = serde_json::from_str(response).ok().ok_or(None)?;
+        if response.raw_id.len() > 1023 {
+            return Err(None);
+        }
+        match self
             .webauthn
             .identify_discoverable_authentication(&response)
-            .ok()
-            .filter(|(_, credential)| credential.len() <= 1023)?;
-        Some(Identified {
-            credential: credential.to_vec(),
-            handle: *handle.as_bytes(),
-            response,
-        })
+        {
+            Ok((handle, credential)) => Ok(Identified {
+                credential: credential.to_vec(),
+                handle: *handle.as_bytes(),
+                response,
+            }),
+            Err(_) => Err(Some(response.raw_id.clone())),
+        }
     }
 
     /// Verifies a sign-in's answer against the state its ceremony began with and the passkey it names, and returns
@@ -204,11 +208,10 @@ fn refused(error: &WebauthnError) -> Error {
 }
 
 /// A ceremony `webauthn-rs` could not start: a fault of what Identity stored, such as an operator with no name,
-/// never the browser's. Only starting a ceremony converts its errors this way; finishing one maps each itself.
-impl From<WebauthnError> for Error {
-    fn from(error: WebauthnError) -> Self {
-        Self::Storage(format!("no ceremony could start: {error}"))
-    }
+/// never the browser's. Only starting a ceremony uses it; finishing one maps each refusal itself, so no `?` can
+/// turn a browser's refusal into a storage failure.
+fn not_started(error: impl std::fmt::Display) -> Error {
+    Error::Storage(format!("no ceremony could start: {error}"))
 }
 
 /// The name an account picker shows for an operator's passkey: the label, then their name, cut to the 64 bytes an

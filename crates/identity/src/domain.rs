@@ -306,11 +306,20 @@ pub struct Enrollee {
 }
 
 /// A ceremony taken from storage to finish: whose it is, the link it redeems, and the state webauthn-rs needs.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Printing it leaves out the link's hash.
+#[derive(Clone, PartialEq, Eq)]
 pub struct TakenCeremony {
     pub operator: OperatorId,
     pub link_hash: [u8; 32],
     pub state: String,
+}
+
+impl std::fmt::Debug for TakenCeremony {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TakenCeremony")
+            .field("operator", &self.operator)
+            .finish_non_exhaustive()
+    }
 }
 
 /// A passkey webauthn-rs has verified, ready to store: its credential ID, and the passkey as webauthn-rs keeps it.
@@ -320,14 +329,15 @@ pub struct NewPasskey {
     pub passkey: String,
 }
 
-/// A passkey found by the credential ID a sign-in names, with its enabled operator, their user handle, and the
-/// passkey as `webauthn-rs` keeps it.
+/// A passkey found by the credential ID a sign-in names, with its operator, their user handle, the passkey as
+/// `webauthn-rs` keeps it, and whether the operator is disabled, so a refused sign-in names whose it was.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Signer {
     pub credential: Vec<u8>,
     pub operator: OperatorId,
     pub user_handle: [u8; 16],
     pub passkey: String,
+    pub disabled: bool,
 }
 
 /// What signing in came to for a passkey that exists.
@@ -371,13 +381,21 @@ pub struct Adder {
 }
 
 /// An addition taken to be finished: its token's and session's hashes, which storing its passkey uses it up by, its
-/// operator, and the state `webauthn-rs` needs.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// operator, and the state `webauthn-rs` needs. Printing it leaves out both hashes.
+#[derive(Clone, PartialEq, Eq)]
 pub struct TakenAddition {
     pub token: [u8; 32],
     pub session: [u8; 32],
     pub operator: OperatorId,
     pub state: String,
+}
+
+impl std::fmt::Debug for TakenAddition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TakenAddition")
+            .field("operator", &self.operator)
+            .finish_non_exhaustive()
+    }
 }
 
 /// What adding a passkey came to for an operator who exists.
@@ -733,6 +751,42 @@ mod tests {
             (printed.contains("hash"), printed.contains("171")),
             (false, false),
             "{printed}"
+        );
+    }
+
+    /// Printing a taken ceremony or addition leaves out the hashes of the tokens that name it.
+    #[test]
+    fn printed_ceremonies_hide_their_hashes() {
+        let printed = [
+            format!(
+                "{:?}",
+                TakenCeremony {
+                    operator: OperatorId::new(1),
+                    link_hash: [0xab; 32],
+                    state: String::new(),
+                }
+            ),
+            format!(
+                "{:?}",
+                TakenAddition {
+                    token: [0xab; 32],
+                    session: [0xab; 32],
+                    operator: OperatorId::new(1),
+                    state: String::new(),
+                }
+            ),
+        ];
+        assert_eq!(
+            printed.each_ref().map(|printed| printed.contains("171")),
+            [false, false],
+            "{printed:?}"
+        );
+        assert_eq!(
+            printed,
+            [
+                "TakenCeremony { operator: OperatorId(1), .. }",
+                "TakenAddition { operator: OperatorId(1), .. }"
+            ]
         );
     }
 

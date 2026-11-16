@@ -155,7 +155,10 @@ INSERT (credential_id, operator_id, passkey, created_at),
 UPDATE (passkey, last_used_at),
 DELETE
 ON passkeys TO tetsu_identity_lookup;
-GRANT SELECT, INSERT, DELETE ON ceremonies TO tetsu_identity_lookup;
+GRANT SELECT, DELETE ON ceremonies TO tetsu_identity_lookup;
+GRANT INSERT (
+    token_hash, kind, operator_id, link_hash, session_hash, state, ends_at
+) ON ceremonies TO tetsu_identity_lookup;
 GRANT UPDATE (token_hash, session_hash, taken, state, ends_at) ON ceremonies
 TO tetsu_identity_lookup;
 
@@ -297,7 +300,7 @@ $$;
 -- for one who holds a passkey already, or null for one who does not exist.
 -- What it checks stays true until the caller commits, under read committed
 -- only, so it refuses any other level with TD002. Only the functions below
--- call it; no role may.
+-- call it; no other role may.
 CREATE FUNCTION enrolling(wanted_operator bigint)
 RETURNS text
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
@@ -430,7 +433,7 @@ $$;
 -- it or is seen by it, sweeps the operator's ceremonies that have ended, and
 -- says when, by the clock read after any wait; null for an operator not
 -- enabled. Under read committed only (TD002). Only the
--- functions that begin such ceremonies call it; no role may.
+-- functions that begin such ceremonies call it; no other role may.
 CREATE FUNCTION holding(wanted_operator bigint)
 RETURNS timestamptz
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
@@ -558,20 +561,24 @@ BEGIN
 END
 $$;
 
--- The passkey a credential ID names, with its operator and their user handle,
--- if the operator is enabled; nothing otherwise. Reading it changes nothing.
+-- The passkey a credential ID names, with its operator, their user handle,
+-- and whether they are disabled, so a refused sign-in names whose it was;
+-- nothing for a credential no operator holds. Reading it changes nothing.
 CREATE FUNCTION signer(wanted_credential bytea)
-RETURNS TABLE (operator_id bigint, user_handle bytea, passkey text)
+RETURNS TABLE (
+    operator_id bigint, user_handle bytea, passkey text, disabled boolean
+)
 LANGUAGE sql STABLE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
 AS $$
     SELECT
         o.id,
         uuid_send(o.user_handle),
-        p.passkey::text
+        p.passkey::text,
+        o.disabled_at IS NOT NULL
     FROM identity.passkeys AS p
     INNER JOIN identity.operators AS o ON p.operator_id = o.id
-    WHERE p.credential_id = wanted_credential AND o.disabled_at IS NULL
+    WHERE p.credential_id = wanted_credential
 $$;
 
 -- Signs an operator in with a passkey a sign-in verified, and says what came
@@ -606,19 +613,36 @@ BEGIN
         RAISE EXCEPTION 'signing in needs read committed'
         USING ERRCODE = 'TD002';
     END IF;
-    IF NOT coalesce(
-        wanted_new #- '{cred,counter}' #- '{cred,backup_state}'
-        #- '{cred,backup_eligible}'
-        = wanted_old #- '{cred,counter}' #- '{cred,backup_state}'
-        #- '{cred,backup_eligible}'
-        AND (wanted_new #>> '{cred,counter}')::bigint
-        >= (wanted_old #>> '{cred,counter}')::bigint
-        AND (
-            (wanted_new #>> '{cred,backup_eligible}')::boolean
-            OR NOT (wanted_old #>> '{cred,backup_eligible}')::boolean
-        ),
-        false
-    ) THEN
+    -- Each moved field must be there on both sides, a counter a whole number
+    -- an authenticator could send and the flags true or false, checked before
+    -- any of them is compared; everything else must be the same text, not
+    -- only the same value, so no number is spelt anew.
+    IF NOT coalesce(CASE
+        WHEN
+            (wanted_new #> '{cred,counter}')::text ~ '^[0-9]{1,10}$'
+            AND (wanted_old #> '{cred,counter}')::text ~ '^[0-9]{1,10}$'
+            AND jsonb_typeof(wanted_new #> '{cred,backup_state}') = 'boolean'
+            AND jsonb_typeof(wanted_old #> '{cred,backup_state}') = 'boolean'
+            AND jsonb_typeof(wanted_new #> '{cred,backup_eligible}') = 'boolean'
+            AND jsonb_typeof(wanted_old #> '{cred,backup_eligible}') = 'boolean'
+            THEN
+                (
+                    wanted_new #- '{cred,counter}' #- '{cred,backup_state}'
+                    #- '{cred,backup_eligible}'
+                )::text
+                = (
+                    wanted_old #- '{cred,counter}' #- '{cred,backup_state}'
+                    #- '{cred,backup_eligible}'
+                )::text
+                AND (wanted_new #>> '{cred,counter}')::bigint
+                BETWEEN (wanted_old #>> '{cred,counter}')::bigint
+                AND 4294967295
+                AND (
+                    (wanted_new #> '{cred,backup_eligible}')::boolean
+                    OR NOT (wanted_old #> '{cred,backup_eligible}')::boolean
+                )
+        ELSE false
+    END, false) THEN
         RAISE EXCEPTION 'a sign-in changed more of a passkey than it may'
         USING ERRCODE = 'TD003';
     END IF;
@@ -627,7 +651,7 @@ BEGIN
     INNER JOIN identity.operators AS o ON p.operator_id = o.id
     WHERE p.credential_id = wanted_credential
     FOR SHARE OF o;
-    IF NOT FOUND OR who <> wanted_operator THEN
+    IF NOT FOUND OR who IS DISTINCT FROM wanted_operator THEN
         RETURN NEXT;
         RETURN;
     ELSIF was IS NOT NULL THEN
@@ -723,34 +747,39 @@ BEGIN
     IF at IS NULL THEN
         RETURN false;
     END IF;
-    INSERT INTO identity.ceremonies
-        (token_hash, kind, operator_id, session_hash, state, ends_at)
-    SELECT
-        wanted_hash,
-        'add',
-        s.operator_id,
-        s.token_hash,
-        wanted_state,
-        at + interval '10 minutes'
-    FROM identity.sessions AS s
-    WHERE
-        s.token_hash = wanted_session
-        AND s.operator_id = wanted_operator
-        AND s.realm = 'operator'
-        AND at < s.ends_at
-        AND at < s.last_seen_at + interval '15 minutes'
-        AND s.started_at > at - interval '10 minutes'
-        AND (
-            SELECT count(*) FROM identity.passkeys AS p
-            WHERE p.operator_id = wanted_operator
-        ) < 2
-    ON CONFLICT (operator_id) WHERE kind = 'add' DO UPDATE
-        SET
-            token_hash = excluded.token_hash,
-            session_hash = excluded.session_hash,
-            taken = false,
-            state = excluded.state,
-            ends_at = excluded.ends_at;
+    BEGIN
+        INSERT INTO identity.ceremonies
+            (token_hash, kind, operator_id, session_hash, state, ends_at)
+        SELECT
+            wanted_hash,
+            'add',
+            s.operator_id,
+            s.token_hash,
+            wanted_state,
+            at + interval '10 minutes'
+        FROM identity.sessions AS s
+        WHERE
+            s.token_hash = wanted_session
+            AND s.operator_id = wanted_operator
+            AND s.realm = 'operator'
+            AND at < s.ends_at
+            AND at < s.last_seen_at + interval '15 minutes'
+            AND s.started_at > at - interval '10 minutes'
+            AND (
+                SELECT count(*) FROM identity.passkeys AS p
+                WHERE p.operator_id = wanted_operator
+            ) < 2
+        ON CONFLICT (operator_id) WHERE kind = 'add' DO UPDATE
+            SET
+                token_hash = excluded.token_hash,
+                session_hash = excluded.session_hash,
+                taken = false,
+                state = excluded.state,
+                ends_at = excluded.ends_at;
+    EXCEPTION WHEN foreign_key_violation THEN
+        -- The session ended while this waited for its row.
+        RETURN false;
+    END;
     RETURN FOUND;
 END
 $$;
@@ -969,7 +998,7 @@ $$;
 
 -- Ends every session an operator holds, in any realm, and says how many were
 -- live as of `at`, spent ones going too. Only disabling and removing passkeys
--- call it, holding the operator's row; no role may.
+-- call it, holding the operator's row; no other role may.
 CREATE FUNCTION end_every_session(wanted_operator bigint, at timestamptz)
 RETURNS bigint
 LANGUAGE sql VOLATILE SECURITY DEFINER

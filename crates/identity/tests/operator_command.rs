@@ -816,8 +816,8 @@ async fn a_sign_in_waiting_on_a_removal_finds_its_passkey_unknown() {
             .query_one(
                 "SELECT signed FROM identity.sign_in(
                      sha256(int8send(1)), 1,
-                     '{\"cred\": {\"counter\": 0, \"backup_eligible\": false}}',
-                     '{\"cred\": {\"counter\": 0, \"backup_eligible\": false}}',
+                     '{\"cred\": {\"counter\": 0, \"backup_eligible\": false, \"backup_state\": false}}',
+                     '{\"cred\": {\"counter\": 0, \"backup_eligible\": false, \"backup_state\": false}}',
                      sha256('s'::bytea)
                  )",
                 &[],
@@ -836,6 +836,85 @@ async fn a_sign_in_waiting_on_a_removal_finds_its_passkey_unknown() {
         number(&database, "SELECT count(*) FROM identity.sessions").await,
         0
     );
+}
+
+/// A sign-in that names no operator signs no one in: it answers that the passkey is unknown.
+#[tokio::test]
+async fn a_sign_in_for_no_operator_signs_no_one_in() {
+    let database = ready().await;
+    let pool = pool(&database.as_app()).expect("a pool");
+    postgres_store(pool.clone())
+        .create(&name("Kurt Medley"), &actor())
+        .await
+        .expect("creates");
+    let passkey = r#"{"cred": {"counter": 0, "backup_eligible": false, "backup_state": false}}"#;
+    as_admin(
+        &database,
+        &format!(
+            "INSERT INTO identity.passkeys (credential_id, operator_id, passkey, created_at)
+             VALUES (sha256(int8send(1)), 1, '{passkey}', now())"
+        ),
+    )
+    .await;
+    let mut client = pool.get().await.expect("a connection");
+    let transaction = ModuleTransaction::begin(&mut client, "identity")
+        .await
+        .expect("begins");
+    let answer: Option<String> = transaction
+        .query_one(
+            "SELECT signed FROM identity.sign_in(
+                 sha256(int8send(1)), null, $1::text::jsonb, $1::text::jsonb, sha256('s'::bytea)
+             )",
+            &[&passkey],
+        )
+        .await
+        .expect("answers")
+        .try_get(0)
+        .expect("text or null");
+    assert_eq!(answer, None);
+}
+
+/// Beginning an addition while its session ends waits for the end, then refuses as for any session that is not
+/// live, rather than failing on the addition's tie to its session.
+#[tokio::test]
+async fn an_addition_begun_as_its_session_ends_is_refused() {
+    let database = ready().await;
+    let pool = pool(&database.as_app()).expect("a pool");
+    postgres_store(pool.clone())
+        .create(&name("Kurt Medley"), &actor())
+        .await
+        .expect("creates");
+    as_admin(
+        &database,
+        "SELECT identity.start_session(sha256('s'::bytea), 'operator', 1)",
+    )
+    .await;
+    let mut admin = connect(&database).await.expect("connects");
+    let ending = admin.transaction().await.expect("begins");
+    ending
+        .execute("DELETE FROM identity.sessions", &[])
+        .await
+        .expect("ends");
+    let beginning = tokio::spawn(async move {
+        let mut client = pool.get().await.expect("a connection");
+        let transaction = ModuleTransaction::begin(&mut client, "identity")
+            .await
+            .expect("begins");
+        let begun: bool = transaction
+            .query_one(
+                "SELECT identity.begin_addition(sha256('t'::bytea), sha256('s'::bytea), 1, '{}')",
+                &[],
+            )
+            .await
+            .expect("answers")
+            .try_get(0)
+            .expect("a boolean");
+        transaction.commit().await.expect("commits");
+        begun
+    });
+    waits_for_a_lock(&database).await;
+    ending.commit().await.expect("commits");
+    assert!(!beginning.await.expect("finishes"));
 }
 
 /// A session starts when it is stored, after any wait for the operator's row, never before an end of sessions that

@@ -151,6 +151,13 @@ async fn hostile_sign_ins_are_refused() {
         ));
     }
     assert_eq!(refused, vec![not_signing_in(); 6]);
+    let kept_credential = "SELECT count(*) FROM identity.outbox_global
+                           WHERE payload ->> 'reason' = 'malformed' AND payload ->> 'credential' IS NOT NULL";
+    assert_eq!(
+        number(&database, kept_credential).await,
+        1,
+        "an answer with no user handle still names its credential"
+    );
     let reasons = "handle_mismatch not_verified malformed malformed malformed malformed";
     let sessions = number(&database, "SELECT count(*) FROM identity.sessions").await;
     assert_eq!(
@@ -161,6 +168,35 @@ async fn hostile_sign_ins_are_refused() {
                 .split(' ')
                 .map(|reason| json!(["refused", reason]))
                 .collect()
+        )
+    );
+}
+
+/// A credential ID of exactly the 1023 bytes `WebAuthn` allows is looked up, and recorded as unknown with the ID;
+/// one byte more is malformed, recorded without it.
+#[tokio::test]
+async fn a_credential_id_of_the_longest_kind_is_looked_up() {
+    let (operators, database, _, kept) = enrolled().await;
+    for length in [1364, 1366] {
+        let (token, response) = answer(&operators, kept.clone(), ORIGIN, |answer| {
+            answer["id"] = json!("A".repeat(length));
+            answer["rawId"] = json!("A".repeat(length));
+        })
+        .await;
+        let _ = operators
+            .finish_sign_in(&party(), &token, &response, &actor())
+            .await;
+    }
+    let named = "SELECT count(*) FROM identity.outbox_global
+                 WHERE event_type = 'identity.signed_in' AND payload ->> 'credential' IS NOT NULL";
+    assert_eq!(
+        (sign_ins(&database).await, number(&database, named).await),
+        (
+            vec![
+                json!(["refused", "unknown_credential"]),
+                json!(["refused", "malformed"])
+            ],
+            1
         )
     );
 }
@@ -233,8 +269,8 @@ async fn counters_move_forward_and_a_counter_gone_back_is_refused_and_recorded()
     );
 }
 
-/// A disabled operator, or one whose passkeys were removed, signs in nowhere; nor does a ceremony token that is
-/// malformed or unknown.
+/// A disabled operator, or one whose passkeys were removed, signs in nowhere, and the record names the disabled
+/// operator; nor does a ceremony token that is malformed or unknown.
 #[tokio::test]
 async fn a_disabled_or_removed_passkey_signs_in_nowhere() {
     let (operators, database, kurt, kept) = enrolled().await;
@@ -269,8 +305,18 @@ async fn a_disabled_or_removed_passkey_signs_in_nowhere() {
     assert_eq!(refused, vec![not_signing_in(); 4]);
     assert_eq!(
         sign_ins(&database).await,
-        vec![json!(["refused", "unknown_credential"]); 2],
+        [
+            json!(["refused", "disabled"]),
+            json!(["refused", "unknown_credential"])
+        ],
         "a token that finds no ceremony records nothing"
+    );
+    let named = "SELECT count(*) FROM identity.outbox_global
+                 WHERE payload ->> 'reason' = 'disabled' AND payload ->> 'operator_id' = '1'";
+    assert_eq!(
+        number(&database, named).await,
+        1,
+        "a disabled operator is named"
     );
 }
 
@@ -376,8 +422,9 @@ async fn a_raced_disabled_or_missing_sign_in_starts_no_session() {
 }
 
 /// The database cannot check a signature, so it refuses a new state that changes more of a passkey than a sign-in
-/// may, such as its key or a counter moved back, as a fault of the caller: a caller with Identity's role cannot
-/// swap an operator's key.
+/// may, as a fault of the caller: its key, a counter moved back, spelt as other than a whole number, or past what
+/// an authenticator sends, or a flag that is not true or false. A caller with Identity's role cannot swap an
+/// operator's key or leave a passkey `webauthn-rs` cannot read.
 #[tokio::test]
 async fn a_sign_in_that_changes_more_of_a_passkey_than_it_may_is_a_fault() {
     let (_, database, _, _) = enrolled().await;
@@ -389,6 +436,14 @@ async fn a_sign_in_that_changes_more_of_a_passkey_than_it_may_is_a_fault() {
     for (field, value) in [
         ("cred_id", json!("AAAAAAAAAAAAAAAAAAAAAA")),
         ("counter", json!(-1)),
+        ("counter", json!("6")),
+        ("counter", json!(6.0)),
+        ("counter", json!(4_294_967_296_u64)),
+        ("counter", json!(1e30)),
+        ("backup_state", json!("yes")),
+        ("backup_state", Value::Null),
+        ("backup_eligible", json!("on")),
+        ("backup_eligible", Value::Null),
     ] {
         let new = changed(&signer.passkey, field, value);
         faults.push(failure(
@@ -400,7 +455,7 @@ async fn a_sign_in_that_changes_more_of_a_passkey_than_it_may_is_a_fault() {
     }
     assert_eq!(
         faults,
-        vec!["storage failed: a sign-in changed more of a passkey than it may".to_string(); 2]
+        vec!["storage failed: a sign-in changed more of a passkey than it may".to_string(); 10]
     );
 }
 
@@ -453,7 +508,7 @@ async fn failures_of_the_server_are_told_apart() {
 }
 
 /// Each function replaced, what it returns instead, and what it answers.
-const UNREADABLE: [(&str, &str, &str); 9] = [
+const UNREADABLE: [(&str, &str, &str); 11] = [
     (
         "take_ceremony(bytea, text)",
         "TABLE (operator_id bigint, link_hash bytea, state integer)",
@@ -461,23 +516,28 @@ const UNREADABLE: [(&str, &str, &str); 9] = [
     ),
     (
         "signer(bytea)",
-        "TABLE (operator_id text, user_handle bytea, passkey text)",
-        "SELECT '1', uuid_send(gen_random_uuid()), '{}'",
+        "TABLE (operator_id text, user_handle bytea, passkey text, disabled boolean)",
+        "SELECT '1', uuid_send(gen_random_uuid()), '{}', false",
     ),
     (
         "signer(bytea)",
-        "TABLE (operator_id bigint, user_handle text, passkey text)",
-        "SELECT 1::bigint, 'x', '{}'",
+        "TABLE (operator_id bigint, user_handle text, passkey text, disabled boolean)",
+        "SELECT 1::bigint, 'x', '{}', false",
     ),
     (
         "signer(bytea)",
-        "TABLE (operator_id bigint, user_handle bytea, passkey integer)",
-        "SELECT 1::bigint, uuid_send(gen_random_uuid()), 1",
+        "TABLE (operator_id bigint, user_handle bytea, passkey integer, disabled boolean)",
+        "SELECT 1::bigint, uuid_send(gen_random_uuid()), 1, false",
     ),
     (
         "signer(bytea)",
-        "TABLE (operator_id bigint, user_handle bytea, passkey text)",
-        "SELECT 1::bigint, '\\x00'::bytea, '{}'",
+        "TABLE (operator_id bigint, user_handle bytea, passkey text, disabled boolean)",
+        "SELECT 1::bigint, '\\x00'::bytea, '{}', false",
+    ),
+    (
+        "signer(bytea)",
+        "TABLE (operator_id bigint, user_handle bytea, passkey text, disabled text)",
+        "SELECT 1::bigint, uuid_send(gen_random_uuid()), '{}', 'x'",
     ),
     (
         "sign_in(bytea, bigint, jsonb, jsonb, bytea)",
@@ -498,6 +558,11 @@ const UNREADABLE: [(&str, &str, &str); 9] = [
         "sign_in(bytea, bigint, jsonb, jsonb, bytea)",
         "TABLE (signed text, session_id text)",
         "SELECT 'signed_in', 'x' WHERE false",
+    ),
+    (
+        "sign_in(bytea, bigint, jsonb, jsonb, bytea)",
+        "TABLE (signed text, session_id text)",
+        "SELECT 'signed_in', null::text",
     ),
 ];
 
@@ -523,9 +588,13 @@ async fn unreadable_answers_are_storage_failures() {
         "{said:?}"
     );
     assert_eq!(said[4], "storage failed: a user handle is not 16 bytes");
-    assert_eq!(said[5], "storage failed: signing in answered \"maybe\"");
+    assert_eq!(said[6], "storage failed: signing in answered \"maybe\"");
     assert_eq!(
-        said[8],
+        said[10],
+        "storage failed: a lookup that acted for a session named none"
+    );
+    assert_eq!(
+        said[9],
         "storage failed: a lookup that always answers answered nothing"
     );
 }

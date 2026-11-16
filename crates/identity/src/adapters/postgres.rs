@@ -203,9 +203,10 @@ async fn run(
     Ok(rows)
 }
 
-/// How a statement failed. Identity's own functions raise two codes of their own, and both are faults of the code
+/// How a statement failed. Identity's own functions raise three codes of their own, and each is a fault of the code
 /// that called them, so storage: TD001, a session started for an operator not enabled, which only a sign-in that
-/// holds an enabled operator's row ever starts; and TD002, an isolation level other than read committed.
+/// holds an enabled operator's row ever starts; TD002, an isolation level other than read committed; and TD003, a
+/// sign-in that would change more of a passkey than its counter and backup flags.
 fn sorted(error: &tokio_postgres::Error) -> Error {
     failed(tetsu_postgres::sort(error))
 }
@@ -794,6 +795,7 @@ fn signer_from(row: &Row, credential: &[u8]) -> Result<Signer, Error> {
         operator: OperatorId::new(column(row, "operator_id")?),
         user_handle: user_handle(row)?,
         passkey: column(row, "passkey")?,
+        disabled: column(row, "disabled")?,
     })
 }
 
@@ -809,8 +811,11 @@ fn signing(
 ) -> Result<Option<(&'static str, String)>, Error> {
     let row = rows.first().ok_or_else(answered_nothing)?;
     let answer: Option<String> = column(row, "signed")?;
-    let session: Option<String> = column(row, "session_id")?;
     let sign_in = answer.as_deref().map(sign_in_from).transpose()?;
+    let session = session_named(
+        column(row, "session_id")?,
+        sign_in == Some(SignIn::SignedIn),
+    )?;
     let _ = answered.set(sign_in);
     let reason = match sign_in {
         Some(SignIn::SignedIn) => None,
@@ -909,7 +914,10 @@ fn adding(
 ) -> Result<Option<(&'static str, String)>, Error> {
     let row = rows.first().ok_or_else(answered_nothing)?;
     let (addition, ended) = added_and_ended(row)?;
-    let session: Option<String> = column(row, "session_id")?;
+    let session = session_named(
+        column(row, "session_id")?,
+        addition == Some(Addition::Added),
+    )?;
     let _ = added.set(addition);
     let reason = addition.map_or(Some("unknown"), Addition::reason);
     Ok(Some(event(
@@ -932,10 +940,24 @@ fn adding(
 }
 
 /// What adding a passkey answered, and how many of the operator's other live sessions it ended.
-fn added_and_ended(row: &Row) -> Result<(Option<Addition>, i64), Error> {
+fn added_and_ended(row: &Row) -> Result<(Option<Addition>, u64), Error> {
     let answer: Option<String> = column(row, "added")?;
     let ended: i64 = column(row, "sessions_ended")?;
+    let ended = u64::try_from(ended)
+        .map_err(|_| Error::Storage("a count of sessions ended is negative".to_string()))?;
     Ok((answer.as_deref().map(addition_from).transpose()?, ended))
+}
+
+/// The public ID of the session a lookup says it started or acted for, which it must name; one it did not is a
+/// fault of storage, never a record that names no session.
+fn session_named(session: Option<String>, acted: bool) -> Result<Option<String>, Error> {
+    if acted && session.is_none() {
+        Err(Error::Storage(
+            "a lookup that acted for a session named none".to_string(),
+        ))
+    } else {
+        Ok(session)
+    }
 }
 
 /// An answer Identity's database never writes is a storage failure, never a guess.
