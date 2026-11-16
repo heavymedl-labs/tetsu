@@ -47,8 +47,8 @@ impl RelyingParty {
     /// until it answers. The passkey must verify the user, and must be discoverable, so signing in needs no name.
     /// Every realm shares one passkey domain until Tetsu has domains (ADR-0061), so the name a device's account
     /// picker shows says the passkey is an operator's. The credentials the operator already `held` are listed for the
-    /// device to refuse, so it makes no second passkey where it has one. It fails only for a stored operator with no name, a fault of
-    /// storage, never the browser's.
+    /// device to refuse, so it makes no second passkey where it has one. It fails only for a stored operator with no
+    /// name, a fault of storage, never the browser's.
     pub(crate) fn begin_registration(
         &self,
         user_handle: [u8; 16],

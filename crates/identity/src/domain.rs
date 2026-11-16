@@ -363,11 +363,19 @@ impl SignIn {
 }
 
 /// A browser's answer to a passkey ceremony: the ceremony's token, and the response its authenticator gave, as
-/// JSON.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// JSON. Printing it leaves out the token.
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Answer<'a> {
     pub ceremony: &'a str,
     pub response: &'a str,
+}
+
+impl std::fmt::Debug for Answer<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Answer")
+            .field("response", &self.response)
+            .finish_non_exhaustive()
+    }
 }
 
 /// An operator a fresh session names who may add a passkey, with what a registration needs: their user handle and
@@ -752,6 +760,16 @@ mod tests {
             (false, false),
             "{printed}"
         );
+    }
+
+    /// Printing an answer leaves out its ceremony's token.
+    #[test]
+    fn a_printed_answer_hides_its_token() {
+        let answer = Answer {
+            ceremony: "secret",
+            response: "{}",
+        };
+        assert_eq!(format!("{answer:?}"), r#"Answer { response: "{}", .. }"#);
     }
 
     /// Printing a taken ceremony or addition leaves out the hashes of the tokens that name it.

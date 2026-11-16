@@ -421,6 +421,34 @@ async fn a_raced_disabled_or_missing_sign_in_starts_no_session() {
     );
 }
 
+/// A sign-in stores a passkey's new state only over the very text it was read as: an old value that differs from
+/// it only in how a number is written is another sign-in's, so it is raced, and nothing is respelt.
+#[tokio::test]
+async fn a_sign_in_never_respells_a_stored_number() {
+    let (_, database, _, _) = enrolled().await;
+    as_admin(
+        &database,
+        "UPDATE identity.passkeys SET passkey = jsonb_set(passkey, '{cred,x}', '1')",
+    )
+    .await;
+    let store = PostgresOperators {
+        pool: app_pool(&database),
+    };
+    let signer = stored_signer(&database, &store).await;
+    let respelt = Signer {
+        passkey: changed(&signer.passkey, "x", json!(1.0)),
+        ..signer
+    };
+    assert_eq!(
+        store
+            .sign_in(&respelt, &respelt.passkey, &[6; 32], &actor())
+            .await,
+        Ok(Some(SignIn::Raced))
+    );
+    let kept = "SELECT count(*) FROM identity.passkeys WHERE passkey #>> '{cred,x}' = '1'";
+    assert_eq!(number(&database, kept).await, 1);
+}
+
 /// The database cannot check a signature, so it refuses a new state that changes more of a passkey than a sign-in
 /// may, as a fault of the caller: its key, a counter moved back, spelt as other than a whole number, or past what
 /// an authenticator sends, or a flag that is not true or false. A caller with Identity's role cannot swap an

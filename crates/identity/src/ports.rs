@@ -113,7 +113,8 @@ pub trait OperatorStore {
         token: &[u8; 32],
     ) -> impl Future<Output = Result<Option<String>, Error>> + Send;
 
-    /// The passkey a credential ID names, if its operator is enabled.
+    /// The passkey a credential ID names, with its operator and whether they are disabled, or none for a credential
+    /// no operator holds.
     fn signer(
         &self,
         credential: &[u8],

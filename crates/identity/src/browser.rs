@@ -89,8 +89,9 @@ impl<'a> Change<'a> {
 
 /// A live session whose request passed the checks for a change: the realm's own origin and the session's form
 /// token. Only [`crate::Operators::session_for_change`] makes one, so a use case that changes state on a session's
-/// behalf, such as adding a passkey, cannot be reached without them.
-/// It cannot be cloned, so a copy kept from one request cannot stand in for another's checks.
+/// behalf, such as adding a passkey, cannot be reached without them. It stands for the one request it checked: it
+/// cannot be cloned, and a page adapter must not keep it past that request, since a later one would skip the
+/// checks.
 #[derive(Debug, PartialEq, Eq)]
 pub struct CheckedSession(pub(crate) Session);
 
@@ -244,7 +245,8 @@ mod tests {
     }
 
     /// A name led by Unicode whitespace is another cookie, which a browser stores apart from ours, so it is never
-    /// read as ours: only ASCII whitespace is trimmed, which closes the cookie prefix bypass published in September 2025.
+    /// read as ours: only ASCII whitespace is trimmed, which closes the cookie prefix bypass published in September
+    /// 2025.
     #[test]
     fn a_name_led_by_unicode_whitespace_is_not_ours() {
         let token = "ab".repeat(32);

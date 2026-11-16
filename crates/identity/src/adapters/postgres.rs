@@ -544,7 +544,7 @@ impl OperatorStore for PostgresOperators {
                 )
             })
             .await?;
-        Ok(ended.unwrap_or_default())
+        ended.ok_or_else(answered_nothing)
     }
 
     async fn list_operators(&self) -> Result<Vec<OperatorSummary>, Error> {
@@ -574,11 +574,21 @@ fn answered(rows: &[Row], name: &str) -> Result<Option<bool>, Error> {
     rows.first().map_or(Ok(None), |row| column(row, name))
 }
 
-/// The count a lookup function answers, or nothing for an operator who does not exist. Postgres's count is never
-/// negative, so the conversion cannot fail.
+/// The count a lookup function answers, or nothing for an operator who does not exist.
 fn counted(rows: &[Row], name: &str) -> Result<Option<u64>, Error> {
     let ended: Option<i64> = rows.first().map_or(Ok(None), |row| column(row, name))?;
-    Ok(ended.map(|ended| u64::try_from(ended).unwrap_or_default()))
+    ended.map(nonnegative).transpose()
+}
+
+/// A count read from a column, which must be a whole number that is not negative.
+fn count(row: &Row, name: &str) -> Result<u64, Error> {
+    column(row, name).and_then(nonnegative)
+}
+
+/// A count Identity's database answers, which it never writes negative: a negative one is a fault of storage, never
+/// read as none.
+fn nonnegative(count: i64) -> Result<u64, Error> {
+    u64::try_from(count).map_err(|_| Error::Storage("a count is negative".to_string()))
 }
 
 /// Reads what a create found, keeps it in `added`, and makes the event it records: changed when it added the
@@ -659,9 +669,12 @@ fn issuance_event(issue: Option<Issue>, id: i64, actor: &Actor) -> (&'static str
     )
 }
 
-/// Whether a ceremony was kept: the link may have ended, or its operator changed, since it was read.
+/// Whether a ceremony was kept: the link may have ended, or its operator changed, since it was read. The function
+/// always answers one row, so none is a storage failure.
 fn begun(rows: &[Row]) -> Result<bool, Error> {
-    rows.first().map_or(Ok(false), |row| column(row, "begun"))
+    rows.first()
+        .ok_or_else(answered_nothing)
+        .and_then(|row| column(row, "begun"))
 }
 
 /// The operator a link names, with the user handle and name a registration needs.
@@ -732,15 +745,16 @@ fn redemption_event(
 
 /// An operator as listed, with their passkeys and open link.
 fn summary_from(row: &Row) -> Result<OperatorSummary, Error> {
-    let passkeys: i64 = column(row, "passkeys")?;
-    let link_minutes: Option<i64> = column(row, "link_minutes")?;
+    let passkeys = count(row, "passkeys")?;
+    let link_minutes = column(row, "link_minutes")
+        .and_then(|minutes: Option<i64>| minutes.map(nonnegative).transpose())?;
     Ok(OperatorSummary {
         id: OperatorId::new(column(row, "id")?),
         name: column(row, "name")?,
         created_at: column(row, "created_at")?,
         disabled_at: column(row, "disabled_at")?,
-        passkeys: u64::try_from(passkeys).unwrap_or_default(),
-        link_minutes: link_minutes.map(|minutes| u64::try_from(minutes).unwrap_or_default()),
+        passkeys,
+        link_minutes,
     })
 }
 
@@ -752,12 +766,11 @@ fn added_from(row: &Row) -> Result<(i64, bool), Error> {
 /// What a disable did, or nothing for an operator who does not exist.
 fn disabling_from(row: &Row) -> Result<Option<Disabling>, Error> {
     let done: Option<bool> = column(row, "done")?;
-    let (sessions, links): (i64, i64) =
-        (column(row, "sessions_ended")?, column(row, "links_ended")?);
+    let (sessions_ended, links_ended) = (count(row, "sessions_ended")?, count(row, "links_ended")?);
     Ok(done.map(|done| Disabling {
         done,
-        sessions_ended: u64::try_from(sessions).unwrap_or_default(),
-        links_ended: u64::try_from(links).unwrap_or_default(),
+        sessions_ended,
+        links_ended,
     }))
 }
 
@@ -942,9 +955,7 @@ fn adding(
 /// What adding a passkey answered, and how many of the operator's other live sessions it ended.
 fn added_and_ended(row: &Row) -> Result<(Option<Addition>, u64), Error> {
     let answer: Option<String> = column(row, "added")?;
-    let ended: i64 = column(row, "sessions_ended")?;
-    let ended = u64::try_from(ended)
-        .map_err(|_| Error::Storage("a count of sessions ended is negative".to_string()))?;
+    let ended = nonnegative(column(row, "sessions_ended")?)?;
     Ok((answer.as_deref().map(addition_from).transpose()?, ended))
 }
 
@@ -968,11 +979,9 @@ fn addition_from(text: &str) -> Result<Addition, Error> {
 
 /// What removing passkeys did, from its answer.
 fn removal_from(row: &Row) -> Result<Removal, Error> {
-    let passkeys: i64 = column(row, "passkeys_removed")?;
-    let sessions: i64 = column(row, "sessions_ended")?;
     Ok(Removal {
-        passkeys_removed: u64::try_from(passkeys).unwrap_or_default(),
-        sessions_ended: u64::try_from(sessions).unwrap_or_default(),
+        passkeys_removed: count(row, "passkeys_removed")?,
+        sessions_ended: count(row, "sessions_ended")?,
     })
 }
 

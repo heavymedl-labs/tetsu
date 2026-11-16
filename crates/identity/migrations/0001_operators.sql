@@ -69,7 +69,9 @@ CREATE TABLE passkeys (
         AND octet_length(credential_id) <= 1023
     ),
     operator_id bigint NOT NULL REFERENCES operators (id),
-    passkey jsonb NOT NULL CHECK (octet_length(passkey::text) <= 8192),
+    -- Enrolling and adding store no passkey over 8 KiB; the table keeps a
+    -- little more, so a counter that gains digits never fails a stored one.
+    passkey jsonb NOT NULL CHECK (octet_length(passkey::text) <= 8320),
     created_at timestamptz NOT NULL,
     last_used_at timestamptz
 );
@@ -592,8 +594,12 @@ $$;
 -- transaction, under read committed only (TD002). The database cannot check a
 -- signature, so it refuses (TD003) a new state that changes more than a
 -- sign-in may: the counter, never backwards, the backup state, and backup
--- eligibility, only from false to true. A caller with Identity's role can
--- still start a session; it cannot swap an operator's key.
+-- eligibility, only from false to true; and it stores one only over the very
+-- text it was read as, so no number is spelt anew. A sign-in cannot rewrite a
+-- passkey into one webauthn-rs cannot read. It is not a guard against
+-- Identity's role, which can start a session here and has other ways to
+-- replace a passkey; a caller that passes it a token hash already used, of the
+-- wrong size, or null fails with that database error.
 CREATE FUNCTION sign_in(
     wanted_credential bytea,
     wanted_operator bigint,
@@ -664,7 +670,7 @@ BEGIN
     WHERE
         p.credential_id = wanted_credential
         AND p.operator_id = wanted_operator
-        AND p.passkey = wanted_old;
+        AND p.passkey::text = wanted_old::text;
     IF NOT FOUND THEN
         -- A passkey removed while this waited is unknown; one changed is raced.
         signed := CASE
@@ -804,13 +810,13 @@ AS $$
     RETURNING c.operator_id, c.state::text
 $$;
 
--- Stores an operator's added passkey and ends their other sessions, keeping
--- the one that added it (ADR-0059, v5.0.0-7.4.3), and says what came of it,
--- with how many live sessions it ended and the adding session's public ID:
--- added; disabled; signed_out, for a session that ended or is not theirs;
--- ended, for an addition this session did not take or that ended, which it
--- uses up, so the database itself ties the passkey to a ceremony a fresh
--- session began; full, for an operator who holds two already (ADR-0057);
+-- Stores an operator's added passkey and ends their other sessions, keeping the
+-- one that added it (ADR-0059, v5.0.0-7.4.3), and says what came of it, with
+-- how many live sessions it ended and the adding session's public ID: added;
+-- disabled; signed_out, for a session that ended or is not theirs; ended, for
+-- no open addition this session took, which leaves any other as it is; the one
+-- it finds it uses up, so the database itself ties the passkey to an addition a
+-- fresh session began; full, for an operator who holds two already (ADR-0057);
 -- oversized, as for a first passkey; taken, for a credential another passkey
 -- has, even one stored a moment before; or null for an operator who does not
 -- exist. It takes the operator's row for update, so what it checks stays true
@@ -1186,10 +1192,11 @@ $$;
 -- No routine here is anyone's by default; Identity's role may run exactly the
 -- lookups it calls, so a helper added later is no one's until granted. It may
 -- not call start_session; only sign_in does. The database cannot check a
--- passkey's signature, though, so a caller with this role can still start a
--- session through sign_in; it cannot swap an operator's key, and it can add a
--- passkey only through an addition a fresh session began and took. Database
--- access stays the trust boundary (ADR-0061).
+-- passkey's signature, though, so a caller with this role can do what an
+-- operator can, for any operator: start a session through sign_in and add a
+-- passkey through an addition that session took, or remove an operator's
+-- passkeys and enroll its own through a new link. Database access stays the
+-- trust boundary (ADR-0061).
 REVOKE EXECUTE ON ALL ROUTINES IN SCHEMA identity FROM public;
 GRANT EXECUTE ON FUNCTION use_session(bytea, text), end_session(bytea, text),
 issue_enrollment(bytea, bigint), list_operators(), enrollee(bytea),

@@ -156,9 +156,9 @@ impl<S: OperatorStore> Operators<S> {
     /// # Errors
     /// Never refuses for the number of sign-ins open: past a bound, the oldest end, so a flood of begins can end a
     /// real one before its person answers until step 5's rate limits. Fails with [`Error::Unavailable`] if no
-    /// secure random source can be read, or if storage fails.
+    /// secure random source can be read, and with [`Error::Storage`] if storage fails.
     pub async fn begin_sign_in(&self, party: &RelyingParty) -> Result<Ceremony, Error> {
-        // Starting a discoverable sign-in cannot fail in webauthn-rs, so its failure joins the random source's.
+        // Starting a discoverable sign-in cannot fail in webauthn-rs; were it to, it would be a storage failure.
         let (token, (options, state)) = CeremonyToken::generate(self.fill)
             .and_then(|token| party.begin_authentication().map(|begun| (token, begun)))?;
         self.store.begin_sign_in(&token.hash(), &state).await?;
