@@ -96,10 +96,21 @@ jobs:
           scripts/check.sh --base "$BASE"
         env:
           BASE: ${{ steps.base.outputs.sha }}
+      # The benchmark harness builds about twenty crates nothing else uses, so it is checked only when something it
+      # builds from changed, and outside the cached target folder, which would grow by about 1 GB.
+      - name: The benchmark harness compiles, if anything it builds from changed
+        env:
+          BASE: ${{ steps.base.outputs.sha }}
+        run: |
+          if git diff --quiet "$BASE" HEAD -- benchmarks Cargo.toml Cargo.lock rust-toolchain.toml; then
+            echo "The benchmark harness and what it builds from are unchanged since $BASE, so it is not checked."
+          else
+            CARGO_TARGET_DIR="$RUNNER_TEMP/bench" cargo check --locked -p tetsu-bench
+          fi
 
   # One job, since GitHub bills each job rounded up to a minute and these are short (ADR-0023).
   rest:
-    name: Image, harness, links, and workflows
+    name: Image, links, and workflows
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -118,7 +129,6 @@ jobs:
           name: image
           path: image.tar.gz
           retention-days: 1
-      - run: cargo check --locked -p tetsu-bench
       - name: All links outside research
         uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
