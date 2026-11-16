@@ -108,7 +108,8 @@ Web service `tetsu-demo` (`srv-dbp542rbc2fs73962k4g`) in Ohio, on the free insta
 
 - **Command:** `/usr/local/bin/tetsu serve`. Render's command replaces the image's entrypoint too, so `serve`
   alone exits with status 128.
-- **Environment:** `TETSU_DEMO=true` and `DATABASE_URL`, and the export settings under
+- **Environment:** `TETSU_DEMO=true`, `TETSU_ORIGIN=https://tetsu-demo.onrender.com`, which the operator
+  pages' passkeys belong to, and `DATABASE_URL`, and the export settings under
   [Logs and alerts](#logs-and-alerts). Render sets `PORT`.
 - **Health check:** `/`.
 - **Free instance:** sleeps after 15 minutes without traffic. Waking takes about 12 seconds, Neon's included, and

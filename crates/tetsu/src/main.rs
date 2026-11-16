@@ -191,13 +191,13 @@ async fn ready(local: &settings::Local) -> Result<(tokio::net::TcpListener, axum
     let demo = settings::demo(|name| local.var(name))?;
     let address = settings::listen(|name| local.var(name))?;
     let pool = connect(local).await?;
-    let tenants = tetsu_tenancy::postgres_store(pool);
+    let operators = operator_pages(local, demo)?;
+    let tenants = tetsu_tenancy::postgres_store(pool.clone());
     refuse_reserved_addresses(&tenants).await?;
-    let app = serve::app(
-        tetsu_tenancy::router(tenants, demo, assets::STYLESHEET, report),
-        demo,
-        serve::not_found,
+    let modules = tetsu_tenancy::router(tenants, demo, assets::STYLESHEET, report).merge(
+        tetsu_identity::router(tetsu_identity::postgres_store(pool), operators),
     );
+    let app = serve::app(modules, demo, serve::not_found);
     let listener = tokio::net::TcpListener::bind(address)
         .await
         .map_err(|error| format!("could not listen on {address}: {error}"))?;
@@ -206,6 +206,21 @@ async fn ready(local: &settings::Local) -> Result<(tokio::net::TcpListener, axum
         .map_err(|error| format!("could not read the listening address: {error}"))?;
     tracing::info!("serving on http://{bound}");
     Ok((listener, app))
+}
+
+/// What Identity's operator pages need: their passkeys belong to the site's own origin, the only one that may send
+/// them a state-changing request.
+fn operator_pages(local: &settings::Local, demo: bool) -> Result<tetsu_identity::Web, String> {
+    local.beside("DATABASE_URL", &["TETSU_ORIGIN"])?;
+    let origin = settings::origin(|name| local.var(name))?;
+    Ok(tetsu_identity::Web {
+        party: tetsu_identity::RelyingParty::new(&origin).map_err(|error| error.to_string())?,
+        origins: tetsu_identity::Origins::parse(&[&origin]).map_err(|error| error.to_string())?,
+        demo,
+        stylesheet: assets::STYLESHEET,
+        script: assets::PASSKEY_SCRIPT,
+        report,
+    })
 }
 
 /// Logs what a module reports for the operator, as an error on the request it happened in.

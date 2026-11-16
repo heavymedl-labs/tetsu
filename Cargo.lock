@@ -5085,6 +5085,8 @@ dependencies = [
 name = "tetsu-identity"
 version = "0.1.0"
 dependencies = [
+ "askama",
+ "axum",
  "deadpool-postgres",
  "getrandom 0.4.3",
  "passkey",

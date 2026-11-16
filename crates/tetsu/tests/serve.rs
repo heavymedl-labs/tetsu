@@ -30,7 +30,8 @@ mod support {
             .args(args)
             .env("DATABASE_URL", settings.url())
             .env("DATABASE_TLS", "disable")
-            .env("TETSU_DEMO", "true");
+            .env("TETSU_DEMO", "true")
+            .env("TETSU_ORIGIN", "http://localhost:8080");
         // A developer's or CI's own OpenTelemetry settings never reach a test server.
         for (name, _) in std::env::vars_os() {
             if name.to_string_lossy().starts_with("OTEL_") {
@@ -318,6 +319,29 @@ use support::{
 };
 use tetsu_postgres::test_support::fresh_database;
 
+/// The operator's sign-in page is served, under a policy that lets it run Tetsu's own script, and the script it
+/// names is served as JavaScript.
+#[tokio::test]
+async fn the_sign_in_page_loads_its_script() {
+    let database = fresh_database().await.expect("a test database");
+    ready(&database);
+    let server = start(&database);
+    let page = get(&server, "/ops/sign-in");
+    assert!(page.starts_with("HTTP/1.1 200"), "{page}");
+    assert!(page.contains("script-src 'self'"), "{page}");
+    let (_, after) = page
+        .split_once("<script type=\"module\" src=\"")
+        .expect("a script");
+    let script = get(&server, after.split('"').next().unwrap_or_default());
+    assert!(script.starts_with("HTTP/1.1 200"), "{script}");
+    assert!(
+        script
+            .to_ascii_lowercase()
+            .contains("content-type: text/javascript"),
+        "{script}"
+    );
+}
+
 #[tokio::test]
 async fn a_visitor_sees_a_tenants_page_tetsus_page_and_not_found_elsewhere() {
     let database = fresh_database().await.expect("a test database");
@@ -484,6 +508,20 @@ async fn it_refuses_to_start_while_a_tenant_holds_a_reserved_address() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("/login"), "{stderr}");
     assert!(stderr.contains("reserved"), "{stderr}");
+}
+
+/// The operator pages need the site's own origin, for their passkeys and to tell their requests from another
+/// site's, so serving refuses to start without it.
+#[tokio::test]
+async fn it_refuses_to_start_without_its_origin() {
+    let database = fresh_database().await.expect("a test database");
+    let output = tetsu(&database, &["serve"])
+        .env_remove("TETSU_ORIGIN")
+        .output()
+        .expect("the binary runs");
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("TETSU_ORIGIN must be set"), "{stderr}");
 }
 
 #[tokio::test]

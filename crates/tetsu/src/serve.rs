@@ -144,8 +144,8 @@ fn html_body(status: StatusCode, body: Option<Bytes>) -> Response {
 }
 
 /// Tetsu's own routes. Every route the site adds goes here, never straight into [`app`], and each starts with a
-/// name no tenant may hold, which a test checks, so none hides a tenant. Routes in the modules' routers are not
-/// checked yet; #20, the first module to add top-level routes, adds that check.
+/// name no tenant may hold, which a test checks, so none hides a tenant. Identity's routes are checked the same
+/// way.
 fn site_routes(demo: bool) -> Vec<(&'static str, MethodRouter)> {
     // The root page depends only on `demo` and the stylesheet's name, which hold while the process runs, so it is
     // rendered once here rather than on every request. Each response shares its bytes.
@@ -490,6 +490,15 @@ mod tests {
             if !segment.is_empty() {
                 assert!(tetsu_tenancy::Slug::parse(segment).is_err(), "{path}");
             }
+        }
+    }
+
+    /// Identity's pages are routes of a module, which must not hide a tenant either.
+    #[test]
+    fn every_route_identity_serves_starts_with_a_reserved_name() {
+        for path in tetsu_identity::PATHS {
+            let segment = path.trim_start_matches('/').split('/').next().unwrap_or("");
+            assert!(tetsu_tenancy::Slug::parse(segment).is_err(), "{path}");
         }
     }
 

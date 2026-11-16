@@ -37,14 +37,16 @@ pub fn files(json: &str) -> Result<Vec<(String, String)>, String> {
         .collect()
 }
 
-/// The brand files (docs/brand) a page links to, by source and by the constant that names each one's URL.
-const BRAND: [(&str, &str); 2] = [
+/// The files a page links to by name, the brand files (docs/brand) and the operator pages' script, by source and by
+/// the constant that names each one's URL.
+const LINKED: [(&str, &str); 3] = [
     ("../docs/brand/tetsu-avatar.svg", "ICON"),
     ("../docs/brand/tetsu-avatar.png", "TOUCH_ICON"),
+    ("src/passkey/ops.ts", "PASSKEY_SCRIPT"),
 ];
 
 /// The Rust source of the asset table: each built file's URL, content type, and bytes, read from `root` with
-/// `include_bytes!`, a constant for each brand file the build has, and the shared stylesheet's URL as
+/// `include_bytes!`, a constant for each linked file the build has, and the shared stylesheet's URL as
 /// `STYLESHEET`.
 ///
 /// # Errors
@@ -68,7 +70,7 @@ pub fn table(root: &str, files: &[(String, String)]) -> Result<String, String> {
             Ok::<_, std::fmt::Error>(entries)
         })
         .map_err(|error| error.to_string())?;
-    let brand: String = BRAND
+    let linked: String = LINKED
         .iter()
         .filter_map(|(source, name)| {
             let file = files.iter().find(|(found, _)| found == source)?;
@@ -79,7 +81,7 @@ pub fn table(root: &str, files: &[(String, String)]) -> Result<String, String> {
         })
         .collect();
     Ok(format!(
-        "pub const ASSETS: &[Asset] = &[\n{entries}];\n{brand}pub const STYLESHEET: &str = {stylesheet:?};\n"
+        "pub const ASSETS: &[Asset] = &[\n{entries}];\n{linked}pub const STYLESHEET: &str = {stylesheet:?};\n"
     ))
 }
 
@@ -165,7 +167,7 @@ mod tests {
     }
 
     #[test]
-    fn the_table_names_the_brand_files_it_finds() {
+    fn the_table_names_the_linked_files_it_finds() {
         let files = [
             (
                 "src/tetsu.css".to_string(),
@@ -179,8 +181,16 @@ mod tests {
                 "../docs/brand/tetsu-avatar.png".to_string(),
                 "assets/tetsu-avatar-Gh4.png".to_string(),
             ),
+            (
+                "src/passkey/ops.ts".to_string(),
+                "assets/passkey-Ij5.js".to_string(),
+            ),
         ];
         let table = table("/build", &files).unwrap();
+        assert!(
+            table.contains("pub const PASSKEY_SCRIPT: &str = \"/assets/passkey-Ij5.js\";\n"),
+            "{table}"
+        );
         assert!(
             table.contains("pub const ICON: &str = \"/assets/tetsu-avatar-Ef3.svg\";\n"),
             "{table}"
