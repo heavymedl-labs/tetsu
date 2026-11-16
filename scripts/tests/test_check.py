@@ -409,7 +409,7 @@ class CheckScript(unittest.TestCase):
             self.assertEqual(self.check().returncode, 0)
             self.assertEqual(self.slow_stages_ran(), (True, True), changed)
 
-    def test_ci_never_reuses_a_machines_pass(self):
+    def test_ci_never_reuses_a_machines_pass_when_rust_changed(self):
         self.assertEqual(self.check().returncode, 0)
         self.slow_stages_ran()
         self.assertEqual(self.check(CI="true", DIFF_QUIET="1").returncode, 0)
