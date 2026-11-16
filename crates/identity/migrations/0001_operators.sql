@@ -119,13 +119,14 @@ GRANT SELECT (
 INSERT (token_hash, realm, operator_id, started_at, last_seen_at, ends_at),
 UPDATE (last_seen_at),
 DELETE ON sessions TO tetsu_identity_lookup;
+-- Replacing a link reads every column its upsert sets, issued_at included.
 GRANT SELECT, INSERT, DELETE ON enrollments TO tetsu_identity_lookup;
 GRANT UPDATE (token_hash, issued_at, ends_at) ON enrollments
 TO tetsu_identity_lookup;
 GRANT SELECT (id, name, user_handle, created_at, disabled_at),
 UPDATE (disabled_at)
 ON operators TO tetsu_identity_lookup;
-GRANT SELECT (credential_id, operator_id),
+GRANT SELECT (operator_id),
 INSERT (credential_id, operator_id, passkey, created_at)
 ON passkeys TO tetsu_identity_lookup;
 GRANT SELECT, INSERT, DELETE ON ceremonies TO tetsu_identity_lookup;
@@ -264,30 +265,28 @@ AS $$
     SELECT coalesce(bool_or(ended.live), false) FROM ended
 $$;
 
--- Issues an operator's enrollment link, replacing any earlier one, and says
--- what it did: issued; disabled, for an operator issued none; enrolled, for
--- one who has a passkey already and adds another only after signing in
--- (v5.0.0-6.4.1); or null for one that does not exist. It takes the
--- operator's row, so a passkey being stored for them is seen, which holds only
--- under read committed, so it refuses any other level with TD002. It reads the
--- clock once, so every link lasts exactly an hour.
-CREATE FUNCTION issue_enrollment(wanted_hash bytea, wanted_operator bigint)
+-- Where an operator stands for enrollment, after taking their row for update,
+-- since both callers change what the operator holds: open, disabled, enrolled
+-- for one who holds a passkey already, or null for one who does not exist.
+-- What it checks stays true until the caller commits, under read committed
+-- only, so it refuses any other level with TD002. Only the functions below
+-- call it; no role may.
+CREATE FUNCTION enrolling(wanted_operator bigint)
 RETURNS text
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
-    at timestamptz;
     was timestamptz;
 BEGIN
     IF current_setting('transaction_isolation') <> 'read committed' THEN
-        RAISE EXCEPTION 'issuing a link needs read committed'
+        RAISE EXCEPTION 'enrolling needs read committed'
         USING ERRCODE = 'TD002';
     END IF;
     SELECT o.disabled_at INTO was
     FROM identity.operators AS o
     WHERE o.id = wanted_operator
-    FOR SHARE;
+    FOR NO KEY UPDATE;
     IF NOT FOUND THEN
         RETURN null;
     ELSIF was IS NOT NULL THEN
@@ -296,6 +295,32 @@ BEGIN
         SELECT FROM identity.passkeys AS p WHERE p.operator_id = wanted_operator
     ) THEN
         RETURN 'enrolled';
+    END IF;
+    RETURN 'open';
+END
+$$;
+
+-- Issues an operator's enrollment link, replacing any earlier one, and says
+-- what it did: issued; disabled, for an operator issued none; enrolled, for
+-- one who has a passkey already and adds another only after signing in
+-- (v5.0.0-6.4.1); or null for one that does not exist. It takes the
+-- operator's row for update, since it replaces what they hold, so a passkey
+-- being stored for them is seen, and a ceremony being begun from the old link
+-- finishes first and then ends with it. That holds only under read committed,
+-- so it refuses any other level with TD002. It reads the clock once, so every
+-- link lasts exactly an hour.
+CREATE FUNCTION issue_enrollment(wanted_hash bytea, wanted_operator bigint)
+RETURNS text
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    at timestamptz;
+    standing text;
+BEGIN
+    standing := identity.enrolling(wanted_operator);
+    IF standing IS DISTINCT FROM 'open' THEN
+        RETURN standing;
     END IF;
     at := clock_timestamp();
     -- A ceremony begun from the link this one replaces ends with it.
@@ -481,24 +506,11 @@ LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
-    was timestamptz;
+    standing text;
 BEGIN
-    IF current_setting('transaction_isolation') <> 'read committed' THEN
-        RAISE EXCEPTION 'storing a passkey needs read committed'
-        USING ERRCODE = 'TD002';
-    END IF;
-    SELECT o.disabled_at INTO was
-    FROM identity.operators AS o
-    WHERE o.id = wanted_operator
-    FOR NO KEY UPDATE;
-    IF NOT FOUND THEN
-        RETURN null;
-    ELSIF was IS NOT NULL THEN
-        RETURN 'disabled';
-    ELSIF EXISTS (
-        SELECT FROM identity.passkeys AS p WHERE p.operator_id = wanted_operator
-    ) THEN
-        RETURN 'enrolled';
+    standing := identity.enrolling(wanted_operator);
+    IF standing IS DISTINCT FROM 'open' THEN
+        RETURN standing;
     ELSIF
         octet_length(wanted_credential) NOT BETWEEN 16 AND 1023
         OR octet_length(wanted_passkey::text) > 8192
@@ -675,6 +687,7 @@ ALTER FUNCTION start_session(bytea, text, bigint)
 OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION use_session(bytea, text) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION end_session(bytea, text) OWNER TO tetsu_identity_lookup;
+ALTER FUNCTION enrolling(bigint) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION issue_enrollment(bytea, bigint) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION list_operators() OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION enrollee(bytea) OWNER TO tetsu_identity_lookup;

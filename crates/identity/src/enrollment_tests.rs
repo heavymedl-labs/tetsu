@@ -176,6 +176,34 @@ async fn redemptions(database: &TestDatabase) -> Vec<Value> {
         .collect()
 }
 
+/// How many passkeys, links, ceremonies, and sessions are stored, in that order.
+async fn held(database: &TestDatabase) -> [i64; 4] {
+    let mut counts = [0; 4];
+    for (count, table) in
+        counts
+            .iter_mut()
+            .zip(["passkeys", "enrollments", "ceremonies", "sessions"])
+    {
+        *count = number(database, &format!("SELECT count(*) FROM identity.{table}")).await;
+    }
+    counts
+}
+
+/// What creation options ask of a passkey and show of its account: whether it must be discoverable, both ways
+/// `WebAuthn` asks, whether it must verify the user, and the account's name and display name.
+fn asked_for(options: &str) -> [Value; 5] {
+    let options: Value = serde_json::from_str(options).expect("JSON");
+    let selection = &options["publicKey"]["authenticatorSelection"];
+    let user = &options["publicKey"]["user"];
+    [
+        selection["residentKey"].clone(),
+        selection["requireResidentKey"].clone(),
+        selection["userVerification"].clone(),
+        user["name"].clone(),
+        user["displayName"].clone(),
+    ]
+}
+
 /// The link opens a ceremony without being used up; finishing stores the passkey, uses up the link and the
 /// ceremony, records it, and signs no one in. The options ask for a discoverable passkey that verifies the user.
 #[tokio::test]
@@ -186,11 +214,16 @@ async fn an_operator_enrolls_their_first_passkey_once() {
         .begin_enrollment(&party, &link)
         .await
         .expect("begins");
-    let options: Value = serde_json::from_str(&ceremony.options).expect("JSON");
-    let selection = &options["publicKey"]["authenticatorSelection"];
-    assert_eq!(selection["residentKey"], json!("required"));
-    assert_eq!(selection["requireResidentKey"], json!(true));
-    assert_eq!(selection["userVerification"], json!("required"));
+    assert_eq!(
+        asked_for(&ceremony.options),
+        [
+            json!("required"),
+            json!(true),
+            json!("required"),
+            json!("Tetsu operator · Kurt Medley"),
+            json!("Kurt Medley"),
+        ]
+    );
     assert_eq!(
         number(&database, "SELECT count(*) FROM identity.enrollments").await,
         1,
@@ -204,15 +237,7 @@ async fn an_operator_enrolls_their_first_passkey_once() {
             .await,
         Ok(kurt)
     );
-    for (table, left) in [
-        ("passkeys", 1),
-        ("enrollments", 0),
-        ("ceremonies", 0),
-        ("sessions", 0),
-    ] {
-        let count = number(&database, &format!("SELECT count(*) FROM identity.{table}")).await;
-        assert_eq!(count, left, "{table}");
-    }
+    assert_eq!(held(&database).await, [1, 0, 0, 0]);
     assert_eq!(
         operators
             .finish_enrollment(&party, &token, &response, &actor())
@@ -427,10 +452,44 @@ async fn a_change_while_enrolling_refuses_the_passkey() {
     }
 }
 
-/// A registration whose client says the passkey is not discoverable is refused, since signing in could never find
-/// it, and the link stays open for another device.
+/// Begins an enrollment from `link`, registers, and finishes with the response rewritten: `value` replaces the
+/// response's transports, or stands in for its extension results under the name `field`.
+async fn finish_rewritten(
+    operators: &Operators<PostgresOperators>,
+    party: &RelyingParty,
+    link: &str,
+    field: &str,
+    value: Value,
+) -> Result<OperatorId, Error> {
+    let ceremony = operators
+        .begin_enrollment(party, link)
+        .await
+        .expect("begins");
+    let mut response: Value =
+        serde_json::from_str(&register(&ceremony.options, ORIGIN, true).await).expect("JSON");
+    if field == "transports" {
+        response["response"][field] = value;
+    } else {
+        let _ = response
+            .as_object_mut()
+            .map(|fields| fields.remove("clientExtensionResults"));
+        response[field] = value;
+    }
+    operators
+        .finish_enrollment(
+            party,
+            &ceremony.token.to_text(),
+            &response.to_string(),
+            &actor(),
+        )
+        .await
+}
+
+/// A registration whose client says the passkey is not discoverable is refused, under either name webauthn-rs reads
+/// it by, since signing in could never find it; so is one listing a transport twice or one `WebAuthn` does not
+/// name. The link stays open for another try, and a registration listing all six transports there are is stored.
 #[tokio::test]
-async fn a_passkey_that_is_not_discoverable_is_refused() {
+async fn an_undiscoverable_or_padded_registration_is_refused() {
     let (operators, database, _, link) = with_link().await;
     let party = party();
     let mut finished = Vec::new();
@@ -440,39 +499,28 @@ async fn a_passkey_that_is_not_discoverable_is_refused() {
             json!({"credProps": {"rk": false}}),
         ),
         ("extensions", json!({"credProps": {"rk": false}})),
-        ("transports", json!(vec!["usb"; 8])),
+        ("transports", json!(["usb", "usb"])),
+        ("transports", json!(["made-up"])),
+        (
+            "transports",
+            json!(["usb", "nfc", "ble", "internal", "hybrid", "test"]),
+        ),
     ] {
-        let ceremony = operators
-            .begin_enrollment(&party, &link)
-            .await
-            .expect("begins");
-        let mut response: Value =
-            serde_json::from_str(&register(&ceremony.options, ORIGIN, true).await).expect("JSON");
-        if field == "transports" {
-            response["response"][field] = value;
-        } else {
-            let _ = response
-                .as_object_mut()
-                .map(|fields| fields.remove("clientExtensionResults"));
-            response[field] = value;
-        }
-        finished.push(
-            operators
-                .finish_enrollment(
-                    &party,
-                    &ceremony.token.to_text(),
-                    &response.to_string(),
-                    &actor(),
-                )
-                .await,
-        );
+        finished.push(finish_rewritten(&operators, &party, &link, field, value).await);
     }
+    let refused = not_enrolling();
     assert_eq!(
         finished,
-        [not_enrolling(), not_enrolling(), not_enrolling()]
+        [
+            refused.clone(),
+            refused.clone(),
+            refused.clone(),
+            refused,
+            Ok(OperatorId::new(1))
+        ]
     );
     assert_eq!(
-        number(&database, "SELECT count(*) FROM identity.enrollments").await,
+        number(&database, "SELECT count(*) FROM identity.passkeys").await,
         1
     );
 }
@@ -804,7 +852,7 @@ async fn unreadable_enrollees_are_storage_failures() {
         ),
         (
             "operator_id bigint, user_handle bytea, name integer",
-            "1::bigint, '\\x00'::bytea, 1",
+            "1::bigint, uuid_send(gen_random_uuid()), 1",
         ),
     ] {
         let (operators, database, _, link) = with_link().await;
@@ -818,6 +866,18 @@ async fn unreadable_enrollees_are_storage_failures() {
         let begun = failure(operators.begin_enrollment(&party, &link).await.map(drop));
         assert!(begun.starts_with("storage failed: "));
     }
+    let (operators, database, _, link) = with_link().await;
+    replace(
+        &database,
+        "enrollee(bytea)",
+        "TABLE (operator_id bigint, user_handle bytea, name text)",
+        "SELECT 1::bigint, '\\x00'::bytea, 'Kurt'",
+    )
+    .await;
+    assert_eq!(
+        failure(operators.begin_enrollment(&party, &link).await.map(drop)),
+        "storage failed: a user handle is not 16 bytes"
+    );
 }
 
 /// An unreadable ceremony, a column of the wrong type or an enrollment with no link, is a storage failure.

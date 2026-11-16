@@ -538,14 +538,11 @@ fn begun(rows: &[Row]) -> Result<bool, Error> {
 /// The operator a link names, with the user handle and name a registration needs.
 fn enrollee_from(row: &Row) -> Result<Enrollee, Error> {
     let bytes: Vec<u8> = column(row, "user_handle")?;
-    // Identity's function writes the handle with uuid_send, which always gives 16 bytes, so copying needs no check.
-    let mut user_handle = [0; 16];
-    for (slot, byte) in user_handle.iter_mut().zip(bytes) {
-        *slot = byte;
-    }
     Ok(Enrollee {
         operator: OperatorId::new(column(row, "operator_id")?),
-        user_handle,
+        user_handle: bytes
+            .try_into()
+            .map_err(|_| Error::Storage("a user handle is not 16 bytes".to_string()))?,
         name: column(row, "name")?,
     })
 }

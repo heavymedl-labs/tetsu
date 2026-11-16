@@ -1063,3 +1063,57 @@ async fn a_disable_or_second_begin_waits_for_a_begin_being_written() {
         assert_eq!(ceremonies, i64::from(second != "disable"), "{second}");
     }
 }
+
+/// A new link takes the operator's row for update, so a begin from the old link waits for it, then finds its link
+/// gone and keeps no ceremony.
+#[tokio::test]
+async fn a_begin_waits_for_a_new_link_being_written() {
+    let database = ready().await;
+    let pool = pool(&database.as_app()).expect("a pool");
+    let operators = postgres_store(pool.clone());
+    let kurt = operators
+        .create(&name("Kurt Medley"), &actor())
+        .await
+        .expect("creates");
+    let old = operators
+        .enroll(kurt, &actor())
+        .await
+        .expect("issues")
+        .to_text();
+    let mut client = pool.get().await.expect("a connection");
+    let issuing = ModuleTransaction::begin(&mut client, "identity")
+        .await
+        .expect("begins");
+    issuing
+        .execute(
+            "SELECT identity.issue_enrollment(sha256('new'::bytea), 1)",
+            &[],
+        )
+        .await
+        .expect("issues");
+    let other = pool.clone();
+    let beginning = tokio::spawn(async move {
+        let mut client = other.get().await.expect("a connection");
+        let racing = ModuleTransaction::begin(&mut client, "identity")
+            .await
+            .expect("begins");
+        let begun: bool = racing
+            .query_one(
+                "SELECT identity.begin_enrollment(sha256('t'::bytea), 1, sha256(decode($1, 'hex')), '{}')",
+                &[&old],
+            )
+            .await
+            .expect("answers")
+            .try_get(0)
+            .expect("a boolean");
+        racing.commit().await.expect("commits");
+        begun
+    });
+    waits_for_a_lock(&database).await;
+    issuing.commit().await.expect("commits");
+    assert!(!beginning.await.expect("finishes"));
+    assert_eq!(
+        number(&database, "SELECT count(*) FROM identity.ceremonies").await,
+        0
+    );
+}

@@ -61,17 +61,24 @@ ends their sessions. `postgres_store(pool)` returns it over Postgres.
 - **Enrolling a first passkey** takes two requests (`v5.0.0-6.4.1`). Beginning reads the link, which must be open
   and name an enabled operator with no passkey, and keeps a ceremony under a token only the browser holds, for ten
   minutes but never past the link. Beginning takes the operator's row, so a disable at the same moment ends what
-  it stores. A link holds one ceremony, by a unique index; a newer one, or a new link, replaces it. Nothing is used up, so a
-  scanner that opens the link, or an abandoned attempt, costs nothing. Finishing takes the ceremony once, verifies
-  the registration through `webauthn-rs` against the realm's exact origin, with user verification, and then, in
-  one transaction holding the operator's row, stores the passkey and uses up the link. It refuses an operator
-  disabled, given a new link, or enrolled by another tab meanwhile, a credential another passkey has, a passkey
-  its browser says is not discoverable or that lists more transports than exist, and one larger than the table
-  keeps, measured as the table measures it, and records `identity.enrollment_redeemed`
-  with the outcome, the reason, and the credential ID. Every refusal reads the same to the browser. The operator
-  is not signed in: signing in with the new passkey proves it works. Passkeys are discoverable, so signing in
-  needs no name, and the account picker names each as an operator's. The AAGUID, which names a passkey's provider
-  but is unverified without attestation, is kept from step 4d, when the browser's authenticator data arrives.
+  it stores, and a new link waits for it and then ends it. A link holds one ceremony, by a unique index; a newer
+  one replaces it. Nothing is used up, so a scanner that opens the link, or an abandoned attempt, costs nothing.
+  Finishing takes the ceremony once, verifies the registration through `webauthn-rs` against the realm's origin,
+  its scheme, host, and port alike, with user verification, and then, in one transaction holding the operator's
+  row, stores the passkey and uses up the link. It refuses an operator disabled, given a new link, or enrolled by
+  another tab meanwhile; a credential another passkey has; a passkey its browser says is not discoverable, or that
+  lists a transport twice or one `WebAuthn` does not name; and one larger than the table keeps, measured as the
+  table measures it. Each is recorded as `identity.enrollment_redeemed` with the outcome, the reason, and the
+  credential ID. Every refusal reads the same to the browser. The operator is not signed in: signing in with the
+  new passkey proves it works. Passkeys are discoverable, so signing in needs no name, and the account picker
+  shows each as "Tetsu operator · Name", the label first, where an authenticator's 64-byte cut never reaches it.
+  The AAGUID, which names a passkey's provider but is unverified without attestation, is kept from step 4d, when
+  the browser's authenticator data arrives.
+- **What `webauthn-rs` owns.** Its challenge comes from its own random source, which panics rather than failing
+  cleanly if the operating system's cannot be read; and serialising a passkey can panic inside the library on a
+  malformed attestation certificate. A stored ceremony that reads but holds the wrong state fails as the browser's
+  registration would, since only Identity writes it. Without attestation, a registration's flags and origin are
+  the client's word: the guarantees that bind a person to a passkey come at sign-in, where the authenticator signs.
 - **Read committed** is required, not assumed, by every function that waits on an operator's row and then checks
   what changed: issuing a link, beginning and finishing an enrollment, disabling, and ending sessions refuse any
   other level (TD002). Such a refusal is a fault of the calling code, so it surfaces as a storage error.

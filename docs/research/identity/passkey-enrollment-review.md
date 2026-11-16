@@ -9,7 +9,8 @@ The changes marked "now" land in the commit that adds this page; the rest feed t
 
 The design follows the W3C specification and `webauthn-rs`'s own guidance. The link is used up only when a
 passkey is stored, atomically, under the operator's row lock. Beginning has no side effect on the link. State
-stays on the server, keyed by a hashed random token. The relying party is the exact origin, and user verification
+stays on the server, keyed by a hashed random token. The relying party is the origin's scheme, host, and port,
+and user verification
 is required. Pinned races under read committed broke none of the three invariants: one first passkey per link, no
 passkey for a disabled operator, and no link for an operator who has one.
 
@@ -100,7 +101,8 @@ link holder could forge it.
   ([PostgreSQL 18, CREATE FUNCTION](https://www.postgresql.org/docs/18/sql-createfunction.html)).
 - **The account picker.** Every realm shares one passkey domain until Tetsu has domains (ADR-0061), so an
   operator's passkey appears beside demo staff and customers' passkeys. Its name now reads like
-  "Kurt Medley (Tetsu operator)", with the plain name as its display name. Renaming a passkey later works only in
+  "Tetsu operator · Kurt Medley", the label first, since authenticators may keep only the first 64 bytes of a name,
+  and the plain name as its display name. Renaming a passkey later works only in
   Chrome and Edge ([Chrome, Signal API](https://developer.chrome.com/docs/identity/webauthn-signal-api)).
 - **Tidiness.** A disable ends the operator's ceremonies as it ends their sessions and link. Two lookups read the
   clock once per statement, as their comments promised.
@@ -141,7 +143,8 @@ remove-passkeys <id>`, recorded and ending the operator's sessions, or `enroll -
 - Beginning changes nothing about the link, so a mail scanner or an abandoned attempt costs nothing.
 - The ceremony is single use, deleted whatever happens, and its state never reaches the browser, the safe use of
   `danger-allow-state-serialisation` that `webauthn-rs` documents.
-- The relying party is the exact origin, refusing other ports, subdomains, and addresses, and requires user
+- The relying party is the origin's scheme, host, and port, refusing other ports, subdomains, and addresses, and
+  requires user
   verification. The user handle is random and holds nothing personal.
 - Every refusal reads the same to the browser, while storage faults are told apart.
 - No one is signed in after enrolling, as NIST and OWASP advise.
