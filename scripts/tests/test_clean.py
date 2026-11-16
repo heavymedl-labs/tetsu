@@ -14,7 +14,7 @@ DAY = 24 * 3600
 NOW = 1_800_000_000.0
 KEPT = clean.KEPT_COPIES
 SETTLE_DAYS = clean.SETTLE // DAY
-# One copy more than are kept, newest first.
+# One copy more than are kept, newest first, so exactly one is pruned.
 HASHES = [f"{index:016x}" for index in range(KEPT + 1)]
 
 
