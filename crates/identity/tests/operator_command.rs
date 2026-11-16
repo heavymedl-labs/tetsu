@@ -5,46 +5,23 @@ use std::fmt::Write;
 
 use serde_json::{Value, json};
 
-use tetsu_identity::{
-    Actor, Disabling, Error, Identity, OperatorId, OperatorName, Removal, SessionToken,
-    postgres_store,
-};
-use tetsu_postgres::test_support::{TestDatabase, migrated_database};
-use tetsu_postgres::{ModuleTransaction, connect, pool};
+use tetsu_identity::{Disabling, Error, OperatorId, Removal, postgres_store};
+use tetsu_postgres::test_support::TestDatabase;
+use tetsu_postgres::{ModuleTransaction, Pool, connect, pool};
 
 #[cfg(test)]
 mod support {
     use super::*;
 
-    /// Starts an operator's session as a passkey sign-in would, as the test server's administrator, and returns its
-    /// token: only the sign-in function may start one, so Identity's role cannot call `start_session` (ADR-0048).
-    pub async fn signed_in(database: &TestDatabase, operator: OperatorId) -> SessionToken {
-        let mut bytes = [0u8; 32];
-        getrandom::fill(&mut bytes).expect("random bytes");
-        let text = bytes.iter().fold(String::new(), |mut text, byte| {
-            let _ = std::fmt::Write::write_fmt(&mut text, format_args!("{byte:02x}"));
-            text
-        });
-        connect(database)
+    /// A migrated database holding Kurt Medley, operator 1, and a pool over it as the application role.
+    pub async fn kurt_and_pool() -> (TestDatabase, Pool) {
+        let database = ready().await;
+        let pool = pool(&database.as_app()).expect("a pool");
+        postgres_store(pool.clone())
+            .create(&name("Kurt Medley"), &actor())
             .await
-            .expect("connects")
-            .execute(
-                "SELECT identity.start_session(sha256(decode($1, 'hex')), 'operator', $2)",
-                &[&text, &operator.get()],
-            )
-            .await
-            .expect("starts");
-        SessionToken::parse(&text).expect("a token")
-    }
-
-    pub async fn ready() -> TestDatabase {
-        migrated_database(&[&Identity])
-            .await
-            .expect("a migrated test database")
-    }
-
-    pub fn name(name: &str) -> OperatorName {
-        OperatorName::parse(name).expect("a name")
+            .expect("creates");
+        (database, pool)
     }
 
     /// What a disable reports.
@@ -54,11 +31,6 @@ mod support {
             sessions_ended,
             links_ended,
         }
-    }
-
-    /// Who runs the operator command in these tests.
-    pub fn actor() -> Actor {
-        Actor::parse("kurt@workstation").expect("an actor")
     }
 
     /// One number the database answers, read past row-level security as the test's own superuser.
@@ -138,21 +110,17 @@ mod support {
     }
 }
 
-use support::{
-    actor, as_admin, disabled, events, name, number, passkey_for, ready, signed_in,
-    waits_for_a_lock,
-};
+#[cfg(test)]
+mod common;
+
+use common::{actor, migrated, name, ready, signed_in, with_kurt};
+use support::{as_admin, disabled, events, kurt_and_pool, number, passkey_for, waits_for_a_lock};
 
 /// The link's token is stored only as its SHA-256 hash, is good for an hour, and a new one replaces the last; each
 /// issue is recorded with the operator's ID and nothing of the token (ADR-0040, ADR-0047).
 #[tokio::test]
 async fn an_enrollment_link_is_stored_hashed_for_an_hour_and_replaced() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, operators, kurt) = with_kurt().await;
     let first = operators.enroll(kurt, &actor()).await.expect("issues");
     let second = operators
         .enroll(kurt, &actor())
@@ -191,12 +159,7 @@ async fn an_enrollment_link_is_stored_hashed_for_an_hour_and_replaced() {
 /// no session and is issued no link (`v5.0.0-7.4.2`).
 #[tokio::test]
 async fn a_disabled_operator_is_signed_out_and_signs_in_nowhere() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, operators, kurt) = with_kurt().await;
     for _ in 0..2 {
         signed_in(&database, kurt).await;
     }
@@ -237,8 +200,7 @@ async fn a_disabled_operator_is_signed_out_and_signs_in_nowhere() {
 /// (`v5.0.0-16.3.3`).
 #[tokio::test]
 async fn an_unknown_operator_is_issued_no_link() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    let (database, operators) = migrated().await;
     let nobody = OperatorId::parse("42").expect("an ID");
     assert_eq!(
         operators.enroll(nobody, &actor()).await.map(|_| ()),
@@ -277,12 +239,7 @@ async fn an_unknown_operator_is_issued_no_link() {
 /// (`v5.0.0-7.4.5`).
 #[tokio::test]
 async fn sessions_end_for_one_operator_or_all() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, operators, kurt) = with_kurt().await;
     let lee = operators
         .create(&name("Lee Park"), &actor())
         .await
@@ -320,12 +277,7 @@ async fn sessions_end_for_one_operator_or_all() {
 /// Operators are listed oldest first, with whether each is disabled.
 #[tokio::test]
 async fn operators_are_listed_oldest_first() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (_database, operators, kurt) = with_kurt().await;
     let lee = operators
         .create(&name("Lee Park"), &actor())
         .await
@@ -437,12 +389,7 @@ async fn ending_sessions_waits_for_a_sign_in_being_written() {
 /// An operator enabled again signs in afresh: their sessions stayed ended, and each change is recorded.
 #[tokio::test]
 async fn an_operator_enabled_again_signs_in_afresh() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, operators, kurt) = with_kurt().await;
     signed_in(&database, kurt).await;
     assert_eq!(
         operators.enable(kurt, &actor()).await,
@@ -473,12 +420,7 @@ async fn an_operator_enabled_again_signs_in_afresh() {
 /// Two links issued at the same moment both succeed, and the operator holds one: whichever was stored last.
 #[tokio::test]
 async fn links_issued_at_once_leave_one() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, operators, kurt) = with_kurt().await;
     let by = actor();
     let (first, second) = tokio::join!(operators.enroll(kurt, &by), operators.enroll(kurt, &by));
     let held = |token: &str| {
@@ -514,12 +456,7 @@ async fn identitys_role_cannot_read_enrollment_links() {
 /// change whose audit event cannot be recorded, which rolls the change back.
 #[tokio::test]
 async fn each_command_fails_as_storage_when_the_database_refuses_it() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, operators, kurt) = with_kurt().await;
     as_admin(
         &database,
         "REVOKE EXECUTE ON FUNCTION identity.issue_enrollment(bytea, bigint),
@@ -565,12 +502,7 @@ async fn each_command_fails_as_storage_when_the_database_refuses_it() {
 /// A function that answers in the wrong type is a storage failure, never a guess.
 #[tokio::test]
 async fn an_answer_of_the_wrong_type_is_a_storage_failure() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, operators, kurt) = with_kurt().await;
     let mut replaced = String::new();
     for (function, arguments) in [
         ("issue_enrollment", "bytea, bigint"),
@@ -612,8 +544,7 @@ async fn a_listed_column_of_the_wrong_type_is_a_storage_failure() {
         ("link_minutes", "bigint", "null"),
     ];
     for wrong in 0..right.len() {
-        let database = ready().await;
-        let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+        let (database, operators) = migrated().await;
         let columns: Vec<String> = right
             .iter()
             .enumerate()
@@ -669,12 +600,7 @@ async fn a_disable_answer_of_the_wrong_type_is_a_storage_failure() {
             "SELECT true, 0::bigint, ''none''",
         ),
     ] {
-        let database = ready().await;
-        let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-        let kurt = operators
-            .create(&name("Kurt Medley"), &actor())
-            .await
-            .expect("creates");
+        let (database, operators, kurt) = with_kurt().await;
         as_admin(
             &database,
             &format!(
@@ -701,12 +627,7 @@ async fn a_disable_answer_of_the_wrong_type_is_a_storage_failure() {
 /// there when begins overlap.
 #[tokio::test]
 async fn changes_that_wait_on_an_operator_need_read_committed() {
-    let database = ready().await;
-    let pool = pool(&database.as_app()).expect("a pool");
-    postgres_store(pool.clone())
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (_database, pool) = kurt_and_pool().await;
     let mut client = pool.get().await.expect("a connection");
     for call in [
         "SELECT * FROM identity.disable_operator(1)",
@@ -747,12 +668,7 @@ async fn changes_that_wait_on_an_operator_need_read_committed() {
 /// record says so.
 #[tokio::test]
 async fn spent_sessions_and_links_are_removed_but_not_counted() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, operators, kurt) = with_kurt().await;
     let spent = "SELECT identity.start_session(sha256('a'::bytea), 'operator', 1);
                  UPDATE identity.sessions SET last_seen_at = last_seen_at - interval '16 minutes';
                  SELECT identity.issue_enrollment(sha256('b'::bytea), 1);
@@ -794,12 +710,7 @@ async fn spent_sessions_and_links_are_removed_but_not_counted() {
 /// and answers that the passkey is unknown, not that another sign-in changed it.
 #[tokio::test]
 async fn a_sign_in_waiting_on_a_removal_finds_its_passkey_unknown() {
-    let database = ready().await;
-    let pool = pool(&database.as_app()).expect("a pool");
-    postgres_store(pool.clone())
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, pool) = kurt_and_pool().await;
     as_admin(&database, &passkey_for(1)).await;
     let mut admin = connect(&database).await.expect("connects");
     let removing = admin.transaction().await.expect("begins");
@@ -841,12 +752,7 @@ async fn a_sign_in_waiting_on_a_removal_finds_its_passkey_unknown() {
 /// A sign-in that names no operator signs no one in: it answers that the passkey is unknown.
 #[tokio::test]
 async fn a_sign_in_for_no_operator_signs_no_one_in() {
-    let database = ready().await;
-    let pool = pool(&database.as_app()).expect("a pool");
-    postgres_store(pool.clone())
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, pool) = kurt_and_pool().await;
     let passkey = r#"{"cred": {"counter": 0, "backup_eligible": false, "backup_state": false}}"#;
     as_admin(
         &database,
@@ -878,12 +784,7 @@ async fn a_sign_in_for_no_operator_signs_no_one_in() {
 /// live, rather than failing on the addition's tie to its session.
 #[tokio::test]
 async fn an_addition_begun_as_its_session_ends_is_refused() {
-    let database = ready().await;
-    let pool = pool(&database.as_app()).expect("a pool");
-    postgres_store(pool.clone())
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, pool) = kurt_and_pool().await;
     as_admin(
         &database,
         "SELECT identity.start_session(sha256('s'::bytea), 'operator', 1)",
@@ -1003,8 +904,7 @@ async fn an_operator_is_added_by_a_plain_name_alone() {
 /// second; the refusal is recorded, naming the operator who holds the name.
 #[tokio::test]
 async fn a_name_already_taken_is_refused_and_recorded() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    let (database, operators) = migrated().await;
     operators
         .create(&name("Kurt Medley"), &actor())
         .await
@@ -1023,8 +923,7 @@ async fn a_name_already_taken_is_refused_and_recorded() {
 /// it cannot yet see who holds the name.
 #[tokio::test]
 async fn a_name_taken_while_a_create_waits_is_refused() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    let (database, operators) = migrated().await;
     let mut admin = connect(&database).await.expect("connects");
     let writing = admin.transaction().await.expect("begins");
     writing
@@ -1087,12 +986,7 @@ async fn a_disable_waits_for_an_enable_being_written() {
 /// (`v5.0.0-6.4.1`). Each refusal records why.
 #[tokio::test]
 async fn an_enrolled_or_disabled_operator_is_issued_no_link() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, operators, kurt) = with_kurt().await;
     let lee = operators
         .create(&name("Lee Park"), &actor())
         .await
@@ -1132,12 +1026,7 @@ async fn an_enrolled_or_disabled_operator_is_issued_no_link() {
 /// not a link that has ended.
 #[tokio::test]
 async fn the_list_shows_passkeys_and_open_links() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, operators, kurt) = with_kurt().await;
     let lee = operators
         .create(&name("Lee Park"), &actor())
         .await
@@ -1277,12 +1166,7 @@ async fn a_begin_waits_for_a_new_link_being_written() {
 /// when there was nothing to remove, and refused for an operator who does not exist.
 #[tokio::test]
 async fn removing_passkeys_lets_an_operator_enroll_again() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, operators, kurt) = with_kurt().await;
     as_admin(&database, &passkey_for(kurt.get())).await;
     signed_in(&database, kurt).await;
     let removed = [
@@ -1338,12 +1222,7 @@ async fn a_removal_answer_of_the_wrong_type_is_a_storage_failure() {
             "0::bigint, ''1''",
         ),
     ] {
-        let database = ready().await;
-        let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-        let kurt = operators
-            .create(&name("Kurt Medley"), &actor())
-            .await
-            .expect("creates");
+        let (database, operators, kurt) = with_kurt().await;
         as_admin(
             &database,
             &format!(

@@ -5,10 +5,10 @@
 use std::time::Duration;
 
 use tetsu_identity::{
-    Actor, Change, Error, ForChange, Identity, OperatorId, OperatorName, Origins, Realm,
-    RelyingParty, SessionToken, SignOut, postgres_store,
+    Change, Error, ForChange, Identity, Origins, Realm, RelyingParty, SessionToken, SignOut,
+    postgres_store,
 };
-use tetsu_postgres::test_support::{TestDatabase, migrated_database};
+use tetsu_postgres::test_support::TestDatabase;
 use tetsu_postgres::{ModuleTransaction, Settings, connect, isolation_violations, pool};
 
 const ORIGIN: &str = "https://ops.example.com";
@@ -16,43 +16,6 @@ const ORIGIN: &str = "https://ops.example.com";
 #[cfg(test)]
 mod support {
     use super::*;
-
-    /// Starts an operator's session as a passkey sign-in would, as the test server's administrator, and returns its
-    /// token: only the sign-in function may start one, so Identity's role cannot call `start_session` (ADR-0048).
-    pub async fn signed_in(database: &TestDatabase, operator: OperatorId) -> SessionToken {
-        let mut bytes = [0u8; 32];
-        getrandom::fill(&mut bytes).expect("random bytes");
-        let text = bytes.iter().fold(String::new(), |mut text, byte| {
-            let _ = std::fmt::Write::write_fmt(&mut text, format_args!("{byte:02x}"));
-            text
-        });
-        connect(database)
-            .await
-            .expect("connects")
-            .execute(
-                "SELECT identity.start_session(sha256(decode($1, 'hex')), 'operator', $2)",
-                &[&text, &operator.get()],
-            )
-            .await
-            .expect("starts");
-        SessionToken::parse(&text).expect("a token")
-    }
-
-    /// A fresh, migrated database.
-    pub async fn ready() -> TestDatabase {
-        migrated_database(&[&Identity])
-            .await
-            .expect("a migrated test database")
-    }
-
-    pub fn name(name: &str) -> OperatorName {
-        OperatorName::parse(name).expect("a name")
-    }
-
-    /// Who runs the operator command in these tests.
-    pub fn actor() -> Actor {
-        Actor::parse("kurt@workstation").expect("an actor")
-    }
 
     /// The operator realm's idle limit, which the database keeps too; tests age sessions by it, so the two must agree.
     pub fn idle_seconds() -> u64 {
@@ -148,9 +111,13 @@ mod support {
     }
 }
 
+#[cfg(test)]
+mod common;
+
+use common::{actor, migrated, name, ready, signed_in, with_kurt};
 use support::{
-    actor, as_admin, cookie, count, idle_seconds, name, origins, ready, replaced_use_session,
-    signed_in, stored, text, use_session_with_wrong,
+    as_admin, cookie, count, idle_seconds, origins, replaced_use_session, stored, text,
+    use_session_with_wrong,
 };
 
 /// Identity keeps its tables in the one schema it owns, under its own name (ADR-0003, ADR-0042).
@@ -179,12 +146,7 @@ async fn identity_follows_the_isolation_rules() {
 /// A session starts now by Postgres's clock, lasts eight hours at most, and records each request on it.
 #[tokio::test]
 async fn a_started_session_is_found_by_its_token_and_records_each_request() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, operators, kurt) = with_kurt().await;
     let token = signed_in(&database, kurt).await;
     assert!(
         stored(
@@ -221,8 +183,7 @@ async fn a_started_session_is_found_by_its_token_and_records_each_request() {
 
 #[tokio::test]
 async fn each_operator_gets_their_own_id_and_a_random_user_handle() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    let (database, operators) = migrated().await;
     let first = operators
         .create(&name("Kurt Medley"), &actor())
         .await
@@ -247,12 +208,7 @@ async fn each_operator_gets_their_own_id_and_a_random_user_handle() {
 /// Only the token's SHA-256 hash is stored, so the stored row cannot sign anyone in (ADR-0047).
 #[tokio::test]
 async fn only_the_tokens_hash_is_stored() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, _, kurt) = with_kurt().await;
     let token = signed_in(&database, kurt).await;
     let text = token.to_text();
     assert!(
@@ -268,12 +224,7 @@ async fn only_the_tokens_hash_is_stored() {
 /// Fifteen minutes without a request ends an operator's session for good, and its row is removed (ADR-0048).
 #[tokio::test]
 async fn an_idle_session_ends_and_is_removed() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, operators, kurt) = with_kurt().await;
     let token = signed_in(&database, kurt).await;
     as_admin(
         &database,
@@ -309,12 +260,7 @@ async fn an_idle_session_ends_and_is_removed() {
 /// Eight hours after it starts, a session ends however busy it is, and its row is removed (ADR-0048).
 #[tokio::test]
 async fn a_busy_session_still_ends_at_its_absolute_limit() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, operators, kurt) = with_kurt().await;
     let token = signed_in(&database, kurt).await;
     as_admin(&database, "UPDATE identity.sessions SET ends_at = now()").await;
     assert_eq!(operators.session([text(&token).as_str()]).await, Ok(None));
@@ -327,12 +273,7 @@ async fn a_busy_session_still_ends_at_its_absolute_limit() {
 /// A request handled after a later one never moves the last request back, which would shorten the session.
 #[tokio::test]
 async fn the_last_request_never_moves_back() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, operators, kurt) = with_kurt().await;
     let token = signed_in(&database, kurt).await;
     as_admin(
         &database,
@@ -371,8 +312,7 @@ async fn requests_at_the_same_moment_never_end_a_live_session() {
 
 #[tokio::test]
 async fn a_token_no_session_holds_finds_none() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    let (_database, operators) = migrated().await;
     for token in ["", "not a token", &"ab".repeat(32), &"AB".repeat(32)] {
         assert_eq!(
             operators.session([cookie(token).as_str()]).await,
@@ -386,12 +326,7 @@ async fn a_token_no_session_holds_finds_none() {
 /// the origin and form-token checks first, and one that fails them ends nothing (ADR-0048).
 #[tokio::test]
 async fn signing_out_ends_the_session_once_its_checks_pass() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, operators, kurt) = with_kurt().await;
     let token = signed_in(&database, kurt).await;
     let (jar, form) = (text(&token), token.form_token().expect("a form token"));
     let sign_out = |origin| Change::new([jar.as_str()], origin, &form);
@@ -424,12 +359,7 @@ async fn signing_out_ends_the_session_once_its_checks_pass() {
 /// Signing out ends that session alone; the operator's others go on.
 #[tokio::test]
 async fn signing_out_leaves_the_operators_other_sessions() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, operators, kurt) = with_kurt().await;
     let token = signed_in(&database, kurt).await;
     let other = signed_in(&database, kurt).await;
     let (jar, form) = (text(&token), token.form_token().expect("a form token"));
@@ -451,12 +381,7 @@ async fn signing_out_leaves_the_operators_other_sessions() {
 /// directly: no bug in the application can make a session that may add a passkey (ADR-0048).
 #[tokio::test]
 async fn identitys_role_cannot_start_a_session() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, _, kurt) = with_kurt().await;
     let pool = pool(&database.as_app()).expect("a pool");
     let mut client = pool.get().await.expect("a connection");
     let transaction = ModuleTransaction::begin(&mut client, "identity")
@@ -499,12 +424,7 @@ async fn identitys_role_cannot_list_sessions() {
 /// operator, who reaches every business; nor does the operator realm extend or end it (ADR-0040).
 #[tokio::test]
 async fn another_realms_session_is_neither_used_nor_ended() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, operators, kurt) = with_kurt().await;
     let token = signed_in(&database, kurt).await;
     as_admin(
         &database,
@@ -533,8 +453,7 @@ async fn another_realms_session_is_neither_used_nor_ended() {
 /// A realm Identity does not know, should a lookup return one, is an error, never a session in some default realm.
 #[tokio::test]
 async fn an_unknown_realm_is_an_error() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    let (database, operators) = migrated().await;
     as_admin(
         &database,
         &replaced_use_session(
@@ -560,8 +479,7 @@ async fn each_stored_column_of_the_wrong_type_is_an_error() {
         "ends_at",
     ];
     for wrong in columns {
-        let database = ready().await;
-        let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+        let (database, operators) = migrated().await;
         as_admin(&database, &use_session_with_wrong(wrong)).await;
         assert!(
             matches!(
@@ -576,8 +494,7 @@ async fn each_stored_column_of_the_wrong_type_is_an_error() {
 /// A create whose answer cannot be read is a storage failure.
 #[tokio::test]
 async fn a_create_answer_that_cannot_be_read_is_a_storage_failure() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    let (database, operators) = migrated().await;
     as_admin(
         &database,
         "ALTER TABLE identity.operators ALTER COLUMN id TYPE integer",
@@ -596,8 +513,7 @@ async fn a_create_answer_that_cannot_be_read_is_a_storage_failure() {
 /// succeeds (ADR-0011).
 #[tokio::test]
 async fn a_stale_cached_statement_is_temporary_and_cleared() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    let (database, operators) = migrated().await;
     let party = RelyingParty::new(ORIGIN).expect("a relying party");
     operators.begin_sign_in(&party).await.expect("begins");
     as_admin(
@@ -634,8 +550,7 @@ async fn an_unreachable_database_is_an_error() {
 
 #[tokio::test]
 async fn an_operator_id_of_the_wrong_type_is_an_error() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    let (database, operators) = migrated().await;
     as_admin(
         &database,
         "ALTER TABLE identity.sessions DROP CONSTRAINT sessions_operator_id_fkey;
@@ -673,12 +588,7 @@ async fn a_transaction_that_cannot_begin_is_an_error() {
 
 #[tokio::test]
 async fn a_statement_that_cannot_be_prepared_is_an_error() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, operators, kurt) = with_kurt().await;
     let token = signed_in(&database, kurt).await;
     let (jar, form) = (text(&token), token.form_token().expect("a form token"));
     let sign_out = Change::new([jar.as_str()], Some(ORIGIN), &form);
@@ -701,12 +611,7 @@ async fn a_statement_that_cannot_be_prepared_is_an_error() {
 /// A commit Postgres refuses was rolled back, so signing out ended nothing, and the refusal is never worth retrying.
 #[tokio::test]
 async fn a_refused_commit_ends_no_session() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, operators, kurt) = with_kurt().await;
     let token = signed_in(&database, kurt).await;
     as_admin(
         &database,
@@ -739,12 +644,7 @@ async fn a_refused_commit_ends_no_session() {
 /// token; failing either finds no session and leaves it as it was (ADR-0048).
 #[tokio::test]
 async fn a_change_needs_the_realms_origin_and_the_sessions_form_token() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, operators, kurt) = with_kurt().await;
     let token = signed_in(&database, kurt).await;
     let other = signed_in(&database, kurt).await;
     as_admin(
@@ -788,8 +688,7 @@ async fn a_change_needs_the_realms_origin_and_the_sessions_form_token() {
 /// A cookie whose token is not one cannot carry its session's form token, so the request is refused.
 #[tokio::test]
 async fn a_change_with_a_malformed_cookie_finds_no_session() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    let (_database, operators) = migrated().await;
     let form = "ab".repeat(32);
     let jar = cookie("not a token");
     let malformed = Change::new([jar.as_str()], Some(ORIGIN), &form);
@@ -837,12 +736,7 @@ async fn requests_at_the_same_moment_never_revive_a_spent_session() {
 /// live ones, so signing in elsewhere signs no one out, and not another operator's.
 #[tokio::test]
 async fn starting_a_session_removes_only_the_operators_spent_ones() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, operators, kurt) = with_kurt().await;
     let ana = operators
         .create(&name("Ana Ortiz"), &actor())
         .await
@@ -886,12 +780,7 @@ async fn starting_a_session_removes_only_the_operators_spent_ones() {
 /// spent once that request has finished, so a session that came back to life is never removed.
 #[tokio::test]
 async fn a_spent_session_refreshed_meanwhile_is_not_removed() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, operators, kurt) = with_kurt().await;
     let token = text(&signed_in(&database, kurt).await);
     as_admin(
         &database,
@@ -928,12 +817,7 @@ async fn a_spent_session_refreshed_meanwhile_is_not_removed() {
 /// Signing out a session that had already ended removes it, and says there was nothing to end.
 #[tokio::test]
 async fn signing_out_a_spent_session_has_nothing_to_end() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, operators, kurt) = with_kurt().await;
     let token = signed_in(&database, kurt).await;
     as_admin(&database, "UPDATE identity.sessions SET ends_at = now()").await;
     let (jar, form) = (text(&token), token.form_token().expect("a form token"));
@@ -971,12 +855,7 @@ async fn signing_out_a_spent_session_has_nothing_to_end() {
 /// A lookup that, against its contract, returns no row says no session ended.
 #[tokio::test]
 async fn an_end_that_returns_nothing_ended_nothing() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, operators, kurt) = with_kurt().await;
     let token = signed_in(&database, kurt).await;
     as_admin(
         &database,
@@ -997,12 +876,7 @@ async fn an_end_that_returns_nothing_ended_nothing() {
 /// Each session has its own random public id, apart from its token, for a list of sessions to show.
 #[tokio::test]
 async fn each_session_has_a_random_public_id() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, _, kurt) = with_kurt().await;
     for _ in 0..3 {
         signed_in(&database, kurt).await;
     }
@@ -1020,8 +894,7 @@ async fn each_session_has_a_random_public_id() {
 /// are unique, so the longest is stored once.
 #[tokio::test]
 async fn the_database_takes_the_longest_name_the_domain_takes() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    let (database, operators) = migrated().await;
     let longest = "é".repeat(100);
     operators
         .create(&name(&longest), &actor())
@@ -1050,8 +923,7 @@ async fn the_database_takes_the_longest_name_the_domain_takes() {
 /// (ADR-0043, ADR-0045).
 #[tokio::test]
 async fn a_change_whose_event_cannot_be_recorded_is_undone() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    let (database, operators) = migrated().await;
     as_admin(
         &database,
         "REVOKE INSERT ON identity.outbox_global FROM tetsu_identity",
@@ -1074,12 +946,7 @@ async fn a_change_whose_event_cannot_be_recorded_is_undone() {
 /// A session whose operator was disabled is never used, however it survived, and is removed when presented.
 #[tokio::test]
 async fn a_disabled_operators_session_is_refused_and_removed() {
-    let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
+    let (database, operators, kurt) = with_kurt().await;
     let token = signed_in(&database, kurt).await;
     as_admin(
         &database,
