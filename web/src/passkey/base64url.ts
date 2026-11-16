@@ -9,7 +9,7 @@ export function encode(data: ArrayBuffer | Uint8Array): string {
   return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }
 
-export function decode(text: string): Uint8Array {
+export function decode(text: string): Uint8Array<ArrayBuffer> {
   // A length of 1 more than a multiple of 4 holds 6 bits, less than a byte, so no encoder writes it.
   if (!alphabet.test(text) || text.length % 4 === 1) {
     throw new TypeError("not base64url");

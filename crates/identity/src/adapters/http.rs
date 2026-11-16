@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 
 use crate::browser::{Change, ForChange, Origins, SignOut};
 use crate::domain::{Actor, Answer, Ceremony, Device, Error, HeldPasskey, Realm, SessionToken};
-use crate::passkeys::RelyingParty;
+use crate::passkeys::{RelyingParty, base64url};
 use crate::ports::OperatorStore;
 use crate::use_cases::Operators;
 
@@ -93,6 +93,8 @@ struct AccountPage {
     stylesheet: &'static str,
     script: &'static str,
     name: String,
+    user: String,
+    credentials: String,
     passkeys: Vec<&'static str>,
     can_add: bool,
     form: String,
@@ -197,6 +199,13 @@ async fn shown<S: OperatorStore>(
                 stylesheet: web.stylesheet,
                 script: web.script,
                 name: account.name,
+                user: base64url(&account.user_handle),
+                credentials: account
+                    .passkeys
+                    .iter()
+                    .map(|passkey| base64url(&passkey.credential))
+                    .collect::<Vec<_>>()
+                    .join(" "),
                 can_add: account.passkeys.len() < 2,
                 passkeys: account.passkeys.iter().map(described).collect(),
                 form,

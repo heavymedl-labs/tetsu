@@ -1,0 +1,62 @@
+{
+  "creation": {
+    "publicKey": {
+      "rp": {
+        "name": "Tetsu",
+        "id": "ops.example.com"
+      },
+      "user": {
+        "id": "-fu99I-_StGJ59XP9wIiZg",
+        "name": "Tetsu operator · Kurt Medley",
+        "displayName": "Kurt Medley"
+      },
+      "challenge": "MW8FF0EA8ho3PJUMl-ypaKX5QNjic4hK1H5-TC8Piy0",
+      "pubKeyCredParams": [
+        {
+          "type": "public-key",
+          "alg": -7
+        },
+        {
+          "type": "public-key",
+          "alg": -35
+        },
+        {
+          "type": "public-key",
+          "alg": -257
+        }
+      ],
+      "timeout": 300000,
+      "excludeCredentials": [
+        {
+          "type": "public-key",
+          "id": "sjuHjcw-723-0IY2brB_0A",
+          "transports": ["hybrid", "internal"]
+        }
+      ],
+      "authenticatorSelection": {
+        "residentKey": "required",
+        "requireResidentKey": true,
+        "userVerification": "required"
+      },
+      "attestation": "none",
+      "extensions": {
+        "credentialProtectionPolicy": "userVerificationRequired",
+        "enforceCredentialProtectionPolicy": false,
+        "uvm": true,
+        "credProps": true
+      }
+    }
+  },
+  "request": {
+    "publicKey": {
+      "challenge": "oB2WkYJIkaHDqSRVkEb5PlvNUqe4NVR10Uj4laoBHQc",
+      "timeout": 300000,
+      "rpId": "ops.example.com",
+      "allowCredentials": [],
+      "userVerification": "required",
+      "extensions": {
+        "uvm": true
+      }
+    }
+  }
+}

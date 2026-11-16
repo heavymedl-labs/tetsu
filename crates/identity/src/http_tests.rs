@@ -192,6 +192,18 @@ async fn signed_in() -> (SocketAddr, TestDatabase, String, String) {
     (address, database, cookie, form_on(&page.body))
 }
 
+/// One text value the database answers.
+async fn text(database: &TestDatabase, sql: &str) -> String {
+    tetsu_postgres::connect(database)
+        .await
+        .expect("connects")
+        .query_one(sql, &[])
+        .await
+        .expect("answers")
+        .try_get(0)
+        .expect("text")
+}
+
 /// Every path Identity serves begins at `/ops`, which the composition root reserves.
 #[test]
 fn every_path_is_under_ops() {
@@ -231,13 +243,24 @@ async fn sign_out(address: SocketAddr, origin: &str, cookie: &str, form: &str) -
 /// two, the page offers no third.
 #[tokio::test]
 async fn an_operator_enrolls_signs_in_and_adds_a_passkey() {
-    let (address, _database, cookie, form) = signed_in().await;
+    let (address, database, cookie, form) = signed_in().await;
     let page = get(address, "/ops", &cookie).await;
     assert_eq!(
         (page.status, page.header("content-security-policy")),
         (200, Some(POLICY))
     );
-    for shown in ["Kurt Medley", "Synced passkey", "data-passkey=\"add\""] {
+    let account = "SELECT encode(uuid_send(user_handle), 'base64') FROM identity.operators";
+    let handle = text(&database, account).await;
+    let user = handle
+        .trim_end_matches('=')
+        .replace('+', "-")
+        .replace('/', "_");
+    for shown in [
+        "Kurt Medley",
+        "Synced passkey",
+        "data-passkey=\"add\"",
+        &format!("data-user=\"{user}\""),
+    ] {
         assert!(page.body.contains(shown), "{shown} in {}", page.body);
     }
     let added = add_passkey(address, &cookie, &form).await;
@@ -480,4 +503,43 @@ async fn failures_of_the_server_are_unavailable() {
     assert!(reported(
         "identity: a passkey request failed: storage failed"
     ));
+}
+
+/// The JSON's shape alone: each object's keys, each array's first item, and each value's kind, so two sets of
+/// options compare equal when only their challenges and IDs differ.
+fn shape(value: &Value) -> Value {
+    match value {
+        Value::Object(fields) => fields
+            .iter()
+            .map(|(key, value)| (key.clone(), shape(value)))
+            .collect(),
+        Value::Array(items) => Value::Array(items.iter().take(1).map(shape).collect()),
+        Value::String(_) => json!("text"),
+        Value::Number(_) => json!("number"),
+        Value::Bool(_) => json!("bool"),
+        Value::Null => Value::Null,
+    }
+}
+
+/// The passkey script is tested against a fixture of the options these endpoints send, so the fixture must keep
+/// their shape: registering with a passkey held, and signing in.
+#[tokio::test]
+async fn the_scripts_fixture_has_the_options_shapes() {
+    let (address, _database, cookie, form) = signed_in().await;
+    let add = post(
+        address,
+        "/ops/passkeys/begin",
+        &cookie,
+        &json!({ "form": form }),
+    )
+    .await;
+    let sign = post(address, "/ops/sign-in/begin", "", &json!({})).await;
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../../web/src/passkey/fixtures/options.json"
+    ))
+    .expect("JSON");
+    assert_eq!(
+        shape(&json!({"creation": add.json()["options"], "request": sign.json()["options"]})),
+        shape(&fixture)
+    );
 }

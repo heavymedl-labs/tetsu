@@ -212,6 +212,26 @@ fn plausible(response: &RegisterPublicKeyCredential) -> bool {
         != Some(false)
 }
 
+/// Bytes as `WebAuthn`'s JSON writes them: RFC 4648's URL-safe alphabet, without padding. Each 3 bytes are 4
+/// characters of 6 bits; a last 1 or 2 bytes are 2 or 3 characters.
+pub(crate) fn base64url(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut text = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let bits = chunk
+            .iter()
+            .zip([16, 8, 0])
+            .fold(0_u32, |bits, (byte, shift)| {
+                bits | u32::from(*byte) << shift
+            });
+        for shift in [18, 12, 6, 0].into_iter().take(chunk.len() + 1) {
+            let index = (bits >> shift) & 63;
+            text.push(char::from(ALPHABET[index as usize]));
+        }
+    }
+    text
+}
+
 /// A sign-in's answer, read once: the credential ID and user handle it names, and the answer itself, which stays
 /// inside this file.
 pub(crate) struct Identified {
@@ -257,6 +277,21 @@ fn account_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Bytes are written as `WebAuthn`'s JSON writes them: RFC 4648's URL-safe alphabet, without padding.
+    #[test]
+    fn bytes_are_written_as_base64url() {
+        let written = [&b""[..], b"f", b"fo", b"foo", b"foobar", &[0xfb, 0xff]].map(base64url);
+        assert_eq!(written, ["", "Zg", "Zm8", "Zm9v", "Zm9vYmFy", "-_8"]);
+    }
+
+    proptest::proptest! {
+        /// Any bytes are written as passkey-types, the test authenticator's library, writes them.
+        #[test]
+        fn base64url_agrees_with_passkey_types(bytes in proptest::collection::vec(proptest::num::u8::ANY, 0..64)) {
+            proptest::prop_assert_eq!(base64url(&bytes), passkey_types::encoding::base64url(&bytes));
+        }
+    }
 
     /// The label always survives, and a long name is cut after a whole word, or at a character's end, within 64
     /// bytes.
