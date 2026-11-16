@@ -11,7 +11,7 @@ COPY crates crates
 COPY docs/brand docs/brand
 RUN npm run build
 
-FROM rust:1.99.1-slim-bookworm AS build
+FROM rust:1.99.1-slim-bookworm@sha256:f2c004e3d2d8b547e8cf7ffbc29205385f4e71d23e53e4e383065db5e9f822cd AS build
 WORKDIR /src
 # Dependencies first, built from the manifests alone over stub sources, so this layer, and the build cache CI
 # keeps of it, last until a manifest or the lockfile changes. A new crate needs its manifest copied here.
