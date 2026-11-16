@@ -51,6 +51,11 @@ const POLICY: &str = "default-src 'none'; object-src 'none'; script-src 'self'; 
                       style-src 'self'; font-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; \
                       frame-ancestors 'none'";
 
+/// The operator pages' referrer policy. Under the site's `no-referrer`, a browser sends `Origin: null` with a
+/// posted form, such as signing out, which the origin check must refuse; `same-origin` sends the real origin, and a
+/// referrer, to Tetsu alone and nothing to any other site (Fetch, "append a request `Origin` header").
+const REFERRER: &str = "same-origin";
+
 /// The largest body any endpoint reads. A passkey's answer is a few kilobytes; enrolling stores none over 8 KiB.
 const LARGEST_BODY: usize = 64 * 1024;
 
@@ -503,6 +508,7 @@ fn page(page: &impl Template) -> Response {
         (header::CONTENT_TYPE, "text/html; charset=utf-8"),
         (header::CACHE_CONTROL, "no-store"),
         (header::CONTENT_SECURITY_POLICY, POLICY),
+        (header::REFERRER_POLICY, REFERRER),
     ];
     (headers, body).into_response()
 }

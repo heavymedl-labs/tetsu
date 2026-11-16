@@ -39,7 +39,8 @@ pub const GRACE: Duration = Duration::from_secs(10);
 
 /// Sent with every response (ADR-0029). The site's pages run no scripts and load only Tetsu's own stylesheets and
 /// fonts, so the policy allows nothing else, not even an inline style, and no site may frame them (ADR-0030). A
-/// route that runs Tetsu's own script sets a policy of its own, which [`secure`] keeps. HSTS lasts a year, the
+/// route that runs Tetsu's own script sets a policy of its own, which [`secure`] keeps, as it keeps a route's own
+/// referrer policy. HSTS lasts a year, the
 /// least ASVS 3.4.1 allows.
 const HEADERS: [(HeaderName, &str); 5] = [
     (
@@ -180,9 +181,9 @@ fn site_routes(demo: bool) -> Vec<(&'static str, MethodRouter)> {
 async fn secure(State(demo): State<bool>, mut response: Response) -> Response {
     let headers = response.headers_mut();
     for (name, value) in HEADERS {
-        // A page that runs Tetsu's own script sets a policy that allows it, which stays; every other header is
-        // the site's alone.
-        if name == header::CONTENT_SECURITY_POLICY {
+        // A page that runs Tetsu's own script, or posts a form, sets the policies it needs, which stay; every other
+        // header is the site's alone.
+        if name == header::CONTENT_SECURITY_POLICY || name == header::REFERRER_POLICY {
             headers
                 .entry(name)
                 .or_insert(HeaderValue::from_static(value));
@@ -294,15 +295,21 @@ mod tests {
             .route("/studio", get(|| async { "studio" }))
             .route(
                 "/scripted",
-                get(|| async { ([(header::CONTENT_SECURITY_POLICY, SCRIPTED)], "scripted") }),
+                get(|| async {
+                    let policies = [
+                        (header::CONTENT_SECURITY_POLICY, SCRIPTED),
+                        (header::REFERRER_POLICY, "same-origin"),
+                    ];
+                    (policies, "scripted")
+                }),
             )
     }
 
     /// A policy a module's page sets for itself, as a page that runs Tetsu's own script does.
     const SCRIPTED: &str = "default-src 'none'; script-src 'self'";
 
-    /// A route may set its own content security policy, which the site keeps; every other header is the site's
-    /// alone, and a route that sets no policy gets the site's.
+    /// A route may set its own content security and referrer policies, which the site keeps; every other header is
+    /// the site's alone, and a route that sets no policy gets the site's.
     #[tokio::test]
     async fn a_route_keeps_its_own_content_security_policy() {
         let raw = get_path("/scripted").await;
@@ -311,9 +318,14 @@ mod tests {
             Some(SCRIPTED),
             "{raw}"
         );
+        assert_eq!(
+            header_of(&raw, "referrer-policy"),
+            Some("same-origin"),
+            "{raw}"
+        );
         for (name, value) in EXPECTED
             .iter()
-            .filter(|(name, _)| *name != "content-security-policy")
+            .filter(|(name, _)| !matches!(*name, "content-security-policy" | "referrer-policy"))
         {
             assert_eq!(header_of(&raw, name), Some(*value), "{name} in {raw}");
         }

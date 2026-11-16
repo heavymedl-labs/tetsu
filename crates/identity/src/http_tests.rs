@@ -343,6 +343,12 @@ async fn the_pages_run_only_tetsus_own_script() {
             (200, Some(POLICY), Some("no-store")),
             "{path}"
         );
+        // A posted form, such as signing out, then carries the page's real origin, not null.
+        assert_eq!(
+            page.header("referrer-policy"),
+            Some("same-origin"),
+            "{path}"
+        );
         assert!(
             page.body
                 .contains(&format!("<script type=\"module\" src=\"{SCRIPT}\">")),
