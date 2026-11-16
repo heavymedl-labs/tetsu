@@ -24,6 +24,7 @@ const RESERVED: &[&str] = &[
     "logout",
     "media",
     "oauth",
+    "ops",
     "pay",
     "register",
     "settings",

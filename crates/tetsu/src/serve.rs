@@ -37,9 +37,10 @@ struct NotFoundPage {
 /// finishes its request cannot hold the server open past it.
 pub const GRACE: Duration = Duration::from_secs(10);
 
-/// Sent with every response (ADR-0029). The pages run no scripts and load only Tetsu's own stylesheets and fonts, so
-/// the policy allows nothing else, not even an inline style, and no site may frame them (ADR-0030). HSTS lasts a year, the least ASVS
-/// 3.4.1 allows.
+/// Sent with every response (ADR-0029). The site's pages run no scripts and load only Tetsu's own stylesheets and
+/// fonts, so the policy allows nothing else, not even an inline style, and no site may frame them (ADR-0030). A
+/// route that runs Tetsu's own script sets a policy of its own, which [`secure`] keeps. HSTS lasts a year, the
+/// least ASVS 3.4.1 allows.
 const HEADERS: [(HeaderName, &str); 5] = [
     (
         header::STRICT_TRANSPORT_SECURITY,
@@ -179,7 +180,15 @@ fn site_routes(demo: bool) -> Vec<(&'static str, MethodRouter)> {
 async fn secure(State(demo): State<bool>, mut response: Response) -> Response {
     let headers = response.headers_mut();
     for (name, value) in HEADERS {
-        headers.insert(name, HeaderValue::from_static(value));
+        // A page that runs Tetsu's own script sets a policy that allows it, which stays; every other header is
+        // the site's alone.
+        if name == header::CONTENT_SECURITY_POLICY {
+            headers
+                .entry(name)
+                .or_insert(HeaderValue::from_static(value));
+        } else {
+            headers.insert(name, HeaderValue::from_static(value));
+        }
     }
     if demo {
         headers.insert(
@@ -281,7 +290,33 @@ mod tests {
 
     /// Stands in for a module's router: a page at one path, and no fallback, which is the site's alone.
     fn module() -> Router {
-        Router::new().route("/studio", get(|| async { "studio" }))
+        Router::new()
+            .route("/studio", get(|| async { "studio" }))
+            .route(
+                "/scripted",
+                get(|| async { ([(header::CONTENT_SECURITY_POLICY, SCRIPTED)], "scripted") }),
+            )
+    }
+
+    /// A policy a module's page sets for itself, as a page that runs Tetsu's own script does.
+    const SCRIPTED: &str = "default-src 'none'; script-src 'self'";
+
+    /// A route may set its own content security policy, which the site keeps; every other header is the site's
+    /// alone, and a route that sets no policy gets the site's.
+    #[tokio::test]
+    async fn a_route_keeps_its_own_content_security_policy() {
+        let raw = get_path("/scripted").await;
+        assert_eq!(
+            header_of(&raw, "content-security-policy"),
+            Some(SCRIPTED),
+            "{raw}"
+        );
+        for (name, value) in EXPECTED
+            .iter()
+            .filter(|(name, _)| *name != "content-security-policy")
+        {
+            assert_eq!(header_of(&raw, name), Some(*value), "{name} in {raw}");
+        }
     }
 
     /// Stands in for the site's own not found page, so these tests can tell which page answered.
