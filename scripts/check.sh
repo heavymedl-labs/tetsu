@@ -272,7 +272,7 @@ if [[ "$reuse" == false ]]; then
     # sized its timeout, so that is set here: about six times the test suite's time.
     mutants=(cargo mutants --in-diff "$work/rust.diff" --baseline skip --timeout 60)
     if [[ -n "${CI:-}" && "${CARGO_MUTANTS_JOBS:-$jobs}" == 1 ]]; then
-      # A runner runs one job, so it mutates the checkout in place, which it throws away after, and reuses
+      # A runner runs one job, so it mutates its checkout in place, which it throws away after, and reuses
       # target/ rather than build every dependency again in a copy, which leaves target/ out.
       "${mutants[@]}" --in-place
     else
