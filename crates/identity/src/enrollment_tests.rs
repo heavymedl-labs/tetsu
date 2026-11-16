@@ -337,16 +337,12 @@ async fn hostile_clients_are_refused_and_the_link_stays_open() {
         );
     }
     for response in ["not a registration", "{}"] {
-        let ceremony = operators
-            .begin_enrollment(&party, &link)
-            .await
-            .expect("begins");
-        assert_eq!(
-            operators
-                .finish_enrollment(&party, &ceremony.token.to_text(), response, &actor())
-                .await,
-            not_enrolling()
-        );
+        let ceremony = operators.begin_enrollment(&party, &link).await;
+        let token = ceremony.expect("begins").token.to_text();
+        let finished = operators
+            .finish_enrollment(&party, &token, response, &actor())
+            .await;
+        assert_eq!(finished, not_enrolling());
     }
     let reasons = [
         "not_verified",
@@ -536,7 +532,8 @@ async fn finish_rewritten(
 
 /// A registration whose client says the passkey is not discoverable is refused, under either name webauthn-rs reads
 /// it by, since signing in could never find it, and the link stays open for another try. Transports are taken as
-/// listed, as `WebAuthn` asks, even ones it does not name or names twice.
+/// listed, as `WebAuthn` asks, even ones it does not name or names twice, and the ones `webauthn-rs` names are
+/// kept once each, sorted, as a hint for the browser.
 #[tokio::test]
 async fn an_undiscoverable_registration_is_refused() {
     let (operators, database, _, link) = with_link().await;
@@ -554,6 +551,8 @@ async fn an_undiscoverable_registration_is_refused() {
     }
     let refused = not_enrolling();
     assert_eq!(finished, [refused.clone(), refused, Ok(OperatorId::new(1))]);
+    let kept = "SELECT count(*) FROM identity.passkeys WHERE transports = 'usb'";
+    assert_eq!(number(&database, kept).await, 1);
     assert_eq!(
         redemptions(&database).await,
         [
@@ -738,6 +737,7 @@ async fn redeeming() -> (
     let passkey = NewPasskey {
         credential_id: Sha256::digest(b"kurt").to_vec(),
         passkey: "{}".to_string(),
+        transports: Vec::new(),
     };
     let ceremony = |operator| TakenCeremony {
         operator,
@@ -780,6 +780,7 @@ async fn an_ended_link_or_oversized_passkey_stores_nothing() {
     let fresh = |credential_id: Vec<u8>, passkey: &str| NewPasskey {
         credential_id,
         passkey: passkey.to_string(),
+        transports: Vec::new(),
     };
     // Compact, this is under 8 KiB; as jsonb writes it back, with a space after each colon and comma, it is over.
     let numbered: Vec<String> = (0..800).map(|n| format!("\"{n:04}\":1")).collect();
@@ -880,7 +881,10 @@ async fn each_enrollment_step_fails_as_storage_when_refused() {
         ("enrollee(bytea)", true),
         ("begin_enrollment(bytea, bigint, bytea, jsonb)", true),
         ("take_ceremony(bytea, text)", false),
-        ("redeem_enrollment(bytea, bigint, bytea, jsonb)", false),
+        (
+            "redeem_enrollment(bytea, bigint, bytea, jsonb, text)",
+            false,
+        ),
     ] {
         let (operators, database, _, link) = with_link().await;
         let revoke = format!("REVOKE EXECUTE ON FUNCTION identity.{function} FROM tetsu_identity");
@@ -1035,7 +1039,7 @@ async fn unreadable_redemptions_are_storage_failures() {
         let response = register(&ceremony.options, ORIGIN, true).await;
         replace(
             &database,
-            "redeem_enrollment(bytea, bigint, bytea, jsonb)",
+            "redeem_enrollment(bytea, bigint, bytea, jsonb, text)",
             returns,
             &format!("SELECT {value}"),
         )

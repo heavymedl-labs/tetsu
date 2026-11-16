@@ -919,6 +919,45 @@ async fn the_database_takes_the_longest_name_the_domain_takes() {
     }
 }
 
+/// The database keeps a passkey's transports to the names `WebAuthn` gives, all five fitting, and refuses any other
+/// value or a stray space (ADR-0060).
+#[tokio::test]
+async fn the_database_keeps_only_named_transports() {
+    let (database, operators) = migrated().await;
+    let kurt = operators
+        .create(&name("Kurt Medley"), &actor())
+        .await
+        .expect("creates")
+        .get();
+    let client = connect(&database).await.expect("connects");
+    let store = "INSERT INTO identity.passkeys (credential_id, operator_id, passkey, transports, created_at)
+                 VALUES ($1, $2, '{}', $3, now())";
+    let mut refused = Vec::new();
+    for (n, transports) in [
+        "ble hybrid internal nfc usb",
+        "",
+        "smart-card",
+        "usb ",
+        "usb  nfc",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let credential = vec![u8::try_from(n).unwrap_or_default(); 16];
+        let error = client
+            .execute(store, &[&credential, &kurt, &transports])
+            .await
+            .err();
+        refused.push(error.and_then(|error| {
+            error
+                .as_db_error()
+                .and_then(|db| db.constraint().map(str::to_string))
+        }));
+    }
+    let check = Some("passkeys_transports_check".to_string());
+    assert_eq!(refused, [None, None, check.clone(), check.clone(), check]);
+}
+
 /// A change whose audit event cannot be recorded is undone with it, so nothing changes without its record
 /// (ADR-0043, ADR-0045).
 #[tokio::test]

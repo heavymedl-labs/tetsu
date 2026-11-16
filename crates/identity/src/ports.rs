@@ -1,8 +1,8 @@
 //! The driven port Identity calls out through.
 
 use crate::domain::{
-    Account, Actor, Addition, CeremonyKind, Disabling, Enrollee, Error, Issue, NewPasskey,
-    OperatorId, OperatorName, OperatorSummary, Realm, Redemption, Removal, Session, SessionStart,
+    Account, Actor, Addition, Disabling, Enrollee, Error, Issue, NewPasskey, OperatorId,
+    OperatorName, OperatorSummary, Realm, Redemption, Refusal, Removal, Session, SessionStart,
     SignIn, Signer, TakenAddition, TakenCeremony,
 };
 use std::future::Future;
@@ -96,15 +96,11 @@ pub trait OperatorStore {
         state: &str,
     ) -> impl Future<Output = Result<(), Error>> + Send;
 
-    /// Records a ceremony refused after it was taken but before storage was asked to store its outcome, with its
-    /// reason and, where known, the operator and credential, so every refusal after a ceremony was taken is in the
-    /// audit record (`v5.0.0-16.3.1`).
+    /// Records a ceremony refused after it was taken but before storage was asked to store its outcome, so every
+    /// refusal after a ceremony was taken is in the audit record (`v5.0.0-16.3.1`).
     fn refuse(
         &self,
-        kind: CeremonyKind,
-        operator: Option<OperatorId>,
-        credential: Option<&[u8]>,
-        reason: &str,
+        refusal: &Refusal<'_>,
         actor: &Actor,
     ) -> impl Future<Output = Result<(), Error>> + Send;
 

@@ -4,7 +4,7 @@ use crate::browser::{Change, CheckedSession, ForChange, Origins, SignOut};
 use crate::domain::{
     Account, Actor, Addition, Answer, Ceremony, CeremonyKind, CeremonyToken, Disabling,
     EnrollmentToken, Error, Fill, Issue, NewPasskey, OperatorId, OperatorName, OperatorSummary,
-    Realm, Redemption, Removal, Session, SessionStart, SessionToken, SignIn, Signer,
+    Realm, Redemption, Refusal, Removal, Session, SessionStart, SessionToken, SignIn, Signer,
 };
 use crate::passkeys::RelyingParty;
 use crate::ports::OperatorStore;
@@ -123,15 +123,13 @@ impl<S: OperatorStore> Operators<S> {
             .await
             .map_err(|error| refusing(error, not_enrolling))?
             .ok_or_else(not_enrolling)?;
+        let pending = Pending {
+            kind: CeremonyKind::Enrollment,
+            operator: taken.operator,
+            state: &taken.state,
+        };
         let passkey = self
-            .registered(
-                party,
-                response,
-                &taken.state,
-                CeremonyKind::Enrollment,
-                taken.operator,
-                actor,
-            )
+            .registered(party, response, &pending, actor)
             .await
             .map_err(|error| refusing(error, not_enrolling))?;
         match self
@@ -245,15 +243,13 @@ impl<S: OperatorStore> Operators<S> {
                 }
             },
         };
-        self.store
-            .refuse(
-                CeremonyKind::SignIn,
-                operator,
-                credential.as_deref(),
-                &reason,
-                actor,
-            )
-            .await?;
+        let refusal = Refusal {
+            kind: CeremonyKind::SignIn,
+            operator,
+            credential: credential.as_deref(),
+            reason: &reason,
+        };
+        self.store.refuse(&refusal, actor).await?;
         Err(not_signing_in())
     }
 
@@ -263,19 +259,21 @@ impl<S: OperatorStore> Operators<S> {
         &self,
         party: &RelyingParty,
         response: &str,
-        state: &str,
-        kind: CeremonyKind,
-        operator: OperatorId,
+        pending: &Pending<'_>,
         actor: &Actor,
     ) -> Result<NewPasskey, Error> {
-        let refusal = match party.finish_registration(response, state) {
+        let reason = match party.finish_registration(response, pending.state) {
             Err(Error::Invalid(reason)) => reason,
             verified => return verified,
         };
-        self.store
-            .refuse(kind, Some(operator), None, &refusal, actor)
-            .await?;
-        Err(Error::Invalid(refusal))
+        let refusal = Refusal {
+            kind: pending.kind,
+            operator: Some(pending.operator),
+            credential: None,
+            reason: &reason,
+        };
+        self.store.refuse(&refusal, actor).await?;
+        Err(Error::Invalid(reason))
     }
 
     /// The account a live session names: the operator, their user handle and name, and every credential they hold,
@@ -310,7 +308,7 @@ impl<S: OperatorStore> Operators<S> {
             .ok_or_else(not_adding)?;
         let (token, (options, state)) = CeremonyToken::generate(self.fill).and_then(|token| {
             party
-                .begin_registration(adder.user_handle, &adder.name, &adder.credentials)
+                .begin_registration(adder.user_handle, &adder.name, &adder.passkeys)
                 .map(|begun| (token, begun))
         })?;
         let begun = self
@@ -343,15 +341,13 @@ impl<S: OperatorStore> Operators<S> {
             .take_addition(&held.hash(), &checked.session().hash)
             .await?
             .ok_or_else(not_adding)?;
+        let pending = Pending {
+            kind: CeremonyKind::Addition,
+            operator: taken.operator,
+            state: &taken.state,
+        };
         let passkey = self
-            .registered(
-                party,
-                answer.response,
-                &taken.state,
-                CeremonyKind::Addition,
-                taken.operator,
-                actor,
-            )
+            .registered(party, answer.response, &pending, actor)
             .await
             .map_err(|error| refusing(error, not_adding))?;
         let outcome = self.store.add_passkey(&taken, &passkey, actor).await?;
@@ -499,6 +495,13 @@ fn not_enrolling() -> Error {
 /// exist (`v5.0.0-6.3.8`).
 fn not_signing_in() -> Error {
     Error::Invalid("this sign-in could not be completed".to_string())
+}
+
+/// A registration whose ceremony was taken: what kind it is, whose, and the state it began with.
+struct Pending<'a> {
+    kind: CeremonyKind,
+    operator: OperatorId,
+    state: &'a str,
 }
 
 /// One answer for every way adding a passkey can fail.

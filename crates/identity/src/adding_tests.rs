@@ -148,13 +148,49 @@ async fn a_live_session_finds_its_account() {
         (
             account.operator,
             account.name.as_str(),
-            account.credentials.len(),
+            account.passkeys.len(),
             found
         ),
         (kurt, "Kurt Medley", 1, 1)
     );
     operators.disable(kurt, &actor()).await.expect("disables");
     assert_eq!(operators.account(session.session()).await, Ok(None));
+}
+
+/// An account lists each passkey with how the browser said it can reach it, and whether it may be and is synced,
+/// read from the passkey as the authenticator last signed it.
+#[tokio::test]
+async fn an_accounts_passkeys_say_how_to_reach_them_and_whether_synced() {
+    let (operators, database, _, session) = signed_in().await;
+    let account = operators
+        .account(session.session())
+        .await
+        .expect("reads")
+        .expect("an account");
+    let held = account.passkeys.first().expect("a passkey");
+    assert_eq!(
+        (
+            held.transports.clone(),
+            held.backup_eligible,
+            held.backup_state
+        ),
+        (
+            vec!["hybrid".to_string(), "internal".to_string()],
+            true,
+            true
+        )
+    );
+    as_admin(
+        &database,
+        "UPDATE identity.passkeys SET passkey = jsonb_set(passkey, '{cred,backup_state}', 'false')",
+    )
+    .await;
+    let read = operators.account(session.session()).await.expect("reads");
+    assert_eq!(
+        read.and_then(|account| account.passkeys.first().map(|held| held.backup_state)),
+        Some(false),
+        "the flag is read from the stored passkey"
+    );
 }
 
 /// Reading an account fails as storage when the database refuses its lookup.
@@ -182,6 +218,11 @@ async fn an_operator_adds_a_second_passkey_and_no_third() {
     let excluded = options["publicKey"]["excludeCredentials"]
         .as_array()
         .map_or(0, Vec::len);
+    assert_eq!(
+        options["publicKey"]["excludeCredentials"][0]["transports"],
+        json!(["hybrid", "internal"]),
+        "the device is told how to reach the passkey held"
+    );
     assert_eq!(
         [
             excluded,
@@ -425,6 +466,7 @@ async fn storing_an_added_passkey_refuses_and_records_why() {
     let fresh = |id: u8, size: usize| NewPasskey {
         credential_id: vec![id; size],
         passkey: "{}".to_string(),
+        transports: Vec::new(),
     };
     let mut answers = Vec::new();
     for (passkey, operator) in [
@@ -484,6 +526,7 @@ async fn an_addition_not_taken_or_a_credential_taken_adds_nothing() {
     let taken = NewPasskey {
         credential_id: first,
         passkey: "{}".to_string(),
+        transports: Vec::new(),
     };
     let untaken = TakenAddition {
         token: [9; 32],
@@ -556,23 +599,23 @@ async fn failures_of_the_server_are_told_apart() {
 const UNREADABLE: [(&str, &str, &str); 14] = [
     (
         "adder(bytea)",
-        "TABLE (operator_id text, user_handle bytea, name text, credentials bytea[])",
-        "SELECT '1', uuid_send(gen_random_uuid()), 'Kurt', array[]::bytea[]",
+        "TABLE (operator_id text, user_handle bytea, name text, credential_id bytea, transports text, backup_eligible boolean, backup_state boolean)",
+        "SELECT '1', uuid_send(gen_random_uuid()), 'Kurt', null::bytea, null::text, null::boolean, null::boolean",
     ),
     (
         "adder(bytea)",
-        "TABLE (operator_id bigint, user_handle bytea, name text, credentials bytea[])",
-        "SELECT 1::bigint, '\\x00'::bytea, 'Kurt', array[]::bytea[]",
+        "TABLE (operator_id bigint, user_handle bytea, name text, credential_id bytea, transports text, backup_eligible boolean, backup_state boolean)",
+        "SELECT 1::bigint, '\\x00'::bytea, 'Kurt', null::bytea, null::text, null::boolean, null::boolean",
     ),
     (
         "adder(bytea)",
-        "TABLE (operator_id bigint, user_handle bytea, name integer, credentials bytea[])",
-        "SELECT 1::bigint, uuid_send(gen_random_uuid()), 1, array[]::bytea[]",
+        "TABLE (operator_id bigint, user_handle bytea, name integer, credential_id bytea, transports text, backup_eligible boolean, backup_state boolean)",
+        "SELECT 1::bigint, uuid_send(gen_random_uuid()), 1, null::bytea, null::text, null::boolean, null::boolean",
     ),
     (
         "adder(bytea)",
-        "TABLE (operator_id bigint, user_handle bytea, name text, credentials text)",
-        "SELECT 1::bigint, uuid_send(gen_random_uuid()), 'Kurt', 'x'",
+        "TABLE (operator_id bigint, user_handle bytea, name text, credential_id bytea, transports text, backup_eligible boolean, backup_state boolean)",
+        "SELECT 1::bigint, uuid_send(gen_random_uuid()), 'Kurt', '\\x01'::bytea, ''::text, true, null::boolean",
     ),
     (
         "take_addition(bytea, bytea)",
@@ -585,37 +628,37 @@ const UNREADABLE: [(&str, &str, &str); 14] = [
         "SELECT 1::bigint, 1",
     ),
     (
-        "add_passkey(bytea, bytea, bigint, bytea, jsonb)",
+        "add_passkey(bytea, bytea, bigint, bytea, jsonb, text)",
         "TABLE (added text, sessions_ended bigint, session_id text)",
         "SELECT 'maybe', 0::bigint, 'x'",
     ),
     (
-        "add_passkey(bytea, bytea, bigint, bytea, jsonb)",
+        "add_passkey(bytea, bytea, bigint, bytea, jsonb, text)",
         "TABLE (added integer, sessions_ended bigint, session_id text)",
         "SELECT 1, 0::bigint, 'x'",
     ),
     (
-        "add_passkey(bytea, bytea, bigint, bytea, jsonb)",
+        "add_passkey(bytea, bytea, bigint, bytea, jsonb, text)",
         "TABLE (added text, sessions_ended text, session_id text)",
         "SELECT 'added', 'x', 'x'",
     ),
     (
-        "add_passkey(bytea, bytea, bigint, bytea, jsonb)",
+        "add_passkey(bytea, bytea, bigint, bytea, jsonb, text)",
         "TABLE (added text, sessions_ended bigint, session_id integer)",
         "SELECT 'added', 0::bigint, 1",
     ),
     (
-        "add_passkey(bytea, bytea, bigint, bytea, jsonb)",
+        "add_passkey(bytea, bytea, bigint, bytea, jsonb, text)",
         "TABLE (added text, sessions_ended bigint, session_id text)",
         "SELECT 'added', 0::bigint, 'x' WHERE false",
     ),
     (
-        "add_passkey(bytea, bytea, bigint, bytea, jsonb)",
+        "add_passkey(bytea, bytea, bigint, bytea, jsonb, text)",
         "TABLE (added text, sessions_ended bigint, session_id text)",
         "SELECT 'added', 0::bigint, null::text",
     ),
     (
-        "add_passkey(bytea, bytea, bigint, bytea, jsonb)",
+        "add_passkey(bytea, bytea, bigint, bytea, jsonb, text)",
         "TABLE (added text, sessions_ended bigint, session_id text)",
         "SELECT 'added', -1::bigint, 'x'",
     ),
@@ -650,7 +693,7 @@ async fn each_step_fails_as_storage_when_refused() {
         "adder(bytea)",
         "begin_addition(bytea, bytea, bigint, jsonb)",
         "take_addition(bytea, bytea)",
-        "add_passkey(bytea, bytea, bigint, bytea, jsonb)",
+        "add_passkey(bytea, bytea, bigint, bytea, jsonb, text)",
     ] {
         let (operators, database, _, session) = signed_in().await;
         as_admin(

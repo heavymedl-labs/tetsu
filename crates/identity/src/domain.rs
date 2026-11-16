@@ -322,11 +322,23 @@ impl std::fmt::Debug for TakenCeremony {
     }
 }
 
-/// A passkey webauthn-rs has verified, ready to store: its credential ID, and the passkey as webauthn-rs keeps it.
+/// A passkey webauthn-rs has verified, ready to store: its credential ID, the passkey as webauthn-rs keeps it, and
+/// the transports the browser listed that `webauthn-rs` names, once each and sorted, a hint for later ceremonies.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewPasskey {
     pub credential_id: Vec<u8>,
     pub passkey: String,
+    pub transports: Vec<String>,
+}
+
+/// A passkey an operator holds, as their account lists it: its credential ID, how the browser said it can reach
+/// it, and whether it may be, and is, synced to other devices, as the authenticator last signed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeldPasskey {
+    pub credential: Vec<u8>,
+    pub transports: Vec<String>,
+    pub backup_eligible: bool,
+    pub backup_state: bool,
 }
 
 /// A passkey found by the credential ID a sign-in names, with its operator, their user handle, the passkey as
@@ -394,7 +406,7 @@ impl std::fmt::Debug for Answer<'_> {
     }
 }
 
-/// The account a live session names: the operator, their user handle and name, and the credential IDs they hold, as
+/// The account a live session names: the operator, their user handle and name, and the passkeys they hold, as
 /// the operator's page, the browser's list of their passkeys, and a registration that must make no second passkey
 /// on a device that has one all need.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -402,7 +414,7 @@ pub struct Account {
     pub operator: OperatorId,
     pub user_handle: [u8; 16],
     pub name: String,
-    pub credentials: Vec<Vec<u8>>,
+    pub passkeys: Vec<HeldPasskey>,
 }
 
 /// An addition taken to be finished: its token's and session's hashes, which storing its passkey uses it up by, its
@@ -567,6 +579,16 @@ pub enum CeremonyKind {
     Enrollment,
     SignIn,
     Addition,
+}
+
+/// A ceremony refused after it was taken but before storage was asked to store its outcome: its kind, its reason as
+/// the audit record names it, and, where known, the operator and credential.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Refusal<'a> {
+    pub kind: CeremonyKind,
+    pub operator: Option<OperatorId>,
+    pub credential: Option<&'a [u8]>,
+    pub reason: &'a str,
 }
 
 /// Who ran an operator command, as the audit record names them, such as `kurt@workstation`. It is asserted by the

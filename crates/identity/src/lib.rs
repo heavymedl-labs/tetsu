@@ -22,9 +22,9 @@ pub use adapters::postgres::postgres_store;
 pub use browser::{Change, CheckedSession, ForChange, Origins, SignOut};
 pub use domain::{
     Account, Actor, Addition, Answer, Ceremony, CeremonyKind, CeremonyToken, Device, Disabling,
-    Enrollee, EnrollmentToken, Error, Issue, Limits, NewPasskey, OperatorId, OperatorName,
-    OperatorSummary, Realm, Redemption, Removal, Session, SessionStart, SessionToken, SignIn,
-    Signer, TakenAddition, TakenCeremony,
+    Enrollee, EnrollmentToken, Error, HeldPasskey, Issue, Limits, NewPasskey, OperatorId,
+    OperatorName, OperatorSummary, Realm, Redemption, Refusal, Removal, Session, SessionStart,
+    SessionToken, SignIn, Signer, TakenAddition, TakenCeremony,
 };
 pub use passkeys::RelyingParty;
 pub use ports::OperatorStore;

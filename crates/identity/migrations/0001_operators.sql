@@ -72,6 +72,15 @@ CREATE TABLE passkeys (
     -- Enrolling and adding store no passkey over 8 KiB; the table keeps a
     -- little more, so a counter that gains digits never fails a stored one.
     passkey jsonb NOT NULL CHECK (octet_length(passkey::text) <= 8320),
+    -- How the browser said it can reach the passkey, as a hint for the next
+    -- ceremony: the browser's word, never trusted. Only the names WebAuthn
+    -- gives, separated by spaces; Identity writes each once, sorted, so all
+    -- five fit in 27.
+    transports text NOT NULL DEFAULT '' CHECK (
+        char_length(transports) <= 27
+        AND transports
+        ~ '^((ble|hybrid|internal|nfc|usb)( (ble|hybrid|internal|nfc|usb))*)?$'
+    ),
     created_at timestamptz NOT NULL,
     last_used_at timestamptz
 );
@@ -152,8 +161,8 @@ TO tetsu_identity_lookup;
 GRANT SELECT (id, name, user_handle, created_at, disabled_at),
 UPDATE (disabled_at)
 ON operators TO tetsu_identity_lookup;
-GRANT SELECT (credential_id, operator_id, passkey),
-INSERT (credential_id, operator_id, passkey, created_at),
+GRANT SELECT (credential_id, operator_id, passkey, transports),
+INSERT (credential_id, operator_id, passkey, transports, created_at),
 UPDATE (passkey, last_used_at),
 DELETE
 ON passkeys TO tetsu_identity_lookup;
@@ -701,12 +710,20 @@ END
 $$;
 
 -- The account a live operator session names, if the operator is enabled: their
--- user handle and name, and the credential IDs they hold, as the operator's
--- page and the browser's list of their passkeys need. Reading it changes
--- nothing, not even the session's last request.
+-- user handle and name, and a row for each passkey they hold, with how the
+-- browser said it can reach it and whether it is synced, as the operator's
+-- page and the browser's list of their passkeys need. An operator who holds
+-- none has one row with no passkey. Reading it changes nothing, not even the
+-- session's last request.
 CREATE FUNCTION account(wanted_session bytea)
 RETURNS TABLE (
-    operator_id bigint, user_handle bytea, name text, credentials bytea[]
+    operator_id bigint,
+    user_handle bytea,
+    name text,
+    credential_id bytea,
+    transports text,
+    backup_eligible boolean,
+    backup_state boolean
 )
 LANGUAGE sql STABLE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
@@ -715,44 +732,49 @@ AS $$
         o.id,
         uuid_send(o.user_handle),
         o.name,
-        array(
-            SELECT p.credential_id
-            FROM identity.passkeys AS p
-            WHERE p.operator_id = o.id
-            ORDER BY p.credential_id
-        )
+        p.credential_id,
+        p.transports,
+        (p.passkey #>> '{cred,backup_eligible}')::boolean,
+        (p.passkey #>> '{cred,backup_state}')::boolean
     FROM identity.sessions AS s
     INNER JOIN identity.operators AS o ON s.operator_id = o.id
+    LEFT JOIN identity.passkeys AS p ON o.id = p.operator_id
     WHERE
         s.token_hash = wanted_session
         AND s.realm = 'operator'
         AND statement_timestamp() < s.ends_at
         AND statement_timestamp() < s.last_seen_at + interval '15 minutes'
         AND o.disabled_at IS NULL
+    ORDER BY p.credential_id
 $$;
 
 -- The account a session names, as account finds it, if the session began
 -- within ten minutes, which makes it a fresh sign-in (ADR-0048, v5.0.0-7.5.1),
 -- and the operator holds fewer than two passkeys (ADR-0057): what adding a
--- passkey needs, with the credential IDs they hold, so a device that has one
--- makes no second. Reading it changes nothing.
+-- passkey needs, with the passkeys they hold, so a device that has one makes
+-- no second. Reading it changes nothing.
 CREATE FUNCTION adder(wanted_session bytea)
 RETURNS TABLE (
-    operator_id bigint, user_handle bytea, name text, credentials bytea[]
+    operator_id bigint,
+    user_handle bytea,
+    name text,
+    credential_id bytea,
+    transports text,
+    backup_eligible boolean,
+    backup_state boolean
 )
 LANGUAGE sql STABLE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
 AS $$
-    SELECT
-        a.operator_id,
-        a.user_handle,
-        a.name,
-        a.credentials
+    SELECT a.*
     FROM identity.account(wanted_session) AS a
     INNER JOIN identity.sessions AS s ON s.token_hash = wanted_session
     WHERE
         s.started_at > statement_timestamp() - interval '10 minutes'
-        AND cardinality(a.credentials) < 2
+        AND (
+            SELECT count(*) FROM identity.passkeys AS p
+            WHERE p.operator_id = a.operator_id
+        ) < 2
 $$;
 
 -- Keeps a ceremony for adding a passkey under its token's hash, for ten
@@ -854,7 +876,8 @@ CREATE FUNCTION add_passkey(
     wanted_session bytea,
     wanted_operator bigint,
     wanted_credential bytea,
-    wanted_passkey jsonb
+    wanted_passkey jsonb,
+    wanted_transports text
 )
 RETURNS TABLE (added text, sessions_ended bigint, session_id text)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
@@ -915,8 +938,14 @@ BEGIN
     ELSE
         BEGIN
             INSERT INTO identity.passkeys
-                (credential_id, operator_id, passkey, created_at)
-            VALUES (wanted_credential, wanted_operator, wanted_passkey, at);
+                (credential_id, operator_id, passkey, transports, created_at)
+            VALUES (
+                wanted_credential,
+                wanted_operator,
+                wanted_passkey,
+                wanted_transports,
+                at
+            );
             added := 'added';
             -- Every other session ends; the one that added stays
             -- (ADR-0059, v5.0.0-7.4.3).
@@ -983,7 +1012,8 @@ CREATE FUNCTION redeem_enrollment(
     wanted_link bytea,
     wanted_operator bigint,
     wanted_credential bytea,
-    wanted_passkey jsonb
+    wanted_passkey jsonb,
+    wanted_transports text
 )
 RETURNS text
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
@@ -1013,9 +1043,13 @@ BEGIN
             RETURN 'expired';
         END IF;
         INSERT INTO identity.passkeys
-            (credential_id, operator_id, passkey, created_at)
+            (credential_id, operator_id, passkey, transports, created_at)
         VALUES (
-            wanted_credential, wanted_operator, wanted_passkey, clock_timestamp()
+            wanted_credential,
+            wanted_operator,
+            wanted_passkey,
+            wanted_transports,
+            clock_timestamp()
         );
     EXCEPTION WHEN unique_violation THEN
         RETURN 'taken';
@@ -1217,9 +1251,10 @@ begin_enrollment(bytea, bigint, bytea, jsonb), take_ceremony(bytea, text),
 begin_sign_in(bytea, jsonb), signer(bytea), account(bytea),
 sign_in(bytea, bigint, jsonb, jsonb, bytea, bytea), adder(bytea),
 begin_addition(bytea, bytea, bigint, jsonb), take_addition(bytea, bytea),
-add_passkey(bytea, bytea, bigint, bytea, jsonb),
-redeem_enrollment(bytea, bigint, bytea, jsonb), disable_operator(bigint),
-enable_operator(bigint), remove_passkeys(bigint), end_sessions(text, bigint)
+add_passkey(bytea, bytea, bigint, bytea, jsonb, text),
+redeem_enrollment(bytea, bigint, bytea, jsonb, text),
+disable_operator(bigint), enable_operator(bigint), remove_passkeys(bigint),
+end_sessions(text, bigint)
 TO tetsu_identity;
 
 -- A new owner needs CREATE on the schema at the moment it takes a function,
@@ -1246,12 +1281,12 @@ ALTER FUNCTION adder(bytea) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION begin_addition(bytea, bytea, bigint, jsonb)
 OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION take_addition(bytea, bytea) OWNER TO tetsu_identity_lookup;
-ALTER FUNCTION add_passkey(bytea, bytea, bigint, bytea, jsonb)
+ALTER FUNCTION add_passkey(bytea, bytea, bigint, bytea, jsonb, text)
 OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION signer(bytea) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION sign_in(bytea, bigint, jsonb, jsonb, bytea, bytea)
 OWNER TO tetsu_identity_lookup;
-ALTER FUNCTION redeem_enrollment(bytea, bigint, bytea, jsonb)
+ALTER FUNCTION redeem_enrollment(bytea, bigint, bytea, jsonb, text)
 OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION disable_operator(bigint) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION enable_operator(bigint) OWNER TO tetsu_identity_lookup;

@@ -10,9 +10,9 @@ use tokio_postgres::Row;
 use tokio_postgres::types::{FromSql, ToSql};
 
 use crate::domain::{
-    Account, Actor, Addition, CeremonyKind, Disabling, Enrollee, Error, Issue, NewPasskey,
-    OperatorId, OperatorName, OperatorSummary, Realm, Redemption, Removal, Session, SessionStart,
-    SignIn, Signer, TakenAddition, TakenCeremony,
+    Account, Actor, Addition, CeremonyKind, Disabling, Enrollee, Error, HeldPasskey, Issue,
+    NewPasskey, OperatorId, OperatorName, OperatorSummary, Realm, Redemption, Refusal, Removal,
+    Session, SessionStart, SignIn, Signer, TakenAddition, TakenCeremony,
 };
 use crate::ports::OperatorStore;
 use crate::use_cases::Operators;
@@ -323,11 +323,13 @@ impl OperatorStore for PostgresOperators {
         actor: &Actor,
     ) -> Result<Option<Redemption>, Error> {
         let id = ceremony.operator.get();
-        let parameters: [&(dyn ToSql + Sync); 4] = [
+        let transports = passkey.transports.join(" ");
+        let parameters: [&(dyn ToSql + Sync); 5] = [
             &ceremony.link_hash.as_slice(),
             &id,
             &passkey.credential_id,
             &passkey.passkey,
+            &transports,
         ];
         self.decided(REDEEM_ENROLLMENT, &parameters, |rows| {
             redemption(rows, id, &passkey.credential_id, actor)
@@ -341,23 +343,16 @@ impl OperatorStore for PostgresOperators {
             .map(drop)
     }
 
-    async fn refuse(
-        &self,
-        kind: CeremonyKind,
-        operator: Option<OperatorId>,
-        credential: Option<&[u8]>,
-        reason: &str,
-        actor: &Actor,
-    ) -> Result<(), Error> {
+    async fn refuse(&self, refusal: &Refusal<'_>, actor: &Actor) -> Result<(), Error> {
         let payload = json!({
-            "operator_id": operator.map(OperatorId::get),
-            "credential": credential.map(hex),
+            "operator_id": refusal.operator.map(OperatorId::get),
+            "credential": refusal.credential.map(hex),
         });
         self.query_recording(RECORD, &[], &|_| {
             Ok(Some(reasoned(
-                event_kind(kind),
+                event_kind(refusal.kind),
                 actor,
-                Some(reason),
+                Some(refusal.reason),
                 payload.clone(),
             )))
         })
@@ -402,19 +397,11 @@ impl OperatorStore for PostgresOperators {
     }
 
     async fn account(&self, session: &[u8; 32]) -> Result<Option<Account>, Error> {
-        self.query(ACCOUNT, &[&session.as_slice()])
-            .await?
-            .first()
-            .map(account_from)
-            .transpose()
+        account_from(&self.query(ACCOUNT, &[&session.as_slice()]).await?)
     }
 
     async fn adder(&self, session: &[u8; 32]) -> Result<Option<Account>, Error> {
-        self.query(ADDER, &[&session.as_slice()])
-            .await?
-            .first()
-            .map(account_from)
-            .transpose()
+        account_from(&self.query(ADDER, &[&session.as_slice()]).await?)
     }
 
     async fn begin_addition(
@@ -451,12 +438,14 @@ impl OperatorStore for PostgresOperators {
         passkey: &NewPasskey,
         actor: &Actor,
     ) -> Result<Option<Addition>, Error> {
-        let parameters: [&(dyn ToSql + Sync); 5] = [
+        let transports = passkey.transports.join(" ");
+        let parameters: [&(dyn ToSql + Sync); 6] = [
             &addition.token.as_slice(),
             &addition.session.as_slice(),
             &addition.operator.get(),
             &passkey.credential_id,
             &passkey.passkey,
+            &transports,
         ];
         self.decided(ADD_PASSKEY, &parameters, |rows| {
             adding(rows, addition.operator.get(), passkey, actor)
@@ -888,15 +877,33 @@ fn hex(bytes: &[u8]) -> String {
     })
 }
 
-/// An account: an enrollee's columns, and the credentials the operator holds.
-fn account_from(row: &Row) -> Result<Account, Error> {
-    let enrollee = enrollee_from(row)?;
-    Ok(Account {
+/// An account: an enrollee's columns from its first row, and a passkey from each row that names one. A passkey
+/// whose stored flags are missing is a fault of storage, never a guess.
+fn account_from(rows: &[Row]) -> Result<Option<Account>, Error> {
+    let Some(first) = rows.first() else {
+        return Ok(None);
+    };
+    let enrollee = enrollee_from(first)?;
+    let mut passkeys = Vec::new();
+    for row in rows {
+        if let Some(credential) = column(row, "credential_id")? {
+            passkeys.push(HeldPasskey {
+                credential,
+                transports: column::<String>(row, "transports")?
+                    .split_whitespace()
+                    .map(str::to_string)
+                    .collect(),
+                backup_eligible: column(row, "backup_eligible")?,
+                backup_state: column(row, "backup_state")?,
+            });
+        }
+    }
+    Ok(Some(Account {
         operator: enrollee.operator,
         user_handle: enrollee.user_handle,
         name: enrollee.name,
-        credentials: column(row, "credentials")?,
-    })
+        passkeys,
+    }))
 }
 
 /// A stored user handle, which must be 16 bytes: `uuid_send` always writes 16, so any other length is a fault of

@@ -9,7 +9,7 @@ use webauthn_rs::prelude::{
 };
 
 use crate::browser::Origins;
-use crate::domain::{Error, NewPasskey};
+use crate::domain::{Error, HeldPasskey, NewPasskey};
 
 /// What an account picker shows before an operator's name. Authenticators may keep only the first 64 bytes of a
 /// name (`WebAuthn` L3 §6.4.1), so the label comes first, where a cut never reaches it.
@@ -53,11 +53,11 @@ impl RelyingParty {
         &self,
         user_handle: [u8; 16],
         name: &str,
-        held: &[Vec<u8>],
+        held: &[HeldPasskey],
     ) -> Result<(String, String), Error> {
         let exclude = (!held.is_empty()).then(|| {
             held.iter()
-                .map(|id| CredentialID::from(id.clone()))
+                .map(|passkey| CredentialID::from(passkey.credential.clone()))
                 .collect()
         });
         let (options, state) = self
@@ -73,6 +73,13 @@ impl RelyingParty {
         let mut options = json!(options);
         options["publicKey"]["authenticatorSelection"]["residentKey"] = json!("required");
         options["publicKey"]["authenticatorSelection"]["requireResidentKey"] = Value::Bool(true);
+        // webauthn-rs lists the passkeys held in the order given, with no transports, so each is added by place,
+        // letting the device skip asking for a key it cannot reach.
+        if let Some(listed) = options["publicKey"]["excludeCredentials"].as_array_mut() {
+            for (entry, passkey) in listed.iter_mut().zip(held) {
+                entry["transports"] = json!(passkey.transports);
+            }
+        }
         Ok((options.to_string(), json!(state).to_string()))
     }
 
@@ -172,13 +179,30 @@ impl RelyingParty {
         Ok(NewPasskey {
             credential_id: AsRef::<[u8]>::as_ref(passkey.cred_id()).to_vec(),
             passkey: json!(passkey).to_string(),
+            transports: named(&json!(response.response.transports)),
         })
     }
 }
 
+/// The transports a browser listed that `webauthn-rs` names, as it writes them, once each and sorted. With no attestation `webauthn-rs`
+/// stores none, so Identity keeps these as a hint; any other value is dropped, never refused, as `WebAuthn` asks.
+fn named(transports: &Value) -> Vec<String> {
+    const NAMED: [&str; 5] = ["ble", "hybrid", "internal", "nfc", "usb"];
+    let mut names: Vec<String> = transports
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter(|name| NAMED.contains(name))
+        .map(str::to_string)
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
 /// Whether a registration could be a usable passkey: not one its client says is not discoverable. Its transports
-/// are not checked: `WebAuthn` asks relying parties to accept values it does not name, and with no attestation
-/// `webauthn-rs` stores none.
+/// are not checked: `WebAuthn` asks relying parties to accept values it does not name.
 fn plausible(response: &RegisterPublicKeyCredential) -> bool {
     response
         .extensions

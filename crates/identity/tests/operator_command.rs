@@ -635,7 +635,7 @@ async fn changes_that_wait_on_an_operator_need_read_committed() {
         "SELECT identity.end_sessions('operator', 1)",
         "SELECT identity.end_sessions('operator', null)",
         "SELECT identity.issue_enrollment(sha256('a'::bytea), 1)",
-        "SELECT identity.redeem_enrollment(sha256('a'::bytea), 1, sha256('c'::bytea), '{}')",
+        "SELECT identity.redeem_enrollment(sha256('a'::bytea), 1, sha256('c'::bytea), '{}', '')",
         "SELECT identity.begin_enrollment(sha256('t'::bytea), 1, sha256('a'::bytea), '{}')",
         "SELECT identity.enable_operator(1)",
         "SELECT * FROM identity.remove_passkeys(1)",
@@ -643,7 +643,7 @@ async fn changes_that_wait_on_an_operator_need_read_committed() {
         "SELECT identity.begin_sign_in(sha256('t'::bytea), '{}')",
         "SELECT identity.begin_addition(sha256('t'::bytea), sha256('s'::bytea), 1, '{}')",
         "SELECT * FROM identity.add_passkey(
-             sha256('t'::bytea), sha256('s'::bytea), 1, sha256('c'::bytea), '{}'
+             sha256('t'::bytea), sha256('s'::bytea), 1, sha256('c'::bytea), '{}', ''
          )",
     ] {
         let transaction = client

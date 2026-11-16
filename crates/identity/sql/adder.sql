@@ -1,7 +1,11 @@
--- The operator a fresh session names, if they may add a passkey.
+-- The operator a fresh session names, if they may add a passkey, a row for each
+-- passkey they hold.
 SELECT
     a.operator_id,
     a.user_handle,
     a.name,
-    a.credentials
+    a.credential_id,
+    a.transports,
+    a.backup_eligible,
+    a.backup_state
 FROM identity.adder($1) AS a;
