@@ -3,7 +3,7 @@
 use crate::domain::{
     Actor, Adder, Addition, Disabling, Enrollee, Error, Issue, NewPasskey, OperatorId,
     OperatorName, OperatorSummary, Realm, Redemption, Removal, Session, SignIn, Signer,
-    TakenCeremony,
+    TakenAddition, TakenCeremony,
 };
 use std::future::Future;
 
@@ -18,15 +18,6 @@ pub trait OperatorStore {
         name: &OperatorName,
         actor: &Actor,
     ) -> impl Future<Output = Result<OperatorId, Error>> + Send;
-
-    /// Stores a session under its token's hash, starting now, and removes the operator's spent sessions in the
-    /// realm.
-    fn insert_session(
-        &self,
-        hash: &[u8; 32],
-        realm: Realm,
-        operator: OperatorId,
-    ) -> impl Future<Output = Result<(), Error>> + Send;
 
     /// Records a request on the live session stored under a token's hash in a realm, and returns it. A session
     /// past either of the realm's limits is removed instead, and none is returned; one in another realm is none.
@@ -103,7 +94,18 @@ pub trait OperatorStore {
         &self,
         token: &[u8; 32],
         state: &str,
-    ) -> impl Future<Output = Result<bool, Error>> + Send;
+    ) -> impl Future<Output = Result<(), Error>> + Send;
+
+    /// Records a sign-in refused before storage was asked to store it, with its reason and, where known, the
+    /// operator and credential, so every refusal after a ceremony was taken is in the audit record
+    /// (`v5.0.0-16.3.1`).
+    fn refuse_sign_in(
+        &self,
+        operator: Option<OperatorId>,
+        credential: Option<&[u8]>,
+        reason: &str,
+        actor: &Actor,
+    ) -> impl Future<Output = Result<(), Error>> + Send;
 
     /// Takes a sign-in ceremony's state by its token's hash, once, if it was still open.
     fn take_sign_in(
@@ -145,15 +147,14 @@ pub trait OperatorStore {
         state: &str,
     ) -> impl Future<Output = Result<bool, Error>> + Send;
 
-    /// Takes a ceremony for adding a passkey by its token's hash, once: its operator and state, if it was still
-    /// open.
+    /// Takes a ceremony for adding a passkey by its token's hash, once, if it was still open.
     fn take_addition(
         &self,
         token: &[u8; 32],
-    ) -> impl Future<Output = Result<Option<(OperatorId, String)>, Error>> + Send;
+    ) -> impl Future<Output = Result<Option<TakenAddition>, Error>> + Send;
 
-    /// Stores an operator's added passkey while their session is live, in one transaction, recording it; says what
-    /// came of it, or none for an operator who does not exist.
+    /// Stores an operator's added passkey while their session is live, ending their other sessions, in one
+    /// transaction, recording it; says what came of it, or none for an operator who does not exist.
     fn add_passkey(
         &self,
         session: &[u8; 32],

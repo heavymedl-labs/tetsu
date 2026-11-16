@@ -116,19 +116,23 @@ async fn an_operator_signs_in_with_their_passkey() {
 }
 
 /// A sign-in is refused, the same way each time, when its answer names another operator's user handle, comes from
-/// another origin, does not verify the user, or is not an answer at all (#109).
+/// another origin, does not verify the user, names no user handle, or is not an answer at all (#109), and each is
+/// recorded with its reason.
 #[tokio::test]
 async fn hostile_sign_ins_are_refused() {
     let (operators, database, _, kept) = enrolled().await;
     let party = party();
     let mut refused = Vec::new();
-    let cases: [(&str, Rewrite); 4] = [
+    let cases: [(&str, Rewrite); 5] = [
         (ORIGIN, |answer| {
             answer["response"]["userHandle"] = json!("AAAAAAAAAAAAAAAAAAAAAA");
         }),
         ("https://ops.example.com:8443", |_| {}),
         (ORIGIN, |answer| *answer = json!({"not": "an answer"})),
         (ORIGIN, |answer| *answer = json!("not JSON at all")),
+        (ORIGIN, |answer| {
+            answer["response"]["userHandle"] = Value::Null;
+        }),
     ];
     for (origin, rewrite) in cases {
         let (token, response) = answer(&operators, kept.clone(), origin, rewrite).await;
@@ -149,10 +153,55 @@ async fn hostile_sign_ins_are_refused() {
             .await
             .map(drop),
     ));
-    assert_eq!(refused, vec![not_signing_in(); 5]);
+    assert_eq!(refused, vec![not_signing_in(); 6]);
     assert_eq!(
         number(&database, "SELECT count(*) FROM identity.sessions").await,
         0
+    );
+    let reasons = [
+        "handle_mismatch",
+        "not_verified",
+        "malformed",
+        "malformed",
+        "malformed",
+        "user_not_verified",
+    ];
+    assert_eq!(
+        sign_ins(&database).await,
+        reasons.map(|reason| json!(["refused", reason]))
+    );
+}
+
+/// A passkey whose signature counter goes back, or whose backup eligibility changed, as a cloned authenticator's
+/// might, is refused, and the record names why (ADR-0047, `WebAuthn` L3 §6.1.1, §6.1.3); a counter that moves
+/// forward is stored.
+#[tokio::test]
+async fn a_counter_gone_back_or_a_changed_backup_eligibility_is_refused_and_recorded() {
+    let (operators, database, _, kept) = enrolled().await;
+    let party = party();
+    let (mut ahead, mut further) = (kept.clone(), kept.clone());
+    ahead.counter = Some(5);
+    further.counter = Some(50);
+    let flip = "UPDATE identity.passkeys SET passkey = jsonb_set(passkey, '{cred,backup_eligible}',
+                to_jsonb(NOT (passkey #>> '{cred,backup_eligible}')::boolean))";
+    for (passkey, change) in [(ahead, ""), (kept, ""), (further, flip)] {
+        as_admin(&database, change).await;
+        let (token, response) = answer(&operators, passkey, ORIGIN, |_| {}).await;
+        let _ = operators
+            .finish_sign_in(&party, &token, &response, &actor())
+            .await;
+    }
+    assert_eq!(
+        sign_ins(&database).await,
+        [
+            json!(["changed", null]),
+            json!(["refused", "counter_regressed"]),
+            json!(["refused", "backup_eligibility_changed"])
+        ]
+    );
+    assert_eq!(
+        number(&database, "SELECT count(*) FROM identity.sessions").await,
+        1
     );
 }
 
@@ -160,7 +209,7 @@ async fn hostile_sign_ins_are_refused() {
 /// malformed or unknown.
 #[tokio::test]
 async fn a_disabled_or_removed_passkey_signs_in_nowhere() {
-    let (operators, _database, kurt, kept) = enrolled().await;
+    let (operators, database, kurt, kept) = enrolled().await;
     let party = party();
     let mut refused = Vec::new();
     for change in ["disable", "remove"] {
@@ -190,35 +239,44 @@ async fn a_disabled_or_removed_passkey_signs_in_nowhere() {
         ));
     }
     assert_eq!(refused, vec![not_signing_in(); 4]);
+    assert_eq!(
+        sign_ins(&database).await,
+        vec![json!(["refused", "unknown_credential"]); 2],
+        "a token that finds no ceremony records nothing"
+    );
 }
 
-/// No more than a thousand sign-ins may be open at once, and each begin sweeps ceremonies that have ended.
+/// Each begin sweeps ceremonies that have ended, and past ten thousand open sign-ins it ends the oldest rather than
+/// refusing, so filling the table locks no one out (ADR-0048, `v5.0.0-6.3.1`).
 #[tokio::test]
-async fn open_sign_ins_are_capped_and_ended_ones_swept() {
+async fn ended_sign_ins_are_swept_and_the_oldest_open_ones_give_way() {
     let (operators, database) = {
         let (operators, database, _, _) = with_link().await;
         (operators, database)
     };
-    let fill = |ends: &str| {
+    let fill = |count: u32, ends: &str| {
         format!(
             "INSERT INTO identity.ceremonies (token_hash, kind, state, ends_at)
-             SELECT sha256(int8send(n)), 'sign_in', '{{}}', now() + interval '{ends}'
-             FROM generate_series(1, 1000) AS n"
+             SELECT sha256(int8send(n)), 'sign_in', '{{}}', now() + interval '{ends}' + n * interval '1 ms'
+             FROM generate_series(1, {count}) AS n"
         )
     };
-    as_admin(&database, &fill("-1 minute")).await;
+    as_admin(&database, &fill(1000, "-1 minute")).await;
     assert!(operators.begin_sign_in(&party()).await.is_ok());
     let left = "SELECT count(*) FROM identity.ceremonies";
     assert_eq!(number(&database, left).await, 901);
     as_admin(
         &database,
-        &format!("DELETE FROM identity.ceremonies; {}", fill("1 minute")),
+        &format!(
+            "DELETE FROM identity.ceremonies; {}",
+            fill(10_000, "1 minute")
+        ),
     )
     .await;
-    assert_eq!(
-        failure(operators.begin_sign_in(&party()).await.map(drop)),
-        not_signing_in()
-    );
+    assert!(operators.begin_sign_in(&party()).await.is_ok());
+    assert_eq!(number(&database, left).await, 10_000);
+    let oldest = "SELECT count(*) FROM identity.ceremonies WHERE token_hash = sha256(int8send(1))";
+    assert_eq!(number(&database, oldest).await, 0, "the oldest gave way");
 }
 
 /// The signer the one stored passkey's credential ID names.
@@ -424,4 +482,28 @@ async fn each_sign_in_step_fails_as_storage_when_refused() {
         .map(|name| format!("storage failed: permission denied for function {name}"))
         .collect();
     assert_eq!(said, expected);
+}
+
+/// A refusal that cannot be recorded is a storage failure, never a silent refusal.
+#[tokio::test]
+async fn a_refusal_that_cannot_be_recorded_fails_as_storage() {
+    let (operators, database, _, kept) = enrolled().await;
+    let (token, response) = answer(&operators, kept, ORIGIN, |answer| {
+        answer["response"]["userHandle"] = json!("AAAAAAAAAAAAAAAAAAAAAA");
+    })
+    .await;
+    as_admin(
+        &database,
+        "REVOKE INSERT ON identity.outbox_global FROM tetsu_identity",
+    )
+    .await;
+    assert_eq!(
+        failure(
+            operators
+                .finish_sign_in(&party(), &token, &response, &actor())
+                .await
+                .map(drop)
+        ),
+        "storage failed: permission denied for table outbox_global"
+    );
 }

@@ -12,7 +12,7 @@ use tokio_postgres::types::{FromSql, ToSql};
 use crate::domain::{
     Actor, Adder, Addition, Disabling, Enrollee, Error, Issue, NewPasskey, OperatorId,
     OperatorName, OperatorSummary, Realm, Redemption, Removal, Session, SignIn, Signer,
-    TakenCeremony,
+    TakenAddition, TakenCeremony,
 };
 use crate::ports::OperatorStore;
 use crate::use_cases::Operators;
@@ -32,7 +32,6 @@ pub const MIGRATIONS: &[Migration] = &[
 const SCHEMA: &str = "identity";
 
 const INSERT_OPERATOR: &str = include_str!("../../sql/insert_operator.sql");
-const START_SESSION: &str = include_str!("../../sql/start_session.sql");
 const USE_SESSION: &str = include_str!("../../sql/use_session.sql");
 const END_SESSION: &str = include_str!("../../sql/end_session.sql");
 const ISSUE_ENROLLMENT: &str = include_str!("../../sql/issue_enrollment.sql");
@@ -51,6 +50,7 @@ const ADDER: &str = include_str!("../../sql/adder.sql");
 const BEGIN_ADDITION: &str = include_str!("../../sql/begin_addition.sql");
 const TAKE_ADDITION: &str = include_str!("../../sql/take_addition.sql");
 const ADD_PASSKEY: &str = include_str!("../../sql/add_passkey.sql");
+const RECORD: &str = include_str!("../../sql/record.sql");
 const BEGIN_ENROLLMENT: &str = include_str!("../../sql/begin_enrollment.sql");
 const TAKE_CEREMONY: &str = include_str!("../../sql/take_ceremony.sql");
 const REDEEM_ENROLLMENT: &str = include_str!("../../sql/redeem_enrollment.sql");
@@ -203,19 +203,11 @@ async fn run(
     Ok(rows)
 }
 
-/// The SQLSTATE Identity's own functions raise for an operator who is disabled or unknown: a code of Identity's,
-/// so no other error is ever taken for it.
-const NO_ENABLED_OPERATOR: &str = "TD001";
-
-/// An operator who is disabled or unknown is the caller's mistake, not storage failing. A function refusing an
-/// isolation level other than read committed (TD002) is a fault of the code that called it, so storage.
+/// How a statement failed. Identity's own functions raise two codes of their own, and both are faults of the code
+/// that called them, so storage: TD001, a session started for an operator not enabled, which only a sign-in that
+/// holds an enabled operator's row ever starts; and TD002, an isolation level other than read committed.
 fn sorted(error: &tokio_postgres::Error) -> Error {
-    match error.as_db_error() {
-        Some(db) if db.code().code() == NO_ENABLED_OPERATOR => {
-            Error::Invalid("no enabled operator".to_string())
-        }
-        _ => failed(tetsu_postgres::sort(error)),
-    }
+    failed(tetsu_postgres::sort(error))
 }
 
 fn commit_failed(error: &tokio_postgres::Error) -> Error {
@@ -250,17 +242,6 @@ impl OperatorStore for PostgresOperators {
         })
         .await?;
         created(added.get().copied().flatten())
-    }
-
-    async fn insert_session(
-        &self,
-        hash: &[u8; 32],
-        realm: Realm,
-        operator: OperatorId,
-    ) -> Result<(), Error> {
-        let parameters: [&(dyn ToSql + Sync); 3] =
-            [&hash.as_slice(), &realm.as_str(), &operator.get()];
-        self.query(START_SESSION, &parameters).await.map(drop)
     }
 
     async fn use_session(&self, hash: &[u8; 32], realm: Realm) -> Result<Option<Session>, Error> {
@@ -342,12 +323,34 @@ impl OperatorStore for PostgresOperators {
         Ok(redeemed.get().copied().flatten())
     }
 
-    async fn begin_sign_in(&self, token: &[u8; 32], state: &str) -> Result<bool, Error> {
-        begun(
-            &self
-                .query(BEGIN_SIGN_IN, &[&token.as_slice(), &state])
-                .await?,
-        )
+    async fn begin_sign_in(&self, token: &[u8; 32], state: &str) -> Result<(), Error> {
+        self.query(BEGIN_SIGN_IN, &[&token.as_slice(), &state])
+            .await
+            .map(drop)
+    }
+
+    async fn refuse_sign_in(
+        &self,
+        operator: Option<OperatorId>,
+        credential: Option<&[u8]>,
+        reason: &str,
+        actor: &Actor,
+    ) -> Result<(), Error> {
+        let payload = json!({
+            "operator_id": operator.map(OperatorId::get),
+            "credential": credential.map(hex),
+            "reason": reason,
+        });
+        self.query_recording(RECORD, &[], &|_| {
+            Ok(Some(event(
+                "identity.signed_in",
+                actor,
+                "refused",
+                payload.clone(),
+            )))
+        })
+        .await
+        .map(drop)
     }
 
     async fn take_sign_in(&self, token: &[u8; 32]) -> Result<Option<String>, Error> {
@@ -405,7 +408,7 @@ impl OperatorStore for PostgresOperators {
         begun(&self.query(BEGIN_ADDITION, &parameters).await?)
     }
 
-    async fn take_addition(&self, token: &[u8; 32]) -> Result<Option<(OperatorId, String)>, Error> {
+    async fn take_addition(&self, token: &[u8; 32]) -> Result<Option<TakenAddition>, Error> {
         self.query(TAKE_ADDITION, &[&token.as_slice()])
             .await?
             .first()
@@ -851,10 +854,18 @@ fn user_handle(row: &Row) -> Result<[u8; 16], Error> {
         .map_err(|_| Error::Storage("a user handle is not 16 bytes".to_string()))
 }
 
-/// A ceremony for adding a passkey: its operator and state.
-fn addition_ceremony_from(row: &Row) -> Result<(OperatorId, String), Error> {
+/// A ceremony for adding a passkey: its operator, the session it began from, which must be a 32-byte hash, and
+/// its state.
+fn addition_ceremony_from(row: &Row) -> Result<TakenAddition, Error> {
     let operator: i64 = column(row, "operator_id")?;
-    Ok((OperatorId::new(operator), column(row, "state")?))
+    let session: Vec<u8> = column(row, "session_hash")?;
+    Ok(TakenAddition {
+        operator: OperatorId::new(operator),
+        session_hash: session
+            .try_into()
+            .map_err(|_| Error::Storage("a session hash is not 32 bytes".to_string()))?,
+        state: column(row, "state")?,
+    })
 }
 
 /// Reads what adding a passkey came to, keeps it in `added`, and makes the event it records: changed when the
@@ -866,10 +877,7 @@ fn adding(
     actor: &Actor,
     added: &OnceLock<Option<Addition>>,
 ) -> Result<Option<(&'static str, String)>, Error> {
-    let addition = rows
-        .first()
-        .map_or(Ok(None), |row| column::<Option<String>>(row, "added"))
-        .and_then(|answer| answer.as_deref().map(addition_from).transpose())?;
+    let (addition, ended) = rows.first().map_or(Ok((None, 0)), added_and_ended)?;
     let _ = added.set(addition);
     let reason = addition.map_or(Some("unknown"), Addition::reason);
     Ok(Some(event(
@@ -880,8 +888,20 @@ fn adding(
         } else {
             "refused"
         },
-        json!({"operator_id": id, "credential": hex(credential), "reason": reason}),
+        json!({
+            "operator_id": id,
+            "credential": hex(credential),
+            "reason": reason,
+            "sessions_ended": ended,
+        }),
     )))
+}
+
+/// What adding a passkey answered, and how many of the operator's other live sessions it ended.
+fn added_and_ended(row: &Row) -> Result<(Option<Addition>, i64), Error> {
+    let answer: Option<String> = column(row, "added")?;
+    let ended: i64 = column(row, "sessions_ended")?;
+    Ok((answer.as_deref().map(addition_from).transpose()?, ended))
 }
 
 /// An answer Identity's database never writes is a storage failure, never a guess.
@@ -962,38 +982,6 @@ mod tests {
         assert_eq!(
             commit_failed(&error),
             Error::Storage("commit refused: syntax error at or near \"SELEC\"".to_string())
-        );
-    }
-
-    /// With no secure random source, no session starts, and nothing is stored.
-    #[tokio::test]
-    async fn no_session_starts_without_randomness() {
-        let (pool, _database) = support::migrated().await;
-        let operators = Operators::with_fill(PostgresOperators { pool: pool.clone() }, |_| {
-            Err(getrandom::Error::UNSUPPORTED)
-        });
-        let kurt = operators
-            .create(
-                &OperatorName::parse("Kurt Medley").expect("a name"),
-                &support::actor(),
-            )
-            .await
-            .expect("creates");
-        assert_eq!(
-            operators.start_session(kurt).await,
-            Err(Error::Unavailable(format!(
-                "no secure random source: {}",
-                getrandom::Error::UNSUPPORTED
-            )))
-        );
-        // The same build, with the operating system's source, starts one: llvm-cov scores each build of a
-        // function on its own, so this one must take both paths.
-        let working = Operators::with_fill(PostgresOperators { pool }, getrandom::fill);
-        assert!(working.start_session(kurt).await.is_ok());
-        assert_eq!(
-            working.start_session(OperatorId::new(i64::MAX)).await,
-            Err(Error::Invalid(format!("no enabled operator {}", i64::MAX))),
-            "an unknown operator starts no session"
         );
     }
 

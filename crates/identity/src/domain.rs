@@ -370,6 +370,15 @@ pub struct Adder {
     pub credentials: Vec<Vec<u8>>,
 }
 
+/// A ceremony for adding a passkey, taken to finish: whose it is, the session it began from, which alone may
+/// finish it, and the state `webauthn-rs` needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TakenAddition {
+    pub operator: OperatorId,
+    pub session_hash: [u8; 32],
+    pub state: String,
+}
+
 /// What adding a passkey came to for an operator who exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Addition {

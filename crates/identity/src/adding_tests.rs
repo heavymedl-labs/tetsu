@@ -105,6 +105,68 @@ async fn an_operator_adds_a_second_passkey_and_no_third() {
     );
 }
 
+/// Adding a passkey ends the operator's other sessions and keeps the one that added it (ADR-0059,
+/// `v5.0.0-7.4.3`), and the record says how many live ones it ended.
+#[tokio::test]
+async fn adding_a_passkey_ends_the_operators_other_sessions() {
+    let (operators, database, _, session) = signed_in().await;
+    as_admin(
+        &database,
+        "SELECT identity.start_session(sha256('other'::bytea), 'operator', 1)",
+    )
+    .await;
+    let (added, _) = add(&operators, &session, |response| response).await;
+    assert_eq!(added, Ok(()));
+    let left = "SELECT count(*) FROM identity.sessions WHERE token_hash <> sha256('other'::bytea)";
+    assert_eq!(
+        [
+            number(&database, "SELECT count(*) FROM identity.sessions").await,
+            number(&database, left).await
+        ],
+        [1, 1]
+    );
+    let ended = "SELECT (payload ->> 'sessions_ended')::bigint FROM identity.outbox_global
+                 WHERE event_type = 'identity.passkey_added'";
+    assert_eq!(number(&database, ended).await, 1);
+}
+
+/// An addition belongs to the session that began it: another of the operator's sessions cannot finish it, and an
+/// operator has one addition open at a time, whatever begins them.
+#[tokio::test]
+async fn only_the_session_that_began_an_addition_finishes_it() {
+    let (operators, database, _, session) = signed_in().await;
+    let party = party();
+    let ceremony = operators
+        .begin_adding_passkey(&party, &session)
+        .await
+        .expect("begins");
+    let mut other = session.clone();
+    other.hash = [7; 32];
+    let (response, _kept) = register_keeping(&ceremony.options, ORIGIN, true).await;
+    let answer = Answer {
+        ceremony: &ceremony.token.to_text(),
+        response: &response,
+    };
+    assert_eq!(
+        failure(
+            operators
+                .finish_adding_passkey(&party, &other, answer, &actor())
+                .await
+        ),
+        not_adding()
+    );
+    let open = "SELECT count(*) FROM identity.ceremonies WHERE kind = 'add'";
+    operators
+        .begin_adding_passkey(&party, &session)
+        .await
+        .expect("begins again");
+    operators
+        .begin_adding_passkey(&party, &session)
+        .await
+        .expect("and again");
+    assert_eq!(number(&database, open).await, 1);
+}
+
 /// Only a fresh sign-in may add a passkey: a session begun more than ten minutes ago is refused.
 #[tokio::test]
 async fn a_session_that_is_not_fresh_adds_no_passkey() {
@@ -294,14 +356,15 @@ async fn failures_of_the_server_are_told_apart() {
         "{said:?}"
     );
     assert_eq!(said[1], "storage failed: a user handle is not 16 bytes");
+    assert_eq!(said[6], "storage failed: a session hash is not 32 bytes");
     assert_eq!(
-        said[6],
+        said[8],
         "storage failed: adding a passkey answered \"maybe\""
     );
 }
 
 /// Each function replaced, what it returns instead, and what it answers.
-const UNREADABLE: [(&str, &str, &str); 8] = [
+const UNREADABLE: [(&str, &str, &str); 11] = [
     (
         "adder(bytea)",
         "TABLE (operator_id text, user_handle bytea, name text, credentials bytea[])",
@@ -324,23 +387,38 @@ const UNREADABLE: [(&str, &str, &str); 8] = [
     ),
     (
         "take_ceremony(bytea, text)",
-        "TABLE (operator_id text, link_hash bytea, state text)",
-        "SELECT '1', null::bytea, '{}'",
+        "TABLE (operator_id text, link_hash bytea, session_hash bytea, state text)",
+        "SELECT '1', null::bytea, sha256('a'::bytea), '{}'",
     ),
     (
         "take_ceremony(bytea, text)",
-        "TABLE (operator_id bigint, link_hash bytea, state integer)",
-        "SELECT 1::bigint, null::bytea, 1",
+        "TABLE (operator_id bigint, link_hash bytea, session_hash bytea, state integer)",
+        "SELECT 1::bigint, null::bytea, sha256('a'::bytea), 1",
+    ),
+    (
+        "take_ceremony(bytea, text)",
+        "TABLE (operator_id bigint, link_hash bytea, session_hash bytea, state text)",
+        "SELECT 1::bigint, null::bytea, '\\x00'::bytea, '{}'",
+    ),
+    (
+        "take_ceremony(bytea, text)",
+        "TABLE (operator_id bigint, link_hash bytea, session_hash integer, state text)",
+        "SELECT 1::bigint, null::bytea, 1, '{}'",
     ),
     (
         "add_passkey(bytea, bigint, bytea, jsonb)",
-        "text",
-        "SELECT 'maybe'",
+        "TABLE (added text, sessions_ended bigint)",
+        "SELECT 'maybe', 0::bigint",
     ),
     (
         "add_passkey(bytea, bigint, bytea, jsonb)",
-        "integer",
-        "SELECT 1",
+        "TABLE (added integer, sessions_ended bigint)",
+        "SELECT 1, 0::bigint",
+    ),
+    (
+        "add_passkey(bytea, bigint, bytea, jsonb)",
+        "TABLE (added text, sessions_ended text)",
+        "SELECT 'added', 'x'",
     ),
 ];
 

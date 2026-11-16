@@ -92,22 +92,30 @@ impl RelyingParty {
             .map_err(Error::from)
     }
 
-    /// The credential ID and user handle a sign-in's answer names, so its passkey can be found and checked, or none
-    /// for an answer that is not one.
-    pub(crate) fn identify(&self, response: &str) -> Option<(Vec<u8>, [u8; 16])> {
+    /// A sign-in's answer, read once, with the credential ID and user handle it names, so its passkey can be found
+    /// and checked; or none for an answer that is not one.
+    pub(crate) fn identify(&self, response: &str) -> Option<Identified> {
         let response: PublicKeyCredential = serde_json::from_str(response).ok()?;
-        self.webauthn
+        let (handle, credential) = self
+            .webauthn
             .identify_discoverable_authentication(&response)
-            .ok()
-            .map(|(handle, credential)| (credential.to_vec(), *handle.as_bytes()))
+            .ok()?;
+        Some(Identified {
+            credential: credential.to_vec(),
+            handle: *handle.as_bytes(),
+            response,
+        })
     }
 
     /// Verifies a sign-in's answer against the state its ceremony began with and the passkey it names, and returns
     /// the passkey as it should now be stored, with its counter and backup flags moved on. `webauthn-rs` refuses a
     /// counter that does not move forward, as a cloned authenticator's would not.
+    ///
+    /// A refusal is [`Error::Invalid`] naming its reason, for the audit record: `counter_regressed`,
+    /// `backup_eligibility_changed`, `user_not_verified`, or `not_verified` for any other.
     pub(crate) fn finish_authentication(
         &self,
-        response: &str,
+        answer: &Identified,
         state: &str,
         passkey: &str,
     ) -> Result<String, Error> {
@@ -119,18 +127,13 @@ impl RelyingParty {
         let mut passkey: Passkey = serde_json::from_str(passkey).map_err(|error| {
             Error::Storage(format!("a stored passkey could not be read: {error}"))
         })?;
-        serde_json::from_str::<PublicKeyCredential>(response)
-            .ok()
-            .and_then(|response| {
-                self.webauthn
-                    .finish_discoverable_authentication_v2(&response, state, &passkey)
-                    .ok()
-            })
+        self.webauthn
+            .finish_discoverable_authentication_v2(&answer.response, state, &passkey)
             .map(|result| {
                 let _ = passkey.update_credential(&result);
                 json!(passkey).to_string()
             })
-            .ok_or_else(|| Error::Invalid("the passkey could not be verified".to_string()))
+            .map_err(|error| refused(&error))
     }
 
     /// Verifies a browser's registration against the state its ceremony began with, and returns the passkey. A
@@ -175,6 +178,26 @@ fn plausible(response: &RegisterPublicKeyCredential) -> bool {
         .as_ref()
         .and_then(|props| props.rk)
         != Some(false)
+}
+
+/// A sign-in's answer, read once: the credential ID and user handle it names, and the answer itself, which stays
+/// inside this file.
+pub(crate) struct Identified {
+    pub(crate) credential: Vec<u8>,
+    pub(crate) handle: [u8; 16],
+    response: PublicKeyCredential,
+}
+
+/// Why `webauthn-rs` refused a sign-in, as the audit record names it. A counter that does not move forward or a
+/// backup eligibility that changed may mean a cloned authenticator (`WebAuthn` L3 §6.1.1, §6.1.3).
+fn refused(error: &WebauthnError) -> Error {
+    let reason = match error {
+        WebauthnError::CredentialPossibleCompromise => "counter_regressed",
+        WebauthnError::CredentialBackupEligibilityInconsistent => "backup_eligibility_changed",
+        WebauthnError::UserNotVerified => "user_not_verified",
+        _ => "not_verified",
+    };
+    Error::Invalid(reason.to_string())
 }
 
 /// A ceremony `webauthn-rs` could not start: a fault of what Identity stored, such as an operator with no name,

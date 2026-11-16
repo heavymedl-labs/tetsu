@@ -82,20 +82,27 @@ starts, finds, and ends their sessions. `postgres_store(pool)` returns it over P
 - **Signing in with a passkey** takes two requests. Beginning names no passkey, so the browser offers the
   person's own, and asks for the prompt a button opens; it keeps a ceremony for ten minutes, like enrollment's.
   Anyone may begin one, so until step 5's rate limits each begin sweeps up to a hundred ended ceremonies without
-  waiting on any, and no more than a thousand sign-ins may be open at once. Finishing takes the ceremony once,
-  finds the passkey the answer names, refuses it unless its enabled operator's user handle is the one the answer
-  gives (`WebAuthn` L3 §7.2), and verifies it through `webauthn-rs`, user verification included, which refuses a
-  counter that does not move forward. Then, in one transaction holding the operator's row, it stores the passkey's
-  new counter only if no other sign-in changed it meanwhile, and starts the session. Each is recorded as
-  `identity.signed_in`, with its reason when refused, and every refusal reads the same to the browser.
+  waiting on any, and past ten thousand open sign-ins ends the oldest rather than refusing, so filling the table
+  locks no one out (`v5.0.0-6.3.1`). Finishing takes the ceremony once, finds the passkey the answer names,
+  refuses it unless its enabled operator's user handle is the one the answer gives (`WebAuthn` L3 §7.2), and
+  verifies it through `webauthn-rs`, user verification included, which refuses a counter that does not move
+  forward or a backup eligibility that changed. Then, in one transaction holding the operator's row, it stores the
+  passkey's new counter only if no other sign-in changed it meanwhile, and starts the session. Only this starts a
+  session: Identity's role cannot call the function that does, so a session begun within ten minutes is a fresh
+  passkey sign-in by construction. Every outcome once the ceremony is taken is recorded as `identity.signed_in`,
+  a refusal with its reason (`malformed`, `unknown_credential`, `handle_mismatch`, `counter_regressed`,
+  `backup_eligibility_changed`, `user_not_verified`, `not_verified`, `disabled`, `raced`, or `unknown`), and every
+  refusal reads the same to the browser. The [sign-in review](../../docs/research/identity/passkey-sign-in-review.md)
+  lists what later steps add.
 - **Adding a second passkey** (ADR-0057) needs a fresh sign-in: a session begun with a passkey within ten minutes,
   by Postgres's clock (ADR-0048, `v5.0.0-7.5.1`). The device is told which passkey the operator holds, so it makes
   no second where it has one. Beginning stores a ceremony for ten minutes, one per operator, re-checking the
   session, that the operator is enabled, and that they hold fewer than two, under their row. Finishing takes the
-  ceremony once, which must be the session's operator's, verifies the registration as enrollment does, and stores
-  the passkey under the operator's row while the session is still live, refusing a third, a taken credential, or
-  one too large, each recorded as `identity.passkey_added`. Operators have no email yet, so the audit record is the
-  notice ADR-0040 asks for.
+  ceremony once, which only the session that began it may finish, verifies the registration as enrollment does,
+  and stores the passkey under the operator's row while the session is still live, refusing a third, a taken
+  credential, or one too large. Storing it ends the operator's other sessions and keeps this one (ADR-0059,
+  `v5.0.0-7.4.3`). Each attempt is recorded as `identity.passkey_added`, with the sessions it ended. Operators have
+  no email yet, so the audit record is the notice ADR-0040 asks for.
 - **Removing an operator's passkeys** lets them be issued a link and enroll again, as when their only passkey is
   lost or unusable. It ends their sessions and any ceremony too, since a session begun with a removed passkey must
   not outlive it (`v5.0.0-7.4.3`), takes their row for update as a disable does, and records
@@ -137,8 +144,7 @@ starts, finds, and ends their sessions. `postgres_store(pool)` returns it over P
   (`v5.0.0-16.2.1`, `v5.0.0-16.3.3`): `identity.operator_created`, `identity.enrollment_issued`,
   `identity.operator_disabled` (with the sessions and links it ended), `identity.operator_enabled`, and
   `identity.sessions_ended`. Listing changes nothing and records nothing. A command refused before it reaches the
-  database, such as one printing a link to a pipe, records no event. Signing in and out records
-  nothing yet; `identity.signed_in` comes with the sign-in pages.
+  database, such as one printing a link to a pipe, records no event. Signing out records nothing yet.
 - **Who ran a command** is `user@host`: the first of `SUDO_USER`, `USER`, and `LOGNAME` that is set, and the
   first real line of `/etc/hostname`, with `unknown` for a part that is missing, not UTF-8, or would not show
   safely. It is asserted, not proven: every command
@@ -150,8 +156,9 @@ starts, finds, and ends their sessions. `postgres_store(pool)` returns it over P
 
 ## Not yet
 
-The pages and script that run enrollment and sign-in in a browser;
-recording registrations and sign-ins that fail to verify, with the request's address; rate limits; revoking a link
+The pages and script that run enrollment and sign-in in a browser, with the request's address in each record;
+ending the session a browser presents when it signs in again; recording registrations that fail to verify; rate
+limits; revoking a link
 on its own (today a new link or a disable ends it); the `Sec-Fetch-Site` check and the headers that apply these
 checks; the session list ([ADR-0059](../../docs/adr/0059-session-controls-and-request-checks.md)); and running the
 dispatcher that carries Identity's events to the audit record arrive in later steps of

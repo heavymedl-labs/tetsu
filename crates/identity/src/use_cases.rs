@@ -160,10 +160,8 @@ impl<S: OperatorStore> Operators<S> {
         // Starting a discoverable sign-in cannot fail in webauthn-rs, so its failure joins the random source's.
         let (token, (options, state)) = CeremonyToken::generate(self.fill)
             .and_then(|token| party.begin_authentication().map(|begun| (token, begun)))?;
-        let begun = self.store.begin_sign_in(&token.hash(), &state).await?;
-        begun
-            .then_some(Ceremony { token, options })
-            .ok_or_else(not_signing_in)
+        self.store.begin_sign_in(&token.hash(), &state).await?;
+        Ok(Ceremony { token, options })
     }
 
     /// Finishes a passkey sign-in and starts the operator's session, returning its token. The ceremony is used up
@@ -188,10 +186,7 @@ impl<S: OperatorStore> Operators<S> {
             .take_sign_in(&held.hash())
             .await?
             .ok_or_else(not_signing_in)?;
-        let signer = self.signer_for(party, response).await?;
-        let passkey = party
-            .finish_authentication(response, &state, &signer.passkey)
-            .map_err(|error| refusing(error, not_signing_in))?;
+        let (signer, passkey) = self.verified(party, response, &state, actor).await?;
         let token = SessionToken::generate(self.fill)?;
         let outcome = self
             .store
@@ -203,14 +198,46 @@ impl<S: OperatorStore> Operators<S> {
             .ok_or_else(not_signing_in)
     }
 
-    /// The passkey a sign-in's answer names, if it belongs to an enabled operator whose user handle the answer gives.
-    async fn signer_for(&self, party: &RelyingParty, response: &str) -> Result<Signer, Error> {
-        let (credential, handle) = party.identify(response).ok_or_else(not_signing_in)?;
+    /// The passkey a sign-in's answer names and verifies, with its state as it should now be stored. Each way it
+    /// can be refused once its ceremony is taken is recorded with its reason, and with the operator and credential
+    /// where known, before the one answer is given: an answer that is not one, a credential no enabled operator
+    /// holds, a user handle that is not the credential's operator's (`WebAuthn` L3 §7.2), or what `webauthn-rs`
+    /// refuses, such as a counter that did not move forward (ADR-0047).
+    async fn verified(
+        &self,
+        party: &RelyingParty,
+        response: &str,
+        state: &str,
+        actor: &Actor,
+    ) -> Result<(Signer, String), Error> {
+        let (operator, credential, reason) = match party.identify(response) {
+            None => (None, None, "malformed".to_string()),
+            Some(answer) => match self.store.signer(&answer.credential).await? {
+                None => (
+                    None,
+                    Some(answer.credential),
+                    "unknown_credential".to_string(),
+                ),
+                Some(signer) if signer.user_handle != answer.handle => (
+                    Some(signer.operator),
+                    Some(answer.credential),
+                    "handle_mismatch".to_string(),
+                ),
+                Some(signer) => {
+                    match party.finish_authentication(&answer, state, &signer.passkey) {
+                        Ok(passkey) => return Ok((signer, passkey)),
+                        Err(Error::Invalid(reason)) => {
+                            (Some(signer.operator), Some(answer.credential), reason)
+                        }
+                        Err(other) => return Err(other),
+                    }
+                }
+            },
+        };
         self.store
-            .signer(&credential)
-            .await?
-            .filter(|signer| signer.user_handle == handle)
-            .ok_or_else(not_signing_in)
+            .refuse_sign_in(operator, credential.as_deref(), &reason, actor)
+            .await?;
+        Err(not_signing_in())
     }
 
     /// Begins adding an operator's second passkey (ADR-0057), from a session that began with a passkey sign-in
@@ -262,12 +289,13 @@ impl<S: OperatorStore> Operators<S> {
         actor: &Actor,
     ) -> Result<(), Error> {
         let held = CeremonyToken::parse(answer.ceremony).ok_or_else(not_adding)?;
-        let (operator, state) = self
+        let taken = self
             .store
             .take_addition(&held.hash())
             .await?
-            .filter(|(operator, _)| *operator == session.operator)
+            .filter(|taken| taken.session_hash == session.hash)
             .ok_or_else(not_adding)?;
+        let (operator, state) = (taken.operator, taken.state);
         let passkey = party
             .finish_registration(answer.response, &state)
             .map_err(|error| refusing(error, not_adding))?;
@@ -336,26 +364,6 @@ impl<S: OperatorStore> Operators<S> {
     /// Fails if storage fails.
     pub async fn list(&self) -> Result<Vec<OperatorSummary>, Error> {
         self.store.list_operators().await
-    }
-
-    /// Starts a session for an operator who has just signed in, and returns its new token, which only the
-    /// operator's browser keeps (ADR-0040, `v5.0.0-7.2.4`). It ends at the realm's absolute limit at the latest, by
-    /// the store's clock. The operator's spent sessions are removed as it starts.
-    ///
-    /// # Errors
-    /// Fails with [`Error::Invalid`] for a disabled or unknown operator, if no secure random source can be read, or
-    /// if storage fails.
-    pub async fn start_session(&self, operator: OperatorId) -> Result<SessionToken, Error> {
-        let token = SessionToken::generate(self.fill)?;
-        let realm = Realm::Operator;
-        self.store
-            .insert_session(&token.hash(), realm, operator)
-            .await
-            .map_err(|error| match error {
-                Error::Invalid(_) => no_enabled(operator),
-                other => other,
-            })?;
-        Ok(token)
     }
 
     /// The live operator session named by the session cookie among a request's `Cookie` headers, for a request

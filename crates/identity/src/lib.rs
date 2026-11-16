@@ -23,7 +23,7 @@ pub use browser::{Change, ForChange, Origins, SignOut};
 pub use domain::{
     Actor, Adder, Addition, Answer, Ceremony, CeremonyToken, Disabling, Enrollee, EnrollmentToken,
     Error, Issue, Limits, NewPasskey, OperatorId, OperatorName, OperatorSummary, Realm, Redemption,
-    Removal, Session, SessionToken, SignIn, Signer, TakenCeremony,
+    Removal, Session, SessionToken, SignIn, Signer, TakenAddition, TakenCeremony,
 };
 pub use passkeys::RelyingParty;
 pub use ports::OperatorStore;

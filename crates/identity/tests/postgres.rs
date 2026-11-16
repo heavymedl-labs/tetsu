@@ -5,8 +5,8 @@
 use std::time::Duration;
 
 use tetsu_identity::{
-    Actor, Change, Error, ForChange, Identity, OperatorName, Origins, Realm, SessionToken, SignOut,
-    postgres_store,
+    Actor, Change, Error, ForChange, Identity, OperatorId, OperatorName, Origins, Realm,
+    RelyingParty, SessionToken, SignOut, postgres_store,
 };
 use tetsu_postgres::test_support::{TestDatabase, fresh_database};
 use tetsu_postgres::{ModuleTransaction, Settings, connect, isolation_violations, migrate, pool};
@@ -16,6 +16,27 @@ const ORIGIN: &str = "https://ops.example.com";
 #[cfg(test)]
 mod support {
     use super::*;
+
+    /// Starts an operator's session as a passkey sign-in would, as the test server's administrator, and returns its
+    /// token: only a sign-in may start one, so Identity's role cannot (ADR-0048).
+    pub async fn signed_in(database: &TestDatabase, operator: OperatorId) -> SessionToken {
+        let mut bytes = [0u8; 32];
+        getrandom::fill(&mut bytes).expect("random bytes");
+        let text = bytes.iter().fold(String::new(), |mut text, byte| {
+            let _ = std::fmt::Write::write_fmt(&mut text, format_args!("{byte:02x}"));
+            text
+        });
+        connect(database)
+            .await
+            .expect("connects")
+            .execute(
+                "SELECT identity.start_session(sha256(decode($1, 'hex')), 'operator', $2)",
+                &[&text, &operator.get()],
+            )
+            .await
+            .expect("starts");
+        SessionToken::parse(&text).expect("a token")
+    }
 
     /// A fresh, migrated database.
     pub async fn ready() -> TestDatabase {
@@ -129,7 +150,7 @@ mod support {
 
 use support::{
     actor, as_admin, cookie, count, idle_seconds, name, origins, ready, replaced_use_session,
-    stored, text, use_session_with_wrong,
+    signed_in, stored, text, use_session_with_wrong,
 };
 
 /// Identity keeps its tables in the one schema it owns, under its own name (ADR-0003, ADR-0042).
@@ -164,7 +185,7 @@ async fn a_started_session_is_found_by_its_token_and_records_each_request() {
         .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
-    let token = operators.start_session(kurt).await.expect("starts");
+    let token = signed_in(&database, kurt).await;
     assert!(
         stored(
             &database,
@@ -232,7 +253,7 @@ async fn only_the_tokens_hash_is_stored() {
         .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
-    let token = operators.start_session(kurt).await.expect("starts");
+    let token = signed_in(&database, kurt).await;
     let text = token.to_text();
     assert!(
         stored(
@@ -253,7 +274,7 @@ async fn an_idle_session_ends_and_is_removed() {
         .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
-    let token = operators.start_session(kurt).await.expect("starts");
+    let token = signed_in(&database, kurt).await;
     as_admin(
         &database,
         &format!(
@@ -294,7 +315,7 @@ async fn a_busy_session_still_ends_at_its_absolute_limit() {
         .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
-    let token = operators.start_session(kurt).await.expect("starts");
+    let token = signed_in(&database, kurt).await;
     as_admin(&database, "UPDATE identity.sessions SET ends_at = now()").await;
     assert_eq!(operators.session([text(&token).as_str()]).await, Ok(None));
     assert!(
@@ -312,7 +333,7 @@ async fn the_last_request_never_moves_back() {
         .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
-    let token = operators.start_session(kurt).await.expect("starts");
+    let token = signed_in(&database, kurt).await;
     as_admin(
         &database,
         "UPDATE identity.sessions SET last_seen_at = now() + interval '1 minute'",
@@ -335,7 +356,7 @@ async fn requests_at_the_same_moment_never_end_a_live_session() {
         .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
-    let token = text(&operators.start_session(kurt).await.expect("starts"));
+    let token = text(&signed_in(&database, kurt).await);
     let requests: Vec<_> = (0..16)
         .map(|_| {
             let (operators, token) = (operators.clone(), token.clone());
@@ -371,7 +392,7 @@ async fn signing_out_ends_the_session_once_its_checks_pass() {
         .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
-    let token = operators.start_session(kurt).await.expect("starts");
+    let token = signed_in(&database, kurt).await;
     let (jar, form) = (text(&token), token.form_token().expect("a form token"));
     let sign_out = |origin| Change::new([jar.as_str()], origin, &form);
     let from_elsewhere = sign_out(Some("https://evil.example"));
@@ -409,8 +430,8 @@ async fn signing_out_leaves_the_operators_other_sessions() {
         .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
-    let token = operators.start_session(kurt).await.expect("starts");
-    let other = operators.start_session(kurt).await.expect("starts");
+    let token = signed_in(&database, kurt).await;
+    let other = signed_in(&database, kurt).await;
     let (jar, form) = (text(&token), token.form_token().expect("a form token"));
     let sign_out = Change::new([jar.as_str()], Some(ORIGIN), &form);
     assert_eq!(
@@ -426,19 +447,32 @@ async fn signing_out_leaves_the_operators_other_sessions() {
     );
 }
 
+/// Only a passkey sign-in starts a session, inside Identity's own functions, so Identity's role cannot start one
+/// directly: no bug in the application can make a session that may add a passkey (ADR-0048).
 #[tokio::test]
-async fn a_session_for_no_operator_is_refused() {
+async fn identitys_role_cannot_start_a_session() {
     let database = ready().await;
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
     let kurt = operators
         .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
-    as_admin(&database, "DELETE FROM identity.operators").await;
-    assert!(matches!(
-        operators.start_session(kurt).await,
-        Err(Error::Invalid(why)) if why == format!("no enabled operator {}", kurt.get())
-    ));
+    let pool = pool(&database.as_app()).expect("a pool");
+    let mut client = pool.get().await.expect("a connection");
+    let transaction = ModuleTransaction::begin(&mut client, "identity")
+        .await
+        .expect("begins");
+    let refused = transaction
+        .execute(
+            "SELECT identity.start_session(sha256('a'::bytea), 'operator', $1)",
+            &[&kurt.get()],
+        )
+        .await
+        .expect_err("refused");
+    assert_eq!(
+        refused.code(),
+        Some(&tokio_postgres::error::SqlState::INSUFFICIENT_PRIVILEGE)
+    );
 }
 
 /// Identity's own role reaches sessions only through its functions, one token's hash at a time, so no request can
@@ -471,7 +505,7 @@ async fn another_realms_session_is_neither_used_nor_ended() {
         .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
-    let token = operators.start_session(kurt).await.expect("starts");
+    let token = signed_in(&database, kurt).await;
     as_admin(
         &database,
         "ALTER TABLE identity.sessions DROP CONSTRAINT sessions_realm_check;
@@ -564,28 +598,22 @@ async fn a_create_answer_that_cannot_be_read_is_a_storage_failure() {
 async fn a_stale_cached_statement_is_temporary_and_cleared() {
     let database = ready().await;
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
-        .await
-        .expect("creates");
-    operators
-        .start_session(kurt)
-        .await
-        .expect("caches the statement");
+    let party = RelyingParty::new(ORIGIN).expect("a relying party");
+    operators.begin_sign_in(&party).await.expect("begins");
     as_admin(
         &database,
-        "DROP FUNCTION identity.start_session(bytea, text, bigint);
-         CREATE FUNCTION identity.start_session(bytea, text, bigint)
+        "DROP FUNCTION identity.begin_sign_in(bytea, jsonb);
+         CREATE FUNCTION identity.begin_sign_in(bytea, jsonb)
          RETURNS int LANGUAGE sql AS 'SELECT 1';
-         GRANT EXECUTE ON FUNCTION identity.start_session(bytea, text, bigint) TO tetsu_identity",
+         GRANT EXECUTE ON FUNCTION identity.begin_sign_in(bytea, jsonb) TO tetsu_identity",
     )
     .await;
     assert!(matches!(
-        operators.start_session(kurt).await,
+        operators.begin_sign_in(&party).await,
         Err(Error::Unavailable(why)) if why.starts_with(tetsu_postgres::STALE)
     ));
     assert!(
-        operators.start_session(kurt).await.is_ok(),
+        operators.begin_sign_in(&party).await.is_ok(),
         "the next request succeeds"
     );
 }
@@ -651,7 +679,7 @@ async fn a_statement_that_cannot_be_prepared_is_an_error() {
         .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
-    let token = operators.start_session(kurt).await.expect("starts");
+    let token = signed_in(&database, kurt).await;
     let (jar, form) = (text(&token), token.form_token().expect("a form token"));
     let sign_out = Change::new([jar.as_str()], Some(ORIGIN), &form);
     as_admin(&database, "DROP FUNCTION identity.end_session(bytea, text)").await;
@@ -670,28 +698,40 @@ async fn a_statement_that_cannot_be_prepared_is_an_error() {
     ));
 }
 
-/// A commit Postgres refuses was rolled back, so no session starts, and the refusal is never worth retrying.
+/// A commit Postgres refuses was rolled back, so signing out ended nothing, and the refusal is never worth retrying.
 #[tokio::test]
-async fn a_refused_commit_starts_no_session() {
+async fn a_refused_commit_ends_no_session() {
     let database = ready().await;
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
     let kurt = operators
         .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
+    let token = signed_in(&database, kurt).await;
     as_admin(
         &database,
         "CREATE FUNCTION identity.refuse() RETURNS trigger LANGUAGE plpgsql
          AS $$ BEGIN RAISE EXCEPTION 'refused at commit'; END $$;
-         CREATE CONSTRAINT TRIGGER refuse AFTER INSERT ON identity.sessions
+         CREATE CONSTRAINT TRIGGER refuse AFTER DELETE ON identity.sessions
          DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION identity.refuse()",
     )
     .await;
+    let (jar, form) = (text(&token), token.form_token().expect("a form token"));
     assert_eq!(
-        operators.start_session(kurt).await.map(drop),
+        operators
+            .end_session(
+                &origins(),
+                &Change::new([jar.as_str()], Some(ORIGIN), &form)
+            )
+            .await,
         Err(Error::Storage(
             "commit refused: refused at commit".to_string()
         ))
+    );
+    assert_eq!(
+        count(&database, "true").await,
+        1,
+        "the session is still stored"
     );
 }
 
@@ -705,8 +745,8 @@ async fn a_change_needs_the_realms_origin_and_the_sessions_form_token() {
         .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
-    let token = operators.start_session(kurt).await.expect("starts");
-    let other = operators.start_session(kurt).await.expect("starts");
+    let token = signed_in(&database, kurt).await;
+    let other = signed_in(&database, kurt).await;
     as_admin(
         &database,
         "UPDATE identity.sessions SET last_seen_at = now() - interval '10 minutes'",
@@ -772,7 +812,7 @@ async fn requests_at_the_same_moment_never_revive_a_spent_session() {
         .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
-    let token = text(&operators.start_session(kurt).await.expect("starts"));
+    let token = text(&signed_in(&database, kurt).await);
     as_admin(
         &database,
         &format!(
@@ -808,7 +848,7 @@ async fn starting_a_session_removes_only_the_operators_spent_ones() {
         .await
         .expect("creates");
     for operator in [kurt, kurt, kurt, ana] {
-        operators.start_session(operator).await.expect("starts");
+        signed_in(&database, operator).await;
     }
     as_admin(
         &database,
@@ -829,7 +869,7 @@ async fn starting_a_session_removes_only_the_operators_spent_ones() {
         ),
     )
     .await;
-    operators.start_session(kurt).await.expect("starts");
+    signed_in(&database, kurt).await;
     assert_eq!(
         count(&database, &format!("operator_id = {}", kurt.get())).await,
         2,
@@ -852,7 +892,7 @@ async fn a_spent_session_refreshed_meanwhile_is_not_removed() {
         .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
-    let token = text(&operators.start_session(kurt).await.expect("starts"));
+    let token = text(&signed_in(&database, kurt).await);
     as_admin(
         &database,
         &format!(
@@ -894,7 +934,7 @@ async fn signing_out_a_spent_session_has_nothing_to_end() {
         .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
-    let token = operators.start_session(kurt).await.expect("starts");
+    let token = signed_in(&database, kurt).await;
     as_admin(&database, "UPDATE identity.sessions SET ends_at = now()").await;
     let (jar, form) = (text(&token), token.form_token().expect("a form token"));
     let sign_out = Change::new([jar.as_str()], Some(ORIGIN), &form);
@@ -903,8 +943,8 @@ async fn signing_out_a_spent_session_has_nothing_to_end() {
         Ok(ForChange::NoSession),
         "the checks pass, but the session has ended"
     );
-    operators.start_session(kurt).await.expect("starts");
-    let token = operators.start_session(kurt).await.expect("starts");
+    signed_in(&database, kurt).await;
+    let token = signed_in(&database, kurt).await;
     as_admin(
         &database,
         &format!(
@@ -937,7 +977,7 @@ async fn an_end_that_returns_nothing_ended_nothing() {
         .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
-    let token = operators.start_session(kurt).await.expect("starts");
+    let token = signed_in(&database, kurt).await;
     as_admin(
         &database,
         "DROP FUNCTION identity.end_session(bytea, text);
@@ -964,7 +1004,7 @@ async fn each_session_has_a_random_public_id() {
         .await
         .expect("creates");
     for _ in 0..3 {
-        operators.start_session(kurt).await.expect("starts");
+        signed_in(&database, kurt).await;
     }
     assert_eq!(count(&database, "true").await, 3);
     assert!(
@@ -1040,7 +1080,7 @@ async fn a_disabled_operators_session_is_refused_and_removed() {
         .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
-    let token = operators.start_session(kurt).await.expect("starts");
+    let token = signed_in(&database, kurt).await;
     as_admin(
         &database,
         "UPDATE identity.operators SET disabled_at = now()",
