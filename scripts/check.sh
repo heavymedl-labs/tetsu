@@ -269,11 +269,18 @@ if [[ "$reuse" == false ]]; then
     if ((jobs > most)); then jobs=$most; fi
     if ((jobs < 1)); then jobs=1; fi
     # The coverage runs above just passed these tests, so cargo-mutants skips its own unmutated run, which also
-    # sized its timeout, so that is set here: about six times the test suite's time. Its copies of the workspace go
-    # under target/, on disk, since a memory-backed /tmp may hold too few of them.
-    mkdir -p target/mutants-tmp
-    TMPDIR="$PWD/target/mutants-tmp" cargo mutants --in-diff "$work/rust.diff" --baseline skip --timeout 60 \
-      --jobs "${CARGO_MUTANTS_JOBS:-$jobs}"
+    # sized its timeout, so that is set here: about six times the test suite's time.
+    mutants=(cargo mutants --in-diff "$work/rust.diff" --baseline skip --timeout 60)
+    if [[ -n "${CI:-}" && "${CARGO_MUTANTS_JOBS:-$jobs}" == 1 ]]; then
+      # A runner runs one job, so it mutates the checkout in place, which it throws away after, and reuses
+      # target/ rather than build every dependency again in a copy, which leaves target/ out.
+      "${mutants[@]}" --in-place
+    else
+      # Its copies of the workspace go under target/, on disk, since a memory-backed /tmp may hold too few. Here
+      # the checkout is the maintainer's, which a killed run in place would leave mutated.
+      mkdir -p target/mutants-tmp
+      TMPDIR="$PWD/target/mutants-tmp" "${mutants[@]}" --jobs "${CARGO_MUTANTS_JOBS:-$jobs}"
+    fi
   elif ! git diff --quiet "${plain[@]}" "$merge" HEAD -- crates; then
     echo "error: commits since $base change crates/, but the files on disk undo that, so there is nothing to" >&2
     echo "mutate. Commit or restore those files first." >&2

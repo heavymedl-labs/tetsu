@@ -337,6 +337,25 @@ class CheckScript(unittest.TestCase):
         self.assertIn("+++ b/crates/a/src/copy.rs\n@@ -0,0 +1,2 @@\n+pub fn a() {}\n+pub fn b() {}\n", diff)
         self.assertNotIn("\x1b[", diff)
 
+    def test_a_runner_mutates_in_place_and_a_machine_mutates_copies(self):
+        # A runner throws its checkout away, so it reuses target/ in place; a maintainer's checkout must never
+        # be left mutated by a killed run.
+        base, _ = self.real_git_repo()
+        self.stub("cargo", f'if [ "$1" = mutants ]; then echo "$@" >> "{self.log}"; fi')
+        runs = {}
+        # The machine runs first: a pass the runner recorded would let it skip, as a runner never does.
+        for name, ci in (("machine", ""), ("runner", "true")):
+            self.log.write_text("")
+            result = self.check("--base", base, CI=ci)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            runs[name] = [line for line in self.log.read_text().splitlines() if "--baseline skip" in line]
+        self.assertEqual(len(runs["runner"]), 1)
+        self.assertIn("--in-place", runs["runner"][0])
+        self.assertNotIn("--jobs", runs["runner"][0])
+        self.assertEqual(len(runs["machine"]), 1)
+        self.assertIn("--jobs 1", runs["machine"][0])
+        self.assertNotIn("--in-place", runs["machine"][0])
+
     def test_committed_rust_undone_on_disk_fails_rather_than_testing_nothing(self):
         base, lib = self.real_git_repo()
         run(["git", "checkout", base, "--", "crates"], self.root, check=True)
