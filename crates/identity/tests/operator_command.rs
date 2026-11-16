@@ -639,7 +639,7 @@ async fn changes_that_wait_on_an_operator_need_read_committed() {
         "SELECT identity.begin_enrollment(sha256('t'::bytea), 1, sha256('a'::bytea), '{}')",
         "SELECT identity.enable_operator(1)",
         "SELECT * FROM identity.remove_passkeys(1)",
-        "SELECT * FROM identity.sign_in(sha256('c'::bytea), 1, '{}', '{}', sha256('s'::bytea))",
+        "SELECT * FROM identity.sign_in(sha256('c'::bytea), 1, '{}', '{}', sha256('s'::bytea), null)",
         "SELECT identity.begin_sign_in(sha256('t'::bytea), '{}')",
         "SELECT identity.begin_addition(sha256('t'::bytea), sha256('s'::bytea), 1, '{}')",
         "SELECT * FROM identity.add_passkey(
@@ -730,7 +730,7 @@ async fn a_sign_in_waiting_on_a_removal_finds_its_passkey_unknown() {
                      sha256(int8send(1)), 1,
                      '{\"cred\": {\"counter\": 0, \"backup_eligible\": false, \"backup_state\": false}}',
                      '{\"cred\": {\"counter\": 0, \"backup_eligible\": false, \"backup_state\": false}}',
-                     sha256('s'::bytea)
+                     sha256('s'::bytea), null
                  )",
                 &[],
             )
@@ -770,7 +770,7 @@ async fn a_sign_in_for_no_operator_signs_no_one_in() {
     let answer: Option<String> = transaction
         .query_one(
             "SELECT signed FROM identity.sign_in(
-                 sha256(int8send(1)), null, $1::text::jsonb, $1::text::jsonb, sha256('s'::bytea)
+                 sha256(int8send(1)), null, $1::text::jsonb, $1::text::jsonb, sha256('s'::bytea), null
              )",
             &[&passkey],
         )

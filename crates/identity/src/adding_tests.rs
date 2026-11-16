@@ -33,7 +33,15 @@ async fn signed_in() -> (
     let (operators, database, kurt, kept) = enrolled().await;
     let (token, response) = answer(&operators, kept, ORIGIN, |_| {}).await;
     let session_token = operators
-        .finish_sign_in(&party(), &token, &response, &actor())
+        .finish_sign_in(
+            &party(),
+            Answer {
+                ceremony: &token,
+                response: &response,
+            },
+            &[],
+            &actor(),
+        )
         .await
         .expect("signs in");
     let cookie = format!(

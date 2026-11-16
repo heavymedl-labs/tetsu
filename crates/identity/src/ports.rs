@@ -2,8 +2,8 @@
 
 use crate::domain::{
     Actor, Adder, Addition, Disabling, Enrollee, Error, Issue, NewPasskey, OperatorId,
-    OperatorName, OperatorSummary, Realm, Redemption, Removal, Session, SignIn, Signer,
-    TakenAddition, TakenCeremony,
+    OperatorName, OperatorSummary, Realm, Redemption, Removal, Session, SessionStart, SignIn,
+    Signer, TakenAddition, TakenCeremony,
 };
 use std::future::Future;
 
@@ -127,7 +127,7 @@ pub trait OperatorStore {
         &self,
         signer: &Signer,
         passkey: &str,
-        session: &[u8; 32],
+        session: &SessionStart,
         actor: &Actor,
     ) -> impl Future<Output = Result<Option<SignIn>, Error>> + Send;
 

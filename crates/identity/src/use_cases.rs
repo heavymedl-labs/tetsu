@@ -4,7 +4,7 @@ use crate::browser::{Change, CheckedSession, ForChange, Origins, SignOut};
 use crate::domain::{
     Actor, Addition, Answer, Ceremony, CeremonyToken, Disabling, EnrollmentToken, Error, Fill,
     Issue, OperatorId, OperatorName, OperatorSummary, Realm, Redemption, Removal, Session,
-    SessionToken, SignIn, Signer,
+    SessionStart, SessionToken, SignIn, Signer,
 };
 use crate::passkeys::RelyingParty;
 use crate::ports::OperatorStore;
@@ -165,8 +165,9 @@ impl<S: OperatorStore> Operators<S> {
         Ok(Ceremony { token, options })
     }
 
-    /// Finishes a passkey sign-in and starts the operator's session, returning its token. The ceremony is used up
-    /// whatever happens. The passkey must belong to an enabled operator whose user handle the answer names
+    /// Finishes a passkey sign-in and starts the operator's session, returning its token, and ends the operator
+    /// session the browser presented among its `cookies`, whoever's it was, in the same transaction (ADR-0059,
+    /// `v5.0.0-7.2.4`). The ceremony is used up whatever happens. The passkey must belong to an enabled operator whose user handle the answer names
     /// (`WebAuthn` L3 §7.2), and must verify, user verification included; its new counter is stored only if no other
     /// sign-in changed it meanwhile, in the transaction that starts the session, which is recorded.
     ///
@@ -177,21 +178,28 @@ impl<S: OperatorStore> Operators<S> {
     pub async fn finish_sign_in(
         &self,
         party: &RelyingParty,
-        ceremony: &str,
-        response: &str,
+        answer: Answer<'_>,
+        cookies: &[&str],
         actor: &Actor,
     ) -> Result<SessionToken, Error> {
-        let held = CeremonyToken::parse(ceremony).ok_or_else(not_signing_in)?;
+        let held = CeremonyToken::parse(answer.ceremony).ok_or_else(not_signing_in)?;
         let state = self
             .store
             .take_sign_in(&held.hash())
             .await?
             .ok_or_else(not_signing_in)?;
-        let (signer, passkey) = self.verified(party, response, &state, actor).await?;
+        let (signer, passkey) = self.verified(party, answer.response, &state, actor).await?;
         let token = SessionToken::generate(self.fill)?;
+        let session = SessionStart {
+            hash: token.hash(),
+            replacing: Realm::Operator
+                .token_in(cookies.iter().copied())
+                .and_then(SessionToken::parse)
+                .map(|presented| presented.hash()),
+        };
         let outcome = self
             .store
-            .sign_in(&signer, &passkey, &token.hash(), actor)
+            .sign_in(&signer, &passkey, &session, actor)
             .await?;
         outcome
             .filter(|answer| *answer == SignIn::SignedIn)

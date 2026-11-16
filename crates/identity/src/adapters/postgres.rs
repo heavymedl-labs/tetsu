@@ -11,8 +11,8 @@ use tokio_postgres::types::{FromSql, ToSql};
 
 use crate::domain::{
     Actor, Adder, Addition, Disabling, Enrollee, Error, Issue, NewPasskey, OperatorId,
-    OperatorName, OperatorSummary, Realm, Redemption, Removal, Session, SignIn, Signer,
-    TakenAddition, TakenCeremony,
+    OperatorName, OperatorSummary, Realm, Redemption, Removal, Session, SessionStart, SignIn,
+    Signer, TakenAddition, TakenCeremony,
 };
 use crate::ports::OperatorStore;
 use crate::use_cases::Operators;
@@ -379,17 +379,19 @@ impl OperatorStore for PostgresOperators {
         &self,
         signer: &Signer,
         passkey: &str,
-        session: &[u8; 32],
+        session: &SessionStart,
         actor: &Actor,
     ) -> Result<Option<SignIn>, Error> {
         let id = signer.operator.get();
         let credential = signer.credential.as_slice();
-        let parameters: [&(dyn ToSql + Sync); 5] = [
+        let replacing = session.replacing.as_ref().map(<[u8; 32]>::as_slice);
+        let parameters: [&(dyn ToSql + Sync); 6] = [
             &credential,
             &id,
             &signer.passkey,
             &passkey,
-            &session.as_slice(),
+            &session.hash.as_slice(),
+            &replacing,
         ];
         self.decided(SIGN_IN, &parameters, |rows| {
             signing(rows, signer, passkey, actor)

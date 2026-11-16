@@ -590,21 +590,21 @@ AS $$
     WHERE p.credential_id = wanted_credential
 $$;
 
--- Signs an operator in with a passkey a sign-in verified, and says what came
--- of it, with the new session's public ID: signed_in; disabled, for an
--- operator disabled since the passkey was read; raced, for a passkey another
--- sign-in changed meanwhile, whose counter this one must not overwrite; or
--- null for a passkey that no longer exists or is no longer that operator's.
--- It takes the operator's row as a sign-in does, so a disable waits for it and
--- then ends the session it starts, stores the passkey's new state only if it
--- is still the one verified against, and starts the session, all in one
--- transaction, under read committed only (TD002). The database cannot check a
--- signature, so it refuses (TD003) a new state that changes more than a
--- sign-in may: the counter, never backwards, the backup state, and backup
--- eligibility, only from false to true; and it stores one only over the very
--- text it was read as, so no number is spelt anew. A sign-in cannot rewrite a
--- passkey into one webauthn-rs cannot read. It is not a guard against
--- Identity's role, which can start a session here and has other ways to
+-- Signs an operator in with a passkey a sign-in verified, and says what came of
+-- it, with the new session's public ID: signed_in; disabled, for an operator
+-- disabled since the passkey was read; raced, for a passkey another sign-in
+-- changed meanwhile, whose counter this one must not overwrite; or null for a
+-- passkey that no longer exists or is no longer that operator's. It takes the
+-- operator's row as a sign-in does, so a disable waits for it and then ends the
+-- session it starts, ends the session the browser presented, stores the
+-- passkey's new state only if it is still the one verified against, and starts
+-- the session, all in one transaction, under read committed only (TD002). The
+-- database cannot check a signature, so it refuses (TD003) a new state that
+-- changes more than a sign-in may: the counter, never backwards, the backup
+-- state, and backup eligibility, only from false to true; and it stores one
+-- only over the very text it was read as, so no number is spelt anew. A sign-in
+-- cannot rewrite a passkey into one webauthn-rs cannot read. It is not a guard
+-- against Identity's role, which can start a session here and has other ways to
 -- replace a passkey; a caller that passes it a token hash already used, of the
 -- wrong size, or null fails with that database error.
 CREATE FUNCTION sign_in(
@@ -612,7 +612,8 @@ CREATE FUNCTION sign_in(
     wanted_operator bigint,
     wanted_old jsonb,
     wanted_new jsonb,
-    wanted_session bytea
+    wanted_session bytea,
+    wanted_presented bytea
 )
 RETURNS TABLE (signed text, session_id text)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
@@ -686,6 +687,10 @@ BEGIN
         RETURN NEXT;
         RETURN;
     END IF;
+    -- The session the browser presented ends, whoever's it was, so no token a
+    -- browser held before signing in outlives it (ADR-0059, v5.0.0-7.2.4).
+    DELETE FROM identity.sessions AS s
+    WHERE s.token_hash = wanted_presented AND s.realm = 'operator';
     PERFORM identity.start_session(wanted_session, 'operator', who);
     signed := 'signed_in';
     SELECT s.id::text INTO session_id
@@ -1192,7 +1197,7 @@ GRANT EXECUTE ON FUNCTION use_session(bytea, text), end_session(bytea, text),
 issue_enrollment(bytea, bigint), list_operators(), enrollee(bytea),
 begin_enrollment(bytea, bigint, bytea, jsonb), take_ceremony(bytea, text),
 begin_sign_in(bytea, jsonb), signer(bytea),
-sign_in(bytea, bigint, jsonb, jsonb, bytea), adder(bytea),
+sign_in(bytea, bigint, jsonb, jsonb, bytea, bytea), adder(bytea),
 begin_addition(bytea, bytea, bigint, jsonb), take_addition(bytea, bytea),
 add_passkey(bytea, bytea, bigint, bytea, jsonb),
 redeem_enrollment(bytea, bigint, bytea, jsonb), disable_operator(bigint),
@@ -1225,7 +1230,7 @@ ALTER FUNCTION take_addition(bytea, bytea) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION add_passkey(bytea, bytea, bigint, bytea, jsonb)
 OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION signer(bytea) OWNER TO tetsu_identity_lookup;
-ALTER FUNCTION sign_in(bytea, bigint, jsonb, jsonb, bytea)
+ALTER FUNCTION sign_in(bytea, bigint, jsonb, jsonb, bytea, bytea)
 OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION redeem_enrollment(bytea, bigint, bytea, jsonb)
 OWNER TO tetsu_identity_lookup;

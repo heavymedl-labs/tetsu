@@ -8,13 +8,13 @@ use tetsu_postgres::connect;
 use tetsu_postgres::test_support::TestDatabase;
 
 use crate::adapters::postgres::PostgresOperators;
-use crate::domain::{SignIn, Signer};
+use crate::domain::{SessionStart, SignIn, Signer};
 use crate::enrollment_tests::{
     ORIGIN, actor, app_pool, as_admin, authenticate, failure, number, party, recorded,
     register_keeping, replace, with_link,
 };
 use crate::ports::OperatorStore;
-use crate::{OperatorId, Operators};
+use crate::{Answer, OperatorId, Operators, Realm};
 
 /// How a hostile client rewrites a sign-in's answer.
 type Rewrite = fn(&mut Value);
@@ -59,6 +59,18 @@ pub(crate) async fn answer(
     (ceremony.token.to_text(), response.to_string())
 }
 
+/// Finishes a sign-in with an answer, from a browser presenting no session.
+async fn finish(
+    operators: &Operators<PostgresOperators>,
+    ceremony: &str,
+    response: &str,
+) -> Result<crate::SessionToken, crate::Error> {
+    let answer = Answer { ceremony, response };
+    operators
+        .finish_sign_in(&party(), answer, &[], &actor())
+        .await
+}
+
 /// What each sign-in recorded, oldest first: its outcome and reason.
 async fn sign_ins(database: &TestDatabase) -> Vec<Value> {
     recorded(database, "identity.signed_in").await
@@ -83,9 +95,7 @@ async fn an_operator_signs_in_with_their_passkey() {
     );
     let response = authenticate(&ceremony.options, ORIGIN, kept, true).await;
     let token = ceremony.token.to_text();
-    let signed = operators
-        .finish_sign_in(&party, &token, &response, &actor())
-        .await;
+    let signed = finish(&operators, &token, &response).await;
     assert!(signed.is_ok());
     let used = "SELECT count(*) FROM identity.passkeys WHERE last_used_at IS NOT NULL";
     assert_eq!(
@@ -96,12 +106,7 @@ async fn an_operator_signs_in_with_their_passkey() {
         [1, 1]
     );
     assert_eq!(
-        failure(
-            operators
-                .finish_sign_in(&party, &token, &response, &actor())
-                .await
-                .map(drop)
-        ),
+        failure(finish(&operators, &token, &response).await.map(drop)),
         not_signing_in()
     );
     assert_eq!(sign_ins(&database).await, [json!(["changed", null])]);
@@ -123,7 +128,6 @@ async fn an_operator_signs_in_with_their_passkey() {
 #[tokio::test]
 async fn hostile_sign_ins_are_refused() {
     let (operators, database, _, kept) = enrolled().await;
-    let party = party();
     let mut refused = Vec::new();
     let cases: [(&str, Rewrite); 6] = [
         (ORIGIN, |answer| {
@@ -144,10 +148,7 @@ async fn hostile_sign_ins_are_refused() {
     for (origin, rewrite) in cases {
         let (token, response) = answer(&operators, kept.clone(), origin, rewrite).await;
         refused.push(failure(
-            operators
-                .finish_sign_in(&party, &token, &response, &actor())
-                .await
-                .map(drop),
+            finish(&operators, &token, &response).await.map(drop),
         ));
     }
     assert_eq!(refused, vec![not_signing_in(); 6]);
@@ -183,9 +184,7 @@ async fn a_credential_id_of_the_longest_kind_is_looked_up() {
             answer["rawId"] = json!("A".repeat(length));
         })
         .await;
-        let _ = operators
-            .finish_sign_in(&party(), &token, &response, &actor())
-            .await;
+        let _ = finish(&operators, &token, &response).await;
     }
     let named = "SELECT count(*) FROM identity.outbox_global
                  WHERE event_type = 'identity.signed_in' AND payload ->> 'credential' IS NOT NULL";
@@ -212,14 +211,59 @@ async fn a_sign_in_that_does_not_verify_the_user_is_refused() {
     options["publicKey"]["userVerification"] = json!("discouraged");
     let response = authenticate(&options.to_string(), ORIGIN, kept, false).await;
     let refused = failure(
-        operators
-            .finish_sign_in(&party, &ceremony.token.to_text(), &response, &actor())
+        finish(&operators, &ceremony.token.to_text(), &response)
             .await
             .map(drop),
     );
     assert_eq!(
         (refused, sign_ins(&database).await),
         (not_signing_in(), vec![json!(["refused", "not_verified"])])
+    );
+}
+
+/// Signing in ends the operator session the browser presented, whoever's it is, in the transaction that starts
+/// the new one (ADR-0059, `v5.0.0-7.2.4`); a refused sign-in leaves it as it was.
+#[tokio::test]
+async fn signing_in_ends_the_session_the_browser_presented() {
+    let (operators, database, _, kept) = enrolled().await;
+    let party = party();
+    let earlier = "aa".repeat(32);
+    as_admin(
+        &database,
+        &format!(
+            "SELECT identity.start_session(sha256(decode('{earlier}', 'hex')), 'operator', 1)"
+        ),
+    )
+    .await;
+    let cookie = format!("{}={earlier}", Realm::Operator.cookie_name());
+    let held = format!(
+        "SELECT count(*) FROM identity.sessions WHERE token_hash = sha256(decode('{earlier}', 'hex'))"
+    );
+    let mut ended = Vec::new();
+    for hostile in [true, false] {
+        let (token, response) = answer(&operators, kept.clone(), ORIGIN, |answer| {
+            if hostile {
+                answer["response"]["userHandle"] = json!("AAAAAAAAAAAAAAAAAAAAAA");
+            }
+        })
+        .await;
+        let answer = Answer {
+            ceremony: &token,
+            response: &response,
+        };
+        let _ = operators
+            .finish_sign_in(&party, answer, &[cookie.as_str()], &actor())
+            .await;
+        ended.push(number(&database, &held).await);
+    }
+    assert_eq!(
+        ended,
+        [1, 0],
+        "a refused sign-in leaves it; a sign-in ends it"
+    );
+    assert_eq!(
+        number(&database, "SELECT count(*) FROM identity.sessions").await,
+        1
     );
 }
 
@@ -230,7 +274,6 @@ async fn a_sign_in_that_does_not_verify_the_user_is_refused() {
 #[tokio::test]
 async fn counters_move_forward_and_a_counter_gone_back_is_refused_and_recorded() {
     let (operators, database, _, kept) = enrolled().await;
-    let party = party();
     let (mut ahead, mut further) = (kept.clone(), kept.clone());
     ahead.counter = Some(5);
     further.counter = Some(50);
@@ -245,9 +288,7 @@ async fn counters_move_forward_and_a_counter_gone_back_is_refused_and_recorded()
     ] {
         as_admin(&database, change).await;
         let (token, response) = answer(&operators, passkey, ORIGIN, |_| {}).await;
-        let _ = operators
-            .finish_sign_in(&party, &token, &response, &actor())
-            .await;
+        let _ = finish(&operators, &token, &response).await;
     }
     assert_eq!(
         sign_ins(&database).await,
@@ -274,7 +315,6 @@ async fn counters_move_forward_and_a_counter_gone_back_is_refused_and_recorded()
 #[tokio::test]
 async fn a_disabled_or_removed_passkey_signs_in_nowhere() {
     let (operators, database, kurt, kept) = enrolled().await;
-    let party = party();
     let mut refused = Vec::new();
     for change in ["disable", "remove"] {
         let (token, response) = answer(&operators, kept.clone(), ORIGIN, |_| {}).await;
@@ -288,19 +328,11 @@ async fn a_disabled_or_removed_passkey_signs_in_nowhere() {
                 .expect("removes");
         }
         refused.push(failure(
-            operators
-                .finish_sign_in(&party, &token, &response, &actor())
-                .await
-                .map(drop),
+            finish(&operators, &token, &response).await.map(drop),
         ));
     }
     for token in ["not a token".to_string(), "ab".repeat(32)] {
-        refused.push(failure(
-            operators
-                .finish_sign_in(&party, &token, "{}", &actor())
-                .await
-                .map(drop),
-        ));
+        refused.push(failure(finish(&operators, &token, "{}").await.map(drop)));
     }
     assert_eq!(refused, vec![not_signing_in(); 4]);
     assert_eq!(
@@ -370,6 +402,14 @@ async fn stored_signer(database: &TestDatabase, store: &PostgresOperators) -> Si
         .expect("a signer")
 }
 
+/// A session to start under `hash`, replacing none the browser presented.
+fn start(hash: [u8; 32]) -> SessionStart {
+    SessionStart {
+        hash,
+        replacing: None,
+    }
+}
+
 /// A stored passkey with one field of its credential changed.
 fn changed(passkey: &str, field: &str, value: Value) -> String {
     let mut passkey: Value = serde_json::from_str(passkey).expect("JSON");
@@ -404,7 +444,11 @@ async fn a_raced_disabled_or_missing_sign_in_starts_no_session() {
         if n == 3 {
             operators.disable(kurt, &actor()).await.expect("disables");
         }
-        answers.push(store.sign_in(who, &who.passkey, &[n; 32], &actor()).await);
+        answers.push(
+            store
+                .sign_in(who, &who.passkey, &start([n; 32]), &actor())
+                .await,
+        );
     }
     let reasons = ["raced", "unknown", "disabled", "unknown"];
     assert_eq!(
@@ -441,7 +485,7 @@ async fn a_sign_in_never_respells_a_stored_number() {
     };
     assert_eq!(
         store
-            .sign_in(&respelt, &respelt.passkey, &[6; 32], &actor())
+            .sign_in(&respelt, &respelt.passkey, &start([6; 32]), &actor())
             .await,
         Ok(Some(SignIn::Raced))
     );
@@ -476,7 +520,7 @@ async fn a_sign_in_that_changes_more_of_a_passkey_than_it_may_is_a_fault() {
         let new = changed(&signer.passkey, field, value);
         faults.push(failure(
             store
-                .sign_in(&signer, &new, &[4; 32], &actor())
+                .sign_in(&signer, &new, &start([4; 32]), &actor())
                 .await
                 .map(drop),
         ));
@@ -509,12 +553,7 @@ async fn failures_of_the_server_are_told_apart() {
     );
     let (token, response) = answer(&operators, kept.clone(), ORIGIN, |_| {}).await;
     assert_eq!(
-        failure(
-            failing
-                .finish_sign_in(&party, &token, &response, &actor())
-                .await
-                .map(drop)
-        ),
+        failure(finish(&failing, &token, &response).await.map(drop)),
         unavailable
     );
     let mut said = Vec::new();
@@ -525,10 +564,7 @@ async fn failures_of_the_server_are_told_apart() {
         let (token, response) = answer(&operators, kept.clone(), ORIGIN, |_| {}).await;
         as_admin(&database, corrupt).await;
         said.push(failure(
-            operators
-                .finish_sign_in(&party, &token, &response, &actor())
-                .await
-                .map(drop),
+            finish(&operators, &token, &response).await.map(drop),
         ));
     }
     assert!(said[0].starts_with("storage failed: a stored sign-in ceremony could not be read"));
@@ -568,27 +604,27 @@ const UNREADABLE: [(&str, &str, &str); 11] = [
         "SELECT 1::bigint, uuid_send(gen_random_uuid()), '{}', 'x'",
     ),
     (
-        "sign_in(bytea, bigint, jsonb, jsonb, bytea)",
+        "sign_in(bytea, bigint, jsonb, jsonb, bytea, bytea)",
         "TABLE (signed text, session_id text)",
         "SELECT 'maybe', 'x'",
     ),
     (
-        "sign_in(bytea, bigint, jsonb, jsonb, bytea)",
+        "sign_in(bytea, bigint, jsonb, jsonb, bytea, bytea)",
         "TABLE (signed integer, session_id text)",
         "SELECT 1, 'x'",
     ),
     (
-        "sign_in(bytea, bigint, jsonb, jsonb, bytea)",
+        "sign_in(bytea, bigint, jsonb, jsonb, bytea, bytea)",
         "TABLE (signed text, session_id integer)",
         "SELECT 'signed_in', 1",
     ),
     (
-        "sign_in(bytea, bigint, jsonb, jsonb, bytea)",
+        "sign_in(bytea, bigint, jsonb, jsonb, bytea, bytea)",
         "TABLE (signed text, session_id text)",
         "SELECT 'signed_in', 'x' WHERE false",
     ),
     (
-        "sign_in(bytea, bigint, jsonb, jsonb, bytea)",
+        "sign_in(bytea, bigint, jsonb, jsonb, bytea, bytea)",
         "TABLE (signed text, session_id text)",
         "SELECT 'signed_in', null::text",
     ),
@@ -605,10 +641,7 @@ async fn unreadable_answers_are_storage_failures() {
         let (token, response) = answer(&operators, kept, ORIGIN, |_| {}).await;
         replace(&database, function, returns, body).await;
         said.push(failure(
-            operators
-                .finish_sign_in(&party(), &token, &response, &actor())
-                .await
-                .map(drop),
+            finish(&operators, &token, &response).await.map(drop),
         ));
     }
     assert!(
@@ -635,7 +668,7 @@ async fn each_sign_in_step_fails_as_storage_when_refused() {
         "begin_sign_in(bytea, jsonb)",
         "take_ceremony(bytea, text)",
         "signer(bytea)",
-        "sign_in(bytea, bigint, jsonb, jsonb, bytea)",
+        "sign_in(bytea, bigint, jsonb, jsonb, bytea, bytea)",
     ] {
         let (operators, database, _, kept) = enrolled().await;
         let revoke = format!("REVOKE EXECUTE ON FUNCTION identity.{function} FROM tetsu_identity");
@@ -646,10 +679,7 @@ async fn each_sign_in_step_fails_as_storage_when_refused() {
             let (token, response) = answer(&operators, kept, ORIGIN, |_| {}).await;
             as_admin(&database, &revoke).await;
             said.push(failure(
-                operators
-                    .finish_sign_in(&party(), &token, &response, &actor())
-                    .await
-                    .map(drop),
+                finish(&operators, &token, &response).await.map(drop),
             ));
         }
     }
@@ -674,12 +704,7 @@ async fn a_refusal_that_cannot_be_recorded_fails_as_storage() {
     )
     .await;
     assert_eq!(
-        failure(
-            operators
-                .finish_sign_in(&party(), &token, &response, &actor())
-                .await
-                .map(drop)
-        ),
+        failure(finish(&operators, &token, &response).await.map(drop)),
         "storage failed: permission denied for table outbox_global"
     );
 }

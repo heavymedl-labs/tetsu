@@ -340,6 +340,22 @@ pub struct Signer {
     pub disabled: bool,
 }
 
+/// The session a sign-in starts, under its token's hash, and the one the browser presented, if any, which it ends.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct SessionStart {
+    pub hash: [u8; 32],
+    pub replacing: Option<[u8; 32]>,
+}
+
+/// Printing it leaves out both hashes, as a session's own printing does.
+impl std::fmt::Debug for SessionStart {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SessionStart")
+            .field("replacing", &self.replacing.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
 /// What signing in came to for a passkey that exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SignIn {
