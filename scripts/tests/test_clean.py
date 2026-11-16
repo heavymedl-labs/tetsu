@@ -12,7 +12,10 @@ from scripts import clean
 TEST_URL = b"DATABASE_URL=postgres://postgres@localhost:54329/t_1763050000_4242_7"
 DAY = 24 * 3600
 NOW = 1_800_000_000.0
-HASHES = ["aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", "cccccccccccccccc", "dddddddddddddddd"]
+KEPT = clean.KEPT_COPIES
+SETTLE_DAYS = clean.SETTLE // DAY
+# One copy more than are kept, newest first.
+HASHES = [f"{index:016x}" for index in range(KEPT + 1)]
 
 
 def environ(*variables):
@@ -24,7 +27,7 @@ class CleanTest(unittest.TestCase):
         self.proc, self.root, self.temporary = (Path(tempfile.mkdtemp()) for _ in range(3))
         for path in (self.proc, self.root, self.temporary):
             self.addCleanup(shutil.rmtree, path)
-        self.host = clean.Host(proc=self.proc, root=self.root, temporary=self.temporary, now=NOW)
+        self.host = clean.Host(proc=self.proc, root=self.root, temporary=self.temporary, now=NOW, ci=False)
         self.docker = mock.patch("scripts.clean.docker").start()
         self.run_command = mock.patch("subprocess.run").start()
         self.run_command.return_value.returncode = 0
@@ -113,42 +116,51 @@ class CleanTest(unittest.TestCase):
         left = sorted(path.name for path in self.temporary.iterdir())
         self.assertEqual(left, ["tetsu-222-env", "tetsu-review-notes", "x.pem"])
 
-    def test_superseded_copies_of_a_unit_go_and_its_newest_three_stay(self):
+    def test_superseded_copies_of_a_unit_go_and_its_newest_stay(self):
         for days, hash_ in enumerate(HASHES):
-            self.built(f"debug/deps/tetsu-{hash_}", days + 2)
-            self.built(f"debug/deps/tetsu-{hash_}.d", days + 2)
+            self.built(f"debug/deps/tetsu-{hash_}", days + SETTLE_DAYS + 1)
+            self.built(f"debug/deps/tetsu-{hash_}.d", days + SETTLE_DAYS + 1)
         self.built("debug/deps/libtokio-eeeeeeeeeeeeeeee.rlib", 30)
         self.built("debug/deps/README", 30)
         self.built("nightly/x86_64-unknown-linux-gnu/debug/incremental/tetsu-1111111111111111", 9)
         clean.main(["--routine"], self.host)
         left = sorted(path.name for path in (self.root / "target" / "debug" / "deps").iterdir())
-        kept = [name for hash_ in HASHES[:3] for name in (f"tetsu-{hash_}", f"tetsu-{hash_}.d")]
+        kept = [name for hash_ in HASHES[:KEPT] for name in (f"tetsu-{hash_}", f"tetsu-{hash_}.d")]
         self.assertEqual(left, sorted(["README", "libtokio-eeeeeeeeeeeeeeee.rlib", *kept]))
 
     def test_superseded_incremental_folders_go_too(self):
-        for days, hash_ in enumerate(["3pbsn1u98tw0c", "3a60esjx1chbr", "2en701jb079ny", "0fzasr1p0elfm"]):
-            self.built(f"debug/incremental/tetsu-{hash_}/s-session", days + 2)
+        folders = [f"{index:013d}" for index in range(KEPT + 1)]
+        for days, hash_ in enumerate(folders):
+            self.built(f"debug/incremental/tetsu-{hash_}/s-session", days + SETTLE_DAYS + 1)
             (self.root / "target" / "debug" / "incremental" / f"tetsu-{hash_}").touch()
-            stamp = NOW - (days + 2) * DAY
+            stamp = NOW - (days + SETTLE_DAYS + 1) * DAY
             os.utime(self.root / "target" / "debug" / "incremental" / f"tetsu-{hash_}", (stamp, stamp))
         found = [path.name for path in clean.superseded_builds(self.root / "target", NOW)]
-        self.assertEqual(found, ["tetsu-0fzasr1p0elfm"])
+        self.assertEqual(found, [f"tetsu-{folders[KEPT]}"])
 
-    def test_a_copy_under_a_day_old_stays_though_superseded(self):
+    def test_a_copy_younger_than_the_wait_stays_though_superseded(self):
         for hours, hash_ in enumerate(HASHES):
             self.built(f"debug/deps/tetsu-{hash_}", hours / 24)
         self.assertEqual(list(clean.superseded_builds(self.root / "target", NOW)), [])
 
     def test_copies_deeper_than_a_profile_count_and_mutants_reports_never_do(self):
         for days, hash_ in enumerate(HASHES):
-            self.built(f"nightly/x86_64-unknown-linux-gnu/debug/deps/tetsu-{hash_}", days + 2)
-            self.built(f"mutants.out/deps/tetsu-{hash_}", days + 2)
+            self.built(f"nightly/x86_64-unknown-linux-gnu/debug/deps/tetsu-{hash_}", days + SETTLE_DAYS + 1)
+            self.built(f"mutants.out/deps/tetsu-{hash_}", days + SETTLE_DAYS + 1)
         found = [
             path.relative_to(self.root / "target")
             for path in clean.superseded_builds(self.root / "target", NOW)
         ]
-        self.assertEqual(found, [Path(f"nightly/x86_64-unknown-linux-gnu/debug/deps/tetsu-{HASHES[3]}")])
+        self.assertEqual(found, [Path(f"nightly/x86_64-unknown-linux-gnu/debug/deps/tetsu-{HASHES[KEPT]}")])
         self.assertEqual(list(clean.superseded_builds(self.root / "missing", NOW)), [])
+
+    def test_ci_prunes_no_build_outputs(self):
+        for days, hash_ in enumerate(HASHES):
+            self.built(f"debug/deps/tetsu-{hash_}", days + SETTLE_DAYS + 1)
+        host = clean.Host(proc=self.proc, root=self.root, temporary=self.temporary, now=NOW, ci=True)
+        clean.main(["--routine"], host)
+        left = sorted(path.name for path in (self.root / "target" / "debug" / "deps").iterdir())
+        self.assertEqual(left, sorted(f"tetsu-{hash_}" for hash_ in HASHES))
 
     def test_routine_removes_what_a_killed_mutation_or_coverage_run_left(self):
         left = ["target/mutants-tmp/x", ".tools/stryker-tmp/sandbox-1/x", ".tools/coverage-web/.tmp/x"]

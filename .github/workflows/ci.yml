@@ -58,15 +58,19 @@ jobs:
             ~/.rustup/toolchains/nightly-*
             .tools
           key: tools-${{ hashFiles('scripts/install-tools.sh', 'rust-toolchain.toml', '.config/nightly-toolchain') }}
-      # Build outputs start from the latest cache when the lockfile changes, so only what changed is rebuilt. Nothing
-      # in them reaches the published image, which builds from a cache of its own.
+      # Build outputs start from the latest cache of the month when the lockfile changes, so only what changed is
+      # rebuilt. Nothing in them reaches the published image, which builds from a cache of its own. Nothing prunes
+      # them here, since a live copy pruned would be rebuilt on every run (scripts/clean.py), so the cache starts
+      # fresh each month instead, and cannot grow without end.
+      - id: month
+        run: echo "month=$(date -u +%Y-%m)" >>"$GITHUB_OUTPUT"
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
             target
-          key: build-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '.config/nightly-toolchain') }}
-          restore-keys: build-
+          key: build-${{ steps.month.outputs.month }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '.config/nightly-toolchain') }}
+          restore-keys: build-${{ steps.month.outputs.month }}-
       # The settings in check.sh's setup hint, since services take no server flags: throwaway data traded for
       # speed, and TLS with the image's self-signed certificate, which the TLS tests must refuse.
       - run: |

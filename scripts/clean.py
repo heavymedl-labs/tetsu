@@ -9,8 +9,11 @@ With --routine, which scripts/check.sh runs on the way out, it removes only what
 - the copies and output mutation and coverage runs keep while they run (cargo-mutants', StrykerJS's, and
   Vitest's), dangling container images, and build cache unused for 7 days.
 - superseded build artifacts under target/. Cargo names each `<unit>-<hash>` and never removes the copies a
-  change replaces, so target/ only grows. Of each unit's copies it keeps the newest three, and removes older
-  ones a day after they were written; one still needed is rebuilt.
+  change replaces, so target/ only grows. Of each unit's copies it keeps the newest eight, and removes older
+  ones a week after they were written; one still needed is rebuilt. One profile holds several live copies of
+  a unit, for checking and building, with each set of features, and Cargo leaves a live copy's time as it
+  was, so a copy pruned too soon is rebuilt on every run. CI prunes none: its build cache starts fresh each
+  month.
 
 With no option, it also stops every `tetsu` built in this repository, drops leftover test databases, deletes
 cargo-mutants' reports, and empties the build cache. The test Postgres and its data stay.
@@ -36,10 +39,11 @@ TEST_TEMPORARY = re.compile(r"tetsu-(\d+)-.+|t_\d+_(\d+)_\d+\.pem")
 BUILD_OUTPUTS = ("deps", "incremental", "build", ".fingerprint", "examples")
 # Cargo hashes outputs in 16 hex digits, and incremental folders in 13 base-36 ones.
 BUILD_UNIT = re.compile(r"(.*)-(?:[0-9a-f]{16}|[0-9a-z]{13})(\..*)?")
-KEPT_COPIES = 3
+# A full check builds at most five live copies of one unit in a profile (2026-11-16), so eight leaves room.
+KEPT_COPIES = 8
 # Build output folders sit in a profile folder, such as target/debug or target/nightly/<triple>/debug.
 PROFILE_DEPTH = 3
-SETTLE = 24 * 3600
+SETTLE = 7 * 24 * 3600
 # Each is removed when its run ends, unless the run was killed.
 RUN_LEFTOVERS = ["target/mutants-tmp", ".tools/stryker-tmp", ".tools/coverage-web"]
 REPORTS = ["target/mutants.out", "target/mutants.out.old", "mutants.out", "mutants.out.old"]
@@ -135,6 +139,8 @@ class Host:
     temporary: Path = field(default_factory=lambda: Path(tempfile.gettempdir()))
     alive: object = running
     now: float = field(default_factory=time.time)
+    # CI keeps target/ in a cache that starts fresh each month, so pruning there would make every run rebuild.
+    ci: bool = field(default_factory=lambda: bool(os.environ.get("CI")))
 
 
 def main(args, host=None):
@@ -149,7 +155,7 @@ def main(args, host=None):
         print(f"stopped {len(found)} tetsu {'test servers' if routine else 'processes'}")
     for leftover in left_by_gone_tests(host.temporary, host.alive):
         remove(leftover)
-    superseded = list(superseded_builds(host.root / "target", host.now))
+    superseded = [] if host.ci else list(superseded_builds(host.root / "target", host.now))
     for leftover in [*superseded, *(host.root / path for path in RUN_LEFTOVERS)]:
         remove(leftover)
     if superseded:
