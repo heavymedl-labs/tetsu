@@ -79,6 +79,7 @@ async fn no_enrollment_link_is_printed_to_a_pipe() {
         );
         assert_eq!(out(&refused), "");
     }
+    // The refused link was never issued, so the list shows no open one.
     assert_eq!(
         out(&operator(&app, &["list"])),
         "1  Kurt Medley  enabled  0 passkeys\n"
