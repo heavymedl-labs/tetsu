@@ -23,6 +23,8 @@ jobs:
   checks:
     name: Repository checks
     runs-on: ubuntu-latest
+    # The longest pass took 44 minutes, mutating nine commits on one runner (2026-11-16); a hang stops at twice that.
+    timeout-minutes: 90
     services:
       postgres:
         # At least MIN_SERVER_VERSION in crates/postgres/src/migrate.rs (ADR-0060).
@@ -99,6 +101,7 @@ jobs:
   rest:
     name: Image, harness, links, and workflows
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -136,6 +139,7 @@ jobs:
     needs: [checks, rest]
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       packages: write
     # Naming bash adds -o pipefail, so a failed gunzip fails the push rather than loading a truncated image.
