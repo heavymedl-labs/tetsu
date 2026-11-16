@@ -40,7 +40,7 @@ here that has passed.
 
 | Workflow | `GITHUB_TOKEN` permissions |
 | --- | --- |
-| `ci.yml` | `contents: read`, and `actions: read` to find the commit the last successful run checked; its publish job, which runs only GitHub's own actions after every check passes, has `packages: write` alone, to publish the image a manual run on main checked |
+| `ci.yml` | `permissions: {}` for the workflow, so each job asks for its own: the checks job `contents: read`, and `actions: read` to find the commit the last successful run checked; the image job `contents: read`; and the publish job, which runs only GitHub's own actions after every check passes, `packages: write` alone, to publish the image a manual run on main checked |
 | `deploy.yml` | `contents: read`, `actions: read` to find the CI run that checked the commit and download its digest, `packages: write` to pull the image and prune old ones, and `deployments: write` to record each deploy. Its chore job has `contents: read`, `deployments: read` to find the image live on the demo, and `packages: read` to pull it. Render's service ID is a repository variable, not a secret |
 | `renewals.yml` | `contents: read`, and `issues: write` to open a reminder for each renewal due within 30 days |
 | `benchmarks.yml` | `contents: read`; its image job adds `packages: write` to push the benchmark image, and its run job `packages: read` to pull it |
