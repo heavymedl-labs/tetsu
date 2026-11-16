@@ -36,7 +36,7 @@ audit record its evidence.
 | 12 | Medium | Sign-in ceremonies: nullable operator, a bounded sweep, an index on `ends_at`, a global cap | Step 4c |
 | 13 | Medium | Sign-in: row-locked counter updates, user handle checked against the credential, two passkeys at most | Step 4c |
 | 14 | Medium | Rate limits for enrollment begin and finish, in ADR-0048's table | Step 5 |
-| 15 | Open | How an operator with an unusable passkey gets back in | Maintainer's decision |
+| 15 | Decided | How an operator with an unusable passkey gets back in: `operator remove-passkeys` | Done |
 
 ## Isolation the functions trust but do not check
 
@@ -132,10 +132,14 @@ link holder could forge it.
 
 ## A decision for the maintainer
 
-An operator whose only passkey becomes unusable, for example one lost before a second is added, cannot get a new
+An operator whose only passkey becomes unusable, for example one lost before a second is added, could not get a new
 link, since `enroll` refuses an operator who holds a passkey. ADR-0057 has such an operator given a new account and
-the old one removed, but operator names are unique, and nothing removes an operator. Either `operator
-remove-passkeys <id>`, recorded and ending the operator's sessions, or `enroll --replace`, would close the gap.
+the old one removed, but operator names are unique, and nothing removes an operator. Two tabs racing on one link
+can also leave a device holding a passkey Tetsu refused, which the server cannot prevent.
+
+The maintainer chose `tetsu operator remove-passkeys <id>`: it removes the operator's passkeys, ends their sessions
+and any ceremony, and is recorded, after which `enroll` issues a link as for a new operator. The operator keeps
+their account and its audit record. ADR-0057's recovery wording should be amended to match.
 
 ## What is already right
 

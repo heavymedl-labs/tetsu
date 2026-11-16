@@ -11,7 +11,7 @@ use std::io::Read;
 
 use tetsu_identity::{
     Actor, Disabling, EnrollmentToken, OperatorId, OperatorName, OperatorStore, OperatorSummary,
-    Operators,
+    Operators, Removal,
 };
 
 use crate::settings::{self, Local};
@@ -24,12 +24,13 @@ pub enum Operator {
     List,
     Disable { id: OperatorId },
     Enable { id: OperatorId },
+    RemovePasskeys { id: OperatorId },
     EndSessions { id: OperatorId },
     EndAllSessions,
 }
 
-const USAGE: &str = "operator takes create <name>, enroll <id>, list, disable <id>, enable <id>, or end-sessions <id \
-                     | --all>";
+const USAGE: &str = "operator takes create <name>, enroll <id>, list, disable <id>, enable <id>, remove-passkeys \
+                     <id>, or end-sessions <id | --all>";
 
 /// The operator command its words name, with its arguments checked.
 pub fn parse(rest: &[String]) -> Result<Operator, String> {
@@ -55,6 +56,7 @@ fn with_id(command: &str, text: &str) -> Result<Operator, String> {
         "enroll" => |id| Operator::Enroll { id },
         "disable" => |id| Operator::Disable { id },
         "enable" => |id| Operator::Enable { id },
+        "remove-passkeys" => |id| Operator::RemovePasskeys { id },
         "end-sessions" => |id| Operator::EndSessions { id },
         _ => return Err(USAGE.into()),
     };
@@ -167,6 +169,10 @@ async fn act(
                 format!("operator {} was already enabled", id.get())
             }]
         }),
+        Operator::RemovePasskeys { id } => operators
+            .remove_passkeys(id, by)
+            .await
+            .map(|removal| vec![removed(id, removal)]),
         Operator::EndSessions { id } => operators
             .end_sessions(id, by)
             .await
@@ -204,6 +210,16 @@ async fn create(
 }
 
 /// What disabling an operator did, with how many sessions and enrollment links it ended.
+/// What removing an operator's passkeys did, and what they do next.
+fn removed(id: OperatorId, removal: Removal) -> String {
+    format!(
+        "removed {} passkeys of operator {id}, ending {} sessions; issue a link with tetsu operator enroll {id}",
+        removal.passkeys_removed,
+        removal.sessions_ended,
+        id = id.get()
+    )
+}
+
 fn disabled(id: OperatorId, done: Disabling) -> String {
     if done.done {
         format!(
@@ -270,6 +286,10 @@ mod tests {
             (&["list"], Operator::List),
             (&["disable", "7"], Operator::Disable { id: kurt }),
             (&["enable", "7"], Operator::Enable { id: kurt }),
+            (
+                &["remove-passkeys", "7"],
+                Operator::RemovePasskeys { id: kurt },
+            ),
             (&["end-sessions", "7"], Operator::EndSessions { id: kurt }),
             (&["end-sessions", "--all"], Operator::EndAllSessions),
         ] {
@@ -503,6 +523,31 @@ mod tests {
         );
     }
 
+    /// Removing an operator's passkeys says how many and what ended, and names the command that issues a new link.
+    #[tokio::test]
+    async fn removing_passkeys_names_the_next_step() {
+        let (operators, _database) = migrated().await;
+        said(
+            &operators,
+            Operator::Create {
+                name: OperatorName::parse("Kurt Medley").unwrap(),
+            },
+        )
+        .await;
+        assert_eq!(
+            said(
+                &operators,
+                Operator::RemovePasskeys {
+                    id: OperatorId::parse("1").unwrap()
+                }
+            )
+            .await,
+            [
+                "removed 0 passkeys of operator 1, ending 0 sessions; issue a link with tetsu operator enroll 1"
+            ]
+        );
+    }
+
     /// Disabling and enabling say what they did, and a disabled operator is issued no link.
     #[tokio::test]
     async fn an_operator_is_disabled_and_enabled_again() {
@@ -539,10 +584,12 @@ mod tests {
             said(&operators, Operator::Enable { id: kurt }).await,
             ["operator 1 was already enabled"]
         );
+
         let nobody = OperatorId::parse("9").unwrap();
         for command in [
             Operator::Disable { id: nobody },
             Operator::Enable { id: nobody },
+            Operator::RemovePasskeys { id: nobody },
             Operator::EndSessions { id: nobody },
         ] {
             assert_eq!(

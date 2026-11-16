@@ -2,7 +2,7 @@
 
 use crate::domain::{
     Actor, Disabling, Enrollee, Error, Issue, NewPasskey, OperatorId, OperatorName,
-    OperatorSummary, Realm, Redemption, Session, TakenCeremony,
+    OperatorSummary, Realm, Redemption, Removal, Session, TakenCeremony,
 };
 use std::future::Future;
 
@@ -95,6 +95,14 @@ pub trait OperatorStore {
         operator: OperatorId,
         actor: &Actor,
     ) -> impl Future<Output = Result<Option<Disabling>, Error>> + Send;
+
+    /// Removes every passkey an operator holds, ending their sessions and any ceremony, and says what it did, or none
+    /// for an operator who does not exist.
+    fn remove_passkeys(
+        &self,
+        operator: OperatorId,
+        actor: &Actor,
+    ) -> impl Future<Output = Result<Option<Removal>, Error>> + Send;
 
     /// Enables a disabled operator again, and says whether they were disabled, or none for an operator who does not
     /// exist. Their sessions stay ended.

@@ -28,7 +28,7 @@ const MODULES: &[&dyn Module] = &[&Tenancy, &Identity, &Audit];
 const USAGE: &str = "usage: tetsu [migrate | seed [--check] <file or folder> | serve | check | reset <schema>... \
                      | replay <schema> <event id> | rename <address> <new slug> \
                      | operator <create <name> | enroll <id> | list | disable <id> | enable <id> \
-                     | end-sessions <id | --all>>]";
+                     | remove-passkeys <id> | end-sessions <id | --all>>]";
 
 #[derive(Debug, PartialEq, Eq)]
 enum Command {

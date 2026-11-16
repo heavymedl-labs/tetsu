@@ -474,6 +474,13 @@ pub struct Disabling {
     pub links_ended: u64,
 }
 
+/// What removing an operator's passkeys did: how many it removed, and how many live sessions it ended with them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Removal {
+    pub passkeys_removed: u64,
+    pub sessions_ended: u64,
+}
+
 /// An operator as the operator command lists them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OperatorSummary {

@@ -5,7 +5,9 @@ use std::fmt::Write;
 
 use serde_json::{Value, json};
 
-use tetsu_identity::{Actor, Disabling, Error, Identity, OperatorId, OperatorName, postgres_store};
+use tetsu_identity::{
+    Actor, Disabling, Error, Identity, OperatorId, OperatorName, Removal, postgres_store,
+};
 use tetsu_postgres::test_support::{TestDatabase, fresh_database};
 use tetsu_postgres::{ModuleTransaction, connect, migrate, pool};
 
@@ -511,7 +513,8 @@ async fn each_command_fails_as_storage_when_the_database_refuses_it() {
         &database,
         "REVOKE EXECUTE ON FUNCTION identity.issue_enrollment(bytea, bigint),
            identity.disable_operator(bigint), identity.enable_operator(bigint),
-           identity.end_sessions(text, bigint), identity.list_operators() FROM tetsu_identity;
+           identity.remove_passkeys(bigint), identity.end_sessions(text, bigint),
+           identity.list_operators() FROM tetsu_identity;
          REVOKE INSERT ON identity.outbox_global FROM tetsu_identity",
     )
     .await;
@@ -519,6 +522,9 @@ async fn each_command_fails_as_storage_when_the_database_refuses_it() {
     assert!(storage(operators.enroll(kurt, &actor()).await.map(drop)));
     assert!(storage(operators.disable(kurt, &actor()).await.map(drop)));
     assert!(storage(operators.enable(kurt, &actor()).await.map(drop)));
+    assert!(storage(
+        operators.remove_passkeys(kurt, &actor()).await.map(drop)
+    ));
     assert!(storage(
         operators.end_sessions(kurt, &actor()).await.map(drop)
     ));
@@ -697,6 +703,7 @@ async fn changes_that_wait_on_an_operator_need_read_committed() {
         "SELECT identity.redeem_enrollment(sha256('a'::bytea), 1, sha256('c'::bytea), '{}')",
         "SELECT identity.begin_enrollment(sha256('t'::bytea), 1, sha256('a'::bytea), '{}')",
         "SELECT identity.enable_operator(1)",
+        "SELECT * FROM identity.remove_passkeys(1)",
     ] {
         let transaction = client
             .build_transaction()
@@ -1118,4 +1125,96 @@ async fn a_begin_waits_for_a_new_link_being_written() {
         number(&database, "SELECT count(*) FROM identity.ceremonies").await,
         0
     );
+}
+
+/// Removing an operator's passkeys lets them be issued a link and enroll again, as when their only one is lost. It
+/// ends their sessions and any ceremony with it, says what it removed, and records each attempt: changed, unchanged
+/// when there was nothing to remove, and refused for an operator who does not exist.
+#[tokio::test]
+async fn removing_passkeys_lets_an_operator_enroll_again() {
+    let database = ready().await;
+    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+    let kurt = operators
+        .create(&name("Kurt Medley"), &actor())
+        .await
+        .expect("creates");
+    as_admin(&database, &passkey_for(kurt.get())).await;
+    operators.start_session(kurt).await.expect("starts");
+    let removed = [
+        operators.remove_passkeys(kurt, &actor()).await,
+        operators.remove_passkeys(kurt, &actor()).await,
+    ];
+    let removal = |passkeys_removed, sessions_ended| {
+        Ok(Removal {
+            passkeys_removed,
+            sessions_ended,
+        })
+    };
+    assert_eq!(removed, [removal(1, 1), removal(0, 0)]);
+    assert_eq!(
+        operators
+            .remove_passkeys(OperatorId::parse("99").expect("an ID"), &actor())
+            .await,
+        Err(Error::Invalid("no operator 99".into()))
+    );
+    assert!(operators.enroll(kurt, &actor()).await.is_ok());
+    let recorded: Vec<Value> = events(&database)
+        .await
+        .into_iter()
+        .filter(|(kind, _)| kind == "identity.passkeys_removed")
+        .map(|(_, payload)| {
+            json!([
+                payload["outcome"],
+                payload["passkeys_removed"],
+                payload["sessions_ended"]
+            ])
+        })
+        .collect();
+    assert_eq!(
+        recorded,
+        [
+            json!(["changed", 1, 1]),
+            json!(["unchanged", 0, 0]),
+            json!(["refused", null, null])
+        ]
+    );
+}
+
+/// A removal whose answer has a column of the wrong type is a storage failure, whichever column it is.
+#[tokio::test]
+async fn a_removal_answer_of_the_wrong_type_is_a_storage_failure() {
+    for (columns, values) in [
+        (
+            "passkeys_removed text, sessions_ended bigint",
+            "''1'', 0::bigint",
+        ),
+        (
+            "passkeys_removed bigint, sessions_ended text",
+            "0::bigint, ''1''",
+        ),
+    ] {
+        let database = ready().await;
+        let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
+        let kurt = operators
+            .create(&name("Kurt Medley"), &actor())
+            .await
+            .expect("creates");
+        as_admin(
+            &database,
+            &format!(
+                "DROP FUNCTION identity.remove_passkeys(bigint);
+                 CREATE FUNCTION identity.remove_passkeys(bigint) RETURNS TABLE ({columns})
+                 LANGUAGE sql AS 'SELECT {values}';
+                 GRANT EXECUTE ON FUNCTION identity.remove_passkeys(bigint) TO tetsu_identity"
+            ),
+        )
+        .await;
+        assert!(
+            matches!(
+                operators.remove_passkeys(kurt, &actor()).await,
+                Err(Error::Storage(_))
+            ),
+            "{columns}"
+        );
+    }
 }

@@ -11,7 +11,7 @@ use tokio_postgres::types::{FromSql, ToSql};
 
 use crate::domain::{
     Actor, Disabling, Enrollee, Error, Issue, NewPasskey, OperatorId, OperatorName,
-    OperatorSummary, Realm, Redemption, Session, TakenCeremony,
+    OperatorSummary, Realm, Redemption, Removal, Session, TakenCeremony,
 };
 use crate::ports::OperatorStore;
 use crate::use_cases::Operators;
@@ -41,6 +41,7 @@ const END_REALM_SESSIONS: &str = include_str!("../../sql/end_realm_sessions.sql"
 const LIST_OPERATORS: &str = include_str!("../../sql/list_operators.sql");
 const ENABLE_OPERATOR: &str = include_str!("../../sql/enable_operator.sql");
 const ENROLLEE: &str = include_str!("../../sql/enrollee.sql");
+const REMOVE_PASSKEYS: &str = include_str!("../../sql/remove_passkeys.sql");
 const BEGIN_ENROLLMENT: &str = include_str!("../../sql/begin_enrollment.sql");
 const TAKE_CEREMONY: &str = include_str!("../../sql/take_ceremony.sql");
 const REDEEM_ENROLLMENT: &str = include_str!("../../sql/redeem_enrollment.sql");
@@ -330,6 +331,20 @@ impl OperatorStore for PostgresOperators {
         })
         .await?;
         Ok(redeemed.get().copied().flatten())
+    }
+
+    async fn remove_passkeys(
+        &self,
+        operator: OperatorId,
+        actor: &Actor,
+    ) -> Result<Option<Removal>, Error> {
+        let id = operator.get();
+        let removed = OnceLock::new();
+        self.query_recording(REMOVE_PASSKEYS, &[&id], &|rows| {
+            removing(rows, id, actor, &removed)
+        })
+        .await?;
+        Ok(removed.get().copied().flatten())
     }
 
     async fn disable_operator(
@@ -636,6 +651,38 @@ fn disabling_from(row: &Row) -> Result<Option<Disabling>, Error> {
         sessions_ended: u64::try_from(sessions).unwrap_or_default(),
         links_ended: u64::try_from(links).unwrap_or_default(),
     }))
+}
+
+/// Reads what removing passkeys did, keeps it in `removed`, and makes the event it records: changed when it removed
+/// any, unchanged when there were none, and refused for an operator who does not exist.
+fn removing(
+    rows: &[Row],
+    id: i64,
+    actor: &Actor,
+    removed: &OnceLock<Option<Removal>>,
+) -> Result<Option<(&'static str, String)>, Error> {
+    let removal = rows.first().map(removal_from).transpose()?;
+    let _ = removed.set(removal);
+    Ok(Some(event(
+        "identity.passkeys_removed",
+        actor,
+        outcome(removal.map(|removal| removal.passkeys_removed > 0)),
+        json!({
+            "operator_id": id,
+            "passkeys_removed": removal.map(|removal| removal.passkeys_removed),
+            "sessions_ended": removal.map(|removal| removal.sessions_ended),
+        }),
+    )))
+}
+
+/// What removing passkeys did, from its answer.
+fn removal_from(row: &Row) -> Result<Removal, Error> {
+    let passkeys: i64 = column(row, "passkeys_removed")?;
+    let sessions: i64 = column(row, "sessions_ended")?;
+    Ok(Removal {
+        passkeys_removed: u64::try_from(passkeys).unwrap_or_default(),
+        sessions_ended: u64::try_from(sessions).unwrap_or_default(),
+    })
 }
 
 /// The outcome of a change: it acted, it found nothing to do, or there was no such operator.

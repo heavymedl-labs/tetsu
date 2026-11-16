@@ -5,7 +5,7 @@ Who signs in to Tetsu, their passkeys, and their sessions ([ADR-0040](../../docs
 in slice 5 ([#110](https://github.com/heavymedl-labs/tetsu/issues/110)); staff and customers follow.
 
 So far, `Operators` creates, lists, disables, and enables operators, issues their enrollment links, begins and
-finishes enrolling their first passkey, and starts, finds, and ends their sessions. `postgres_store(pool)` returns it over Postgres.
+finishes enrolling their first passkey, removes their passkeys, and starts, finds, and ends their sessions. `postgres_store(pool)` returns it over Postgres.
 
 - **Session tokens are 256 random bits** from the operating system's source, written as 64 lowercase hexadecimal
   digits. Only their SHA-256 hash is stored ([ADR-0047](../../docs/adr/0047-sign-in-libraries.md)), and a token
@@ -78,6 +78,11 @@ finishes enrolling their first passkey, and starts, finds, and ends their sessio
   shows each as "Tetsu operator · Name", the label first, where an authenticator's 64-byte cut never reaches it.
   The AAGUID, which names a passkey's provider but is unverified without attestation, is kept from step 4d, when
   the browser's authenticator data arrives.
+- **Removing an operator's passkeys** lets them be issued a link and enroll again, as when their only passkey is
+  lost or unusable. It ends their sessions and any ceremony too, since a session begun with a removed passkey must
+  not outlive it (`v5.0.0-7.4.3`), takes their row for update as a disable does, and records
+  `identity.passkeys_removed` with the counts. The operator keeps their account and its audit record, where
+  ADR-0057 has a new account made instead.
 - **What one database login allows.** Identity's role, which the web app shares with the operator command
   (ADR-0061), can issue a link for an operator with no passkey, so code that runs SQL as that role could enroll a
   passkey of its own for one. Database access is the trust boundary, as for every operator command.

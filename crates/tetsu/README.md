@@ -22,6 +22,7 @@ names no business that uses Tetsu. Its root page names fictional customers only 
 | `tetsu operator list` | Lists operators: ID, name, whether they are enabled, their passkeys, and the minutes left on an open enrollment link |
 | `tetsu operator disable <id>` | Disables an operator, ending their sessions and enrollment link |
 | `tetsu operator enable <id>` | Enables a disabled operator again; their sessions stay ended |
+| `tetsu operator remove-passkeys <id>` | Removes an operator's passkeys, as when their only one is lost, and ends their sessions, so a new link can enroll them again |
 | `tetsu operator end-sessions <id \| --all>` | Ends one operator's sessions, or every operator's |
 
 The deploy workflow runs `check`, `reset`, `replay`, and `rename` against the demo ([runbook](../../docs/operations/demo-environment.md)).

@@ -127,7 +127,8 @@ GRANT SELECT (id, name, user_handle, created_at, disabled_at),
 UPDATE (disabled_at)
 ON operators TO tetsu_identity_lookup;
 GRANT SELECT (operator_id),
-INSERT (credential_id, operator_id, passkey, created_at)
+INSERT (credential_id, operator_id, passkey, created_at),
+DELETE
 ON passkeys TO tetsu_identity_lookup;
 GRANT SELECT, INSERT, DELETE ON ceremonies TO tetsu_identity_lookup;
 GRANT UPDATE (token_hash, state, ends_at) ON ceremonies
@@ -542,6 +543,27 @@ BEGIN
 END
 $$;
 
+-- Ends every session an operator holds, in any realm, and says how many were
+-- live as of `at`, spent ones going too. Only disabling and removing passkeys
+-- call it, holding the operator's row; no role may.
+CREATE FUNCTION end_every_session(wanted_operator bigint, at timestamptz)
+RETURNS bigint
+LANGUAGE sql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+    WITH gone AS (
+        DELETE FROM identity.sessions AS s
+        WHERE s.operator_id = wanted_operator
+        RETURNING
+            at < s.ends_at
+            AND at < s.last_seen_at + CASE s.realm
+                WHEN 'operator' THEN interval '15 minutes'
+            END AS live
+    )
+
+    SELECT count(*) FILTER (WHERE gone.live) FROM gone
+$$;
+
 -- Disables an operator, then ends every session it holds in any realm, its
 -- enrollment link, and any passkey ceremony under way (v5.0.0-7.4.2), and
 -- says whether it acted and how many live sessions and links it ended, spent
@@ -579,17 +601,7 @@ BEGIN
     at := clock_timestamp();
     UPDATE identity.operators AS o SET disabled_at = at
     WHERE o.id = wanted_operator;
-    WITH gone AS (
-        DELETE FROM identity.sessions AS s
-        WHERE s.operator_id = wanted_operator
-        RETURNING
-            at < s.ends_at
-            AND at < s.last_seen_at + CASE s.realm
-                WHEN 'operator' THEN interval '15 minutes'
-            END AS live
-    )
-
-    SELECT count(*) FILTER (WHERE gone.live) INTO sessions_ended FROM gone;
+    sessions_ended := identity.end_every_session(wanted_operator, at);
     WITH gone AS (
         DELETE FROM identity.enrollments AS e
         WHERE e.operator_id = wanted_operator
@@ -599,6 +611,47 @@ BEGIN
     SELECT count(*) FILTER (WHERE gone.live) INTO links_ended FROM gone;
     DELETE FROM identity.ceremonies AS c WHERE c.operator_id = wanted_operator;
     done := true;
+    RETURN NEXT;
+END
+$$;
+
+-- Removes every passkey an operator holds, so they can be issued a link and
+-- enroll again, as when their only passkey is lost or unusable (ADR-0057).
+-- It ends their sessions and any ceremony too, since a session begun with a
+-- removed passkey must not outlive it (v5.0.0-7.4.3). Says how many passkeys
+-- it removed and how many live sessions it ended, or nothing for an operator
+-- who does not exist. Like a disable, it takes the operator's row for update
+-- first, so a sign-in or an enrollment being stored waits for it or is seen by
+-- it, under read committed only, so it refuses any other level with TD002.
+CREATE FUNCTION remove_passkeys(wanted_operator bigint)
+RETURNS TABLE (passkeys_removed bigint, sessions_ended bigint)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    at timestamptz;
+BEGIN
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'removing passkeys needs read committed'
+        USING ERRCODE = 'TD002';
+    END IF;
+    PERFORM
+    FROM identity.operators AS o
+    WHERE o.id = wanted_operator
+    FOR NO KEY UPDATE;
+    IF NOT FOUND THEN
+        RETURN;
+    END IF;
+    at := clock_timestamp();
+    WITH gone AS (
+        DELETE FROM identity.passkeys AS p
+        WHERE p.operator_id = wanted_operator
+        RETURNING p.operator_id
+    )
+
+    SELECT count(*) INTO passkeys_removed FROM gone;
+    sessions_ended := identity.end_every_session(wanted_operator, at);
+    DELETE FROM identity.ceremonies AS c WHERE c.operator_id = wanted_operator;
     RETURN NEXT;
 END
 $$;
@@ -685,7 +738,8 @@ use_session(bytea, text), end_session(bytea, text),
 issue_enrollment(bytea, bigint), list_operators(), enrollee(bytea),
 begin_enrollment(bytea, bigint, bytea, jsonb), take_ceremony(bytea, text),
 redeem_enrollment(bytea, bigint, bytea, jsonb), disable_operator(bigint),
-enable_operator(bigint), end_sessions(text, bigint) TO tetsu_identity;
+enable_operator(bigint), remove_passkeys(bigint), end_sessions(text, bigint)
+TO tetsu_identity;
 
 -- A new owner needs CREATE on the schema at the moment it takes a function,
 -- and no longer after.
@@ -695,6 +749,8 @@ OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION use_session(bytea, text) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION end_session(bytea, text) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION enrolling(bigint) OWNER TO tetsu_identity_lookup;
+ALTER FUNCTION end_every_session(bigint, timestamptz)
+OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION issue_enrollment(bytea, bigint) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION list_operators() OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION enrollee(bytea) OWNER TO tetsu_identity_lookup;
@@ -705,5 +761,6 @@ ALTER FUNCTION redeem_enrollment(bytea, bigint, bytea, jsonb)
 OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION disable_operator(bigint) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION enable_operator(bigint) OWNER TO tetsu_identity_lookup;
+ALTER FUNCTION remove_passkeys(bigint) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION end_sessions(text, bigint) OWNER TO tetsu_identity_lookup;
 REVOKE CREATE ON SCHEMA identity FROM tetsu_identity_lookup;

@@ -18,7 +18,7 @@ pub use adapters::postgres::postgres_store;
 pub use browser::{Change, ForChange, Origins, SignOut};
 pub use domain::{
     Actor, Ceremony, CeremonyToken, Disabling, Enrollee, EnrollmentToken, Error, Issue, Limits,
-    NewPasskey, OperatorId, OperatorName, OperatorSummary, Realm, Redemption, Session,
+    NewPasskey, OperatorId, OperatorName, OperatorSummary, Realm, Redemption, Removal, Session,
     SessionToken, TakenCeremony,
 };
 pub use passkeys::RelyingParty;

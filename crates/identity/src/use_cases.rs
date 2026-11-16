@@ -3,7 +3,7 @@
 use crate::browser::{Change, ForChange, Origins, SignOut};
 use crate::domain::{
     Actor, Ceremony, CeremonyToken, Disabling, EnrollmentToken, Error, Fill, Issue, OperatorId,
-    OperatorName, OperatorSummary, Realm, Redemption, Session, SessionToken,
+    OperatorName, OperatorSummary, Realm, Redemption, Removal, Session, SessionToken,
 };
 use crate::passkeys::RelyingParty;
 use crate::ports::OperatorStore;
@@ -144,6 +144,24 @@ impl<S: OperatorStore> Operators<S> {
     pub async fn disable(&self, operator: OperatorId, actor: &Actor) -> Result<Disabling, Error> {
         self.store
             .disable_operator(operator, actor)
+            .await?
+            .ok_or_else(|| no_operator(operator))
+    }
+
+    /// Removes every passkey an operator holds, so they can be issued a link and enroll again, as when their only
+    /// passkey is lost or unusable (ADR-0057). Their sessions and any ceremony end too, since a session begun with a
+    /// removed passkey must not outlive it (`v5.0.0-7.4.3`). Says how many passkeys it removed and sessions it
+    /// ended.
+    ///
+    /// # Errors
+    /// Fails with [`Error::Invalid`] for an operator who does not exist, or if storage fails.
+    pub async fn remove_passkeys(
+        &self,
+        operator: OperatorId,
+        actor: &Actor,
+    ) -> Result<Removal, Error> {
+        self.store
+            .remove_passkeys(operator, actor)
             .await?
             .ok_or_else(|| no_operator(operator))
     }
