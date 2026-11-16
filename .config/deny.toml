@@ -18,6 +18,7 @@ yanked = "deny"
 # Offline, a cached database older than this fails.
 maximum-db-staleness = "P7D"
 # Each entry is a table whose reason ends "Tracked in #<issue>. Review by <YYYY-MM-DD>.", which check.sh reads.
+# An entry says why the advisory cannot reach Tetsu, not only that no fix exists yet.
 ignore = [
     { id = "RUSTSEC-2025-0057", reason = "fxhash, unmaintained, comes only through monoio in the benchmark harness. Tracked in #94. Review by 2026-12-10." },
     { id = "RUSTSEC-2026-0441", reason = "pin-utils, unmaintained, comes only through monoio in the benchmark harness. Tracked in #94. Review by 2026-12-10." },
