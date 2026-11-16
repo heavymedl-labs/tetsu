@@ -69,6 +69,8 @@ number, and add a row below. Never renumber.
 | [0061](0061-one-service-until-domains.md) | One service and two logins until Tetsu has domains | Deploying, adding a realm, or adding a database login | Accepted |
 | [0062](0062-seeding-from-the-deploy.md) | Seeding the demo from Tetsu's deploy | Changing how demo businesses reach the demo | Accepted |
 | [0063](0063-ci-minutes-per-run.md) | CI minutes per run | Changing what a CI run builds or caches | Proposed |
+| [0064](0064-ci-skips-unchanged-work.md) | CI skips work whose inputs are unchanged | Changing which checks a CI run skips | Proposed |
+| [0065](0065-arm-runner-for-checks.md) | An Arm runner for the checks job | Changing which runners CI uses | Proposed |
 
 ## Open decisions
 
