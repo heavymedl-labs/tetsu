@@ -47,19 +47,26 @@ jobs:
           node-version-file: .nvmrc
           # npm's download cache, keyed by the lockfile; check.sh installs from it without scripts (ADR-0034).
           cache: npm
+      # The tools check.sh runs restore only from a cache made for exactly these versions, never from the newest
+      # under the prefix, so code that ran in one run cannot leave a tampered tool for the next.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/bin
             ~/.cargo/.crates.toml
             ~/.cargo/.crates2.json
-            ~/.cargo/registry
             ~/.rustup/toolchains/nightly-*
             .tools
+          key: tools-${{ hashFiles('scripts/install-tools.sh', 'rust-toolchain.toml', '.config/nightly-toolchain') }}
+      # Build outputs start from the latest cache when the lockfile changes, so only what changed is rebuilt. Nothing
+      # in them reaches the published image, which builds from a cache of its own.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
             target
-          key: tools-${{ hashFiles('scripts/install-tools.sh', 'Cargo.lock', 'rust-toolchain.toml', '.config/nightly-toolchain') }}
-          # A new key starts from the latest cache, so only what changed is rebuilt, and saves under the new key.
-          restore-keys: tools-
+          key: build-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '.config/nightly-toolchain') }}
+          restore-keys: build-
       # The settings in check.sh's setup hint, since services take no server flags: throwaway data traded for
       # speed, and TLS with the image's self-signed certificate, which the TLS tests must refuse.
       - run: |
@@ -130,14 +137,15 @@ jobs:
           persist-credentials: false
       # The image's Rust dependencies are a layer of their own, which lasts until a manifest or the lockfile changes
       # (Dockerfile), so it is kept between runs and imported rather than built again: a new cache is exported only
-      # when the key changes. A builder of Docker's own BuildKit, pinned as every image here is, imports and exports
-      # one (ADR-0063).
+      # when the key changes, after one cold build. A builder of Docker's own BuildKit, pinned as every image here
+      # is, imports and exports one (ADR-0063).
       - id: image-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/image-cache
+          # Exactly this key, never the newest under the prefix: this cache goes into the image that is published,
+          # so no other run's cache may stand in for it.
           key: image-${{ hashFiles('Dockerfile', '**/Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'package-lock.json') }}
-          restore-keys: image-
       - env:
           CACHE: ${{ runner.temp }}/image-cache
           HIT: ${{ steps.image-cache.outputs.cache-hit }}
@@ -170,7 +178,9 @@ jobs:
         with:
           args: --no-progress --include-fragments --offline "docs/research/**/*.md"
           fail: true
-      - run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 -color
+      - run: >-
+          docker run --rm -v "$PWD:/repo" -w /repo
+          rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 -color
 
   # Publishes the image the run checked, once every check passed, and records its digest for the deploy
   # (ADR-0033). Never from a pull request. It holds the only write token and runs only GitHub's own actions.

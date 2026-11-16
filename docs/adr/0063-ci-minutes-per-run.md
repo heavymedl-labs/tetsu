@@ -28,6 +28,11 @@ Two parts of the image job repeat the same work from cold on every run:
 - **CI keeps that layer between runs.** The image job imports it from the Actions cache, through a builder of
   Docker's own BuildKit, and exports a new one only when the cache key changes. BuildKit's image is pinned by
   version and digest, as every image here is.
+- **A cache restores only on its exact key where a tampered one could matter.** Code that runs inside a run on
+  `main`, such as a test's npm package, can write any new key in `main`'s cache scope, and a prefix match restores
+  the newest. The image cache goes into the published image, and the tools cache holds the binaries every check
+  trusts, so both restore on their exact key alone. Build outputs keep the prefix match, since nothing in them
+  reaches the image, and sit in a cache of their own.
 - **The benchmark harness is checked only when something it builds from changed** since the base the run checks:
   `benchmarks/`, a manifest, the lockfile, or the toolchain. It runs in the checks job, which knows that base, and
   in a target folder outside the cache, which would grow by about 1 GB. This supersedes the part of ADR-0023 that
@@ -50,7 +55,9 @@ Two parts of the image job repeat the same work from cold on every run:
 
 - A typical run should bill about 12 to 13 minutes rather than 19, measured on the first runs after this lands.
 - The image job pulls BuildKit's image each run, about 10 to 20 s, and the Actions cache holds about 1 GB more,
-  next to the tools cache of about 2.3 GB, within the 10 GB GitHub allows.
+  next to the tools and build caches of about 2.3 GB together, within the 10 GB GitHub allows.
+- A change to the image's cache key builds the image cold once, about 5 minutes, and a change to a tool's version
+  installs every tool again, rather than starting from a cache another run could have written.
 - Adding a crate means adding its manifest to the Dockerfile's dependency layer.
 - A change that breaks the benchmark harness without touching what it builds from is not caught by CI. The
   Benchmarks workflow still builds it before every benchmark run.
@@ -70,7 +77,8 @@ evicted often enough that runs rebuild from cold, or if BuildKit's image stops b
 - [Docker: cache storage backends](https://docs.docker.com/build/cache/backends/): the local backend exports a
   build's cache to a directory, and needs a builder other than the default `docker` driver.
 - [GitHub: dependency caching](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching):
-  10 GB per repository, and caches unused for seven days are removed.
+  10 GB per repository, caches unused for seven days are removed, a pull request's cache is scoped to its merge
+  ref, and a restore key returns the most recently created match.
 - moby/buildkit on GitHub, read 2026-11-16: Apache-2.0, actively maintained, about 10,400 stars. v0.34.2,
   released 2026-11-03, patches every advisory published so far; v0.35.0 was five days old, so the older patched
   release is pinned.
