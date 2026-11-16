@@ -24,7 +24,7 @@ fn not_signing_in() -> String {
 }
 
 /// Kurt Medley, operator 1, enrolled with a passkey, and the passkey his device keeps.
-async fn enrolled() -> (
+pub(crate) async fn enrolled() -> (
     Operators<PostgresOperators>,
     TestDatabase,
     OperatorId,
@@ -45,7 +45,7 @@ async fn enrolled() -> (
 }
 
 /// Begins a sign-in and has the device answer it from `origin`, with the answer rewritten by `rewrite`.
-async fn answer(
+pub(crate) async fn answer(
     operators: &Operators<PostgresOperators>,
     passkey: Passkey,
     origin: &str,

@@ -4,7 +4,7 @@
 
 use serde_json::{Value, json};
 use webauthn_rs::prelude::{
-    DiscoverableAuthentication, Passkey, PasskeyRegistration, PublicKeyCredential,
+    CredentialID, DiscoverableAuthentication, Passkey, PasskeyRegistration, PublicKeyCredential,
     RegisterPublicKeyCredential, Url, Uuid, Webauthn, WebauthnBuilder, WebauthnError,
 };
 
@@ -46,20 +46,27 @@ impl RelyingParty {
     /// Starts registering a passkey for a user handle and name: the options for the browser, and the state to keep
     /// until it answers. The passkey must verify the user, and must be discoverable, so signing in needs no name.
     /// Every realm shares one passkey domain until Tetsu has domains (ADR-0061), so the name a device's account
-    /// picker shows says the passkey is an operator's. It fails only for a stored operator with no name, a fault of
+    /// picker shows says the passkey is an operator's. The credentials the operator already `held` are listed for the
+    /// device to refuse, so it makes no second passkey where it has one. It fails only for a stored operator with no name, a fault of
     /// storage, never the browser's.
     pub(crate) fn begin_registration(
         &self,
         user_handle: [u8; 16],
         name: &str,
+        held: &[Vec<u8>],
     ) -> Result<(String, String), Error> {
+        let exclude = (!held.is_empty()).then(|| {
+            held.iter()
+                .map(|id| CredentialID::from(id.clone()))
+                .collect()
+        });
         let (options, state) = self
             .webauthn
             .start_passkey_registration(
                 Uuid::from_bytes(user_handle),
                 &account_name(name),
                 name,
-                None,
+                exclude,
             )
             .map_err(Error::from)?;
         // Serialising these types cannot fail, so json! takes the place of a Result no test could reach.

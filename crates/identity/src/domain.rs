@@ -352,6 +352,64 @@ impl SignIn {
     }
 }
 
+/// A browser's answer to a passkey ceremony: the ceremony's token, and the response its authenticator gave, as
+/// JSON.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Answer<'a> {
+    pub ceremony: &'a str,
+    pub response: &'a str,
+}
+
+/// An operator a fresh session names who may add a passkey, with what a registration needs: their user handle and
+/// name, and the credential IDs they hold, so a device that has one makes no second.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Adder {
+    pub operator: OperatorId,
+    pub user_handle: [u8; 16],
+    pub name: String,
+    pub credentials: Vec<Vec<u8>>,
+}
+
+/// What adding a passkey came to for an operator who exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Addition {
+    Added,
+    Disabled,
+    /// The session ended, or names another operator.
+    SignedOut,
+    /// The operator holds two passkeys already (ADR-0057).
+    Full,
+    Oversized,
+    Taken,
+}
+
+impl Addition {
+    /// The answer as Identity's database writes it, or none for one it never writes.
+    pub(crate) fn parse(text: &str) -> Option<Self> {
+        match text {
+            "added" => Some(Self::Added),
+            "disabled" => Some(Self::Disabled),
+            "signed_out" => Some(Self::SignedOut),
+            "full" => Some(Self::Full),
+            "oversized" => Some(Self::Oversized),
+            "taken" => Some(Self::Taken),
+            _ => None,
+        }
+    }
+
+    /// The reason a refusal records, or none for a passkey added.
+    pub(crate) fn reason(self) -> Option<&'static str> {
+        match self {
+            Self::Added => None,
+            Self::Disabled => Some("disabled"),
+            Self::SignedOut => Some("signed_out"),
+            Self::Full => Some("full"),
+            Self::Oversized => Some("oversized"),
+            Self::Taken => Some("taken"),
+        }
+    }
+}
+
 /// What redeeming an enrollment link came to for an operator who exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Redemption {
@@ -568,6 +626,8 @@ fn no_randomness(error: getrandom::Error) -> Error {
 /// A signed-in operator's session, as stored.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Session {
+    /// The hash of the token that found it, so a change made in its name can be checked against it again.
+    pub(crate) hash: [u8; 32],
     pub(crate) realm: Realm,
     pub(crate) operator: OperatorId,
     pub(crate) started_at: SystemTime,

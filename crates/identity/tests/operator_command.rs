@@ -706,6 +706,8 @@ async fn changes_that_wait_on_an_operator_need_read_committed() {
         "SELECT identity.enable_operator(1)",
         "SELECT * FROM identity.remove_passkeys(1)",
         "SELECT identity.sign_in(sha256('c'::bytea), '{}', '{}', sha256('s'::bytea))",
+        "SELECT identity.begin_addition(sha256('t'::bytea), sha256('s'::bytea), 1, '{}')",
+        "SELECT identity.add_passkey(sha256('s'::bytea), 1, sha256('c'::bytea), '{}')",
     ] {
         let transaction = client
             .build_transaction()

@@ -2,9 +2,9 @@
 
 use crate::browser::{Change, ForChange, Origins, SignOut};
 use crate::domain::{
-    Actor, Ceremony, CeremonyToken, Disabling, EnrollmentToken, Error, Fill, Issue, OperatorId,
-    OperatorName, OperatorSummary, Realm, Redemption, Removal, Session, SessionToken, SignIn,
-    Signer,
+    Actor, Addition, Answer, Ceremony, CeremonyToken, Disabling, EnrollmentToken, Error, Fill,
+    Issue, OperatorId, OperatorName, OperatorSummary, Realm, Redemption, Removal, Session,
+    SessionToken, SignIn, Signer,
 };
 use crate::passkeys::RelyingParty;
 use crate::ports::OperatorStore;
@@ -85,15 +85,16 @@ impl<S: OperatorStore> Operators<S> {
             .store
             .enrollee(&link.hash())
             .await
-            .map_err(as_one_refusal)?
+            .map_err(|error| refusing(error, not_enrolling))?
             .ok_or_else(not_enrolling)?;
-        let (options, state) = party.begin_registration(enrollee.user_handle, &enrollee.name)?;
+        let (options, state) =
+            party.begin_registration(enrollee.user_handle, &enrollee.name, &[])?;
         let token = CeremonyToken::generate(self.fill)?;
         let begun = self
             .store
             .begin_enrollment(&token.hash(), enrollee.operator, &link.hash(), &state)
             .await
-            .map_err(as_one_refusal)?;
+            .map_err(|error| refusing(error, not_enrolling))?;
         if begun {
             Ok(Ceremony { token, options })
         } else {
@@ -120,16 +121,16 @@ impl<S: OperatorStore> Operators<S> {
             .store
             .take_enrollment(&held.hash())
             .await
-            .map_err(as_one_refusal)?
+            .map_err(|error| refusing(error, not_enrolling))?
             .ok_or_else(not_enrolling)?;
         let passkey = party
             .finish_registration(response, &taken.state)
-            .map_err(as_one_refusal)?;
+            .map_err(|error| refusing(error, not_enrolling))?;
         match self
             .store
             .redeem_enrollment(&taken, &passkey, actor)
             .await
-            .map_err(as_one_refusal)?
+            .map_err(|error| refusing(error, not_enrolling))?
         {
             Some(Redemption::Redeemed) => Ok(taken.operator),
             _ => Err(not_enrolling()),
@@ -190,7 +191,7 @@ impl<S: OperatorStore> Operators<S> {
         let signer = self.signer_for(party, response).await?;
         let passkey = party
             .finish_authentication(response, &state, &signer.passkey)
-            .map_err(as_sign_in_refusal)?;
+            .map_err(|error| refusing(error, not_signing_in))?;
         let token = SessionToken::generate(self.fill)?;
         let outcome = self
             .store
@@ -210,6 +211,74 @@ impl<S: OperatorStore> Operators<S> {
             .await?
             .filter(|signer| signer.user_handle == handle)
             .ok_or_else(not_signing_in)
+    }
+
+    /// Begins adding an operator's second passkey (ADR-0057), from a session that began with a passkey sign-in
+    /// within ten minutes, by Postgres's clock (ADR-0048, `v5.0.0-7.5.1`). The options list the passkeys they hold,
+    /// so a device that has one makes no second, and the ceremony lasts ten minutes. With no email for operators
+    /// yet, the audit record is the notice ADR-0040 asks for.
+    ///
+    /// # Errors
+    /// Fails with [`Error::Invalid`], the same for every cause, for a session that is not fresh or an operator who
+    /// is disabled or holds two passkeys; with [`Error::Unavailable`] if no secure random source can be read; or if
+    /// storage fails.
+    pub async fn begin_adding_passkey(
+        &self,
+        party: &RelyingParty,
+        session: &Session,
+    ) -> Result<Ceremony, Error> {
+        let adder = self
+            .store
+            .adder(&session.hash)
+            .await?
+            .ok_or_else(not_adding)?;
+        let (token, (options, state)) = CeremonyToken::generate(self.fill).and_then(|token| {
+            party
+                .begin_registration(adder.user_handle, &adder.name, &adder.credentials)
+                .map(|begun| (token, begun))
+        })?;
+        let begun = self
+            .store
+            .begin_addition(&token.hash(), &session.hash, adder.operator, &state)
+            .await?;
+        begun
+            .then_some(Ceremony { token, options })
+            .ok_or_else(not_adding)
+    }
+
+    /// Finishes adding a passkey: takes the ceremony once, which must be the session's operator's, verifies the
+    /// registration, and stores the passkey while the session is still live and the operator holds fewer than two,
+    /// recording it.
+    ///
+    /// # Errors
+    /// Fails with [`Error::Invalid`], the same for every cause, for a ceremony that is malformed, unknown, ended, or
+    /// another operator's, a registration that does not verify, or a session or operator that no longer allows it;
+    /// or if storage fails.
+    pub async fn finish_adding_passkey(
+        &self,
+        party: &RelyingParty,
+        session: &Session,
+        answer: Answer<'_>,
+        actor: &Actor,
+    ) -> Result<(), Error> {
+        let held = CeremonyToken::parse(answer.ceremony).ok_or_else(not_adding)?;
+        let (operator, state) = self
+            .store
+            .take_addition(&held.hash())
+            .await?
+            .filter(|(operator, _)| *operator == session.operator)
+            .ok_or_else(not_adding)?;
+        let passkey = party
+            .finish_registration(answer.response, &state)
+            .map_err(|error| refusing(error, not_adding))?;
+        let outcome = self
+            .store
+            .add_passkey(&session.hash, operator, &passkey, actor)
+            .await?;
+        outcome
+            .filter(|addition| *addition == Addition::Added)
+            .map(drop)
+            .ok_or_else(not_adding)
     }
 
     /// Removes every passkey an operator holds, so they can be issued a link and enroll again, as when their only
@@ -366,25 +435,22 @@ fn not_enrolling() -> Error {
     Error::Invalid("this enrollment link has ended or is not valid".to_string())
 }
 
-/// Any refusal on the way through an enrollment, whoever reports it, reads as the one answer; a failure that is
-/// not a refusal stays itself.
-fn as_one_refusal(error: Error) -> Error {
-    match error {
-        Error::Invalid(_) => not_enrolling(),
-        other => other,
-    }
-}
-
 /// One answer for every way a sign-in can fail, so a browser learns nothing about which passkeys or operators
 /// exist (`v5.0.0-6.3.8`).
 fn not_signing_in() -> Error {
     Error::Invalid("this sign-in could not be completed".to_string())
 }
 
-/// A refusal on the way through a sign-in reads as the one answer; a failure that is not a refusal stays itself.
-fn as_sign_in_refusal(error: Error) -> Error {
+/// One answer for every way adding a passkey can fail.
+fn not_adding() -> Error {
+    Error::Invalid("this passkey could not be added".to_string())
+}
+
+/// A refusal on the way through a ceremony reads as that ceremony's one answer, whoever reports it, so a browser
+/// learns nothing about which part refused; a failure that is not a refusal stays itself.
+fn refusing(error: Error, refusal: fn() -> Error) -> Error {
     match error {
-        Error::Invalid(_) => not_signing_in(),
+        Error::Invalid(_) => refusal(),
         other => other,
     }
 }

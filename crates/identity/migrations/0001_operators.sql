@@ -85,14 +85,14 @@ CREATE INDEX passkeys_operator_id ON passkeys (operator_id);
 -- link it will redeem, which is used up only when the passkey is stored.
 CREATE TABLE ceremonies (
     token_hash bytea PRIMARY KEY CHECK (octet_length(token_hash) = 32),
-    kind text NOT NULL CHECK (kind IN ('enroll', 'sign_in')),
-    -- An enrollment knows its operator and link; a sign-in knows neither until
-    -- the browser answers with a passkey.
+    kind text NOT NULL CHECK (kind IN ('enroll', 'sign_in', 'add')),
+    -- An enrollment knows its operator and link, and adding a passkey its
+    -- operator; a sign-in knows neither until the browser answers.
     operator_id bigint REFERENCES operators (id),
     link_hash bytea CHECK (octet_length(link_hash) = 32),
     state jsonb NOT NULL CHECK (octet_length(state::text) <= 16384),
     ends_at timestamptz NOT NULL,
-    CHECK ((kind = 'enroll') = (operator_id IS NOT NULL)),
+    CHECK ((kind IN ('enroll', 'add')) = (operator_id IS NOT NULL)),
     CHECK ((kind = 'enroll') = (link_hash IS NOT NULL))
 );
 
@@ -406,6 +406,38 @@ AS $$
         )
 $$;
 
+-- Takes an enabled operator's row in share mode, as a ceremony that will add
+-- a passkey for them begins, so a disable or a passkey being stored waits for
+-- it or is seen by it, sweeps the operator's ceremonies that have ended, and
+-- says when, by the clock read after any wait; null for an operator not
+-- enabled. Under read committed only (TD002). Only the
+-- functions that begin such ceremonies call it; no role may.
+CREATE FUNCTION holding(wanted_operator bigint)
+RETURNS timestamptz
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    at timestamptz;
+BEGIN
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'beginning a ceremony needs read committed'
+        USING ERRCODE = 'TD002';
+    END IF;
+    PERFORM
+    FROM identity.operators AS o
+    WHERE o.id = wanted_operator AND o.disabled_at IS NULL
+    FOR SHARE;
+    IF NOT FOUND THEN
+        RETURN null;
+    END IF;
+    at := clock_timestamp();
+    DELETE FROM identity.ceremonies AS c
+    WHERE c.operator_id = wanted_operator AND c.ends_at <= at;
+    RETURN at;
+END
+$$;
+
 -- Keeps an enrollment ceremony's state under its token's hash, and says
 -- whether it did: only while the link is open, its operator enabled, and no
 -- passkey theirs, checked here rather than trusted from the caller. It takes
@@ -429,20 +461,10 @@ AS $$
 DECLARE
     at timestamptz;
 BEGIN
-    IF current_setting('transaction_isolation') <> 'read committed' THEN
-        RAISE EXCEPTION 'beginning an enrollment needs read committed'
-        USING ERRCODE = 'TD002';
-    END IF;
-    PERFORM
-    FROM identity.operators AS o
-    WHERE o.id = wanted_operator AND o.disabled_at IS NULL
-    FOR SHARE;
-    IF NOT FOUND THEN
+    at := identity.holding(wanted_operator);
+    IF at IS NULL THEN
         RETURN false;
     END IF;
-    at := clock_timestamp();
-    DELETE FROM identity.ceremonies AS c
-    WHERE c.operator_id = wanted_operator AND c.ends_at <= at;
     INSERT INTO identity.ceremonies
         (token_hash, kind, operator_id, link_hash, state, ends_at)
     SELECT
@@ -564,6 +586,159 @@ BEGIN
     END IF;
     PERFORM identity.start_session(wanted_session, 'operator', who);
     RETURN 'signed_in';
+END
+$$;
+
+-- The operator a live session names, if it began within ten minutes, which
+-- makes it a fresh sign-in (ADR-0048, v5.0.0-7.5.1), the operator is enabled,
+-- and they hold fewer than two passkeys (ADR-0057); with what adding a passkey
+-- needs: their user handle and name, and the credential IDs they hold, so a
+-- device that has one makes no second. Reading it changes nothing.
+CREATE FUNCTION adder(wanted_session bytea)
+RETURNS TABLE (
+    operator_id bigint, user_handle bytea, name text, credentials bytea[]
+)
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+    SELECT
+        o.id,
+        uuid_send(o.user_handle),
+        o.name,
+        array(
+            SELECT p.credential_id
+            FROM identity.passkeys AS p
+            WHERE p.operator_id = o.id
+            ORDER BY p.credential_id
+        )
+    FROM identity.sessions AS s
+    INNER JOIN identity.operators AS o ON s.operator_id = o.id
+    WHERE
+        s.token_hash = wanted_session
+        AND s.realm = 'operator'
+        AND statement_timestamp() < s.ends_at
+        AND statement_timestamp() < s.last_seen_at + interval '15 minutes'
+        AND s.started_at > statement_timestamp() - interval '10 minutes'
+        AND o.disabled_at IS NULL
+        AND (
+            SELECT count(*) FROM identity.passkeys AS p
+            WHERE p.operator_id = o.id
+        ) < 2
+$$;
+
+-- Keeps a ceremony for adding a passkey under its token's hash, for ten
+-- minutes, and says whether it did: only while the session is live and fresh,
+-- names the operator, who is enabled and holds fewer than two passkeys,
+-- checked here rather than trusted from the caller. It takes the operator's
+-- row first, so a removal or a disable waits for it or is seen by it, under
+-- read committed only (TD002). An operator has one such ceremony at a time: a
+-- newer one replaces it.
+CREATE FUNCTION begin_addition(
+    wanted_hash bytea,
+    wanted_session bytea,
+    wanted_operator bigint,
+    wanted_state jsonb
+)
+RETURNS boolean
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    at timestamptz;
+BEGIN
+    at := identity.holding(wanted_operator);
+    IF at IS NULL THEN
+        RETURN false;
+    END IF;
+    DELETE FROM identity.ceremonies AS c
+    WHERE c.operator_id = wanted_operator AND c.kind = 'add';
+    INSERT INTO identity.ceremonies (token_hash, kind, operator_id, state, ends_at)
+    SELECT
+        wanted_hash,
+        'add',
+        s.operator_id,
+        wanted_state,
+        at + interval '10 minutes'
+    FROM identity.sessions AS s
+    WHERE
+        s.token_hash = wanted_session
+        AND s.operator_id = wanted_operator
+        AND s.realm = 'operator'
+        AND at < s.ends_at
+        AND at < s.last_seen_at + interval '15 minutes'
+        AND s.started_at > at - interval '10 minutes'
+        AND (
+            SELECT count(*) FROM identity.passkeys AS p
+            WHERE p.operator_id = wanted_operator
+        ) < 2;
+    RETURN FOUND;
+END
+$$;
+
+-- Stores an operator's added passkey and says what came of it: added;
+-- disabled; signed_out, for a session that ended or is not theirs; full, for
+-- an operator who holds two already (ADR-0057); oversized, as for a first
+-- passkey; taken, for a credential another passkey has, even one stored a
+-- moment before; or null for an operator who does not exist. It takes the
+-- operator's row for update, so what it checks stays true until it commits,
+-- under read committed only (TD002). The session need not still be fresh: a
+-- ceremony begun from a fresh one may take its ten minutes.
+CREATE FUNCTION add_passkey(
+    wanted_session bytea,
+    wanted_operator bigint,
+    wanted_credential bytea,
+    wanted_passkey jsonb
+)
+RETURNS text
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    at timestamptz;
+    was timestamptz;
+BEGIN
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'adding a passkey needs read committed'
+        USING ERRCODE = 'TD002';
+    END IF;
+    SELECT o.disabled_at INTO was
+    FROM identity.operators AS o
+    WHERE o.id = wanted_operator
+    FOR NO KEY UPDATE;
+    at := clock_timestamp();
+    IF NOT FOUND THEN
+        RETURN null;
+    ELSIF was IS NOT NULL THEN
+        RETURN 'disabled';
+    ELSIF NOT EXISTS (
+        SELECT FROM identity.sessions AS s
+        WHERE
+            s.token_hash = wanted_session
+            AND s.operator_id = wanted_operator
+            AND s.realm = 'operator'
+            AND at < s.ends_at
+            AND at < s.last_seen_at + interval '15 minutes'
+    ) THEN
+        RETURN 'signed_out';
+    ELSIF (
+        SELECT count(*) FROM identity.passkeys AS p
+        WHERE p.operator_id = wanted_operator
+    ) >= 2 THEN
+        RETURN 'full';
+    ELSIF
+        octet_length(wanted_credential) NOT BETWEEN 16 AND 1023
+        OR octet_length(wanted_passkey::text) > 8192
+    THEN
+        RETURN 'oversized';
+    END IF;
+    BEGIN
+        INSERT INTO identity.passkeys
+            (credential_id, operator_id, passkey, created_at)
+        VALUES (wanted_credential, wanted_operator, wanted_passkey, at);
+    EXCEPTION WHEN unique_violation THEN
+        RETURN 'taken';
+    END;
+    RETURN 'added';
 END
 $$;
 
@@ -842,6 +1017,8 @@ use_session(bytea, text), end_session(bytea, text),
 issue_enrollment(bytea, bigint), list_operators(), enrollee(bytea),
 begin_enrollment(bytea, bigint, bytea, jsonb), take_ceremony(bytea, text),
 begin_sign_in(bytea, jsonb), signer(bytea), sign_in(bytea, jsonb, jsonb, bytea),
+adder(bytea), begin_addition(bytea, bytea, bigint, jsonb),
+add_passkey(bytea, bigint, bytea, jsonb),
 redeem_enrollment(bytea, bigint, bytea, jsonb), disable_operator(bigint),
 enable_operator(bigint), remove_passkeys(bigint), end_sessions(text, bigint)
 TO tetsu_identity;
@@ -854,6 +1031,7 @@ OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION use_session(bytea, text) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION end_session(bytea, text) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION enrolling(bigint) OWNER TO tetsu_identity_lookup;
+ALTER FUNCTION holding(bigint) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION end_every_session(bigint, timestamptz)
 OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION issue_enrollment(bytea, bigint) OWNER TO tetsu_identity_lookup;
@@ -863,6 +1041,11 @@ ALTER FUNCTION begin_enrollment(bytea, bigint, bytea, jsonb)
 OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION take_ceremony(bytea, text) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION begin_sign_in(bytea, jsonb) OWNER TO tetsu_identity_lookup;
+ALTER FUNCTION adder(bytea) OWNER TO tetsu_identity_lookup;
+ALTER FUNCTION begin_addition(bytea, bytea, bigint, jsonb)
+OWNER TO tetsu_identity_lookup;
+ALTER FUNCTION add_passkey(bytea, bigint, bytea, jsonb)
+OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION signer(bytea) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION sign_in(bytea, jsonb, jsonb, bytea)
 OWNER TO tetsu_identity_lookup;

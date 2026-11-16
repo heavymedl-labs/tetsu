@@ -1,8 +1,9 @@
 //! The driven port Identity calls out through.
 
 use crate::domain::{
-    Actor, Disabling, Enrollee, Error, Issue, NewPasskey, OperatorId, OperatorName,
-    OperatorSummary, Realm, Redemption, Removal, Session, SignIn, Signer, TakenCeremony,
+    Actor, Adder, Addition, Disabling, Enrollee, Error, Issue, NewPasskey, OperatorId,
+    OperatorName, OperatorSummary, Realm, Redemption, Removal, Session, SignIn, Signer,
+    TakenCeremony,
 };
 use std::future::Future;
 
@@ -126,6 +127,40 @@ pub trait OperatorStore {
         session: &[u8; 32],
         actor: &Actor,
     ) -> impl Future<Output = Result<Option<SignIn>, Error>> + Send;
+
+    /// The operator a live session's hash names, if it began within ten minutes, the operator is enabled, and they
+    /// hold fewer than two passkeys.
+    fn adder(
+        &self,
+        session: &[u8; 32],
+    ) -> impl Future<Output = Result<Option<Adder>, Error>> + Send;
+
+    /// Keeps a ceremony for adding a passkey for ten minutes, if the session still allows it, replacing the
+    /// operator's earlier one; says whether it did.
+    fn begin_addition(
+        &self,
+        token: &[u8; 32],
+        session: &[u8; 32],
+        operator: OperatorId,
+        state: &str,
+    ) -> impl Future<Output = Result<bool, Error>> + Send;
+
+    /// Takes a ceremony for adding a passkey by its token's hash, once: its operator and state, if it was still
+    /// open.
+    fn take_addition(
+        &self,
+        token: &[u8; 32],
+    ) -> impl Future<Output = Result<Option<(OperatorId, String)>, Error>> + Send;
+
+    /// Stores an operator's added passkey while their session is live, in one transaction, recording it; says what
+    /// came of it, or none for an operator who does not exist.
+    fn add_passkey(
+        &self,
+        session: &[u8; 32],
+        operator: OperatorId,
+        passkey: &NewPasskey,
+        actor: &Actor,
+    ) -> impl Future<Output = Result<Option<Addition>, Error>> + Send;
 
     /// Removes every passkey an operator holds, ending their sessions and any ceremony, and says what it did, or none
     /// for an operator who does not exist.

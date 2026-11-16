@@ -10,8 +10,9 @@ use tokio_postgres::Row;
 use tokio_postgres::types::{FromSql, ToSql};
 
 use crate::domain::{
-    Actor, Disabling, Enrollee, Error, Issue, NewPasskey, OperatorId, OperatorName,
-    OperatorSummary, Realm, Redemption, Removal, Session, SignIn, Signer, TakenCeremony,
+    Actor, Adder, Addition, Disabling, Enrollee, Error, Issue, NewPasskey, OperatorId,
+    OperatorName, OperatorSummary, Realm, Redemption, Removal, Session, SignIn, Signer,
+    TakenCeremony,
 };
 use crate::ports::OperatorStore;
 use crate::use_cases::Operators;
@@ -46,6 +47,10 @@ const BEGIN_SIGN_IN: &str = include_str!("../../sql/begin_sign_in.sql");
 const TAKE_SIGN_IN: &str = include_str!("../../sql/take_sign_in.sql");
 const SIGNER: &str = include_str!("../../sql/signer.sql");
 const SIGN_IN: &str = include_str!("../../sql/sign_in.sql");
+const ADDER: &str = include_str!("../../sql/adder.sql");
+const BEGIN_ADDITION: &str = include_str!("../../sql/begin_addition.sql");
+const TAKE_ADDITION: &str = include_str!("../../sql/take_addition.sql");
+const ADD_PASSKEY: &str = include_str!("../../sql/add_passkey.sql");
 const BEGIN_ENROLLMENT: &str = include_str!("../../sql/begin_enrollment.sql");
 const TAKE_CEREMONY: &str = include_str!("../../sql/take_ceremony.sql");
 const REDEEM_ENROLLMENT: &str = include_str!("../../sql/redeem_enrollment.sql");
@@ -262,7 +267,7 @@ impl OperatorStore for PostgresOperators {
         let rows = self
             .query(USE_SESSION, &[&hash.as_slice(), &realm.as_str()])
             .await?;
-        rows.first().map(session_from).transpose()
+        rows.first().map(|row| session_from(row, hash)).transpose()
     }
 
     async fn delete_session(&self, hash: &[u8; 32], realm: Realm) -> Result<bool, Error> {
@@ -371,6 +376,60 @@ impl OperatorStore for PostgresOperators {
         let answer = OnceLock::new();
         self.query_recording(SIGN_IN, &parameters, &|rows| {
             signing(rows, id, credential, actor, &answer)
+        })
+        .await?;
+        Ok(answer.get().copied().flatten())
+    }
+
+    async fn adder(&self, session: &[u8; 32]) -> Result<Option<Adder>, Error> {
+        self.query(ADDER, &[&session.as_slice()])
+            .await?
+            .first()
+            .map(adder_from)
+            .transpose()
+    }
+
+    async fn begin_addition(
+        &self,
+        token: &[u8; 32],
+        session: &[u8; 32],
+        operator: OperatorId,
+        state: &str,
+    ) -> Result<bool, Error> {
+        let parameters: [&(dyn ToSql + Sync); 4] = [
+            &token.as_slice(),
+            &session.as_slice(),
+            &operator.get(),
+            &state,
+        ];
+        begun(&self.query(BEGIN_ADDITION, &parameters).await?)
+    }
+
+    async fn take_addition(&self, token: &[u8; 32]) -> Result<Option<(OperatorId, String)>, Error> {
+        self.query(TAKE_ADDITION, &[&token.as_slice()])
+            .await?
+            .first()
+            .map(addition_ceremony_from)
+            .transpose()
+    }
+
+    async fn add_passkey(
+        &self,
+        session: &[u8; 32],
+        operator: OperatorId,
+        passkey: &NewPasskey,
+        actor: &Actor,
+    ) -> Result<Option<Addition>, Error> {
+        let id = operator.get();
+        let parameters: [&(dyn ToSql + Sync); 4] = [
+            &session.as_slice(),
+            &id,
+            &passkey.credential_id,
+            &passkey.passkey,
+        ];
+        let answer = OnceLock::new();
+        self.query_recording(ADD_PASSKEY, &parameters, &|rows| {
+            adding(rows, id, &passkey.credential_id, actor, &answer)
         })
         .await?;
         Ok(answer.get().copied().flatten())
@@ -595,12 +654,9 @@ fn begun(rows: &[Row]) -> Result<bool, Error> {
 
 /// The operator a link names, with the user handle and name a registration needs.
 fn enrollee_from(row: &Row) -> Result<Enrollee, Error> {
-    let bytes: Vec<u8> = column(row, "user_handle")?;
     Ok(Enrollee {
         operator: OperatorId::new(column(row, "operator_id")?),
-        user_handle: bytes
-            .try_into()
-            .map_err(|_| Error::Storage("a user handle is not 16 bytes".to_string()))?,
+        user_handle: user_handle(row)?,
         name: column(row, "name")?,
     })
 }
@@ -722,13 +778,10 @@ fn taken_state(rows: &[Row]) -> Result<Option<String>, Error> {
 
 /// The passkey a credential names, with its operator and their user handle, which must be 16 bytes.
 fn signer_from(row: &Row, credential: &[u8]) -> Result<Signer, Error> {
-    let bytes: Vec<u8> = column(row, "user_handle")?;
     Ok(Signer {
         credential: credential.to_vec(),
         operator: OperatorId::new(column(row, "operator_id")?),
-        user_handle: bytes
-            .try_into()
-            .map_err(|_| Error::Storage("a user handle is not 16 bytes".to_string()))?,
+        user_handle: user_handle(row)?,
         passkey: column(row, "passkey")?,
     })
 }
@@ -778,6 +831,65 @@ fn hex(bytes: &[u8]) -> String {
     })
 }
 
+/// An operator who may add a passkey: an enrollee's columns, and the credentials they hold.
+fn adder_from(row: &Row) -> Result<Adder, Error> {
+    let enrollee = enrollee_from(row)?;
+    Ok(Adder {
+        operator: enrollee.operator,
+        user_handle: enrollee.user_handle,
+        name: enrollee.name,
+        credentials: column(row, "credentials")?,
+    })
+}
+
+/// A stored user handle, which must be 16 bytes: `uuid_send` always writes 16, so any other length is a fault of
+/// storage, never a guess.
+fn user_handle(row: &Row) -> Result<[u8; 16], Error> {
+    let bytes: Vec<u8> = column(row, "user_handle")?;
+    bytes
+        .try_into()
+        .map_err(|_| Error::Storage("a user handle is not 16 bytes".to_string()))
+}
+
+/// A ceremony for adding a passkey: its operator and state.
+fn addition_ceremony_from(row: &Row) -> Result<(OperatorId, String), Error> {
+    let operator: i64 = column(row, "operator_id")?;
+    Ok((OperatorId::new(operator), column(row, "state")?))
+}
+
+/// Reads what adding a passkey came to, keeps it in `added`, and makes the event it records: changed when the
+/// passkey was stored, and refused otherwise, with the reason and the credential ID.
+fn adding(
+    rows: &[Row],
+    id: i64,
+    credential: &[u8],
+    actor: &Actor,
+    added: &OnceLock<Option<Addition>>,
+) -> Result<Option<(&'static str, String)>, Error> {
+    let addition = rows
+        .first()
+        .map_or(Ok(None), |row| column::<Option<String>>(row, "added"))
+        .and_then(|answer| answer.as_deref().map(addition_from).transpose())?;
+    let _ = added.set(addition);
+    let reason = addition.map_or(Some("unknown"), Addition::reason);
+    Ok(Some(event(
+        "identity.passkey_added",
+        actor,
+        if reason.is_none() {
+            "changed"
+        } else {
+            "refused"
+        },
+        json!({"operator_id": id, "credential": hex(credential), "reason": reason}),
+    )))
+}
+
+/// An answer Identity's database never writes is a storage failure, never a guess.
+fn addition_from(text: &str) -> Result<Addition, Error> {
+    Addition::parse(text)
+        .ok_or_else(|| Error::Storage(format!("adding a passkey answered {text:?}")))
+}
+
 /// What removing passkeys did, from its answer.
 fn removal_from(row: &Row) -> Result<Removal, Error> {
     let passkeys: i64 = column(row, "passkeys_removed")?;
@@ -798,12 +910,13 @@ fn outcome(acted: Option<bool>) -> &'static str {
 }
 
 /// A stored realm Identity does not know is an error, never a session in some default realm.
-fn session_from(row: &Row) -> Result<Session, Error> {
+fn session_from(row: &Row, hash: &[u8; 32]) -> Result<Session, Error> {
     let realm: String = column(row, "realm")?;
     let Some(known) = Realm::parse(&realm) else {
         return Err(Error::Storage(format!("unknown realm {realm:?}")));
     };
     Ok(Session {
+        hash: *hash,
         realm: known,
         operator: OperatorId::new(column(row, "operator_id")?),
         started_at: column(row, "started_at")?,

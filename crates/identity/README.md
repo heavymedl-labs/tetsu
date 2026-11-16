@@ -5,8 +5,8 @@ Who signs in to Tetsu, their passkeys, and their sessions ([ADR-0040](../../docs
 in slice 5 ([#110](https://github.com/heavymedl-labs/tetsu/issues/110)); staff and customers follow.
 
 So far, `Operators` creates, lists, disables, and enables operators, issues their enrollment links, begins and
-finishes enrolling their first passkey, signs them in with it, removes their passkeys, and starts, finds, and
-ends their sessions. `postgres_store(pool)` returns it over Postgres.
+finishes enrolling their first passkey, signs them in with it, adds their second, removes their passkeys, and
+starts, finds, and ends their sessions. `postgres_store(pool)` returns it over Postgres.
 
 - **Session tokens are 256 random bits** from the operating system's source, written as 64 lowercase hexadecimal
   digits. Only their SHA-256 hash is stored ([ADR-0047](../../docs/adr/0047-sign-in-libraries.md)), and a token
@@ -88,6 +88,14 @@ ends their sessions. `postgres_store(pool)` returns it over Postgres.
   counter that does not move forward. Then, in one transaction holding the operator's row, it stores the passkey's
   new counter only if no other sign-in changed it meanwhile, and starts the session. Each is recorded as
   `identity.signed_in`, with its reason when refused, and every refusal reads the same to the browser.
+- **Adding a second passkey** (ADR-0057) needs a fresh sign-in: a session begun with a passkey within ten minutes,
+  by Postgres's clock (ADR-0048, `v5.0.0-7.5.1`). The device is told which passkey the operator holds, so it makes
+  no second where it has one. Beginning stores a ceremony for ten minutes, one per operator, re-checking the
+  session, that the operator is enabled, and that they hold fewer than two, under their row. Finishing takes the
+  ceremony once, which must be the session's operator's, verifies the registration as enrollment does, and stores
+  the passkey under the operator's row while the session is still live, refusing a third, a taken credential, or
+  one too large, each recorded as `identity.passkey_added`. Operators have no email yet, so the audit record is the
+  notice ADR-0040 asks for.
 - **Removing an operator's passkeys** lets them be issued a link and enroll again, as when their only passkey is
   lost or unusable. It ends their sessions and any ceremony too, since a session begun with a removed passkey must
   not outlive it (`v5.0.0-7.4.3`), takes their row for update as a disable does, and records
@@ -142,7 +150,7 @@ ends their sessions. `postgres_store(pool)` returns it over Postgres.
 
 ## Not yet
 
-A second passkey after a fresh sign-in; the pages and script that run enrollment and sign-in in a browser;
+The pages and script that run enrollment and sign-in in a browser;
 recording registrations and sign-ins that fail to verify, with the request's address; rate limits; revoking a link
 on its own (today a new link or a disable ends it); the `Sec-Fetch-Site` check and the headers that apply these
 checks; the session list ([ADR-0059](../../docs/adr/0059-session-controls-and-request-checks.md)); and running the
