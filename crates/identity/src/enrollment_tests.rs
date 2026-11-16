@@ -306,7 +306,7 @@ fn without_verification(options: &str) -> String {
 
 /// A registration is refused when it does not verify the user, or comes from another port or a subdomain of the
 /// realm's origin, and so is one that is not a registration at all, or not even JSON (#109). Each refusal leaves
-/// the link open, so the operator can try again. These are honest clients set up wrong: with no attestation, the
+/// the link open, so the operator can try again, and is recorded with its reason. These are honest clients set up wrong: with no attestation, the
 /// flags and origin a registration reports are the client's word, which a hostile client could forge, so the
 /// guarantees that bind a person to a passkey come at sign-in, where the authenticator signs.
 #[tokio::test]
@@ -348,13 +348,18 @@ async fn hostile_clients_are_refused_and_the_link_stays_open() {
             not_enrolling()
         );
     }
+    let reasons = [
+        "not_verified",
+        "not_verified",
+        "not_verified",
+        "malformed",
+        "malformed",
+    ];
+    let kept =
+        "SELECT (SELECT count(*) FROM identity.passkeys) * 10 + count(*) FROM identity.enrollments";
     assert_eq!(
-        number(&database, "SELECT count(*) FROM identity.passkeys").await,
-        0
-    );
-    assert_eq!(
-        number(&database, "SELECT count(*) FROM identity.enrollments").await,
-        1
+        (redemptions(&database).await, number(&database, kept).await),
+        (reasons.map(|reason| json!(["refused", reason])).to_vec(), 1)
     );
 }
 
@@ -549,6 +554,14 @@ async fn an_undiscoverable_registration_is_refused() {
     }
     let refused = not_enrolling();
     assert_eq!(finished, [refused.clone(), refused, Ok(OperatorId::new(1))]);
+    assert_eq!(
+        redemptions(&database).await,
+        [
+            json!(["refused", "not_discoverable"]),
+            json!(["refused", "not_discoverable"]),
+            json!(["changed", null])
+        ]
+    );
     assert_eq!(
         number(&database, "SELECT count(*) FROM identity.passkeys").await,
         1

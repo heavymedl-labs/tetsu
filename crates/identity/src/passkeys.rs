@@ -144,7 +144,8 @@ impl RelyingParty {
 
     /// Verifies a browser's registration against the state its ceremony began with, and returns the passkey. A
     /// registration whose client says the passkey is not discoverable is refused, since signing in could never find
-    /// it; one that says nothing is taken, as some browsers say nothing. So is one listing a transport `WebAuthn`
+    /// it; one that says nothing is taken, as some browsers say nothing. A refusal's reason, as the audit record
+    /// names it, is `malformed`, `not_discoverable`, or `not_verified`. So is one listing a transport `WebAuthn`
     /// does not name, or one twice. Its size is checked where it is stored, measured as the table measures it.
     pub(crate) fn finish_registration(
         &self,
@@ -157,16 +158,17 @@ impl RelyingParty {
                 "a stored passkey ceremony could not be read: {error}"
             ))
         })?;
-        let refused = || Error::Invalid("the passkey could not be verified".to_string());
+        let refused = |reason: &str| Error::Invalid(reason.to_string());
         // Parsed first, so each check reads what webauthn-rs reads, whichever name the client gave a field.
         let response = serde_json::from_str::<RegisterPublicKeyCredential>(response)
-            .ok()
-            .filter(plausible)
-            .ok_or_else(refused)?;
+            .map_err(|_| refused("malformed"))?;
+        if !plausible(&response) {
+            return Err(refused("not_discoverable"));
+        }
         let passkey = self
             .webauthn
             .finish_passkey_registration(&response, &state)
-            .map_err(|_| refused())?;
+            .map_err(|_| refused("not_verified"))?;
         Ok(NewPasskey {
             credential_id: AsRef::<[u8]>::as_ref(passkey.cred_id()).to_vec(),
             passkey: json!(passkey).to_string(),

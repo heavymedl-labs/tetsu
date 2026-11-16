@@ -10,9 +10,9 @@ use tokio_postgres::Row;
 use tokio_postgres::types::{FromSql, ToSql};
 
 use crate::domain::{
-    Account, Actor, Addition, Disabling, Enrollee, Error, Issue, NewPasskey, OperatorId,
-    OperatorName, OperatorSummary, Realm, Redemption, Removal, Session, SessionStart, SignIn,
-    Signer, TakenAddition, TakenCeremony,
+    Account, Actor, Addition, CeremonyKind, Disabling, Enrollee, Error, Issue, NewPasskey,
+    OperatorId, OperatorName, OperatorSummary, Realm, Redemption, Removal, Session, SessionStart,
+    SignIn, Signer, TakenAddition, TakenCeremony,
 };
 use crate::ports::OperatorStore;
 use crate::use_cases::Operators;
@@ -341,8 +341,9 @@ impl OperatorStore for PostgresOperators {
             .map(drop)
     }
 
-    async fn refuse_sign_in(
+    async fn refuse(
         &self,
+        kind: CeremonyKind,
         operator: Option<OperatorId>,
         credential: Option<&[u8]>,
         reason: &str,
@@ -354,7 +355,7 @@ impl OperatorStore for PostgresOperators {
         });
         self.query_recording(RECORD, &[], &|_| {
             Ok(Some(reasoned(
-                "identity.signed_in",
+                event_kind(kind),
                 actor,
                 Some(reason),
                 payload.clone(),
@@ -724,6 +725,15 @@ fn redemption(rows: &[Row], id: i64, credential: &[u8], actor: &Actor) -> Decide
         redemption,
         Some(redemption_event(redemption, id, credential, actor)),
     ))
+}
+
+/// The event a ceremony's outcome is recorded under, refused or not.
+fn event_kind(kind: CeremonyKind) -> &'static str {
+    match kind {
+        CeremonyKind::Enrollment => "identity.enrollment_redeemed",
+        CeremonyKind::SignIn => "identity.signed_in",
+        CeremonyKind::Addition => "identity.passkey_added",
+    }
 }
 
 /// An answer Identity's database never writes is a storage failure, never a guess.

@@ -205,6 +205,67 @@ async fn an_operator_adds_a_second_passkey_and_no_third() {
     );
 }
 
+/// A registration that is not one, or that does not verify, adds nothing, and each is recorded with its reason and
+/// the operator whose addition it was; the addition is spent, as any ceremony is once taken.
+#[tokio::test]
+async fn a_registration_that_does_not_verify_is_recorded() {
+    let (operators, database, _, session) = signed_in().await;
+    let party = party();
+    let mut finished = Vec::new();
+    for origin in [None, Some("https://evil.ops.example.com")] {
+        let ceremony = operators
+            .begin_adding_passkey(&party, &session)
+            .await
+            .expect("begins");
+        let response = match origin {
+            None => "not a registration".to_string(),
+            Some(origin) => register_keeping(&ceremony.options, origin, true).await.0,
+        };
+        let answer = Answer {
+            ceremony: &ceremony.token.to_text(),
+            response: &response,
+        };
+        finished.push(failure(
+            operators
+                .finish_adding_passkey(&party, &session, answer, &actor())
+                .await,
+        ));
+    }
+    assert_eq!(finished, [not_adding(), not_adding()]);
+    let operators_named = "SELECT count(*) FROM identity.outbox_global
+                           WHERE event_type = 'identity.passkey_added' AND payload ->> 'operator_id' = '1'";
+    assert_eq!(
+        (
+            recorded(&database, "identity.passkey_added").await,
+            number(&database, operators_named).await
+        ),
+        (
+            vec![
+                json!(["refused", "malformed"]),
+                json!(["refused", "not_verified"])
+            ],
+            2
+        )
+    );
+}
+
+/// A registration refused where its refusal cannot be recorded fails as storage, not as the one refusal, so no
+/// refusal goes unrecorded unseen.
+#[tokio::test]
+async fn a_refusal_that_cannot_be_recorded_fails_as_storage() {
+    let (operators, database, _, session) = signed_in().await;
+    as_admin(
+        &database,
+        "REVOKE INSERT ON identity.outbox_global FROM tetsu_identity",
+    )
+    .await;
+    let (refused, _) = add(&operators, &session, |_| "{}".to_string()).await;
+    assert_eq!(
+        failure(refused),
+        "storage failed: permission denied for table outbox_global"
+    );
+}
+
 /// Adding a passkey ends the operator's other sessions and keeps the one that added it (ADR-0059,
 /// `v5.0.0-7.4.3`), and the record says how many live ones it ended.
 #[tokio::test]
@@ -304,7 +365,8 @@ async fn a_session_that_is_not_fresh_adds_no_passkey() {
 }
 
 /// Finishing refuses, the same way each time, a registration that is not one, a ceremony token that is unknown or
-/// malformed, and a session that went idle meanwhile, which is recorded.
+/// malformed, and a session that went idle meanwhile. The registration and the idle session are recorded; a token
+/// that names no ceremony has no operator to record against.
 #[tokio::test]
 async fn finishing_refuses_what_no_longer_allows_it() {
     let (operators, database, _, session) = signed_in().await;
@@ -345,7 +407,10 @@ async fn finishing_refuses_what_no_longer_allows_it() {
     assert_eq!(said, vec![not_adding(); 4]);
     assert_eq!(
         recorded(&database, "identity.passkey_added").await,
-        [json!(["refused", "signed_out"])]
+        [
+            json!(["refused", "malformed"]),
+            json!(["refused", "signed_out"])
+        ]
     );
 }
 

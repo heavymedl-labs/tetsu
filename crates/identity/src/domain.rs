@@ -561,6 +561,14 @@ impl std::fmt::Display for Device {
     }
 }
 
+/// The kind of ceremony a refusal ends, which names the event that records it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CeremonyKind {
+    Enrollment,
+    SignIn,
+    Addition,
+}
+
 /// Who ran an operator command, as the audit record names them, such as `kurt@workstation`. It is asserted by the
 /// command, not proven: every command signs in as one database login (ADR-0061), so database access is the trust
 /// boundary, and this says which person used it.
