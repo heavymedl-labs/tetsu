@@ -202,6 +202,44 @@ async fn an_account_may_hold_no_passkey() {
     assert_eq!(account.map(|account| account.passkeys.len()), Some(0));
 }
 
+/// A passkey row whose credential, transports, or flags cannot be read is a storage failure, never a guess.
+#[tokio::test]
+async fn an_unreadable_passkey_row_is_a_storage_failure() {
+    let mut said = Vec::new();
+    for (credential, transports, eligible) in [
+        ("'x'::text", "''::text", "true"),
+        ("'\\x01'::bytea", "1", "true"),
+        ("'\\x01'::bytea", "''::text", "null::boolean"),
+    ] {
+        let (operators, database, _, session) = signed_in().await;
+        let returns = format!(
+            "TABLE (operator_id bigint, user_handle bytea, name text, credential_id {}, transports {}, \
+             backup_eligible boolean, backup_state boolean)",
+            if credential.ends_with("text") {
+                "text"
+            } else {
+                "bytea"
+            },
+            if transports == "1" { "integer" } else { "text" },
+        );
+        let body = format!(
+            "SELECT 1::bigint, uuid_send(gen_random_uuid()), 'Kurt', {credential}, {transports}, {eligible}, true"
+        );
+        replace(&database, "account(bytea)", &returns, &body).await;
+        said.push(failure(
+            operators.account(session.session()).await.map(drop),
+        ));
+    }
+    for (said, column) in said.iter().zip(3..) {
+        assert!(
+            said.starts_with(&format!(
+                "storage failed: error deserializing column {column}: "
+            )),
+            "{said}"
+        );
+    }
+}
+
 /// Reading an account fails as storage when the database refuses its lookup.
 #[tokio::test]
 async fn an_account_that_cannot_be_read_is_a_storage_failure() {
