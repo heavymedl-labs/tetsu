@@ -117,7 +117,24 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - run: docker build -t tetsu:ci .
+      # The image's Rust dependencies are a layer of their own, which lasts until a manifest or the lockfile changes
+      # (Dockerfile), so it is kept between runs and imported rather than built again: a new cache is exported only
+      # when the key changes. A builder of Docker's own BuildKit is needed to import and export one.
+      - id: image-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/image-cache
+          key: image-${{ hashFiles('Dockerfile', '**/Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'package-lock.json') }}
+          restore-keys: image-
+      - env:
+          CACHE: ${{ runner.temp }}/image-cache
+          HIT: ${{ steps.image-cache.outputs.cache-hit }}
+        run: |
+          docker buildx create --use --driver docker-container
+          export=()
+          if [[ "$HIT" != true ]]; then export=(--cache-to "type=local,dest=$CACHE-new,mode=max"); fi
+          docker buildx build --load -t tetsu:ci --cache-from "type=local,src=$CACHE" "${export[@]}" .
+          if [[ "$HIT" != true ]]; then rm -rf "$CACHE" && mv "$CACHE-new" "$CACHE"; fi
       - run: docker run --rm tetsu:ci
       # The publish job pushes this exact image once every check has passed (ADR-0033).
       - name: Keep the image for publishing
