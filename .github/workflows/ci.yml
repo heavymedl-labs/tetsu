@@ -108,7 +108,7 @@ jobs:
             CARGO_TARGET_DIR="$RUNNER_TEMP/bench" cargo check --locked -p tetsu-bench
           fi
 
-  # One job, since GitHub bills each job rounded up to a minute and these are short (ADR-0023).
+  # One job, since GitHub bills each job rounded up to a minute and these are short (ADR-0023, ADR-0063).
   rest:
     name: Image, links, and workflows
     runs-on: ubuntu-latest
