@@ -197,7 +197,8 @@ async fn run(
 /// so no other error is ever taken for it.
 const NO_ENABLED_OPERATOR: &str = "TD001";
 
-/// An operator who is disabled or unknown is the caller's mistake, not storage failing.
+/// An operator who is disabled or unknown is the caller's mistake, not storage failing. A function refusing an
+/// isolation level other than read committed (TD002) is a fault of the code that called it, so storage.
 fn sorted(error: &tokio_postgres::Error) -> Error {
     match error.as_db_error() {
         Some(db) if db.code().code() == NO_ENABLED_OPERATOR => {

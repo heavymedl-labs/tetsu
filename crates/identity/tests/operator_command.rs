@@ -694,6 +694,7 @@ async fn changes_that_wait_on_an_operator_need_read_committed() {
         "SELECT identity.end_sessions('operator', null)",
         "SELECT identity.issue_enrollment(sha256('a'::bytea), 1)",
         "SELECT identity.redeem_enrollment(sha256('a'::bytea), 1, sha256('c'::bytea), '{}')",
+        "SELECT identity.begin_enrollment(sha256('t'::bytea), 1, sha256('a'::bytea), '{}')",
     ] {
         let transaction = client
             .build_transaction()
@@ -1010,4 +1011,55 @@ async fn the_list_shows_passkeys_and_open_links() {
         .map(|operator| (operator.passkeys, operator.link_minutes))
         .collect();
     assert_eq!(listed, [(0, Some(60)), (1, None), (0, None)]);
+}
+
+/// A begin holds the operator's row as it stores a ceremony, so a disable at the same moment waits for it and then
+/// ends what it stored, and two begins on one link leave one ceremony.
+#[tokio::test]
+async fn a_disable_or_second_begin_waits_for_a_begin_being_written() {
+    for second in ["disable", "begin"] {
+        let database = ready().await;
+        let pool = pool(&database.as_app()).expect("a pool");
+        let operators = postgres_store(pool.clone());
+        let kurt = operators
+            .create(&name("Kurt Medley"), &actor())
+            .await
+            .expect("creates");
+        let link = operators
+            .enroll(kurt, &actor())
+            .await
+            .expect("issues")
+            .to_text();
+        let begin = "SELECT identity.begin_enrollment(
+             sha256(convert_to($1, 'UTF8')), 1, sha256(decode($2, 'hex')), '{}')";
+        let mut client = pool.get().await.expect("a connection");
+        let writing = ModuleTransaction::begin(&mut client, "identity")
+            .await
+            .expect("begins");
+        writing
+            .execute(begin, &[&"first", &link])
+            .await
+            .expect("writes");
+        let other = pool.clone();
+        let then = tokio::spawn(async move {
+            if second == "disable" {
+                postgres_store(other).disable(kurt, &actor()).await.is_ok()
+            } else {
+                let mut client = other.get().await.expect("a connection");
+                let racing = ModuleTransaction::begin(&mut client, "identity")
+                    .await
+                    .expect("begins");
+                racing
+                    .execute(begin, &[&"second", &link])
+                    .await
+                    .expect("writes");
+                racing.commit().await.is_ok()
+            }
+        });
+        waits_for_a_lock(&database).await;
+        writing.commit().await.expect("commits");
+        assert!(then.await.expect("finishes"), "{second}");
+        let ceremonies = number(&database, "SELECT count(*) FROM identity.ceremonies").await;
+        assert_eq!(ceremonies, i64::from(second != "disable"), "{second}");
+    }
 }

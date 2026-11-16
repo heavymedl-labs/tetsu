@@ -237,7 +237,9 @@ fn without_verification(options: &str) -> String {
 
 /// A registration is refused when it does not verify the user, or comes from another port or a subdomain of the
 /// realm's origin, and so is one that is not a registration at all, or not even JSON (#109). Each refusal leaves
-/// the link open, so the operator can try again.
+/// the link open, so the operator can try again. These are honest clients set up wrong: with no attestation, the
+/// flags and origin a registration reports are the client's word, which a hostile client could forge, so the
+/// guarantees that bind a person to a passkey come at sign-in, where the authenticator signs.
 #[tokio::test]
 async fn hostile_clients_are_refused_and_the_link_stays_open() {
     let (operators, database, _, link) = with_link().await;
@@ -372,11 +374,12 @@ async fn a_ceremony_outlives_the_browsers_wait_but_not_its_link() {
     assert_eq!(number(&database, lasts).await, 3);
 }
 
-/// What changes between a ceremony's two halves still counts: a disable ends the ceremony, and a new link in place
-/// of the one it began from, or the ceremony ending, refuses the passkey; a replaced link is recorded as expired.
+/// What changes between a ceremony's two halves still counts: a disable or a new link ends the ceremony, and so does
+/// time, so the passkey is refused with nothing left to redeem; and a passkey stored for the operator meanwhile
+/// refuses it as enrolled, recorded.
 #[tokio::test]
 async fn a_change_while_enrolling_refuses_the_passkey() {
-    for change in ["disable", "new link", "ended"] {
+    for change in ["disable", "new link", "ended", "enrolled elsewhere"] {
         let (operators, database, kurt, link) = with_link().await;
         let party = party();
         let ceremony = operators
@@ -387,6 +390,14 @@ async fn a_change_while_enrolling_refuses_the_passkey() {
         match change {
             "disable" => drop(operators.disable(kurt, &actor()).await.expect("disables")),
             "new link" => drop(operators.enroll(kurt, &actor()).await.expect("issues")),
+            "enrolled elsewhere" => {
+                as_admin(
+                    &database,
+                    "INSERT INTO identity.passkeys (credential_id, operator_id, passkey, created_at)
+                     VALUES (sha256('elsewhere'::bytea), 1, '{}', now())",
+                )
+                .await;
+            }
             _ => {
                 as_admin(
                     &database,
@@ -402,16 +413,16 @@ async fn a_change_while_enrolling_refuses_the_passkey() {
             not_enrolling(),
             "{change}"
         );
+        let elsewhere = change == "enrolled elsewhere";
         assert_eq!(
             number(&database, "SELECT count(*) FROM identity.passkeys").await,
-            0,
+            i64::from(elsewhere),
             "{change}"
         );
-        let recorded = if change == "new link" {
-            vec![json!(["refused", "expired"])]
-        } else {
-            vec![]
-        };
+        let recorded: Vec<Value> = [json!(["refused", "enrolled"])]
+            .into_iter()
+            .filter(|_| elsewhere)
+            .collect();
         assert_eq!(redemptions(&database).await, recorded, "{change}");
     }
 }
@@ -422,27 +433,62 @@ async fn a_change_while_enrolling_refuses_the_passkey() {
 async fn a_passkey_that_is_not_discoverable_is_refused() {
     let (operators, database, _, link) = with_link().await;
     let party = party();
-    let ceremony = operators
-        .begin_enrollment(&party, &link)
-        .await
-        .expect("begins");
-    let mut response: Value =
-        serde_json::from_str(&register(&ceremony.options, ORIGIN, true).await).expect("JSON");
-    response["clientExtensionResults"]["credProps"] = json!({"rk": false});
+    let mut finished = Vec::new();
+    for (field, value) in [
+        (
+            "clientExtensionResults",
+            json!({"credProps": {"rk": false}}),
+        ),
+        ("extensions", json!({"credProps": {"rk": false}})),
+        ("transports", json!(vec!["usb"; 8])),
+    ] {
+        let ceremony = operators
+            .begin_enrollment(&party, &link)
+            .await
+            .expect("begins");
+        let mut response: Value =
+            serde_json::from_str(&register(&ceremony.options, ORIGIN, true).await).expect("JSON");
+        if field == "transports" {
+            response["response"][field] = value;
+        } else {
+            let _ = response
+                .as_object_mut()
+                .map(|fields| fields.remove("clientExtensionResults"));
+            response[field] = value;
+        }
+        finished.push(
+            operators
+                .finish_enrollment(
+                    &party,
+                    &ceremony.token.to_text(),
+                    &response.to_string(),
+                    &actor(),
+                )
+                .await,
+        );
+    }
     assert_eq!(
-        operators
-            .finish_enrollment(
-                &party,
-                &ceremony.token.to_text(),
-                &response.to_string(),
-                &actor()
-            )
-            .await,
-        not_enrolling()
+        finished,
+        [not_enrolling(), not_enrolling(), not_enrolling()]
     );
     assert_eq!(
         number(&database, "SELECT count(*) FROM identity.enrollments").await,
         1
+    );
+}
+
+/// A new link ends any ceremony begun from the one it replaces.
+#[tokio::test]
+async fn a_new_link_ends_the_old_links_ceremony() {
+    let (operators, database, kurt, link) = with_link().await;
+    operators
+        .begin_enrollment(&party(), &link)
+        .await
+        .expect("begins");
+    operators.enroll(kurt, &actor()).await.expect("issues");
+    assert_eq!(
+        number(&database, "SELECT count(*) FROM identity.ceremonies").await,
+        0
     );
 }
 
@@ -534,7 +580,7 @@ async fn failures_of_the_server_are_told_apart() {
     )
     .await;
     let begun = operators.begin_enrollment(&party, &link).await.map(drop);
-    assert!(failure(begun).starts_with("invalid: no ceremony could start"));
+    assert!(failure(begun).starts_with("storage failed: no ceremony could start"));
 }
 
 /// Kurt Medley with a stored passkey, whose credential ID is the SHA-256 of `kurt`, and Lee Park with an open link;
@@ -595,6 +641,56 @@ async fn a_taken_credential_or_missing_operator_stores_nothing() {
     assert_eq!(
         redemptions(&database).await,
         [json!(["refused", "taken"]), json!(["refused", "unknown"])]
+    );
+}
+
+/// Storing a passkey refuses a link no longer open, and a credential or passkey larger than the table keeps,
+/// measured as the table measures it, and records each with its reason.
+#[tokio::test]
+async fn an_ended_link_or_oversized_passkey_stores_nothing() {
+    let (_operators, database, store, _, [lees, _, _]) = redeeming().await;
+    let unknown_link = TakenCeremony {
+        link_hash: [7; 32],
+        ..lees.clone()
+    };
+    let fresh = |credential_id: Vec<u8>, passkey: &str| NewPasskey {
+        credential_id,
+        passkey: passkey.to_string(),
+    };
+    // Compact, this is under 8 KiB; as jsonb writes it back, with a space after each colon and comma, it is over.
+    let numbered: Vec<String> = (0..800).map(|n| format!("\"{n:04}\":1")).collect();
+    let spaced = format!("{{{}}}", numbered.join(","));
+    assert!(spaced.len() <= 8192);
+    let mut answers = vec![
+        store
+            .redeem_enrollment(&unknown_link, &fresh(vec![1; 16], "{}"), &actor())
+            .await,
+    ];
+    for (id, passkey) in [(1024, "{}"), (15, "{}"), (16, spaced.as_str())] {
+        answers.push(
+            store
+                .redeem_enrollment(&lees, &fresh(vec![1; id], passkey), &actor())
+                .await,
+        );
+    }
+    let oversized = Ok(Some(Redemption::Oversized));
+    assert_eq!(
+        answers,
+        [
+            Ok(Some(Redemption::Expired)),
+            oversized.clone(),
+            oversized.clone(),
+            oversized
+        ]
+    );
+    assert_eq!(
+        redemptions(&database).await,
+        [
+            json!(["refused", "expired"]),
+            json!(["refused", "oversized"]),
+            json!(["refused", "oversized"]),
+            json!(["refused", "oversized"]),
+        ]
     );
 }
 

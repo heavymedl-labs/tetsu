@@ -80,7 +80,7 @@ COMMENT ON TABLE passkeys IS
 CREATE INDEX passkeys_operator_id ON passkeys (operator_id);
 
 -- A passkey ceremony under way: the state webauthn-rs needs to finish it,
--- under the hash of a token only the browser holds, good once and for five
+-- under the hash of a token only the browser holds, good once and for ten
 -- minutes, and never sent to the browser (ADR-0047). An enrollment keeps the
 -- link it will redeem, which is used up only when the passkey is stored.
 CREATE TABLE ceremonies (
@@ -97,6 +97,9 @@ COMMENT ON TABLE ceremonies IS
 'tetsu:global: found by its token before anyone is signed in';
 
 CREATE INDEX ceremonies_operator_id ON ceremonies (operator_id);
+
+-- A link holds one ceremony at most, however many begin at once.
+CREATE UNIQUE INDEX ceremonies_link_hash ON ceremonies (link_hash);
 
 -- The runner's default privileges give Identity's role every right on a new
 -- table; each is replaced by exactly what is granted below.
@@ -126,6 +129,8 @@ GRANT SELECT (credential_id, operator_id),
 INSERT (credential_id, operator_id, passkey, created_at)
 ON passkeys TO tetsu_identity_lookup;
 GRANT SELECT, INSERT, DELETE ON ceremonies TO tetsu_identity_lookup;
+GRANT UPDATE (token_hash, state, ends_at) ON ceremonies
+TO tetsu_identity_lookup;
 
 -- Each realm's limits live here, beside the clock that applies them, so no
 -- caller can lengthen a session by passing other numbers (ADR-0048). Each
@@ -293,6 +298,9 @@ BEGIN
         RETURN 'enrolled';
     END IF;
     at := clock_timestamp();
+    -- A ceremony begun from the link this one replaces ends with it.
+    DELETE FROM identity.ceremonies AS c
+    WHERE c.operator_id = wanted_operator AND c.kind = 'enroll';
     INSERT INTO identity.enrollments
         (token_hash, operator_id, issued_at, ends_at)
     VALUES (wanted_hash, wanted_operator, at, at + interval '1 hour')
@@ -367,12 +375,14 @@ $$;
 
 -- Keeps an enrollment ceremony's state under its token's hash, and says
 -- whether it did: only while the link is open, its operator enabled, and no
--- passkey theirs, checked here rather than trusted from the caller. A
--- ceremony lasts ten minutes, longer than the five a browser gives its
--- authenticator, but never past its link. A link holds one ceremony at most:
--- a newer one replaces it, as a new link replaces the last, so beginning again
--- and again stores nothing more. The operator's ceremonies that have ended go
--- too, through the index on their operator.
+-- passkey theirs, checked here rather than trusted from the caller. It takes
+-- the operator's row first, so a disable or a passkey being stored waits for
+-- it or is seen by it, which holds only under read committed (TD002), and
+-- reads the clock after any wait. A ceremony lasts ten minutes, longer than
+-- the five a browser gives its authenticator, but never past its link. A link
+-- holds one ceremony at most, by a unique index: a newer one replaces it, as a
+-- new link replaces the last, so beginning again and again stores nothing
+-- more. The operator's ceremonies that have ended go too.
 CREATE FUNCTION begin_enrollment(
     wanted_hash bytea,
     wanted_operator bigint,
@@ -384,12 +394,22 @@ LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
-    at timestamptz := clock_timestamp();
+    at timestamptz;
 BEGIN
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'beginning an enrollment needs read committed'
+        USING ERRCODE = 'TD002';
+    END IF;
+    PERFORM
+    FROM identity.operators AS o
+    WHERE o.id = wanted_operator AND o.disabled_at IS NULL
+    FOR SHARE;
+    IF NOT FOUND THEN
+        RETURN false;
+    END IF;
+    at := clock_timestamp();
     DELETE FROM identity.ceremonies AS c
-    WHERE
-        c.operator_id = wanted_operator
-        AND (c.ends_at <= at OR c.link_hash = wanted_link);
+    WHERE c.operator_id = wanted_operator AND c.ends_at <= at;
     INSERT INTO identity.ceremonies
         (token_hash, kind, operator_id, link_hash, state, ends_at)
     SELECT
@@ -400,15 +420,19 @@ BEGIN
         wanted_state,
         least(at + interval '10 minutes', e.ends_at)
     FROM identity.enrollments AS e
-    INNER JOIN identity.operators AS o ON e.operator_id = o.id
     WHERE
         e.token_hash = wanted_link
         AND e.operator_id = wanted_operator
         AND e.ends_at > at
-        AND o.disabled_at IS NULL
         AND NOT EXISTS (
-            SELECT FROM identity.passkeys AS p WHERE p.operator_id = o.id
-        );
+            SELECT FROM identity.passkeys AS p
+            WHERE p.operator_id = wanted_operator
+        )
+    ON CONFLICT (link_hash) DO UPDATE
+        SET
+            token_hash = excluded.token_hash,
+            state = excluded.state,
+            ends_at = excluded.ends_at;
     RETURN FOUND;
 END
 $$;
@@ -437,8 +461,11 @@ $$;
 -- Stores an operator's first passkey and uses up the link that let them, in
 -- one transaction, and says what came of it: redeemed; disabled; enrolled,
 -- for an operator who has a passkey already, as when two tabs finish one
--- link; expired, for a link that ended or was replaced; taken, for a
--- credential another passkey has, even one stored a moment before; or null
+-- link; oversized, for a credential ID outside the 16 to 1023 bytes WebAuthn
+-- allows or a passkey larger than the table keeps, measured as the table
+-- measures it; expired, for a link that ended or was replaced; taken, for a
+-- credential another operator's passkey has, even one stored a moment before
+-- (the operator's own passkeys were refused as enrolled already); or null
 -- for an operator who does not exist. It takes the operator's row first, so a
 -- link being issued, a disable, or another tab's passkey waits, and what it
 -- checks stays true until it commits, under read committed only, so it
@@ -472,6 +499,11 @@ BEGIN
         SELECT FROM identity.passkeys AS p WHERE p.operator_id = wanted_operator
     ) THEN
         RETURN 'enrolled';
+    ELSIF
+        octet_length(wanted_credential) NOT BETWEEN 16 AND 1023
+        OR octet_length(wanted_passkey::text) > 8192
+    THEN
+        RETURN 'oversized';
     END IF;
     -- A credential another operator's passkey has, however recently, undoes
     -- the link's use and is a refusal, recorded like any other.

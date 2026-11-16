@@ -284,7 +284,7 @@ secret_token!(
 
 secret_token!(
     CeremonyToken,
-    "What a browser holds between a passkey ceremony's two halves, good once and for five minutes. The \
+    "What a browser holds between a passkey ceremony's two halves, good once and for ten minutes. The \
      ceremony's state stays in Postgres under its hash, and never reaches the browser (ADR-0047)."
 );
 
@@ -332,6 +332,8 @@ pub enum Redemption {
     Expired,
     /// Another operator's passkey has this credential ID.
     Taken,
+    /// The credential ID or passkey is larger, or the credential ID smaller, than the store keeps.
+    Oversized,
 }
 
 impl Redemption {
@@ -343,6 +345,7 @@ impl Redemption {
             "enrolled" => Some(Self::Enrolled),
             "expired" => Some(Self::Expired),
             "taken" => Some(Self::Taken),
+            "oversized" => Some(Self::Oversized),
             _ => None,
         }
     }
@@ -355,6 +358,7 @@ impl Redemption {
             Self::Enrolled => Some("enrolled"),
             Self::Expired => Some("expired"),
             Self::Taken => Some("taken"),
+            Self::Oversized => Some("oversized"),
         }
     }
 }

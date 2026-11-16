@@ -71,7 +71,10 @@ waits (`FOR UPDATE SKIP LOCKED` with a limit), an index on `ends_at`, and a glob
 - **Oversized credentials.** `webauthn-rs` accepts credential IDs up to 4096 bytes, while WebAuthn and the table
   allow 16 to 1023, and the table caps a passkey's JSON at 8 KiB. A software authenticator in a link holder's
   hands could make a registration that verifies and then fails the table's check. Both bounds are now checked
-  before storing, and refused like any other bad registration.
+  where the passkey is stored, as a recorded `oversized` refusal. A first attempt checked them in Rust, on the
+  compact JSON, which jsonb writes back longer, with a space after each colon and comma, so a padded passkey
+  still slipped past it; the doubt-driven review that followed caught it, along with registrations padded with
+  transports, now limited to the seven that exist.
 
 ## A passkey signing in could never find
 

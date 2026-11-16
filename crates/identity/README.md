@@ -60,18 +60,21 @@ ends their sessions. `postgres_store(pool)` returns it over Postgres.
   name, rather than making a second.
 - **Enrolling a first passkey** takes two requests (`v5.0.0-6.4.1`). Beginning reads the link, which must be open
   and name an enabled operator with no passkey, and keeps a ceremony under a token only the browser holds, for ten
-  minutes but never past the link. A link holds one ceremony; a newer one replaces it. Nothing is used up, so a
+  minutes but never past the link. Beginning takes the operator's row, so a disable at the same moment ends what
+  it stores. A link holds one ceremony, by a unique index; a newer one, or a new link, replaces it. Nothing is used up, so a
   scanner that opens the link, or an abandoned attempt, costs nothing. Finishing takes the ceremony once, verifies
   the registration through `webauthn-rs` against the realm's exact origin, with user verification, and then, in
   one transaction holding the operator's row, stores the passkey and uses up the link. It refuses an operator
   disabled, given a new link, or enrolled by another tab meanwhile, a credential another passkey has, a passkey
-  its browser says is not discoverable, and one too large to store, and records `identity.enrollment_redeemed`
+  its browser says is not discoverable or that lists more transports than exist, and one larger than the table
+  keeps, measured as the table measures it, and records `identity.enrollment_redeemed`
   with the outcome, the reason, and the credential ID. Every refusal reads the same to the browser. The operator
   is not signed in: signing in with the new passkey proves it works. Passkeys are discoverable, so signing in
   needs no name, and the account picker names each as an operator's. The AAGUID, which names a passkey's provider
   but is unverified without attestation, is kept from step 4d, when the browser's authenticator data arrives.
 - **Read committed** is required, not assumed, by every function that waits on an operator's row and then checks
-  what changed: issuing a link, storing a passkey, disabling, and ending sessions refuse any other level (TD002).
+  what changed: issuing a link, beginning and finishing an enrollment, disabling, and ending sessions refuse any
+  other level (TD002). Such a refusal is a fault of the calling code, so it surfaces as a storage error.
 - **Disabling an operator** ends every session and the open link they hold (`v5.0.0-7.4.2`), in separate statements
   after the update, so they see a sign-in or link committed while the update waited on the operator's row. That
   holds only under read committed, which every scoped transaction asks for, and which disabling and ending
