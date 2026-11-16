@@ -1,11 +1,24 @@
-# Each pull request costs a CI run (ADR-0023), so Actions updates come monthly in one group. Security alerts are
-# on, and automatic security pull requests are off: fixes are made by hand (ADR-0028).
+# Each pull request costs a CI run (ADR-0023), so updates come monthly, each kind in one group. Security alerts are
+# on, and automatic security pull requests are off: fixes are made by hand (ADR-0028). A release waits a week
+# before it is proposed, so one published and then pulled for being compromised never reaches a pull request.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
+    cooldown:
+      default-days: 7
     groups:
       actions:
+        patterns: ["*"]
+  # The base images both Dockerfiles pin by digest.
+  - package-ecosystem: docker
+    directories: ["/", "/benchmarks"]
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    groups:
+      images:
         patterns: ["*"]

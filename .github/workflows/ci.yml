@@ -10,10 +10,8 @@ on:
         description: Commit to check every change since. Empty means the last commit a successful manual run checked.
         required: false
 
-permissions:
-  contents: read
-  # To find the commit the last successful run checked.
-  actions: read
+# Each job asks for what it needs, and nothing is granted to all of them.
+permissions: {}
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -25,10 +23,14 @@ jobs:
     runs-on: ubuntu-latest
     # The longest pass took 44 minutes, mutating nine commits on one runner (2026-11-16); a hang stops at twice that.
     timeout-minutes: 90
+    permissions:
+      contents: read
+      # To find the commit the last successful run checked.
+      actions: read
     services:
       postgres:
         # At least MIN_SERVER_VERSION in crates/postgres/src/migrate.rs (ADR-0060).
-        image: postgres:18.7
+        image: postgres:18.7@sha256:2ea8630df176ad090ec92136dee850397c5af8781e4bcf2e4162593691c61bbc
         env:
           POSTGRES_HOST_AUTH_METHOD: trust
         ports: ["5432:5432"]
@@ -70,6 +72,8 @@ jobs:
             -c "ALTER SYSTEM SET ssl = on" \
             -c "SELECT pg_reload_conf()"
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.7"
       - run: scripts/install-tools.sh
       # A pull request checks against its base. A manual run checks every change since the base it is given, or
       # since the commit the last successful manual run on main checked. Only manual runs count: a pull request
@@ -87,6 +91,11 @@ jobs:
           fi
           if [[ -z "$base" ]]; then
             echo "::error::No successful manual run on main to check changes since. Run again with the base input set."
+            exit 1
+          fi
+          # A full commit SHA, so the value can never reach git as an option.
+          if [[ ! "$base" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::The base must be a full commit SHA."
             exit 1
           fi
           echo "sha=$base" >>"$GITHUB_OUTPUT"
@@ -113,6 +122,8 @@ jobs:
     name: Image, links, and workflows
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -159,7 +170,7 @@ jobs:
         with:
           args: --no-progress --include-fragments --offline "docs/research/**/*.md"
           fail: true
-      - run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color
+      - run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 -color
 
   # Publishes the image the run checked, once every check passed, and records its digest for the deploy
   # (ADR-0033). Never from a pull request. It holds the only write token and runs only GitHub's own actions.
