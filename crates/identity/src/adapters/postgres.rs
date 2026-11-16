@@ -1036,7 +1036,7 @@ mod tests {
         }
     }
 
-    /// A commit Postgres refused was rolled back, so it is never sorted as worth retrying.
+    /// A commit Postgres refused was rolled back, so it is a storage failure, never sorted as worth retrying.
     #[tokio::test]
     async fn a_refused_commit_is_a_storage_failure() {
         let database = tetsu_postgres::test_support::fresh_database()
