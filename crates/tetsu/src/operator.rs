@@ -472,12 +472,10 @@ mod tests {
         Operators<impl OperatorStore>,
         tetsu_postgres::test_support::TestDatabase,
     ) {
-        let database = tetsu_postgres::test_support::fresh_database()
-            .await
-            .unwrap();
-        tetsu_postgres::migrate(&database, &[&tetsu_identity::Identity])
-            .await
-            .unwrap();
+        let database =
+            tetsu_postgres::test_support::migrated_database(&[&tetsu_identity::Identity])
+                .await
+                .unwrap();
         let pool = tetsu_postgres::pool(&database.as_app()).unwrap();
         (tetsu_identity::postgres_store(pool), database)
     }

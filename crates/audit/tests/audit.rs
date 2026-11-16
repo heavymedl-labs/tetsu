@@ -3,10 +3,9 @@
 
 use tetsu_audit::{Audit, consumer};
 use tetsu_kernel::{Migration, Module, Storage};
-use tetsu_postgres::test_support::{TestDatabase, fresh_database};
+use tetsu_postgres::test_support::{TestDatabase, migrated_database};
 use tetsu_postgres::{
-    Dispatcher, ModuleTransaction, NewEvent, OUTBOX, Pool, TenantTransaction, connect, migrate,
-    pool,
+    Dispatcher, ModuleTransaction, NewEvent, OUTBOX, Pool, TenantTransaction, connect, pool,
 };
 
 #[cfg(test)]
@@ -49,10 +48,9 @@ mod support {
     }
 
     pub async fn ready() -> (Pool, Dispatcher, TestDatabase) {
-        let database = fresh_database().await.expect("a test database");
-        migrate(&database, &[&Signins, &Bookings, &Audit])
+        let database = migrated_database(&[&Signins, &Bookings, &Audit])
             .await
-            .expect("migrates");
+            .expect("a migrated test database");
         let pool = pool(&database.as_app()).expect("pool");
         let dispatcher = Dispatcher::new(
             pool.clone(),

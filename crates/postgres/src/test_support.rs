@@ -1,18 +1,27 @@
 //! Fresh databases for tests. `TEST_DATABASE_URL` points at a Postgres the tests may create databases on.
 //!
 //! Every database is dropped when its test is done with it, including when the test fails or panics. One
-//! left by a run that was killed is swept by a later run (#43). Temporary files work the same way: a [`Scratch`]
+//! left by a run that was killed is swept by a later run (#43). A database with modules migrated is copied from a
+//! template migrated once, which the final sweep drops. Temporary files work the same way: a [`Scratch`]
 //! is removed when dropped, and `scripts/clean.py` sweeps one a killed run left (#124).
 
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use tetsu_kernel::Module;
+
 use crate::connection::{Error, Settings, connect};
+use crate::migrate::migrate;
 use crate::roles::{APP_ROLE, ensure_role};
 
 static NEXT: AtomicU32 = AtomicU32::new(0);
 /// Held while sweeping, so test binaries running at once do not each repeat the same drops.
 pub const SWEEP_LOCK: i64 = 7_243_002;
+/// Held while building a template, so test binaries running at once build each one once.
+pub const TEMPLATE_LOCK: i64 = 7_243_003;
+/// What every template's name starts with; the rest is a hash of the migrations it holds.
+const TEMPLATE_PREFIX: &str = "tetsu_template_";
 /// Far longer than any one test holds its database, which is seconds, so one this old belongs to a run that is gone.
 const STALE: Duration = Duration::from_mins(10);
 /// How long the final sweep waits for a running one to finish before failing.
@@ -81,6 +90,82 @@ pub async fn fresh_database() -> Result<TestDatabase, Error> {
     create("").await
 }
 
+/// A fresh database with `modules` migrated, as [`crate::migrate`] leaves one. It is copied from a template
+/// migrated once and named for those migrations, which is about ten times faster than migrating each time, so a
+/// changed migration gets a template of its own. Templates stay for later tests and runs until the final sweep.
+///
+/// # Errors
+/// As [`fresh_database`], or if the modules fail to migrate.
+pub async fn migrated_database(modules: &[&dyn Module]) -> Result<TestDatabase, Error> {
+    let template = template(modules).await?;
+    create(&format!(" TEMPLATE {}", quoted(&template))).await
+}
+
+/// The template for `modules`, built first if no test has built it yet. It is built as a test database, so a run
+/// killed while building leaves only what the sweep removes, then renamed, and closed to connections, since
+/// Postgres copies only a database no one is connected to.
+async fn template(modules: &[&dyn Module]) -> Result<String, Error> {
+    let name = template_name(modules);
+    let admin = connect(&Settings::from_values(&admin_url()?, Some("disable"))).await?;
+    if !exists(&admin, &name).await? {
+        // Closing the connection releases the lock.
+        admin
+            .query_one("SELECT pg_advisory_lock($1)", &[&TEMPLATE_LOCK])
+            .await?;
+        if !exists(&admin, &name).await? {
+            build_template(&admin, &name, modules).await?;
+        }
+    }
+    Ok(name)
+}
+
+async fn exists(admin: &tokio_postgres::Client, name: &str) -> Result<bool, Error> {
+    let row = admin
+        .query_one(
+            "SELECT EXISTS (SELECT FROM pg_database WHERE datname = $1) AS found",
+            &[&name],
+        )
+        .await?;
+    Ok(row.try_get("found")?)
+}
+
+/// Migrates a test database, then makes it the template: renamed once no one is connected, and closed to
+/// connections from then on.
+async fn build_template(
+    admin: &tokio_postgres::Client,
+    name: &str,
+    modules: &[&dyn Module],
+) -> Result<(), Error> {
+    let build = create("").await?;
+    migrate(&build, modules).await?;
+    admin
+        .query(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1",
+            &[&build.name()],
+        )
+        .await?;
+    let (from, to) = (quoted(build.name()), quoted(name));
+    admin
+        .batch_execute(&format!("ALTER DATABASE {from} RENAME TO {to}"))
+        .await?;
+    admin
+        .batch_execute(&format!("ALTER DATABASE {to} WITH ALLOW_CONNECTIONS false"))
+        .await?;
+    Ok(())
+}
+
+/// A template's name: the prefix, then a hash of every schema, version, and file the modules migrate.
+fn template_name(modules: &[&dyn Module]) -> String {
+    let mut hasher = DefaultHasher::new();
+    for storage in modules.iter().filter_map(|module| module.storage()) {
+        storage.schema.hash(&mut hasher);
+        for migration in storage.migrations {
+            (migration.version, migration.sql).hash(&mut hasher);
+        }
+    }
+    format!("{TEMPLATE_PREFIX}{:016x}", hasher.finish())
+}
+
 /// [`fresh_database`], storing text in another encoding, such as `LATIN1`.
 ///
 /// # Errors
@@ -136,7 +221,7 @@ async fn sweep(older_than: Duration, wait: Option<Duration>) -> Result<(), Error
         .iter()
         .filter_map(|row| row.try_get::<_, String>("datname").ok());
     let mut left = Vec::new();
-    for name in names.filter(|name| stale(name, now, older_than)) {
+    for name in names.filter(|name| swept(name, now, older_than)) {
         if let Err(error) = admin.batch_execute(&drop_statement(&name)).await {
             eprintln!("warning: stale test database {name} was not dropped: {error}");
             left.push(name);
@@ -169,6 +254,12 @@ async fn take_sweep_lock(
         .map_err(|error| format!("another sweep kept the lock: {error}"))?;
     admin.batch_execute("RESET lock_timeout").await?;
     Ok(true)
+}
+
+/// Whether a sweep drops a database: a stale test database, or a template, but only in the final sweep, which drops
+/// every test database however new, since later tests copy templates while any run goes on.
+fn swept(name: &str, now: u64, older_than: Duration) -> bool {
+    stale(name, now, older_than) || (older_than.is_zero() && name.starts_with(TEMPLATE_PREFIX))
 }
 
 /// Whether a name is exactly `t_<seconds>_<process>_<counter>`, as [`create`] makes them, and was created at
@@ -248,8 +339,24 @@ fn admin_url() -> Result<String, Error> {
     Ok(std::env::var("TEST_DATABASE_URL").map_err(|_| "TEST_DATABASE_URL must be set")?)
 }
 
+/// Drops a test's database. The test's own connections are usually still open, since its runtime waits on this
+/// drop, and a forced drop waits for the connections it ends in steps of 100 ms; ending them first and watching
+/// for them in steps of 2 ms takes a tenth of that. The forced drop stays, for any connection that outlives the
+/// wait.
 async fn drop_database(admin_url: &str, name: &str) -> Result<(), Error> {
     let admin = connect(&Settings::from_values(admin_url, Some("disable"))).await?;
+    let connected =
+        "SELECT count(pg_terminate_backend(pid)) AS ended FROM pg_stat_activity WHERE datname = $1";
+    for _ in 0..500 {
+        let ended: i64 = admin
+            .query_one(connected, &[&name])
+            .await?
+            .try_get("ended")?;
+        if ended == 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(2)).await;
+    }
     admin.batch_execute(&drop_statement(name)).await?;
     Ok(())
 }
@@ -453,6 +560,21 @@ mod tests {
         assert!(
             error.contains(&format!("test databases were left: {name}")),
             "{error}"
+        );
+    }
+
+    /// Templates outlive every sweep but the final one, since tests copy them while any run goes on.
+    #[test]
+    fn only_the_final_sweep_drops_templates() {
+        let template = format!("{TEMPLATE_PREFIX}0123456789abcdef");
+        assert_eq!(
+            [
+                swept(&template, 5_000, STALE),
+                swept(&template, 5_000, Duration::ZERO),
+                swept("t_1000_1_0", 5_000, STALE),
+                swept("tetsu_other", 5_000, Duration::ZERO)
+            ],
+            [false, true, true, false]
         );
     }
 

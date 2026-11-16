@@ -8,8 +8,8 @@ use tetsu_identity::{
     Actor, Change, Error, ForChange, Identity, OperatorId, OperatorName, Origins, Realm,
     RelyingParty, SessionToken, SignOut, postgres_store,
 };
-use tetsu_postgres::test_support::{TestDatabase, fresh_database};
-use tetsu_postgres::{ModuleTransaction, Settings, connect, isolation_violations, migrate, pool};
+use tetsu_postgres::test_support::{TestDatabase, migrated_database};
+use tetsu_postgres::{ModuleTransaction, Settings, connect, isolation_violations, pool};
 
 const ORIGIN: &str = "https://ops.example.com";
 
@@ -40,9 +40,9 @@ mod support {
 
     /// A fresh, migrated database.
     pub async fn ready() -> TestDatabase {
-        let database = fresh_database().await.expect("a test database");
-        migrate(&database, &[&Identity]).await.expect("migrates");
-        database
+        migrated_database(&[&Identity])
+            .await
+            .expect("a migrated test database")
     }
 
     pub fn name(name: &str) -> OperatorName {

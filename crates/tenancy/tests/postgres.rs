@@ -1,6 +1,6 @@
 //! Tenancy against a real Postgres.
 
-use tetsu_postgres::test_support::{TestDatabase, fresh_database};
+use tetsu_postgres::test_support::{TestDatabase, fresh_database, migrated_database};
 use tetsu_postgres::{migrate, pool};
 use tetsu_tenancy::{
     Color, Error, Location, NewTenant, Slug, Tenancy, TenantStore, Tenants, Theme, postgres_store,
@@ -13,8 +13,9 @@ mod support {
     /// A migrated store, with the test database it uses. Keep both until the test ends: dropping the database
     /// drops everything in it.
     pub async fn store_and_settings() -> (Tenants<impl TenantStore>, TestDatabase) {
-        let settings = fresh_database().await.expect("a test database");
-        migrate(&settings, &[&Tenancy]).await.expect("migrates");
+        let settings = migrated_database(&[&Tenancy])
+            .await
+            .expect("a migrated test database");
         (postgres_store(pool(&settings).expect("pool")), settings)
     }
 
@@ -222,8 +223,9 @@ async fn a_failure_after_the_tenant_row_leaves_nothing_behind() {
 /// A stale statement is cached on every connection that ran the query, so the first failure clears them all.
 #[tokio::test]
 async fn a_stale_cached_query_is_temporary_and_clears_every_connection() {
-    let settings = fresh_database().await.expect("a test database");
-    migrate(&settings, &[&Tenancy]).await.expect("migrates");
+    let settings = migrated_database(&[&Tenancy])
+        .await
+        .expect("a migrated test database");
     let pool = pool(&settings).expect("pool");
     let store = postgres_store(pool.clone());
     store

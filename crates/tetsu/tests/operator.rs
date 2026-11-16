@@ -5,8 +5,8 @@ use std::process::{Command, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tetsu_identity::{Identity, OperatorName};
-use tetsu_postgres::test_support::{Scratch, TestDatabase, fresh_database};
-use tetsu_postgres::{Settings, migrate, pool};
+use tetsu_postgres::test_support::{Scratch, TestDatabase, migrated_database};
+use tetsu_postgres::{Settings, pool};
 
 #[cfg(test)]
 mod support {
@@ -42,8 +42,9 @@ mod support {
 
     /// A migrated database holding one operator, Kurt Medley, as operator 1.
     pub async fn with_kurt() -> TestDatabase {
-        let database = fresh_database().await.expect("a test database");
-        migrate(&database, &[&Identity]).await.expect("migrates");
+        let database = migrated_database(&[&Identity])
+            .await
+            .expect("a migrated test database");
         tetsu_identity::postgres_store(pool(&database.as_app()).expect("a pool"))
             .create(
                 &OperatorName::parse("Kurt Medley").expect("a name"),

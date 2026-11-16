@@ -11,8 +11,8 @@ use passkey::types::Passkey;
 use passkey::types::ctap2::{Aaguid, Ctap2Error};
 use passkey::types::webauthn::{CredentialCreationOptions, CredentialRequestOptions};
 use serde_json::{Value, json};
-use tetsu_postgres::test_support::{TestDatabase, fresh_database};
-use tetsu_postgres::{Pool, connect, migrate, pool};
+use tetsu_postgres::test_support::{TestDatabase, migrated_database};
+use tetsu_postgres::{Pool, connect, pool};
 use webauthn_rs::prelude::Url;
 
 use sha2::{Digest, Sha256};
@@ -129,8 +129,9 @@ pub(crate) async fn with_link() -> (
     OperatorId,
     String,
 ) {
-    let database = fresh_database().await.expect("a test database");
-    migrate(&database, &[&Identity]).await.expect("migrates");
+    let database = migrated_database(&[&Identity])
+        .await
+        .expect("a migrated test database");
     let operators = Operators::new(PostgresOperators {
         pool: app_pool(&database),
     });

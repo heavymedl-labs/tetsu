@@ -9,8 +9,8 @@ use tetsu_identity::{
     Actor, Disabling, Error, Identity, OperatorId, OperatorName, Removal, SessionToken,
     postgres_store,
 };
-use tetsu_postgres::test_support::{TestDatabase, fresh_database};
-use tetsu_postgres::{ModuleTransaction, connect, migrate, pool};
+use tetsu_postgres::test_support::{TestDatabase, migrated_database};
+use tetsu_postgres::{ModuleTransaction, connect, pool};
 
 #[cfg(test)]
 mod support {
@@ -38,9 +38,9 @@ mod support {
     }
 
     pub async fn ready() -> TestDatabase {
-        let database = fresh_database().await.expect("a test database");
-        migrate(&database, &[&Identity]).await.expect("migrates");
-        database
+        migrated_database(&[&Identity])
+            .await
+            .expect("a migrated test database")
     }
 
     pub fn name(name: &str) -> OperatorName {

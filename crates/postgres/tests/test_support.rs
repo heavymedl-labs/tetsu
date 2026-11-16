@@ -2,8 +2,9 @@
 
 use std::sync::{Arc, Mutex};
 
+use tetsu_kernel::{Migration, Module, Storage};
 use tetsu_postgres::test_support::{
-    SWEEP_LOCK, fresh_database, fresh_database_encoded, sweep_stale_databases,
+    SWEEP_LOCK, fresh_database, fresh_database_encoded, migrated_database, sweep_stale_databases,
 };
 use tetsu_postgres::{Settings, connect};
 
@@ -41,9 +42,52 @@ mod support {
         }
         false
     }
+
+    /// A module whose one migration makes a table named for this process, so its template is this run's own.
+    pub struct Probe;
+
+    /// The migration [`Probe`] runs, made once per process.
+    fn probe_migrations() -> &'static [Migration] {
+        static MIGRATIONS: std::sync::OnceLock<[Migration; 1]> = std::sync::OnceLock::new();
+        MIGRATIONS.get_or_init(|| {
+            let sql = format!("CREATE TABLE made_by_{} (id int)", std::process::id());
+            [Migration {
+                version: 1,
+                sql: Box::leak(sql.into_boxed_str()),
+            }]
+        })
+    }
+
+    impl Module for Probe {
+        fn name(&self) -> &'static str {
+            "probe"
+        }
+
+        fn storage(&self) -> Option<Storage> {
+            Some(Storage {
+                schema: "probe",
+                migrations: probe_migrations(),
+            })
+        }
+    }
+
+    /// How many templates the server holds.
+    pub async fn templates() -> i64 {
+        connect(&admin())
+            .await
+            .expect("connects")
+            .query_one(
+                "SELECT count(*) AS n FROM pg_database WHERE datname LIKE 'tetsu\\_template\\_%'",
+                &[],
+            )
+            .await
+            .expect("counts")
+            .try_get("n")
+            .expect("a count")
+    }
 }
 
-use support::{admin, exists, swept};
+use support::{Probe, admin, exists, swept, templates};
 
 #[tokio::test]
 async fn a_database_is_dropped_when_the_test_is_done_with_it() {
@@ -192,4 +236,34 @@ async fn a_database_name_that_is_not_utf8_cannot_stop_the_sweep() {
         .expect("cleans up");
     swept.expect("the sweep skips the name");
     created.expect("tests can still get a database");
+}
+
+/// Every database migrated for the same modules is copied from one template, built by the first test that needs
+/// it, and holds what migrating leaves; the copy is a test database like any other, dropped with its test.
+#[tokio::test]
+async fn migrated_databases_are_copies_of_one_template() {
+    let before = templates().await;
+    let first = migrated_database(&[&Probe])
+        .await
+        .expect("a migrated database");
+    let second = migrated_database(&[&Probe]).await.expect("another");
+    assert_eq!(templates().await, before + 1);
+    let table = format!("made_by_{}", std::process::id());
+    for database in [&first, &second] {
+        let found: i64 = connect(database)
+            .await
+            .expect("connects")
+            .query_one(
+                "SELECT count(*) AS n FROM pg_tables WHERE schemaname = 'probe' AND tablename = $1",
+                &[&table],
+            )
+            .await
+            .expect("counts")
+            .try_get("n")
+            .expect("a count");
+        assert_eq!(found, 1, "{}", database.name());
+    }
+    let name = first.name().to_string();
+    drop(first);
+    assert!(!exists(&name).await);
 }

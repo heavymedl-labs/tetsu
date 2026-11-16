@@ -1017,15 +1017,14 @@ mod tests {
     #[cfg(test)]
     mod support {
         use tetsu_postgres::Pool;
-        use tetsu_postgres::test_support::{TestDatabase, fresh_database};
+        use tetsu_postgres::test_support::{TestDatabase, migrated_database};
 
         /// A pool signed in as the application role, over a fresh database Identity has migrated, kept while
         /// the test runs.
         pub async fn migrated() -> (Pool, TestDatabase) {
-            let database = fresh_database().await.expect("a test database");
-            tetsu_postgres::migrate(&database, &[&crate::Identity])
+            let database = migrated_database(&[&crate::Identity])
                 .await
-                .expect("migrates");
+                .expect("a migrated test database");
             let pool = tetsu_postgres::pool(&database.as_app()).expect("a pool");
             (pool, database)
         }
