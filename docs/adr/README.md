@@ -71,7 +71,7 @@ number, and add a row below. Never renumber.
 | [0063](0063-ci-minutes-per-run.md) | CI minutes per run | Changing what a CI run builds or caches | Accepted |
 | [0064](0064-ci-skips-unchanged-work.md) | CI skips work whose inputs are unchanged | Changing which checks a CI run skips | Accepted |
 | [0065](0065-arm-runner-for-checks.md) | An Arm runner for the checks job | Changing which runners CI uses | Accepted |
-| [0066](0066-public-repository.md) | A public repository | Changing who can see or run the repository, or licensing it | Proposed |
+| [0066](0066-public-repository.md) | A public repository | Changing who can see or run the repository, or licensing it | Accepted |
 
 ## Open decisions
 

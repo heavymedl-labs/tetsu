@@ -1,6 +1,6 @@
 # 0066. A public repository
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-16
 
 ## Context
