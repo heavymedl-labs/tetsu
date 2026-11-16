@@ -588,7 +588,8 @@ async fn an_answer_of_the_wrong_type_is_a_storage_failure() {
     ));
 }
 
-/// A listed column of the wrong type is a storage failure, whichever column it is.
+/// A listed column of the wrong type is a storage failure, whichever column it is. The list's function is replaced
+/// outright, so no operator need exist for it to answer.
 #[tokio::test]
 async fn a_listed_column_of_the_wrong_type_is_a_storage_failure() {
     let right = [
