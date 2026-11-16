@@ -35,13 +35,14 @@ starts, finds, and ends their sessions. `postgres_store(pool)` returns it over P
   (`Realm::token_in`) takes every `Cookie` header, as HTTP/2 may split them, refuses a request that carries it
   twice, and trims only ASCII whitespace, so a name led by Unicode whitespace is never taken for it.
 - **Every state-changing request for a session** must come from one of the realm's `Origins`, exactly, and carry
-  the session's form token (`Operators::session_for_change`). Signing in and enrolling have no session yet; their
-  origin checks, the only guard against signing someone in to an attacker's account, come with the pages in step
-  4d. A `Change` is built from every `Cookie` header, so the session
-  token is always read through `Realm::token_in`. A form token is derived from the session token with SHA-256, so
+  the session's form token (`Operators::session_for_change`). Signing in and enrolling have no session yet, so
+  their requests pass `Origins::admit` alone, the only guard against signing someone in to an attacker's account:
+  an exact `Origin`, and a `Sec-Fetch-Site` of `same-origin` when the browser sends one (ADR-0059). A `Change`
+  checks both too, and is built from every `Cookie` header, so the session token is always read through
+  `Realm::token_in`. A form token is derived from the session token with SHA-256, so
   nothing more is stored. Each page masks it with a fresh random pad, so a compressed page never repeats it (BREACH),
-  and it is unmasked and compared in constant time. These are plain text in and out; the page adapter in step 4 reads
-  and writes the headers.
+  and it is unmasked and compared in constant time. These are plain text in and out; the pages' adapter reads and writes
+  the headers.
 
 ## Hot paths
 
@@ -59,7 +60,8 @@ starts, finds, and ends their sessions. `postgres_store(pool)` returns it over P
   command prints
   it only to a terminal, a guard against it landing in a log by accident; the trust boundary is access to the
   database. The token sits in the link's fragment, which a browser never sends to a server, though its history
-  keeps it. The page a link opens, `/ops/enroll`, arrives with passkeys, so until then a link opens nothing.
+  keeps it. The page a link opens, `/ops/enroll`, reads the token from the fragment and clears it from the address
+  bar at once.
 - **Names are unique.** A create retried after its output was lost is refused, naming the operator who holds the
   name, rather than making a second.
 - **Enrolling a first passkey** takes two requests (`v5.0.0-6.4.1`). Beginning reads the link, which must be open
@@ -73,14 +75,15 @@ starts, finds, and ends their sessions. `postgres_store(pool)` returns it over P
   row, stores the passkey and uses up the link. It refuses an operator disabled, given a new link, or enrolled by
   another tab meanwhile; a credential another passkey has; and one larger than the table keeps, measured as the
   table measures it. Each of those is recorded as `identity.enrollment_redeemed` with the outcome, the reason,
-  and the credential ID. Before that, it refuses a registration that does not verify, or whose browser says the
-  passkey is not discoverable; recording those, with the request's address, waits for step 4d. Transports are
-  taken as listed, as `WebAuthn` asks. Every refusal reads the same to the browser, whichever part of Identity
+  and the credential ID. Before that, it refuses a registration that is malformed, does not verify, or whose
+  browser says the passkey is not discoverable, and records it the same way, with that reason. Transports are
+  taken as listed, as `WebAuthn` asks, and the ones `webauthn-rs` names are kept, once each and sorted, as a hint
+  for later ceremonies. Every refusal reads the same to the browser, whichever part of Identity
   refuses it. The operator is not signed in: signing in with the
   new passkey proves it works. Passkeys are discoverable, so signing in needs no name, and the account picker
   shows each as "Tetsu operator · Name", the label first, where an authenticator's 64-byte cut never reaches it.
-  The AAGUID, which names a passkey's provider but is unverified without attestation, is kept from step 4d, when
-  the browser's authenticator data arrives.
+  The AAGUID, which names a passkey's provider but is unverified without attestation, is not kept: `webauthn-rs`
+  does not expose it, and reading it needs a CBOR decoder, a new dependency.
 - **Signing in with a passkey** takes two requests. Beginning names no passkey, so the browser offers the person's
   own, and asks for the prompt a button opens; it keeps a ceremony for ten minutes, like enrollment's. Anyone may
   begin one, so until step 5's rate limits each begin sweeps up to a hundred ended ceremonies without waiting on
@@ -172,12 +175,20 @@ starts, finds, and ends their sessions. `postgres_store(pool)` returns it over P
   hide or reorder what the audit record shows. The database refuses control characters in names too, and
   Identity's role adds an operator by name alone.
 
+## The operator pages
+
+`adapters/http.rs` serves `/ops/sign-in`, `/ops/enroll`, and `/ops`, the signed-in operator's page, with the JSON
+endpoints the passkey script in `web/src/passkey/` calls. Pages load only Tetsu's own script, under a policy of
+their own, and are never cached. Endpoints read only a JSON object sent as `application/json`, answer `no-store`,
+and give each ceremony's one refusal; a failure of the server is `503` to the browser and reported to the operator.
+Signing in ends the session the browser presented, in the transaction that starts the new one. Signing out is a
+plain form that clears the cookie. The operator's page offers a second passkey only within ten minutes of signing
+in, as the database allows, and tells the operator's devices every passkey Tetsu holds, through the Signal API.
+
 ## Not yet
 
-The pages and script that run enrollment and sign-in in a browser, with the request's address in each record;
-ending the session a browser presents when it signs in again; recording registrations that fail to verify; rate
-limits; revoking a link
-on its own (today a new link or a disable ends it); the `Sec-Fetch-Site` check and the headers that apply these
-checks; the session list ([ADR-0059](../../docs/adr/0059-session-controls-and-request-checks.md)); and running the
-dispatcher that carries Identity's events to the audit record arrive in later steps of
+Rate limits, with the request's address in each record; revoking a link on its own (today a new link or a
+disable ends it); the session list ([ADR-0059](../../docs/adr/0059-session-controls-and-request-checks.md));
+browser tests ([#129](https://github.com/heavymedl-labs/tetsu/issues/129)); and running the dispatcher that
+carries Identity's events to the audit record arrive in later steps of
 [#110](https://github.com/heavymedl-labs/tetsu/issues/110).
