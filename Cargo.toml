@@ -58,7 +58,7 @@ toml = { version = "1.2.1", default-features = false, features = ["parse", "serd
 # Passkey registration and discoverable sign-in (ADR-0047), with each ceremony's state kept in Postgres and never
 # sent to the browser, which needs the state serialisable. A sign-in stores a passkey only if its new JSON differs
 # from the stored text in nothing but the counter and backup flags, so an upgrade that writes a passkey differently
-# turns every sign-in into a storage failure, an outage: write a migration that rewrites stored passkeys first.
+# turns every sign-in into a storage failure, an outage: rewrite the stored passkeys in a migration first.
 webauthn-rs = { version = "0.6.2", features = ["conditional-ui", "danger-allow-state-serialisation"] }
 webpki-roots = "1"
 
