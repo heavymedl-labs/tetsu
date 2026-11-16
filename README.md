@@ -54,4 +54,8 @@ Free tiers for now, each behind a setting or a port so it can be swapped
 | Logs and alerts | [Grafana Cloud](https://grafana.com/products/cloud/) ([ADR-0049](docs/adr/0049-log-export.md)) | Live |
 | Email | [Resend](https://resend.com) ([ADR-0044](docs/adr/0044-email-delivery.md)) | With sign-in |
 
+## License
+
+None yet. The source is public to read, but no license is granted to use, copy, modify, or deploy it.
+
 [Architecture](ARCHITECTURE.md) · [Decisions](docs/adr/README.md) · [Quality bar](CONSTRAINTS.md) · [Glossary](docs/glossary.md) · [Contributing](CONTRIBUTING.md) · [Agents](AGENTS.md) · [Roadmap](https://github.com/heavymedl-labs/tetsu/milestones) · [Board](https://github.com/orgs/heavymedl-labs/projects/1)
