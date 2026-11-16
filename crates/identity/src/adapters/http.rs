@@ -10,7 +10,7 @@ use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{HeaderMap, HeaderName, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{MethodRouter, get, post};
 use serde_json::{Value, json};
 
 use crate::browser::{Change, ForChange, Origins, SignOut};
@@ -122,16 +122,36 @@ where
     Router::new()
         .route(ACCOUNT, get(account::<S>))
         .route(SIGN_IN, get(sign_in_page::<S>))
-        .route(SIGN_IN_BEGIN, post(begin_sign_in::<S>))
-        .route(SIGN_IN_FINISH, post(finish_sign_in::<S>))
+        .route(SIGN_IN_BEGIN, before_route::<S>(Before::BeginSignIn))
+        .route(SIGN_IN_FINISH, before_route::<S>(Before::FinishSignIn))
         .route(ENROLL, get(enroll_page::<S>))
-        .route(ENROLL_BEGIN, post(begin_enrollment::<S>))
-        .route(ENROLL_FINISH, post(finish_enrollment::<S>))
-        .route(ADD_BEGIN, post(begin_adding::<S>))
-        .route(ADD_FINISH, post(finish_adding::<S>))
+        .route(ENROLL_BEGIN, before_route::<S>(Before::BeginEnrollment))
+        .route(ENROLL_FINISH, before_route::<S>(Before::FinishEnrollment))
+        .route(ADD_BEGIN, signed_route::<S>(Signed::BeginAdding))
+        .route(ADD_FINISH, signed_route::<S>(Signed::FinishAdding))
         .route(SIGN_OUT, post(sign_out::<S>))
         .layer(DefaultBodyLimit::max(LARGEST_BODY))
         .with_state(Arc::new(Served { operators, web }))
+}
+
+fn before_route<S: OperatorStore + Send + Sync + 'static>(
+    step: Before,
+) -> MethodRouter<Arc<Served<S>>> {
+    post(
+        move |State(served): Shared<S>, headers: HeaderMap, body: Bytes| {
+            before(served, headers, body, step)
+        },
+    )
+}
+
+fn signed_route<S: OperatorStore + Send + Sync + 'static>(
+    step: Signed,
+) -> MethodRouter<Arc<Served<S>>> {
+    post(
+        move |State(served): Shared<S>, headers: HeaderMap, body: Bytes| {
+            signed(served, headers, body, step)
+        },
+    )
 }
 
 async fn sign_in_page<S>(State(served): Shared<S>) -> Response {
@@ -224,133 +244,91 @@ fn described(passkey: &HeldPasskey) -> &'static str {
     }
 }
 
-async fn begin_sign_in<S: OperatorStore>(
-    State(served): Shared<S>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
-    if let Err(refused) = admitted(&served.web, &headers, &body) {
-        return *refused;
-    }
-    let begun = served.operators.begin_sign_in(&served.web.party).await;
-    answered(&served.web, begun.map(|ceremony| begun_json(&ceremony)))
+/// A step of a ceremony before sign-in, which has no session to check.
+#[derive(Clone, Copy)]
+enum Before {
+    BeginSignIn,
+    FinishSignIn,
+    BeginEnrollment,
+    FinishEnrollment,
 }
 
-async fn finish_sign_in<S: OperatorStore>(
-    State(served): Shared<S>,
+/// A step of a ceremony a signed-in operator takes.
+#[derive(Clone, Copy)]
+enum Signed {
+    BeginAdding,
+    FinishAdding,
+}
+
+/// Runs a step before sign-in, once the request is admitted: begins or finishes signing in or enrolling.
+async fn before<S: OperatorStore>(
+    served: Arc<Served<S>>,
     headers: HeaderMap,
     body: Bytes,
-) -> Response {
-    let sent = match admitted(&served.web, &headers, &body) {
-        Ok(sent) => sent,
-        Err(refused) => return *refused,
-    };
+    step: Before,
+) -> Result<Response, Refused> {
+    let sent = admitted(&served.web, &headers, &body)?;
+    let (web, operators) = (&served.web, &served.operators);
     let (ceremony, response) = answer_in(&sent);
     let answer = Answer {
         ceremony,
         response: &response,
     };
-    let finished = served
-        .operators
-        .finish_sign_in(
-            &served.web.party,
-            answer,
-            &cookies(&headers),
-            &browser(&headers, None),
-        )
-        .await
-        .map(|token| {
-            let cookie = Realm::Operator.session_cookie(&token);
-            ([(header::SET_COOKIE, cookie)], next(ACCOUNT)).into_response()
-        });
-    answered(&served.web, finished)
+    let actor = browser(&headers, None);
+    let answered_with = match step {
+        Before::BeginSignIn => operators
+            .begin_sign_in(&web.party)
+            .await
+            .map(|begun| begun_json(&begun)),
+        Before::FinishSignIn => operators
+            .finish_sign_in(&web.party, answer, &cookies(&headers), &actor)
+            .await
+            .map(|token| {
+                let cookie = Realm::Operator.session_cookie(&token);
+                ([(header::SET_COOKIE, cookie)], next(ACCOUNT)).into_response()
+            }),
+        Before::BeginEnrollment => operators
+            .begin_enrollment(&web.party, sent["link"].as_str().unwrap_or_default())
+            .await
+            .map(|begun| begun_json(&begun)),
+        Before::FinishEnrollment => operators
+            .finish_enrollment(&web.party, ceremony, &response, &actor)
+            .await
+            .map(|_| next(SIGN_IN)),
+    };
+    Ok(answered(web, answered_with))
 }
 
-async fn begin_enrollment<S: OperatorStore>(
-    State(served): Shared<S>,
+/// Runs a signed-in operator's step, once the request has passed the checks for a change: begins or finishes
+/// adding a passkey.
+async fn signed<S: OperatorStore>(
+    served: Arc<Served<S>>,
     headers: HeaderMap,
     body: Bytes,
-) -> Response {
-    let sent = match admitted(&served.web, &headers, &body) {
-        Ok(sent) => sent,
-        Err(refused) => return *refused,
+    step: Signed,
+) -> Result<Response, Refused> {
+    let sent = json_in(&headers, &body)?;
+    let checked = acting(&served, &headers, &sent).await?;
+    let (web, operators) = (&served.web, &served.operators);
+    let answered_with = match step {
+        Signed::BeginAdding => operators
+            .begin_adding_passkey(&web.party, &checked)
+            .await
+            .map(|begun| begun_json(&begun)),
+        Signed::FinishAdding => {
+            let (ceremony, response) = answer_in(&sent);
+            let answer = Answer {
+                ceremony,
+                response: &response,
+            };
+            let actor = browser(&headers, Some(checked.session().operator()));
+            operators
+                .finish_adding_passkey(&web.party, &checked, answer, &actor)
+                .await
+                .map(|()| next(ACCOUNT))
+        }
     };
-    let link = sent["link"].as_str().unwrap_or_default();
-    let begun = served
-        .operators
-        .begin_enrollment(&served.web.party, link)
-        .await;
-    answered(&served.web, begun.map(|ceremony| begun_json(&ceremony)))
-}
-
-async fn finish_enrollment<S: OperatorStore>(
-    State(served): Shared<S>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
-    let sent = match admitted(&served.web, &headers, &body) {
-        Ok(sent) => sent,
-        Err(refused) => return *refused,
-    };
-    let (ceremony, response) = answer_in(&sent);
-    let finished = served
-        .operators
-        .finish_enrollment(
-            &served.web.party,
-            ceremony,
-            &response,
-            &browser(&headers, None),
-        )
-        .await
-        .map(|_| next(SIGN_IN));
-    answered(&served.web, finished)
-}
-
-async fn begin_adding<S: OperatorStore>(
-    State(served): Shared<S>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
-    let sent = match json_in(&headers, &body) {
-        Ok(sent) => sent,
-        Err(refused) => return *refused,
-    };
-    let checked = match acting(&served, &headers, &sent).await {
-        Ok(checked) => checked,
-        Err(refused) => return *refused,
-    };
-    let begun = served
-        .operators
-        .begin_adding_passkey(&served.web.party, &checked)
-        .await;
-    answered(&served.web, begun.map(|ceremony| begun_json(&ceremony)))
-}
-
-async fn finish_adding<S: OperatorStore>(
-    State(served): Shared<S>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
-    let sent = match json_in(&headers, &body) {
-        Ok(sent) => sent,
-        Err(refused) => return *refused,
-    };
-    let checked = match acting(&served, &headers, &sent).await {
-        Ok(checked) => checked,
-        Err(refused) => return *refused,
-    };
-    let (ceremony, response) = answer_in(&sent);
-    let answer = Answer {
-        ceremony,
-        response: &response,
-    };
-    let actor = browser(&headers, Some(checked.session().operator()));
-    let finished = served
-        .operators
-        .finish_adding_passkey(&served.web.party, &checked, answer, &actor)
-        .await
-        .map(|()| next(ACCOUNT));
-    answered(&served.web, finished)
+    Ok(answered(web, answered_with))
 }
 
 /// Signs out from the operator's page's form, with its form token, and sends the browser to sign in with its
@@ -386,7 +364,7 @@ async fn acting<S: OperatorStore>(
     served: &Served<S>,
     headers: &HeaderMap,
     sent: &Value,
-) -> Result<crate::CheckedSession, Box<Response>> {
+) -> Result<crate::CheckedSession, Refused> {
     let change = change(headers, sent["form"].as_str().unwrap_or_default());
     match served
         .operators
@@ -394,21 +372,39 @@ async fn acting<S: OperatorStore>(
         .await
     {
         Ok(ForChange::Acting(checked)) => Ok(checked),
-        Ok(ForChange::NoSession) => Err(Box::new(refusal(StatusCode::UNAUTHORIZED, SIGNED_OUT))),
-        Ok(ForChange::Refused) => Err(Box::new(refusal(StatusCode::FORBIDDEN, REFUSED))),
-        Err(error) => Err(Box::new(unavailable(&served.web, &error))),
+        Ok(ForChange::NoSession) => {
+            Err(Refused::with(refusal(StatusCode::UNAUTHORIZED, SIGNED_OUT)))
+        }
+        Ok(ForChange::Refused) => Err(Refused::with(refusal(StatusCode::FORBIDDEN, REFUSED))),
+        Err(error) => Err(Refused::with(unavailable(&served.web, &error))),
     }
 }
 
 /// A request before sign-in, which has no session to check: its JSON, if it comes from one of the realm's
 /// origins and says so in both ways a browser can (ADR-0059), or the answer it gets instead.
-fn admitted(web: &Web, headers: &HeaderMap, body: &Bytes) -> Result<Value, Box<Response>> {
+fn admitted(web: &Web, headers: &HeaderMap, body: &Bytes) -> Result<Value, Refused> {
     let origin = text(headers, &header::ORIGIN);
     let site = text(headers, &SEC_FETCH_SITE);
     if web.origins.admit(origin, site) {
         json_in(headers, body)
     } else {
-        Err(Box::new(refusal(StatusCode::FORBIDDEN, REFUSED)))
+        Err(Refused::with(refusal(StatusCode::FORBIDDEN, REFUSED)))
+    }
+}
+
+/// The answer a request gets when a check refuses it before its use case runs. Boxed, since a response is large and
+/// most requests pass.
+struct Refused(Box<Response>);
+
+impl Refused {
+    fn with(response: Response) -> Self {
+        Self(Box::new(response))
+    }
+}
+
+impl IntoResponse for Refused {
+    fn into_response(self) -> Response {
+        *self.0
     }
 }
 
@@ -416,14 +412,14 @@ const SEC_FETCH_SITE: HeaderName = HeaderName::from_static("sec-fetch-site");
 
 /// The JSON object a request sends, if it says it sends JSON. Anything else is refused before it is read: a form
 /// or plain text, which a page on another site can send without asking, is unsupported.
-fn json_in(headers: &HeaderMap, body: &Bytes) -> Result<Value, Box<Response>> {
+fn json_in(headers: &HeaderMap, body: &Bytes) -> Result<Value, Refused> {
     let is_json = text(headers, &header::CONTENT_TYPE).is_some_and(|kind| {
         kind.split(';')
             .next()
             .is_some_and(|kind| kind.trim().eq_ignore_ascii_case("application/json"))
     });
     if !is_json {
-        return Err(Box::new(refusal(
+        return Err(Refused::with(refusal(
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
             "send JSON",
         )));
@@ -431,7 +427,7 @@ fn json_in(headers: &HeaderMap, body: &Bytes) -> Result<Value, Box<Response>> {
     serde_json::from_slice::<Value>(body)
         .ok()
         .filter(Value::is_object)
-        .ok_or_else(|| Box::new(refusal(StatusCode::BAD_REQUEST, REFUSED)))
+        .ok_or_else(|| Refused::with(refusal(StatusCode::BAD_REQUEST, REFUSED)))
 }
 
 /// A ceremony's token and the browser's answer, as text, from what a request sent. Missing or of the wrong kind,
