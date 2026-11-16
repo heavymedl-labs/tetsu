@@ -872,6 +872,16 @@ mod tests {
         );
     }
 
+    /// Printing a session to start leaves out both hashes, saying only whether it replaces one.
+    #[test]
+    fn a_printed_session_start_hides_its_hashes() {
+        let start = SessionStart {
+            hash: [0xab; 32],
+            replacing: Some([0xcd; 32]),
+        };
+        assert_eq!(format!("{start:?}"), "SessionStart { replacing: true, .. }");
+    }
+
     /// Printing an answer leaves out its ceremony's token.
     #[test]
     fn a_printed_answer_hides_its_token() {

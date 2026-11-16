@@ -193,6 +193,15 @@ async fn an_accounts_passkeys_say_how_to_reach_them_and_whether_synced() {
     );
 }
 
+/// An operator whose passkeys are gone while their session lives has an account with none listed.
+#[tokio::test]
+async fn an_account_may_hold_no_passkey() {
+    let (operators, database, _, session) = signed_in().await;
+    as_admin(&database, "DELETE FROM identity.passkeys").await;
+    let account = operators.account(session.session()).await.expect("reads");
+    assert_eq!(account.map(|account| account.passkeys.len()), Some(0));
+}
+
 /// Reading an account fails as storage when the database refuses its lookup.
 #[tokio::test]
 async fn an_account_that_cannot_be_read_is_a_storage_failure() {
