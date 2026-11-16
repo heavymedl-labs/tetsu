@@ -1,0 +1,9 @@
+{% extends "ops_page.html" %}
+{% import "button.html" as ui %}
+{% block title %}Set up your passkey · Tetsu{% endblock %}
+{% block card %}
+<div class="mt-2 text-3xl font-semibold tracking-tight text-ink"><h1>Set up your passkey</h1></div>
+<p class="mt-4 text-pretty text-muted">This link sets up the passkey you sign in to Tetsu with. It works once, and
+only for a short time. Your device keeps the passkey; Tetsu never sees a password.</p>
+{% call ui::passkey("enroll") %}Create a passkey{% endcall %}
+{% endblock %}

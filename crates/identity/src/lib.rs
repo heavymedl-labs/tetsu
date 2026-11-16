@@ -2,7 +2,8 @@
 //! in slice 5; staff and customers follow.
 //!
 //! The public surface (ADR-0021): the use cases on [`Operators`], the driven port, the domain types they name, the
-//! module's registration, and the adapter constructor, which returns an [`Operators`].
+//! module's registration, the adapter constructor, which returns an [`Operators`], and the operator pages' router
+//! with the paths it serves.
 
 mod adapters;
 mod browser;
@@ -16,8 +17,11 @@ mod adding_tests;
 #[cfg(test)]
 mod enrollment_tests;
 #[cfg(test)]
+mod http_tests;
+#[cfg(test)]
 mod sign_in_tests;
 
+pub use adapters::http::{PATHS, Web, router};
 pub use adapters::postgres::postgres_store;
 pub use browser::{Change, CheckedSession, ForChange, Origins, SignOut};
 pub use domain::{

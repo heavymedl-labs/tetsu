@@ -1,0 +1,16 @@
+{#- The shell of each operator page: the shared page, Tetsu's passkey script, and one narrow column. A page's
+    struct adds `script`, the script's hashed URL, to what the shared page needs. -#}
+{% extends "../../../web/templates/page.html" %}
+{% block head %}<script type="module" src="{{ script }}"></script>{% endblock %}
+{% block demo %}<strong>Demo.</strong> Operators run Tetsu from here. A passkey made on the demo works only on the
+demo.{% endblock %}
+{% block body %}
+<main class="flex flex-1 items-center justify-center p-6">
+<div class="w-full max-w-sm">
+<p class="font-mono text-xs tracking-widest text-accent uppercase">Tetsu operators</p>
+{% block card %}{% endblock %}
+<p data-passkey-status role="status" aria-live="polite" class="mt-4 min-h-6 text-sm text-pretty text-muted"></p>
+<noscript><p class="text-sm text-muted">Passkeys need JavaScript, which this browser has turned off.</p></noscript>
+</div>
+</main>
+{% endblock %}
