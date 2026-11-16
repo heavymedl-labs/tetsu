@@ -77,7 +77,9 @@ describe("ceremony", () => {
       ],
     ]);
   });
+});
 
+describe("ceremony, creating a passkey", () => {
   it("enrolls and adds by creating a passkey, sending what the page gave with both halves", async () => {
     for (const [action, endpoint, extra] of [
       ["enroll", "/ops/enroll", { link: "L" }],
@@ -102,7 +104,9 @@ describe("ceremony", () => {
       });
     }
   });
+});
 
+describe("a ceremony that does not finish", () => {
   it("throws the server's refusal, in its words", async () => {
     serve([400, { error: "this sign-in could not be completed" }]);
     const refused = await ceremony("sign-in", {}, device(signed)).catch((error: unknown) => error);

@@ -91,7 +91,9 @@ describe("start", () => {
       expect(run).toHaveBeenCalledWith("add", { form }, device);
     }
   });
+});
 
+describe("start, when it cannot go on", () => {
   it("says why a ceremony did not finish, and stays", async () => {
     const shown = page(parts("sign-in"));
     start(shown);
