@@ -87,12 +87,25 @@ impl<'a> Change<'a> {
     }
 }
 
+/// A live session whose request passed the checks for a change: the realm's own origin and the session's form
+/// token. Only [`crate::Operators::session_for_change`] makes one, so a use case that changes state on a session's
+/// behalf, such as adding a passkey, cannot be reached without them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckedSession(pub(crate) Session);
+
+impl CheckedSession {
+    #[must_use]
+    pub fn session(&self) -> &Session {
+        &self.0
+    }
+}
+
 /// What a state-changing request may do. A refused request is told apart from one whose session has ended, so the
 /// page adapter can answer it as forbidden and record it (`v5.0.0-3.5.1`, `v5.0.0-16.3.3`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ForChange {
     /// The request passed the checks, and acts for this live session.
-    Acting(Session),
+    Acting(CheckedSession),
     /// The request passed the checks, but its session has ended or never was.
     NoSession,
     /// The request came from elsewhere, or without its session's form token, or with its cookie sent twice.

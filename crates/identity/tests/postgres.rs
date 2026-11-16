@@ -780,7 +780,7 @@ async fn a_change_needs_the_realms_origin_and_the_sessions_form_token() {
         .session_for_change(&origins(), &change(Some(ORIGIN), &form))
         .await;
     assert!(
-        matches!(&accepted, Ok(ForChange::Acting(session)) if session.operator() == kurt),
+        matches!(&accepted, Ok(ForChange::Acting(session)) if session.session().operator() == kurt),
         "{accepted:?}"
     );
 }

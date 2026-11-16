@@ -90,13 +90,19 @@ CREATE TABLE ceremonies (
     -- operator; a sign-in knows neither until the browser answers.
     operator_id bigint REFERENCES operators (id),
     link_hash bytea CHECK (octet_length(link_hash) = 32),
-    -- The session an addition began from, which alone may finish it.
-    session_hash bytea CHECK (octet_length(session_hash) = 32),
+    -- The session an addition began from, which alone may finish it; the
+    -- addition ends with it.
+    session_hash bytea CHECK (octet_length(session_hash) = 32)
+    REFERENCES sessions (token_hash) ON DELETE CASCADE,
+    -- An addition taken to be verified, which only storing its passkey may
+    -- then use up.
+    taken boolean NOT NULL DEFAULT FALSE,
     state jsonb NOT NULL CHECK (octet_length(state::text) <= 16384),
     ends_at timestamptz NOT NULL,
     CHECK ((kind IN ('enroll', 'add')) = (operator_id IS NOT NULL)),
     CHECK ((kind = 'enroll') = (link_hash IS NOT NULL)),
-    CHECK ((kind = 'add') = (session_hash IS NOT NULL))
+    CHECK ((kind = 'add') = (session_hash IS NOT NULL)),
+    CHECK (kind = 'add' OR NOT taken)
 );
 
 COMMENT ON TABLE ceremonies IS
@@ -114,6 +120,10 @@ CREATE INDEX ceremonies_ends_at ON ceremonies (ends_at);
 CREATE UNIQUE INDEX ceremonies_addition ON ceremonies (operator_id)
 WHERE kind = 'add';
 
+-- Ending a session finds the addition it began.
+CREATE INDEX ceremonies_session_hash ON ceremonies (session_hash)
+WHERE session_hash IS NOT NULL;
+
 -- The runner's default privileges give Identity's role every right on a new
 -- table; each is replaced by exactly what is granted below.
 REVOKE ALL ON operators, sessions, enrollments, passkeys, ceremonies
@@ -126,8 +136,9 @@ REVOKE ALL ON SEQUENCE operators_id_seq FROM tetsu_identity;
 -- its row while they do, so a disable at the same moment never misses what
 -- they add.
 GRANT SELECT (id, name), INSERT (name) ON operators TO tetsu_identity;
+-- The public ID too, which audit records name a session by, never its hash.
 GRANT SELECT (
-    token_hash, realm, operator_id, started_at, last_seen_at, ends_at
+    token_hash, id, realm, operator_id, started_at, last_seen_at, ends_at
 ),
 INSERT (token_hash, realm, operator_id, started_at, last_seen_at, ends_at),
 UPDATE (last_seen_at),
@@ -145,7 +156,7 @@ UPDATE (passkey, last_used_at),
 DELETE
 ON passkeys TO tetsu_identity_lookup;
 GRANT SELECT, INSERT, DELETE ON ceremonies TO tetsu_identity_lookup;
-GRANT UPDATE (token_hash, session_hash, state, ends_at) ON ceremonies
+GRANT UPDATE (token_hash, session_hash, taken, state, ends_at) ON ceremonies
 TO tetsu_identity_lookup;
 
 -- Each realm's limits live here, beside the clock that applies them, so no
@@ -502,11 +513,12 @@ $$;
 
 -- Keeps a sign-in ceremony's state for ten minutes under its token's hash.
 -- Anyone may begin one, so until step 5's rate limits two bounds keep the
--- table small without ever locking anyone out (ADR-0048, v5.0.0-6.3.1): each
--- begin sweeps up to a hundred ended ceremonies, and past ten thousand open
--- sign-ins it ends the oldest, so filling the table only shortens the time
--- others have to answer. Both skip rows another transaction holds, so begins
--- never wait on each other.
+-- table small and never refuse a begin (ADR-0048, v5.0.0-6.3.1): each begin
+-- sweeps up to a hundred ended ceremonies, and past ten thousand open sign-ins
+-- it ends the oldest. A flood of begins can still end a real ceremony before
+-- its person answers, until those rate limits. Both skip rows another
+-- transaction holds, so begins never wait on each other, under read committed
+-- only (TD002), where a skipped row is never a serialisation failure.
 CREATE FUNCTION begin_sign_in(wanted_hash bytea, wanted_state jsonb)
 RETURNS void
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
@@ -516,6 +528,10 @@ DECLARE
     at timestamptz := clock_timestamp();
     over bigint;
 BEGIN
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'beginning a sign-in needs read committed'
+        USING ERRCODE = 'TD002';
+    END IF;
     DELETE FROM identity.ceremonies AS c
     WHERE c.ctid = any(array(
         SELECT ended.ctid
@@ -559,20 +575,26 @@ AS $$
 $$;
 
 -- Signs an operator in with a passkey a sign-in verified, and says what came
--- of it: signed_in; disabled, for an operator disabled since the passkey was
--- read; raced, for a passkey another sign-in changed meanwhile, whose counter
--- this one must not overwrite; or null for a passkey that no longer exists.
--- It takes the operator's row as a sign-in does, so a disable waits for it
--- and then ends the session it starts, stores the passkey's new counter only
--- if it is still the one verified against, and starts the session, all in one
--- transaction, under read committed only (TD002).
+-- of it, with the new session's public ID: signed_in; disabled, for an
+-- operator disabled since the passkey was read; raced, for a passkey another
+-- sign-in changed meanwhile, whose counter this one must not overwrite; or
+-- null for a passkey that no longer exists or is no longer that operator's.
+-- It takes the operator's row as a sign-in does, so a disable waits for it and
+-- then ends the session it starts, stores the passkey's new state only if it
+-- is still the one verified against, and starts the session, all in one
+-- transaction, under read committed only (TD002). The database cannot check a
+-- signature, so it refuses (TD003) a new state that changes more than a
+-- sign-in may: the counter, never backwards, the backup state, and backup
+-- eligibility, only from false to true. A caller with Identity's role can
+-- still start a session; it cannot swap an operator's key.
 CREATE FUNCTION sign_in(
     wanted_credential bytea,
+    wanted_operator bigint,
     wanted_old jsonb,
     wanted_new jsonb,
     wanted_session bytea
 )
-RETURNS text
+RETURNS TABLE (signed text, session_id text)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
 AS $$
@@ -584,30 +606,58 @@ BEGIN
         RAISE EXCEPTION 'signing in needs read committed'
         USING ERRCODE = 'TD002';
     END IF;
+    IF NOT coalesce(
+        wanted_new #- '{cred,counter}' #- '{cred,backup_state}'
+        #- '{cred,backup_eligible}'
+        = wanted_old #- '{cred,counter}' #- '{cred,backup_state}'
+        #- '{cred,backup_eligible}'
+        AND (wanted_new #>> '{cred,counter}')::bigint
+        >= (wanted_old #>> '{cred,counter}')::bigint
+        AND (
+            (wanted_new #>> '{cred,backup_eligible}')::boolean
+            OR NOT (wanted_old #>> '{cred,backup_eligible}')::boolean
+        ),
+        false
+    ) THEN
+        RAISE EXCEPTION 'a sign-in changed more of a passkey than it may'
+        USING ERRCODE = 'TD003';
+    END IF;
     SELECT o.id, o.disabled_at INTO who, was
     FROM identity.passkeys AS p
     INNER JOIN identity.operators AS o ON p.operator_id = o.id
     WHERE p.credential_id = wanted_credential
     FOR SHARE OF o;
-    IF NOT FOUND THEN
-        RETURN null;
+    IF NOT FOUND OR who <> wanted_operator THEN
+        RETURN NEXT;
+        RETURN;
     ELSIF was IS NOT NULL THEN
-        RETURN 'disabled';
+        signed := 'disabled';
+        RETURN NEXT;
+        RETURN;
     END IF;
     UPDATE identity.passkeys AS p
     SET passkey = wanted_new, last_used_at = clock_timestamp()
-    WHERE p.credential_id = wanted_credential AND p.passkey = wanted_old;
+    WHERE
+        p.credential_id = wanted_credential
+        AND p.operator_id = wanted_operator
+        AND p.passkey = wanted_old;
     IF NOT FOUND THEN
         -- A passkey removed while this waited is unknown; one changed is raced.
-        RETURN CASE
+        signed := CASE
             WHEN EXISTS (
                 SELECT FROM identity.passkeys AS p
                 WHERE p.credential_id = wanted_credential
             ) THEN 'raced'
         END;
+        RETURN NEXT;
+        RETURN;
     END IF;
     PERFORM identity.start_session(wanted_session, 'operator', who);
-    RETURN 'signed_in';
+    signed := 'signed_in';
+    SELECT s.id::text INTO session_id
+    FROM identity.sessions AS s
+    WHERE s.token_hash = wanted_session;
+    RETURN NEXT;
 END
 $$;
 
@@ -698,29 +748,53 @@ BEGIN
         SET
             token_hash = excluded.token_hash,
             session_hash = excluded.session_hash,
+            taken = false,
             state = excluded.state,
             ends_at = excluded.ends_at;
     RETURN FOUND;
 END
 $$;
 
+-- Takes an open addition by its token's hash, for the session that began it,
+-- and returns its operator and state. It is marked taken, so it is taken once,
+-- and only storing its passkey uses it up; a session that did not begin it
+-- leaves it as it was.
+CREATE FUNCTION take_addition(wanted_hash bytea, wanted_session bytea)
+RETURNS TABLE (operator_id bigint, state text)
+LANGUAGE sql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+    UPDATE identity.ceremonies AS c
+    SET taken = true
+    WHERE
+        c.token_hash = wanted_hash
+        AND c.kind = 'add'
+        AND c.session_hash = wanted_session
+        AND NOT c.taken
+        AND c.ends_at > clock_timestamp()
+    RETURNING c.operator_id, c.state::text
+$$;
+
 -- Stores an operator's added passkey and ends their other sessions, keeping
 -- the one that added it (ADR-0059, v5.0.0-7.4.3), and says what came of it,
--- with how many live sessions it ended: added;
--- disabled; signed_out, for a session that ended or is not theirs; full, for
--- an operator who holds two already (ADR-0057); oversized, as for a first
--- passkey; taken, for a credential another passkey has, even one stored a
--- moment before; or null for an operator who does not exist. It takes the
--- operator's row for update, so what it checks stays true until it commits,
--- under read committed only (TD002). The session need not still be fresh: a
--- ceremony begun from a fresh one may take its ten minutes.
+-- with how many live sessions it ended and the adding session's public ID:
+-- added; disabled; signed_out, for a session that ended or is not theirs;
+-- ended, for an addition this session did not take or that ended, which it
+-- uses up, so the database itself ties the passkey to a ceremony a fresh
+-- session began; full, for an operator who holds two already (ADR-0057);
+-- oversized, as for a first passkey; taken, for a credential another passkey
+-- has, even one stored a moment before; or null for an operator who does not
+-- exist. It takes the operator's row for update, so what it checks stays true
+-- until it commits, under read committed only (TD002). The session need not
+-- still be fresh: an addition begun from a fresh one may take its ten minutes.
 CREATE FUNCTION add_passkey(
+    wanted_addition bytea,
     wanted_session bytea,
     wanted_operator bigint,
     wanted_credential bytea,
     wanted_passkey jsonb
 )
-RETURNS TABLE (added text, sessions_ended bigint)
+RETURNS TABLE (added text, sessions_ended bigint, session_id text)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
 AS $$
@@ -743,16 +817,32 @@ BEGIN
         RETURN;
     ELSIF was IS NOT NULL THEN
         added := 'disabled';
-    ELSIF NOT EXISTS (
-        SELECT FROM identity.sessions AS s
-        WHERE
-            s.token_hash = wanted_session
-            AND s.operator_id = wanted_operator
-            AND s.realm = 'operator'
-            AND at < s.ends_at
-            AND at < s.last_seen_at + interval '15 minutes'
-    ) THEN
+        RETURN NEXT;
+        RETURN;
+    END IF;
+    SELECT s.id::text INTO session_id
+    FROM identity.sessions AS s
+    WHERE
+        s.token_hash = wanted_session
+        AND s.operator_id = wanted_operator
+        AND s.realm = 'operator'
+        AND at < s.ends_at
+        AND at < s.last_seen_at + interval '15 minutes';
+    IF NOT FOUND THEN
         added := 'signed_out';
+        RETURN NEXT;
+        RETURN;
+    END IF;
+    DELETE FROM identity.ceremonies AS c
+    WHERE
+        c.token_hash = wanted_addition
+        AND c.kind = 'add'
+        AND c.taken
+        AND c.session_hash = wanted_session
+        AND c.operator_id = wanted_operator
+        AND c.ends_at > at;
+    IF NOT FOUND THEN
+        added := 'ended';
     ELSIF (
         SELECT count(*) FROM identity.passkeys AS p
         WHERE p.operator_id = wanted_operator
@@ -793,25 +883,26 @@ BEGIN
 END
 $$;
 
--- Takes a ceremony of a kind by its token's hash, once: it is removed whether
--- or not it is still open, and returned only if it is.
+-- Takes an enrollment or sign-in ceremony by its token's hash, once: it is
+-- removed whether or not it is still open, and returned only if it is.
+-- Additions are taken by take_addition, for their session alone.
 CREATE FUNCTION take_ceremony(wanted_hash bytea, wanted_kind text)
-RETURNS TABLE (
-    operator_id bigint, link_hash bytea, session_hash bytea, state text
-)
+RETURNS TABLE (operator_id bigint, link_hash bytea, state text)
 LANGUAGE sql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
 AS $$
     WITH taken AS (
         DELETE FROM identity.ceremonies AS c
-        WHERE c.token_hash = wanted_hash AND c.kind = wanted_kind
-        RETURNING c.operator_id, c.link_hash, c.session_hash, c.state, c.ends_at
+        WHERE
+            c.token_hash = wanted_hash
+            AND c.kind = wanted_kind
+            AND c.kind <> 'add'
+        RETURNING c.operator_id, c.link_hash, c.state, c.ends_at
     )
 
     SELECT
         taken.operator_id,
         taken.link_hash,
-        taken.session_hash,
         taken.state::text
     FROM taken
     WHERE taken.ends_at > clock_timestamp()
@@ -1065,15 +1156,19 @@ $$;
 
 -- No routine here is anyone's by default; Identity's role may run exactly the
 -- lookups it calls, so a helper added later is no one's until granted. It may
--- not start a session: only a passkey sign-in does, so a session begun within
--- ten minutes is a fresh passkey sign-in by construction (ADR-0048).
+-- not call start_session; only sign_in does. The database cannot check a
+-- passkey's signature, though, so a caller with this role can still start a
+-- session through sign_in; it cannot swap an operator's key, and it can add a
+-- passkey only through an addition a fresh session began and took. Database
+-- access stays the trust boundary (ADR-0061).
 REVOKE EXECUTE ON ALL ROUTINES IN SCHEMA identity FROM public;
 GRANT EXECUTE ON FUNCTION use_session(bytea, text), end_session(bytea, text),
 issue_enrollment(bytea, bigint), list_operators(), enrollee(bytea),
 begin_enrollment(bytea, bigint, bytea, jsonb), take_ceremony(bytea, text),
-begin_sign_in(bytea, jsonb), signer(bytea), sign_in(bytea, jsonb, jsonb, bytea),
-adder(bytea), begin_addition(bytea, bytea, bigint, jsonb),
-add_passkey(bytea, bigint, bytea, jsonb),
+begin_sign_in(bytea, jsonb), signer(bytea),
+sign_in(bytea, bigint, jsonb, jsonb, bytea), adder(bytea),
+begin_addition(bytea, bytea, bigint, jsonb), take_addition(bytea, bytea),
+add_passkey(bytea, bytea, bigint, bytea, jsonb),
 redeem_enrollment(bytea, bigint, bytea, jsonb), disable_operator(bigint),
 enable_operator(bigint), remove_passkeys(bigint), end_sessions(text, bigint)
 TO tetsu_identity;
@@ -1099,10 +1194,11 @@ ALTER FUNCTION begin_sign_in(bytea, jsonb) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION adder(bytea) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION begin_addition(bytea, bytea, bigint, jsonb)
 OWNER TO tetsu_identity_lookup;
-ALTER FUNCTION add_passkey(bytea, bigint, bytea, jsonb)
+ALTER FUNCTION take_addition(bytea, bytea) OWNER TO tetsu_identity_lookup;
+ALTER FUNCTION add_passkey(bytea, bytea, bigint, bytea, jsonb)
 OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION signer(bytea) OWNER TO tetsu_identity_lookup;
-ALTER FUNCTION sign_in(bytea, jsonb, jsonb, bytea)
+ALTER FUNCTION sign_in(bytea, bigint, jsonb, jsonb, bytea)
 OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION redeem_enrollment(bytea, bigint, bytea, jsonb)
 OWNER TO tetsu_identity_lookup;

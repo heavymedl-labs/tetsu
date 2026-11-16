@@ -93,13 +93,15 @@ impl RelyingParty {
     }
 
     /// A sign-in's answer, read once, with the credential ID and user handle it names, so its passkey can be found
-    /// and checked; or none for an answer that is not one.
+    /// and checked; or none for an answer that is not one, including a credential ID longer than the 1023 bytes
+    /// `WebAuthn` allows, which no record could keep.
     pub(crate) fn identify(&self, response: &str) -> Option<Identified> {
         let response: PublicKeyCredential = serde_json::from_str(response).ok()?;
         let (handle, credential) = self
             .webauthn
             .identify_discoverable_authentication(&response)
-            .ok()?;
+            .ok()
+            .filter(|(_, credential)| credential.len() <= 1023)?;
         Some(Identified {
             credential: credential.to_vec(),
             handle: *handle.as_bytes(),
@@ -111,8 +113,8 @@ impl RelyingParty {
     /// the passkey as it should now be stored, with its counter and backup flags moved on. `webauthn-rs` refuses a
     /// counter that does not move forward, as a cloned authenticator's would not.
     ///
-    /// A refusal is [`Error::Invalid`] naming its reason, for the audit record: `counter_regressed`,
-    /// `backup_eligibility_changed`, `user_not_verified`, or `not_verified` for any other.
+    /// A refusal is [`Error::Invalid`] naming its reason, for the audit record: `counter_regressed`, or
+    /// `not_verified` for any other.
     pub(crate) fn finish_authentication(
         &self,
         answer: &Identified,
@@ -188,14 +190,15 @@ pub(crate) struct Identified {
     response: PublicKeyCredential,
 }
 
-/// Why `webauthn-rs` refused a sign-in, as the audit record names it. A counter that does not move forward or a
-/// backup eligibility that changed may mean a cloned authenticator (`WebAuthn` L3 §6.1.1, §6.1.3).
+/// Why `webauthn-rs` refused a sign-in, as the audit record names it. A counter that does not move forward may mean
+/// a cloned authenticator (`WebAuthn` L3 §6.1.1); `webauthn-rs` checks it after the signature, so the authenticator
+/// said it. It checks user verification and backup eligibility before the signature, so anyone could claim
+/// either: they are recorded as `not_verified`, like any other refusal.
 fn refused(error: &WebauthnError) -> Error {
-    let reason = match error {
-        WebauthnError::CredentialPossibleCompromise => "counter_regressed",
-        WebauthnError::CredentialBackupEligibilityInconsistent => "backup_eligibility_changed",
-        WebauthnError::UserNotVerified => "user_not_verified",
-        _ => "not_verified",
+    let reason = if matches!(error, WebauthnError::CredentialPossibleCompromise) {
+        "counter_regressed"
+    } else {
+        "not_verified"
     };
     Error::Invalid(reason.to_string())
 }

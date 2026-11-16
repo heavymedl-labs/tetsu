@@ -131,3 +131,13 @@ never re-serialised.
     pending prompt before starting another.
 - **Step 5:** rate limits per address on sign-in begins and failures.
 - **Level 2 review:** a step-up assertion for adding a passkey; a fixed slot pool if begins need a hard bound.
+
+## Note added after review
+
+A doubt cycle on 2026-11-16 found that this page's "now" changes overclaimed. Revoking `start_session` did not
+make a fresh session a passkey sign-in by construction: Identity's role could still start one through
+`sign_in`, and swap an operator's key with it, and `add_passkey` trusted its caller for freshness. `sign_in` now
+refuses a new state that changes more than the counter and backup flags, and checks the operator Rust checked;
+`add_passkey` uses up an addition its session took; and user verification and backup eligibility, which
+`webauthn-rs` checks before the signature, are recorded as `not_verified`. The role can still start a session,
+which stays a matter of the shared login (ADR-0061). Identity's README has the current rules.

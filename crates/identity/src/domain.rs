@@ -370,12 +370,13 @@ pub struct Adder {
     pub credentials: Vec<Vec<u8>>,
 }
 
-/// A ceremony for adding a passkey, taken to finish: whose it is, the session it began from, which alone may
-/// finish it, and the state `webauthn-rs` needs.
+/// An addition taken to be finished: its token's and session's hashes, which storing its passkey uses it up by, its
+/// operator, and the state `webauthn-rs` needs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TakenAddition {
+    pub token: [u8; 32],
+    pub session: [u8; 32],
     pub operator: OperatorId,
-    pub session_hash: [u8; 32],
     pub state: String,
 }
 
@@ -386,6 +387,8 @@ pub enum Addition {
     Disabled,
     /// The session ended, or names another operator.
     SignedOut,
+    /// The addition was not taken by this session, or has ended.
+    Ended,
     /// The operator holds two passkeys already (ADR-0057).
     Full,
     Oversized,
@@ -399,6 +402,7 @@ impl Addition {
             "added" => Some(Self::Added),
             "disabled" => Some(Self::Disabled),
             "signed_out" => Some(Self::SignedOut),
+            "ended" => Some(Self::Ended),
             "full" => Some(Self::Full),
             "oversized" => Some(Self::Oversized),
             "taken" => Some(Self::Taken),
@@ -412,6 +416,7 @@ impl Addition {
             Self::Added => None,
             Self::Disabled => Some("disabled"),
             Self::SignedOut => Some("signed_out"),
+            Self::Ended => Some("ended"),
             Self::Full => Some("full"),
             Self::Oversized => Some("oversized"),
             Self::Taken => Some("taken"),
@@ -632,8 +637,8 @@ fn no_randomness(error: getrandom::Error) -> Error {
     Error::Unavailable(format!("no secure random source: {error}"))
 }
 
-/// A signed-in operator's session, as stored.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A signed-in operator's session, as stored. Printing it leaves out the hash of its token, which finds it.
+#[derive(Clone, PartialEq, Eq)]
 pub struct Session {
     /// The hash of the token that found it, so a change made in its name can be checked against it again.
     pub(crate) hash: [u8; 32],
@@ -671,6 +676,18 @@ impl Session {
     }
 }
 
+impl std::fmt::Debug for Session {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Session")
+            .field("realm", &self.realm)
+            .field("operator", &self.operator)
+            .field("started_at", &self.started_at)
+            .field("last_seen_at", &self.last_seen_at)
+            .field("ends_at", &self.ends_at)
+            .finish_non_exhaustive()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
     Invalid(String),
@@ -695,6 +712,29 @@ impl std::error::Error for Error {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Printing a session leaves out the hash of its token, which finds it.
+    #[test]
+    fn a_printed_session_hides_its_hash() {
+        let session = Session {
+            hash: [0xab; 32],
+            realm: Realm::Operator,
+            operator: OperatorId::new(1),
+            started_at: SystemTime::UNIX_EPOCH,
+            last_seen_at: SystemTime::UNIX_EPOCH,
+            ends_at: SystemTime::UNIX_EPOCH,
+        };
+        let printed = format!("{session:?}");
+        assert!(
+            printed.starts_with("Session { realm: Operator, operator: "),
+            "{printed}"
+        );
+        assert_eq!(
+            (printed.contains("hash"), printed.contains("171")),
+            (false, false),
+            "{printed}"
+        );
+    }
 
     #[test]
     fn an_actor_is_a_user_at_a_host() {

@@ -374,11 +374,16 @@ impl OperatorStore for PostgresOperators {
     ) -> Result<Option<SignIn>, Error> {
         let id = signer.operator.get();
         let credential = signer.credential.as_slice();
-        let parameters: [&(dyn ToSql + Sync); 4] =
-            [&credential, &signer.passkey, &passkey, &session.as_slice()];
+        let parameters: [&(dyn ToSql + Sync); 5] = [
+            &credential,
+            &id,
+            &signer.passkey,
+            &passkey,
+            &session.as_slice(),
+        ];
         let answer = OnceLock::new();
         self.query_recording(SIGN_IN, &parameters, &|rows| {
-            signing(rows, id, credential, actor, &answer)
+            signing(rows, signer, passkey, actor, &answer)
         })
         .await?;
         Ok(answer.get().copied().flatten())
@@ -408,31 +413,34 @@ impl OperatorStore for PostgresOperators {
         begun(&self.query(BEGIN_ADDITION, &parameters).await?)
     }
 
-    async fn take_addition(&self, token: &[u8; 32]) -> Result<Option<TakenAddition>, Error> {
-        self.query(TAKE_ADDITION, &[&token.as_slice()])
+    async fn take_addition(
+        &self,
+        token: &[u8; 32],
+        session: &[u8; 32],
+    ) -> Result<Option<TakenAddition>, Error> {
+        self.query(TAKE_ADDITION, &[&token.as_slice(), &session.as_slice()])
             .await?
             .first()
-            .map(addition_ceremony_from)
+            .map(|row| taken_addition(row, token, session))
             .transpose()
     }
 
     async fn add_passkey(
         &self,
-        session: &[u8; 32],
-        operator: OperatorId,
+        addition: &TakenAddition,
         passkey: &NewPasskey,
         actor: &Actor,
     ) -> Result<Option<Addition>, Error> {
-        let id = operator.get();
-        let parameters: [&(dyn ToSql + Sync); 4] = [
-            &session.as_slice(),
-            &id,
+        let parameters: [&(dyn ToSql + Sync); 5] = [
+            &addition.token.as_slice(),
+            &addition.session.as_slice(),
+            &addition.operator.get(),
             &passkey.credential_id,
             &passkey.passkey,
         ];
         let answer = OnceLock::new();
         self.query_recording(ADD_PASSKEY, &parameters, &|rows| {
-            adding(rows, id, &passkey.credential_id, actor, &answer)
+            adding(rows, addition.operator.get(), passkey, actor, &answer)
         })
         .await?;
         Ok(answer.get().copied().flatten())
@@ -789,20 +797,21 @@ fn signer_from(row: &Row, credential: &[u8]) -> Result<Signer, Error> {
     })
 }
 
-/// Reads what signing in came to, keeps it in `signed`, and makes the event it records: changed when a session
-/// started, and refused otherwise, with the reason and the credential ID, which is public.
+/// Reads what signing in came to, keeps it in `answered`, and makes the event it records: changed when a session
+/// started, and refused otherwise, with the reason, the credential ID, which is public, the session's public ID,
+/// and the passkey's flags. The function always answers one row, so none is a storage failure.
 fn signing(
     rows: &[Row],
-    id: i64,
-    credential: &[u8],
+    signer: &Signer,
+    passkey: &str,
     actor: &Actor,
-    signed: &OnceLock<Option<SignIn>>,
+    answered: &OnceLock<Option<SignIn>>,
 ) -> Result<Option<(&'static str, String)>, Error> {
-    let sign_in = rows
-        .first()
-        .map_or(Ok(None), |row| column::<Option<String>>(row, "signed"))
-        .and_then(|answer| answer.as_deref().map(sign_in_from).transpose())?;
-    let _ = signed.set(sign_in);
+    let row = rows.first().ok_or_else(answered_nothing)?;
+    let answer: Option<String> = column(row, "signed")?;
+    let session: Option<String> = column(row, "session_id")?;
+    let sign_in = answer.as_deref().map(sign_in_from).transpose()?;
+    let _ = answered.set(sign_in);
     let reason = match sign_in {
         Some(SignIn::SignedIn) => None,
         Some(SignIn::Disabled) => Some("disabled"),
@@ -817,8 +826,31 @@ fn signing(
         } else {
             "refused"
         },
-        json!({"operator_id": id, "credential": hex(credential), "reason": reason}),
+        json!({
+            "operator_id": signer.operator.get(),
+            "credential": hex(&signer.credential),
+            "reason": reason,
+            "session": session,
+            "flags": flags(passkey),
+        }),
     )))
+}
+
+/// A passkey's flags as stored, for the audit record: whether it may be backed up, whether it is, and whether its
+/// registration verified the user. They come from the passkey Identity just verified, which is always JSON.
+fn flags(passkey: &str) -> Value {
+    let passkey: Value = serde_json::from_str(passkey).unwrap_or_default();
+    let credential = &passkey["cred"];
+    json!({
+        "backup_eligible": credential["backup_eligible"],
+        "backup_state": credential["backup_state"],
+        "user_verified": credential["user_verified"],
+    })
+}
+
+/// A lookup function that always answers one row answered none: a fault of storage, never a guess.
+fn answered_nothing() -> Error {
+    Error::Storage("a lookup that always answers answered nothing".to_string())
 }
 
 /// An answer Identity's database never writes is a storage failure, never a guess.
@@ -854,30 +886,30 @@ fn user_handle(row: &Row) -> Result<[u8; 16], Error> {
         .map_err(|_| Error::Storage("a user handle is not 16 bytes".to_string()))
 }
 
-/// A ceremony for adding a passkey: its operator, the session it began from, which must be a 32-byte hash, and
-/// its state.
-fn addition_ceremony_from(row: &Row) -> Result<TakenAddition, Error> {
+/// An addition taken for a session: its operator and state, with the hashes it was taken by.
+fn taken_addition(row: &Row, token: &[u8; 32], session: &[u8; 32]) -> Result<TakenAddition, Error> {
     let operator: i64 = column(row, "operator_id")?;
-    let session: Vec<u8> = column(row, "session_hash")?;
     Ok(TakenAddition {
+        token: *token,
+        session: *session,
         operator: OperatorId::new(operator),
-        session_hash: session
-            .try_into()
-            .map_err(|_| Error::Storage("a session hash is not 32 bytes".to_string()))?,
         state: column(row, "state")?,
     })
 }
 
 /// Reads what adding a passkey came to, keeps it in `added`, and makes the event it records: changed when the
-/// passkey was stored, and refused otherwise, with the reason and the credential ID.
+/// passkey was stored, and refused otherwise, with the reason, the credential ID, the sessions it ended, the adding
+/// session's public ID, and the passkey's flags. The function always answers one row, so none is a storage failure.
 fn adding(
     rows: &[Row],
     id: i64,
-    credential: &[u8],
+    passkey: &NewPasskey,
     actor: &Actor,
     added: &OnceLock<Option<Addition>>,
 ) -> Result<Option<(&'static str, String)>, Error> {
-    let (addition, ended) = rows.first().map_or(Ok((None, 0)), added_and_ended)?;
+    let row = rows.first().ok_or_else(answered_nothing)?;
+    let (addition, ended) = added_and_ended(row)?;
+    let session: Option<String> = column(row, "session_id")?;
     let _ = added.set(addition);
     let reason = addition.map_or(Some("unknown"), Addition::reason);
     Ok(Some(event(
@@ -890,9 +922,11 @@ fn adding(
         },
         json!({
             "operator_id": id,
-            "credential": hex(credential),
+            "credential": hex(&passkey.credential_id),
             "reason": reason,
             "sessions_ended": ended,
+            "session": session,
+            "flags": flags(&passkey.passkey),
         }),
     )))
 }

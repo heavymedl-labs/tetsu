@@ -82,27 +82,31 @@ starts, finds, and ends their sessions. `postgres_store(pool)` returns it over P
 - **Signing in with a passkey** takes two requests. Beginning names no passkey, so the browser offers the
   person's own, and asks for the prompt a button opens; it keeps a ceremony for ten minutes, like enrollment's.
   Anyone may begin one, so until step 5's rate limits each begin sweeps up to a hundred ended ceremonies without
-  waiting on any, and past ten thousand open sign-ins ends the oldest rather than refusing, so filling the table
-  locks no one out (`v5.0.0-6.3.1`). Finishing takes the ceremony once, finds the passkey the answer names,
-  refuses it unless its enabled operator's user handle is the one the answer gives (`WebAuthn` L3 §7.2), and
-  verifies it through `webauthn-rs`, user verification included, which refuses a counter that does not move
-  forward or a backup eligibility that changed. Then, in one transaction holding the operator's row, it stores the
-  passkey's new counter only if no other sign-in changed it meanwhile, and starts the session. Only this starts a
-  session: Identity's role cannot call the function that does, so a session begun within ten minutes is a fresh
-  passkey sign-in by construction. Every outcome once the ceremony is taken is recorded as `identity.signed_in`,
-  a refusal with its reason (`malformed`, `unknown_credential`, `handle_mismatch`, `counter_regressed`,
-  `backup_eligibility_changed`, `user_not_verified`, `not_verified`, `disabled`, `raced`, or `unknown`), and every
-  refusal reads the same to the browser. The [sign-in review](../../docs/research/identity/passkey-sign-in-review.md)
-  lists what later steps add.
+  waiting on any, and past ten thousand open sign-ins ends the oldest rather than refusing a begin
+  (`v5.0.0-6.3.1`). A flood of begins can still end a real ceremony before its person answers, until those rate
+  limits. Finishing takes the ceremony once, finds the passkey the answer names, refuses a credential ID past
+  `WebAuthn`'s 1023 bytes, refuses it unless its enabled operator's user handle is the one the answer gives
+  (`WebAuthn` L3 §7.2), and verifies it through `webauthn-rs`, user verification included, which refuses a counter
+  that does not move forward or a backup eligibility that changed. Then, in one transaction holding the
+  operator's row, it stores the passkey's new state only if no other sign-in changed it meanwhile, and starts the
+  session. Every outcome once the ceremony is taken is recorded as `identity.signed_in`, with the passkey's flags
+  and, once one starts, the session's public ID; a refusal names its reason (`malformed`, `unknown_credential`,
+  `handle_mismatch`, `counter_regressed`, `not_verified`, `disabled`, `raced`, or `unknown`), and every refusal
+  reads the same to the browser. `webauthn-rs` checks user verification and backup eligibility before the
+  signature, so anyone could claim either: they are recorded as `not_verified`. The
+  [sign-in review](../../docs/research/identity/passkey-sign-in-review.md) lists what later steps add.
 - **Adding a second passkey** (ADR-0057) needs a fresh sign-in: a session begun with a passkey within ten minutes,
-  by Postgres's clock (ADR-0048, `v5.0.0-7.5.1`). The device is told which passkey the operator holds, so it makes
-  no second where it has one. Beginning stores a ceremony for ten minutes, one per operator, re-checking the
-  session, that the operator is enabled, and that they hold fewer than two, under their row. Finishing takes the
-  ceremony once, which only the session that began it may finish, verifies the registration as enrollment does,
-  and stores the passkey under the operator's row while the session is still live, refusing a third, a taken
-  credential, or one too large. Storing it ends the operator's other sessions and keeps this one (ADR-0059,
-  `v5.0.0-7.4.3`). Each attempt is recorded as `identity.passkey_added`, with the sessions it ended. Operators have
-  no email yet, so the audit record is the notice ADR-0040 asks for.
+  by Postgres's clock (ADR-0048, `v5.0.0-7.5.1`), on a request that passed the origin and form-token checks, which
+  only `session_for_change` makes. The device is told which passkey the operator holds, so it makes no second
+  where it has one. Beginning stores an addition for ten minutes, one per operator, re-checking the session, that
+  the operator is enabled, and that they hold fewer than two, under their row; it ends with the session that
+  began it. Finishing takes the addition for that session alone, once, and verifies the registration as
+  enrollment does. Storing the passkey uses the addition up, under the operator's row, while the session is still
+  live, refusing a third, a taken credential, or one too large, so the database itself ties the passkey to an
+  addition a fresh session began. It can finish up to twenty minutes after the sign-in: ten to begin, and the
+  addition's ten. Storing it ends the operator's other sessions and keeps this one (ADR-0059, `v5.0.0-7.4.3`).
+  Each attempt is recorded as `identity.passkey_added`, with the sessions it ended, the adding session's public
+  ID, and the passkey's flags. Operators have no email yet, so the audit record is the notice ADR-0040 asks for.
 - **Removing an operator's passkeys** lets them be issued a link and enroll again, as when their only passkey is
   lost or unusable. It ends their sessions and any ceremony too, since a session begun with a removed passkey must
   not outlive it (`v5.0.0-7.4.3`), takes their row for update as a disable does, and records
@@ -110,7 +114,10 @@ starts, finds, and ends their sessions. `postgres_store(pool)` returns it over P
   ADR-0057 has a new account made instead.
 - **What one database login allows.** Identity's role, which the web app shares with the operator command
   (ADR-0061), can issue a link for an operator with no passkey, so code that runs SQL as that role could enroll a
-  passkey of its own for one. Database access is the trust boundary, as for every operator command.
+  passkey of its own for one. The database cannot check a passkey's signature either, so such code can start a
+  session through the sign-in function. It cannot call `start_session` directly, swap an operator's key (a sign-in
+  may change only the counter, never backwards, and the backup flags), or add a passkey without an addition a
+  fresh session began. Database access is the trust boundary, as for every operator command.
 - **A device can keep a passkey Tetsu does not.** Every attempt registers under the operator's one user handle,
   and an authenticator replaces a discoverable passkey with a newer one for the same handle. If two tabs begin,
   the newer finishes, and the older then creates its passkey anyway, the device holds a passkey whose finish was

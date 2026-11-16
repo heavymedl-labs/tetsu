@@ -1,6 +1,5 @@
--- Takes a ceremony for adding a passkey, once, if it is still open.
+-- Takes an addition for the session that began it, once, if it is still open.
 SELECT
-    c.operator_id,
-    c.session_hash,
-    c.state
-FROM identity.take_ceremony($1, 'add') AS c;
+    t.operator_id,
+    t.state
+FROM identity.take_addition($1, $2) AS t;

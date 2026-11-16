@@ -1,6 +1,6 @@
 //! Use cases, reached only through [`Operators`] (ADR-0021).
 
-use crate::browser::{Change, ForChange, Origins, SignOut};
+use crate::browser::{Change, CheckedSession, ForChange, Origins, SignOut};
 use crate::domain::{
     Actor, Addition, Answer, Ceremony, CeremonyToken, Disabling, EnrollmentToken, Error, Fill,
     Issue, OperatorId, OperatorName, OperatorSummary, Realm, Redemption, Removal, Session,
@@ -154,8 +154,9 @@ impl<S: OperatorStore> Operators<S> {
     /// person's passkeys. The ceremony lasts ten minutes, and its state never leaves the store.
     ///
     /// # Errors
-    /// Fails with [`Error::Invalid`] while too many sign-ins are open; with [`Error::Unavailable`] if no secure
-    /// random source can be read; or if storage fails.
+    /// Never refuses for the number of sign-ins open: past a bound, the oldest end, so a flood of begins can end a
+    /// real one before its person answers until step 5's rate limits. Fails with [`Error::Unavailable`] if no
+    /// secure random source can be read, or if storage fails.
     pub async fn begin_sign_in(&self, party: &RelyingParty) -> Result<Ceremony, Error> {
         // Starting a discoverable sign-in cannot fail in webauthn-rs, so its failure joins the random source's.
         let (token, (options, state)) = CeremonyToken::generate(self.fill)
@@ -252,8 +253,9 @@ impl<S: OperatorStore> Operators<S> {
     pub async fn begin_adding_passkey(
         &self,
         party: &RelyingParty,
-        session: &Session,
+        checked: &CheckedSession,
     ) -> Result<Ceremony, Error> {
+        let session = checked.session();
         let adder = self
             .store
             .adder(&session.hash)
@@ -273,9 +275,9 @@ impl<S: OperatorStore> Operators<S> {
             .ok_or_else(not_adding)
     }
 
-    /// Finishes adding a passkey: takes the ceremony once, which must be the session's operator's, verifies the
-    /// registration, and stores the passkey while the session is still live and the operator holds fewer than two,
-    /// recording it.
+    /// Finishes adding a passkey: takes the addition once, for the session that began it, verifies the registration,
+    /// and stores the passkey while the session is still live and the operator holds fewer than two, using up the
+    /// addition and ending the operator's other sessions, recording it.
     ///
     /// # Errors
     /// Fails with [`Error::Invalid`], the same for every cause, for a ceremony that is malformed, unknown, ended, or
@@ -284,25 +286,20 @@ impl<S: OperatorStore> Operators<S> {
     pub async fn finish_adding_passkey(
         &self,
         party: &RelyingParty,
-        session: &Session,
+        checked: &CheckedSession,
         answer: Answer<'_>,
         actor: &Actor,
     ) -> Result<(), Error> {
         let held = CeremonyToken::parse(answer.ceremony).ok_or_else(not_adding)?;
         let taken = self
             .store
-            .take_addition(&held.hash())
+            .take_addition(&held.hash(), &checked.session().hash)
             .await?
-            .filter(|taken| taken.session_hash == session.hash)
             .ok_or_else(not_adding)?;
-        let (operator, state) = (taken.operator, taken.state);
         let passkey = party
-            .finish_registration(answer.response, &state)
+            .finish_registration(answer.response, &taken.state)
             .map_err(|error| refusing(error, not_adding))?;
-        let outcome = self
-            .store
-            .add_passkey(&session.hash, operator, &passkey, actor)
-            .await?;
+        let outcome = self.store.add_passkey(&taken, &passkey, actor).await?;
         outcome
             .filter(|addition| *addition == Addition::Added)
             .map(drop)
@@ -402,7 +399,7 @@ impl<S: OperatorStore> Operators<S> {
             return Ok(ForChange::Refused);
         };
         Ok(match self.live(&token).await? {
-            Some(session) => ForChange::Acting(session),
+            Some(session) => ForChange::Acting(CheckedSession(session)),
             None => ForChange::NoSession,
         })
     }

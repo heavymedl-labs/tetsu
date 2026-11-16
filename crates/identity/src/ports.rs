@@ -88,8 +88,8 @@ pub trait OperatorStore {
         actor: &Actor,
     ) -> impl Future<Output = Result<Option<Disabling>, Error>> + Send;
 
-    /// Keeps a sign-in ceremony's state for ten minutes under its token's hash, and says whether it did: not while
-    /// too many sign-ins are open at once.
+    /// Keeps a sign-in ceremony's state for ten minutes under its token's hash. It never refuses for the number
+    /// open: past a bound, the oldest end.
     fn begin_sign_in(
         &self,
         token: &[u8; 32],
@@ -119,9 +119,9 @@ pub trait OperatorStore {
         credential: &[u8],
     ) -> impl Future<Output = Result<Option<Signer>, Error>> + Send;
 
-    /// Stores a passkey's verified new state, if no other sign-in changed it meanwhile, and starts the operator's
-    /// session under a token's hash, in one transaction, recording it; says what came of it, or none for a passkey
-    /// that no longer exists.
+    /// Stores a passkey's verified new state, if no other sign-in changed it meanwhile and it is still the signer's
+    /// operator's, and starts the operator's session under a token's hash, in one transaction, recording it; says
+    /// what came of it, or none for a passkey that no longer exists or is no longer theirs.
     fn sign_in(
         &self,
         signer: &Signer,
@@ -147,18 +147,20 @@ pub trait OperatorStore {
         state: &str,
     ) -> impl Future<Output = Result<bool, Error>> + Send;
 
-    /// Takes a ceremony for adding a passkey by its token's hash, once, if it was still open.
+    /// Takes an addition by its token's hash for the session that began it, once, if it was still open. Only storing
+    /// its passkey then uses it up.
     fn take_addition(
         &self,
         token: &[u8; 32],
+        session: &[u8; 32],
     ) -> impl Future<Output = Result<Option<TakenAddition>, Error>> + Send;
 
-    /// Stores an operator's added passkey while their session is live, ending their other sessions, in one
-    /// transaction, recording it; says what came of it, or none for an operator who does not exist.
+    /// Stores an operator's added passkey while their session is live, using up the addition it took and ending
+    /// their other sessions, in one transaction, recording it; says what came of it, or none for an operator who
+    /// does not exist.
     fn add_passkey(
         &self,
-        session: &[u8; 32],
-        operator: OperatorId,
+        addition: &TakenAddition,
         passkey: &NewPasskey,
         actor: &Actor,
     ) -> impl Future<Output = Result<Option<Addition>, Error>> + Send;

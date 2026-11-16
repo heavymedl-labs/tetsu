@@ -695,9 +695,10 @@ async fn a_disable_answer_of_the_wrong_type_is_a_storage_failure() {
     }
 }
 
-/// Disabling, enabling, ending sessions, issuing a link, and beginning or finishing an enrollment refuse to run
-/// under repeatable read, where a row committed while they waited would escape their checks, whoever starts the
-/// transaction.
+/// Disabling, enabling, ending sessions, issuing a link, beginning or finishing an enrollment, signing in, and
+/// beginning or finishing an addition refuse to run under repeatable read, where a row committed while they waited
+/// would escape their checks, whoever starts the transaction; so does beginning a sign-in, whose sweep would fail
+/// there when begins overlap.
 #[tokio::test]
 async fn changes_that_wait_on_an_operator_need_read_committed() {
     let database = ready().await;
@@ -716,9 +717,12 @@ async fn changes_that_wait_on_an_operator_need_read_committed() {
         "SELECT identity.begin_enrollment(sha256('t'::bytea), 1, sha256('a'::bytea), '{}')",
         "SELECT identity.enable_operator(1)",
         "SELECT * FROM identity.remove_passkeys(1)",
-        "SELECT identity.sign_in(sha256('c'::bytea), '{}', '{}', sha256('s'::bytea))",
+        "SELECT * FROM identity.sign_in(sha256('c'::bytea), 1, '{}', '{}', sha256('s'::bytea))",
+        "SELECT identity.begin_sign_in(sha256('t'::bytea), '{}')",
         "SELECT identity.begin_addition(sha256('t'::bytea), sha256('s'::bytea), 1, '{}')",
-        "SELECT identity.add_passkey(sha256('s'::bytea), 1, sha256('c'::bytea), '{}')",
+        "SELECT * FROM identity.add_passkey(
+             sha256('t'::bytea), sha256('s'::bytea), 1, sha256('c'::bytea), '{}'
+         )",
     ] {
         let transaction = client
             .build_transaction()
@@ -810,7 +814,12 @@ async fn a_sign_in_waiting_on_a_removal_finds_its_passkey_unknown() {
             .expect("begins");
         let answer: Option<String> = transaction
             .query_one(
-                "SELECT identity.sign_in(sha256(int8send(1)), '{}', '{}', sha256('s'::bytea))",
+                "SELECT signed FROM identity.sign_in(
+                     sha256(int8send(1)), 1,
+                     '{\"cred\": {\"counter\": 0, \"backup_eligible\": false}}',
+                     '{\"cred\": {\"counter\": 0, \"backup_eligible\": false}}',
+                     sha256('s'::bytea)
+                 )",
                 &[],
             )
             .await
