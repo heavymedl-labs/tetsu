@@ -1,6 +1,6 @@
 # 0063. CI minutes per run
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-16
 
 ## Context

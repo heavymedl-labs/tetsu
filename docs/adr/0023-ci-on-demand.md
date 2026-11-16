@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-11-08
+- The benchmark harness compile's place in the image job superseded by [ADR-0063](0063-ci-minutes-per-run.md),
+  and every run checking everything by [ADR-0064](0064-ci-skips-unchanged-work.md)
 
 ## Context
 

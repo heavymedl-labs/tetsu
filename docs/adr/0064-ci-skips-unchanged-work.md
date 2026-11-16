@@ -1,6 +1,6 @@
 # 0064. CI skips work whose inputs are unchanged
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-16
 
 ## Context
