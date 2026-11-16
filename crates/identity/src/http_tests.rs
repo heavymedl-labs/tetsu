@@ -293,15 +293,23 @@ async fn a_stale_sign_in_is_told_to_sign_in_again_to_add_a_passkey() {
     assert!(page.body.contains("sign out and sign in"), "{}", page.body);
 }
 
-/// A sign-in counts as fresh for ten minutes, by this server's clock, and one it puts in the future counts too.
+/// A sign-in counts as fresh for under ten minutes, and one that starts after now counts too.
 #[test]
-fn a_sign_in_is_fresh_for_ten_minutes() {
+fn a_sign_in_is_fresh_for_under_ten_minutes() {
     use std::time::{Duration, SystemTime};
-    let ago = |seconds| SystemTime::now() - Duration::from_secs(seconds);
-    let ahead = SystemTime::now() + Duration::from_secs(60);
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let started = |seconds: i64| {
+        let offset = Duration::from_secs(seconds.unsigned_abs());
+        if seconds < 0 {
+            now - offset
+        } else {
+            now + offset
+        }
+    };
     assert_eq!(
-        [ago(0), ago(9 * 60), ago(11 * 60), ahead].map(crate::adapters::http::fresh),
-        [true, true, false, true]
+        [0, -599, -600, -601, 60]
+            .map(|seconds| crate::adapters::http::fresh(started(seconds), now)),
+        [true, true, false, false, true]
     );
 }
 

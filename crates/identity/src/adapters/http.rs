@@ -229,7 +229,7 @@ async fn shown<S: OperatorStore>(
                     .collect::<Vec<_>>()
                     .join(" "),
                 can_add: account.passkeys.len() < 2,
-                fresh: fresh(session.started_at()),
+                fresh: fresh(session.started_at(), SystemTime::now()),
                 passkeys: account.passkeys.iter().map(described).collect(),
                 form,
             })
@@ -241,12 +241,10 @@ async fn shown<S: OperatorStore>(
 /// The page uses it only to offer the button, or say why it does not.
 const FRESH: Duration = Duration::from_mins(10);
 
-/// Whether a session began recently enough to add a passkey. A start this server's clock puts in the future counts
-/// as fresh, and the database refuses it if the clocks disagree.
-pub(crate) fn fresh(started: SystemTime) -> bool {
-    SystemTime::now()
-        .duration_since(started)
-        .map_or(true, |age| age < FRESH)
+/// Whether a session that began at `started` is recent enough at `now` to add a passkey: under ten minutes old. A
+/// start this server's clock puts in the future counts as fresh, and the database refuses it if the clocks disagree.
+pub(crate) fn fresh(started: SystemTime, now: SystemTime) -> bool {
+    now.duration_since(started).map_or(true, |age| age < FRESH)
 }
 
 /// How the operator's page lists a passkey: whether it is synced to their other devices, as the authenticator

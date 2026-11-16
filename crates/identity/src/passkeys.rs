@@ -218,12 +218,10 @@ pub(crate) fn base64url(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     let mut text = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
-        let bits = chunk
-            .iter()
-            .zip([16, 8, 0])
-            .fold(0_u32, |bits, (byte, shift)| {
-                bits | u32::from(*byte) << shift
-            });
+        // The group's bytes fill the low three of four, with any missing as zeros, which no character reads.
+        let mut group = [0; 4];
+        group[1..=chunk.len()].copy_from_slice(chunk);
+        let bits = u32::from_be_bytes(group);
         for shift in [18, 12, 6, 0].into_iter().take(chunk.len() + 1) {
             let index = (bits >> shift) & 63;
             text.push(char::from(ALPHABET[index as usize]));
