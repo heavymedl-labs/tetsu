@@ -58,6 +58,16 @@ ends their sessions. `postgres_store(pool)` returns it over Postgres.
   keeps it. The page a link opens, `/ops/enroll`, arrives with passkeys, so until then a link opens nothing.
 - **Names are unique.** A create retried after its output was lost is refused, naming the operator who holds the
   name, rather than making a second.
+- **Enrolling a first passkey** takes two requests (`v5.0.0-6.4.1`). Beginning reads the link, which must be open
+  and name an enabled operator with no passkey, and keeps a ceremony for five minutes under a token only the
+  browser holds; nothing is used up, so a scanner that opens the link, or an abandoned attempt, costs nothing.
+  Finishing takes the ceremony once, verifies the registration through `webauthn-rs` against the realm's exact
+  origin, with user verification, and then, in one transaction holding the operator's row, stores the passkey and
+  uses up the link. It refuses an operator disabled, given a new link, or enrolled by another tab meanwhile, and
+  records `identity.enrollment_redeemed` with the outcome, the reason, and the credential ID. Every refusal
+  reads the same to the browser. The operator is not signed in: signing in with the new passkey proves it works.
+  Passkeys are discoverable, so signing in needs no name. Their AAGUID is not kept: with no attestation it says
+  nothing, and every operator enrolls again with attestation on Tetsu's domains (ADR-0057).
 - **Disabling an operator** ends every session and the open link they hold (`v5.0.0-7.4.2`), in separate statements
   after the update, so they see a sign-in or link committed while the update waited on the operator's row. That
   holds only under read committed, which every scoped transaction asks for, and which disabling and ending
@@ -91,7 +101,8 @@ ends their sessions. `postgres_store(pool)` returns it over Postgres.
 
 ## Not yet
 
-Enrolling and signing in with passkeys, which the `passkeys` table already holds, revoking a link on its own
+Signing in with a passkey, the pages and script that run enrollment in a browser, recording a registration
+that fails to verify (with the sign-in rate limits), revoking a link on its own
 (today a new link or a disable ends it), the sign-in
 pages, the `Sec-Fetch-Site` check, the headers that apply these checks, the session list
 ([ADR-0059](../../docs/adr/0059-session-controls-and-request-checks.md)), rate limits, the `identity.signed_in`

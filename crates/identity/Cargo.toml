@@ -19,8 +19,12 @@ subtle.workspace = true
 tetsu-kernel.workspace = true
 tetsu-postgres.workspace = true
 tokio-postgres.workspace = true
+webauthn-rs.workspace = true
 
 [dev-dependencies]
+passkey.workspace = true
+# Only for its feature that writes bytes as base64url, as browsers and webauthn-rs do.
+passkey-types.workspace = true
 proptest.workspace = true
 tokio.workspace = true
 

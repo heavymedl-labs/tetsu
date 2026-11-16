@@ -1,7 +1,8 @@
 //! The driven port Identity calls out through.
 
 use crate::domain::{
-    Actor, Disabling, Error, Issue, OperatorId, OperatorName, OperatorSummary, Realm, Session,
+    Actor, Disabling, Enrollee, Error, Issue, NewPasskey, OperatorId, OperatorName,
+    OperatorSummary, Realm, Redemption, Session, TakenCeremony,
 };
 use std::future::Future;
 
@@ -52,6 +53,38 @@ pub trait OperatorStore {
         operator: OperatorId,
         actor: &Actor,
     ) -> impl Future<Output = Result<Option<Issue>, Error>> + Send;
+
+    /// The operator an enrollment link's hash names, while the link is open, the operator enabled, and no passkey
+    /// theirs yet. Reading it uses nothing up.
+    fn enrollee(
+        &self,
+        link: &[u8; 32],
+    ) -> impl Future<Output = Result<Option<Enrollee>, Error>> + Send;
+
+    /// Keeps an enrollment ceremony's state for five minutes under its token's hash, with the link it will redeem.
+    fn begin_enrollment(
+        &self,
+        token: &[u8; 32],
+        operator: OperatorId,
+        link: &[u8; 32],
+        state: &str,
+    ) -> impl Future<Output = Result<(), Error>> + Send;
+
+    /// Takes an enrollment ceremony by its token's hash, once: it is gone after this, and returned only if it was
+    /// still open.
+    fn take_enrollment(
+        &self,
+        token: &[u8; 32],
+    ) -> impl Future<Output = Result<Option<TakenCeremony>, Error>> + Send;
+
+    /// Stores an operator's first passkey and uses up the ceremony's link, in one transaction, and says what came of
+    /// it, or none for an operator who does not exist.
+    fn redeem_enrollment(
+        &self,
+        ceremony: &TakenCeremony,
+        passkey: &NewPasskey,
+        actor: &Actor,
+    ) -> impl Future<Output = Result<Option<Redemption>, Error>> + Send;
 
     /// Disables an operator, ending every session and enrollment link they hold, and says what it did, or none for
     /// an operator who does not exist.

@@ -2,9 +2,10 @@
 
 use crate::browser::{Change, ForChange, Origins, SignOut};
 use crate::domain::{
-    Actor, Disabling, EnrollmentToken, Error, Fill, Issue, OperatorId, OperatorName,
-    OperatorSummary, Realm, Session, SessionToken,
+    Actor, Ceremony, CeremonyToken, Disabling, EnrollmentToken, Error, Fill, Issue, OperatorId,
+    OperatorName, OperatorSummary, Realm, Redemption, Session, SessionToken,
 };
+use crate::passkeys::RelyingParty;
 use crate::ports::OperatorStore;
 
 /// The operator realm's use cases over a store. It offers nothing that reaches the store, so no caller can read or
@@ -61,6 +62,70 @@ impl<S: OperatorStore> Operators<S> {
                 operator.get()
             ))),
             None => Err(no_operator(operator)),
+        }
+    }
+
+    /// Begins enrolling an operator's first passkey from the token their enrollment link carries. The link stays
+    /// open: only finishing uses it up, so a scanner that opens the page, or a ceremony the operator abandons, costs
+    /// nothing. The ceremony lasts five minutes, and its state never leaves the store.
+    ///
+    /// # Errors
+    /// Fails with [`Error::Invalid`], the same for every cause, for a link that is malformed, unknown, ended, or
+    /// names an operator who is disabled or holds a passkey; if no secure random source can be read; or if storage
+    /// fails.
+    pub async fn begin_enrollment(
+        &self,
+        party: &RelyingParty,
+        link: &str,
+    ) -> Result<Ceremony, Error> {
+        let link = EnrollmentToken::parse(link).ok_or_else(not_enrolling)?;
+        let enrollee = self
+            .store
+            .enrollee(&link.hash())
+            .await?
+            .ok_or_else(not_enrolling)?;
+        let (options, state) = party.begin_registration(enrollee.user_handle, &enrollee.name)?;
+        let token = CeremonyToken::generate(self.fill)?;
+        self.store
+            .begin_enrollment(&token.hash(), enrollee.operator, &link.hash(), &state)
+            .await?;
+        Ok(Ceremony { token, options })
+    }
+
+    /// Finishes enrolling: verifies the browser's registration against its ceremony, then stores the passkey and
+    /// uses up the link in one transaction, and records it. The ceremony is used up whatever happens. The operator
+    /// is not signed in: they sign in with the new passkey, which proves it works.
+    ///
+    /// # Errors
+    /// Fails with [`Error::Invalid`], the same for every cause, for a ceremony that is malformed, unknown, or ended,
+    /// a registration that does not verify, or a link or operator that no longer allows it; or if storage fails.
+    pub async fn finish_enrollment(
+        &self,
+        party: &RelyingParty,
+        ceremony: &str,
+        response: &str,
+        actor: &Actor,
+    ) -> Result<OperatorId, Error> {
+        let held = CeremonyToken::parse(ceremony).ok_or_else(not_enrolling)?;
+        let taken = self
+            .store
+            .take_enrollment(&held.hash())
+            .await?
+            .ok_or_else(not_enrolling)?;
+        let passkey =
+            party
+                .finish_registration(response, &taken.state)
+                .map_err(|error| match error {
+                    Error::Invalid(_) => not_enrolling(),
+                    other => other,
+                })?;
+        match self
+            .store
+            .redeem_enrollment(&taken, &passkey, actor)
+            .await?
+        {
+            Some(Redemption::Redeemed) => Ok(taken.operator),
+            _ => Err(not_enrolling()),
         }
     }
 
@@ -205,6 +270,12 @@ impl<S: OperatorStore> Operators<S> {
     async fn live(&self, token: &SessionToken) -> Result<Option<Session>, Error> {
         self.store.use_session(&token.hash(), Realm::Operator).await
     }
+}
+
+/// One answer for every way an enrollment can fail, so a browser learns nothing about which links or operators
+/// exist.
+fn not_enrolling() -> Error {
+    Error::Invalid("this enrollment link has ended or is not valid".to_string())
 }
 
 fn no_operator(operator: OperatorId) -> Error {

@@ -70,9 +70,6 @@ CREATE TABLE passkeys (
     ),
     operator_id bigint NOT NULL REFERENCES operators (id),
     passkey jsonb NOT NULL CHECK (octet_length(passkey::text) <= 8192),
-    -- Which kind of authenticator made it, kept for the attestation gate
-    -- before the Level 2 review (ADR-0057); all zeros when it does not say.
-    aaguid uuid NOT NULL,
     created_at timestamptz NOT NULL,
     last_used_at timestamptz
 );
@@ -82,9 +79,29 @@ COMMENT ON TABLE passkeys IS
 
 CREATE INDEX passkeys_operator_id ON passkeys (operator_id);
 
+-- A passkey ceremony under way: the state webauthn-rs needs to finish it,
+-- under the hash of a token only the browser holds, good once and for five
+-- minutes, and never sent to the browser (ADR-0047). An enrollment keeps the
+-- link it will redeem, which is used up only when the passkey is stored.
+CREATE TABLE ceremonies (
+    token_hash bytea PRIMARY KEY CHECK (octet_length(token_hash) = 32),
+    kind text NOT NULL CHECK (kind IN ('enroll')),
+    operator_id bigint NOT NULL REFERENCES operators (id),
+    link_hash bytea CHECK (octet_length(link_hash) = 32),
+    state jsonb NOT NULL CHECK (octet_length(state::text) <= 16384),
+    ends_at timestamptz NOT NULL,
+    CHECK (kind <> 'enroll' OR link_hash IS NOT NULL)
+);
+
+COMMENT ON TABLE ceremonies IS
+'tetsu:global: found by its token before anyone is signed in';
+
+CREATE INDEX ceremonies_operator_id ON ceremonies (operator_id);
+
 -- The runner's default privileges give Identity's role every right on a new
 -- table; each is replaced by exactly what is granted below.
-REVOKE ALL ON operators, sessions, enrollments, passkeys FROM tetsu_identity;
+REVOKE ALL ON operators, sessions, enrollments, passkeys, ceremonies
+FROM tetsu_identity;
 REVOKE ALL ON SEQUENCE operators_id_seq FROM tetsu_identity;
 
 -- Identity's role adds and reads operators, and reaches sessions and links
@@ -102,9 +119,13 @@ DELETE ON sessions TO tetsu_identity_lookup;
 GRANT SELECT, INSERT, DELETE ON enrollments TO tetsu_identity_lookup;
 GRANT UPDATE (token_hash, issued_at, ends_at) ON enrollments
 TO tetsu_identity_lookup;
-GRANT SELECT (id, name, created_at, disabled_at), UPDATE (disabled_at)
+GRANT SELECT (id, name, user_handle, created_at, disabled_at),
+UPDATE (disabled_at)
 ON operators TO tetsu_identity_lookup;
-GRANT SELECT (operator_id) ON passkeys TO tetsu_identity_lookup;
+GRANT SELECT (credential_id, operator_id),
+INSERT (credential_id, operator_id, passkey, created_at)
+ON passkeys TO tetsu_identity_lookup;
+GRANT SELECT, INSERT, DELETE ON ceremonies TO tetsu_identity_lookup;
 
 -- Each realm's limits live here, beside the clock that applies them, so no
 -- caller can lengthen a session by passing other numbers (ADR-0048). Each
@@ -315,6 +336,134 @@ AS $$
     ORDER BY o.id
 $$;
 
+-- The operator an enrollment link names, while the link is open, the operator
+-- enabled, and no passkey theirs yet, with the user handle and name a
+-- registration needs; nothing otherwise. Reading a link uses nothing up.
+CREATE FUNCTION enrollee(wanted_link bytea)
+RETURNS TABLE (operator_id bigint, user_handle bytea, name text)
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+    SELECT
+        o.id,
+        uuid_send(o.user_handle),
+        o.name
+    FROM identity.enrollments AS e
+    INNER JOIN identity.operators AS o ON e.operator_id = o.id
+    WHERE
+        e.token_hash = wanted_link
+        AND e.ends_at > clock_timestamp()
+        AND o.disabled_at IS NULL
+        AND NOT EXISTS (
+            SELECT FROM identity.passkeys AS p WHERE p.operator_id = o.id
+        )
+$$;
+
+-- Keeps a ceremony's state for five minutes under its token's hash, and
+-- removes ceremonies that have ended, so none piles up.
+CREATE FUNCTION begin_ceremony(
+    wanted_hash bytea,
+    wanted_kind text,
+    wanted_operator bigint,
+    wanted_link bytea,
+    wanted_state jsonb
+)
+RETURNS void
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    at timestamptz := clock_timestamp();
+BEGIN
+    DELETE FROM identity.ceremonies AS c WHERE c.ends_at <= at;
+    INSERT INTO identity.ceremonies
+        (token_hash, kind, operator_id, link_hash, state, ends_at)
+    VALUES (
+        wanted_hash,
+        wanted_kind,
+        wanted_operator,
+        wanted_link,
+        wanted_state,
+        at + interval '5 minutes'
+    );
+END
+$$;
+
+-- Takes a ceremony of a kind by its token's hash, once: it is removed whether
+-- or not it is still open, and returned only if it is.
+CREATE FUNCTION take_ceremony(wanted_hash bytea, wanted_kind text)
+RETURNS TABLE (operator_id bigint, link_hash bytea, state text)
+LANGUAGE sql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+    WITH taken AS (
+        DELETE FROM identity.ceremonies AS c
+        WHERE c.token_hash = wanted_hash AND c.kind = wanted_kind
+        RETURNING c.operator_id, c.link_hash, c.state, c.ends_at
+    )
+
+    SELECT
+        taken.operator_id,
+        taken.link_hash,
+        taken.state::text
+    FROM taken
+    WHERE taken.ends_at > clock_timestamp()
+$$;
+
+-- Stores an operator's first passkey and uses up the link that let them, in
+-- one transaction, and says what came of it: redeemed; disabled; enrolled,
+-- for an operator who has a passkey already, as when two tabs finish one
+-- link; expired, for a link that ended or was replaced; taken, for a
+-- credential another passkey has; or null for an operator who does not exist.
+-- It takes the operator's row first, so a link being issued, a disable, or
+-- another tab's passkey waits, and what it checks stays true until it commits.
+CREATE FUNCTION redeem_enrollment(
+    wanted_link bytea,
+    wanted_operator bigint,
+    wanted_credential bytea,
+    wanted_passkey jsonb
+)
+RETURNS text
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    was timestamptz;
+BEGIN
+    SELECT o.disabled_at INTO was
+    FROM identity.operators AS o
+    WHERE o.id = wanted_operator
+    FOR NO KEY UPDATE;
+    IF NOT FOUND THEN
+        RETURN null;
+    ELSIF was IS NOT NULL THEN
+        RETURN 'disabled';
+    ELSIF EXISTS (
+        SELECT FROM identity.passkeys AS p WHERE p.operator_id = wanted_operator
+    ) THEN
+        RETURN 'enrolled';
+    ELSIF EXISTS (
+        SELECT FROM identity.passkeys AS p
+        WHERE p.credential_id = wanted_credential
+    ) THEN
+        RETURN 'taken';
+    END IF;
+    DELETE FROM identity.enrollments AS e
+    WHERE
+        e.token_hash = wanted_link
+        AND e.operator_id = wanted_operator
+        AND e.ends_at > clock_timestamp();
+    IF NOT FOUND THEN
+        RETURN 'expired';
+    END IF;
+    INSERT INTO identity.passkeys
+        (credential_id, operator_id, passkey, created_at)
+    VALUES
+        (wanted_credential, wanted_operator, wanted_passkey, clock_timestamp());
+    RETURN 'redeemed';
+END
+$$;
+
 -- Disables an operator, then ends every session it holds in any realm and its
 -- enrollment link (v5.0.0-7.4.2), and says whether it acted and how many live
 -- ones it ended, spent ones going too: done is false for an operator already
@@ -443,14 +592,9 @@ BEGIN
 END
 $$;
 
-REVOKE EXECUTE ON FUNCTION start_session(bytea, text, bigint),
-use_session(bytea, text), end_session(bytea, text),
-issue_enrollment(bytea, bigint), list_operators(), disable_operator(bigint),
-enable_operator(bigint), end_sessions(text, bigint) FROM public;
-GRANT EXECUTE ON FUNCTION start_session(bytea, text, bigint),
-use_session(bytea, text), end_session(bytea, text),
-issue_enrollment(bytea, bigint), list_operators(), disable_operator(bigint),
-enable_operator(bigint), end_sessions(text, bigint) TO tetsu_identity;
+-- Every function above is one of these lookups, for Identity's role alone.
+REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA identity FROM public;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA identity TO tetsu_identity;
 
 -- A new owner needs CREATE on the schema at the moment it takes a function,
 -- and no longer after.
@@ -461,6 +605,12 @@ ALTER FUNCTION use_session(bytea, text) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION end_session(bytea, text) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION issue_enrollment(bytea, bigint) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION list_operators() OWNER TO tetsu_identity_lookup;
+ALTER FUNCTION enrollee(bytea) OWNER TO tetsu_identity_lookup;
+ALTER FUNCTION begin_ceremony(bytea, text, bigint, bytea, jsonb)
+OWNER TO tetsu_identity_lookup;
+ALTER FUNCTION take_ceremony(bytea, text) OWNER TO tetsu_identity_lookup;
+ALTER FUNCTION redeem_enrollment(bytea, bigint, bytea, jsonb)
+OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION disable_operator(bigint) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION enable_operator(bigint) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION end_sessions(text, bigint) OWNER TO tetsu_identity_lookup;

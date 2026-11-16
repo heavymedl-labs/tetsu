@@ -21,6 +21,7 @@ maximum-db-staleness = "P7D"
 ignore = [
     { id = "RUSTSEC-2025-0057", reason = "fxhash, unmaintained, comes only through monoio in the benchmark harness. Tracked in #94. Review by 2026-12-10." },
     { id = "RUSTSEC-2026-0441", reason = "pin-utils, unmaintained, comes only through monoio in the benchmark harness. Tracked in #94. Review by 2026-12-10." },
+    { id = "RUSTSEC-2023-0071", reason = "rsa's timing leak of a private key; webauthn-rs only verifies RS256 signatures with public keys, and Tetsu holds no RSA private key. crypto-glue 0.2.2 pins rsa 0.10.0-rc.19, and the fixed 0.10.0 drops a feature it needs. Tracked in #139. Review by 2026-12-15." },
 ]
 
 [licenses]
@@ -33,6 +34,8 @@ allow = [
     "Zlib",
     "Unicode-3.0",
     "CDLA-Permissive-2.0",
+    # webauthn-rs, shipped unmodified; file-level copyleft (ADR-0047).
+    "MPL-2.0",
 ]
 confidence-threshold = 0.93
 # Our own crates are unpublished.

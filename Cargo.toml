@@ -26,6 +26,10 @@ opentelemetry = { version = "0.33.1", default-features = false, features = ["log
 opentelemetry-appender-tracing = { version = "0.33.1", default-features = false, features = ["experimental_span_attributes"] }
 opentelemetry-otlp = { version = "0.33.1", default-features = false, features = ["gzip-http", "http-proto", "internal-logs", "logs", "reqwest-blocking-client", "reqwest-rustls"] }
 opentelemetry_sdk = { version = "0.33.1", default-features = false, features = ["logs"] }
+# A virtual authenticator that makes real passkeys and plays hostile clients, for sign-in tests only (ADR-0058),
+# with WebAuthn's bytes written as base64url, as a browser writes them.
+passkey = "0.6"
+passkey-types = { version = "0.6", features = ["serialize_bytes_as_base64_string"] }
 # Property tests for Tier 1 invariants, as a dev-dependency only (ADR-0046).
 proptest = "1.12"
 rustls = "0.23.46"
@@ -51,6 +55,9 @@ tokio = { version = "1.54", features = ["macros", "net", "rt-multi-thread", "tim
 tokio-postgres = "0.7"
 tokio-postgres-rustls = "0.14"
 toml = { version = "1.2.1", default-features = false, features = ["parse", "serde", "std"] }
+# Passkey registration and sign-in (ADR-0047), with each ceremony's state kept in Postgres and never sent to the
+# browser, which needs the state serialisable.
+webauthn-rs = { version = "0.6.2", features = ["danger-allow-state-serialisation"] }
 webpki-roots = "1"
 
 [workspace.lints.rust]

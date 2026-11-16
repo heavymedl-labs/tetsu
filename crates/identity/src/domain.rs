@@ -238,30 +238,124 @@ fn from_hex<const N: usize>(text: &str) -> Option<[u8; N]> {
     Some(bytes)
 }
 
-/// What an enrollment link carries: 256 random bits, like a session token, good once and for an hour. Only its hash
-/// is stored, and the operator command prints it only to the terminal that ran it (ADR-0040).
-#[derive(Clone)]
-pub struct EnrollmentToken(SessionToken);
+/// A token of 256 random bits, like a session token, of which only the hash is stored, and whose `Debug` hides it.
+macro_rules! secret_token {
+    ($name:ident, $doc:literal) => {
+        #[doc = $doc]
+        #[derive(Clone, PartialEq, Eq)]
+        pub struct $name(SessionToken);
 
-impl EnrollmentToken {
-    pub(crate) fn generate(fill: Fill) -> Result<Self, Error> {
-        SessionToken::generate(fill).map(Self)
-    }
+        impl $name {
+            pub(crate) fn generate(fill: Fill) -> Result<Self, Error> {
+                SessionToken::generate(fill).map(Self)
+            }
 
-    /// The token as an enrollment link carries it.
-    #[must_use]
-    pub fn to_text(&self) -> String {
-        self.0.to_text()
-    }
+            /// The token in the form [`Self::to_text`] writes, and nothing else.
+            #[must_use]
+            pub fn parse(text: &str) -> Option<Self> {
+                SessionToken::parse(text).map(Self)
+            }
 
-    pub(crate) fn hash(&self) -> [u8; 32] {
-        self.0.hash()
-    }
+            /// The token as 64 lowercase hexadecimal digits.
+            #[must_use]
+            pub fn to_text(&self) -> String {
+                self.0.to_text()
+            }
+
+            pub(crate) fn hash(&self) -> [u8; 32] {
+                self.0.hash()
+            }
+        }
+
+        impl std::fmt::Debug for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(concat!(stringify!($name), "(hidden)"))
+            }
+        }
+    };
 }
 
-impl std::fmt::Debug for EnrollmentToken {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("EnrollmentToken(hidden)")
+// The doc text is a literal, not attributes the macro repeats, which lizard reads as one long function.
+secret_token!(
+    EnrollmentToken,
+    "What an enrollment link carries, good once and for an hour. The operator command prints it only to the \
+     terminal that ran it (ADR-0040)."
+);
+
+secret_token!(
+    CeremonyToken,
+    "What a browser holds between a passkey ceremony's two halves, good once and for five minutes. The \
+     ceremony's state stays in Postgres under its hash, and never reaches the browser (ADR-0047)."
+);
+
+/// A passkey ceremony begun: the token the browser keeps until it finishes, and the options it hands its
+/// authenticator, as JSON.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ceremony {
+    pub token: CeremonyToken,
+    pub options: String,
+}
+
+/// An operator whose open enrollment link a browser presented: enabled, and holding no passkey yet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Enrollee {
+    pub operator: OperatorId,
+    /// The user handle `WebAuthn` names them by: random, so it says nothing about the operator (ADR-0040).
+    pub user_handle: [u8; 16],
+    pub name: String,
+}
+
+/// A ceremony taken from storage to finish: whose it is, the link it redeems, and the state webauthn-rs needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TakenCeremony {
+    pub operator: OperatorId,
+    pub link_hash: [u8; 32],
+    pub state: String,
+}
+
+/// A passkey webauthn-rs has verified, ready to store: its credential ID, and the passkey as webauthn-rs keeps it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewPasskey {
+    pub credential_id: Vec<u8>,
+    pub passkey: String,
+}
+
+/// What redeeming an enrollment link came to for an operator who exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Redemption {
+    /// The passkey is stored and the link used up.
+    Redeemed,
+    Disabled,
+    /// The operator holds a passkey already, as when two tabs finish the same link.
+    Enrolled,
+    /// The link ended, or was replaced, before the ceremony finished.
+    Expired,
+    /// Another operator's passkey has this credential ID.
+    Taken,
+}
+
+impl Redemption {
+    /// The answer as Identity's database writes it, or none for one it never writes.
+    pub(crate) fn parse(text: &str) -> Option<Self> {
+        match text {
+            "redeemed" => Some(Self::Redeemed),
+            "disabled" => Some(Self::Disabled),
+            "enrolled" => Some(Self::Enrolled),
+            "expired" => Some(Self::Expired),
+            "taken" => Some(Self::Taken),
+            _ => None,
+        }
+    }
+
+    /// The reason a refusal records, or none for a passkey stored.
+    pub(crate) fn reason(self) -> Option<&'static str> {
+        match self {
+            Self::Redeemed => None,
+            Self::Disabled => Some("disabled"),
+            Self::Enrolled => Some("enrolled"),
+            Self::Expired => Some("expired"),
+            Self::Taken => Some("taken"),
+        }
     }
 }
 

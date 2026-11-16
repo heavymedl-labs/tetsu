@@ -1,0 +1,700 @@
+//! Enrolling an operator's first passkey, end to end, with passkey-rs's authenticator in place of a person's
+//! (ADR-0058), against Postgres signed in as the application role. They live in this one build because llvm-cov
+//! scores each build of a generic use case on its own, and only here can a test make the random source fail.
+
+use std::future::Future;
+use std::pin::Pin;
+
+use passkey::authenticator::{Authenticator, UiHint, UserCheck, UserValidationMethod};
+use passkey::client::{Client, DefaultClientData};
+use passkey::types::Passkey;
+use passkey::types::ctap2::{Aaguid, Ctap2Error};
+use passkey::types::webauthn::CredentialCreationOptions;
+use serde_json::{Value, json};
+use tetsu_postgres::test_support::{TestDatabase, fresh_database};
+use tetsu_postgres::{Pool, connect, migrate, pool};
+use webauthn_rs::prelude::Url;
+
+use crate::adapters::postgres::PostgresOperators;
+use crate::{Actor, Error, Identity, OperatorId, OperatorName, Operators, RelyingParty};
+
+const ORIGIN: &str = "https://ops.example.com";
+
+/// A person at their device, who confirms they are present, and verifies themselves unless told not to, as a
+/// hostile client might.
+struct Person {
+    verifies: bool,
+}
+
+type Checked<'b> = Pin<Box<dyn Future<Output = Result<UserCheck, Ctap2Error>> + Send + 'b>>;
+
+// passkey-rs declares this trait through async-trait; writing out the boxed future it expects keeps that crate out of
+// Tetsu's dependencies.
+impl UserValidationMethod for Person {
+    type PasskeyItem = Passkey;
+
+    fn check_user<'a, 's, 'b>(
+        &'s self,
+        _hint: UiHint<'a, Passkey>,
+        presence: bool,
+        verification: bool,
+    ) -> Checked<'b>
+    where
+        'a: 'b,
+        's: 'b,
+        Self: 'b,
+    {
+        let verified = verification && self.verifies;
+        Box::pin(async move {
+            Ok(UserCheck {
+                presence,
+                verification: verified,
+            })
+        })
+    }
+
+    fn is_presence_enabled(&self) -> bool {
+        true
+    }
+
+    fn is_verification_enabled(&self) -> Option<bool> {
+        Some(self.verifies)
+    }
+}
+
+/// What a browser at `origin` sends back after its authenticator registers a passkey for the options given, as JSON.
+async fn register(options: &str, origin: &str, verifies: bool) -> String {
+    let authenticator = Authenticator::new(
+        Aaguid::new_empty(),
+        None::<Passkey>,
+        Person { verifies },
+        passkey::crypto::AvailableBackend,
+    );
+    let mut client = Client::new(authenticator);
+    let options: CredentialCreationOptions = serde_json::from_str(options).expect("options");
+    let origin = Url::parse(origin).expect("an origin");
+    let created = client
+        .register(&origin, options, DefaultClientData)
+        .await
+        .expect("registers");
+    serde_json::to_string(&created).expect("JSON")
+}
+
+/// Identity's use cases over a fresh, migrated database, with Kurt Medley as operator 1 and his link issued.
+async fn with_link() -> (
+    Operators<PostgresOperators>,
+    TestDatabase,
+    OperatorId,
+    String,
+) {
+    let database = fresh_database().await.expect("a test database");
+    migrate(&database, &[&Identity]).await.expect("migrates");
+    let operators = Operators::new(PostgresOperators {
+        pool: app_pool(&database),
+    });
+    let kurt = operators
+        .create(
+            &OperatorName::parse("Kurt Medley").expect("a name"),
+            &actor(),
+        )
+        .await
+        .expect("creates");
+    let link = operators.enroll(kurt, &actor()).await.expect("issues");
+    (operators, database, kurt, link.to_text())
+}
+
+fn app_pool(database: &TestDatabase) -> Pool {
+    pool(&database.as_app()).expect("a pool")
+}
+
+fn party() -> RelyingParty {
+    RelyingParty::new(ORIGIN).expect("a relying party")
+}
+
+fn actor() -> Actor {
+    Actor::parse("operator-1@browser").expect("an actor")
+}
+
+/// What a failure says, as `category: message`, or nothing for a success, so a test compares text rather than
+/// matching a pattern whose other arm no test takes.
+fn failure(result: Result<(), Error>) -> String {
+    result
+        .err()
+        .map(|error| error.to_string())
+        .unwrap_or_default()
+}
+
+fn not_enrolling() -> Result<OperatorId, Error> {
+    Err(Error::Invalid(
+        "this enrollment link has ended or is not valid".to_string(),
+    ))
+}
+
+/// One number the database answers, read as the test's own superuser.
+async fn number(database: &TestDatabase, sql: &str) -> i64 {
+    connect(database)
+        .await
+        .expect("connects")
+        .query_one(sql, &[])
+        .await
+        .expect("reads")
+        .try_get(0)
+        .expect("a number")
+}
+
+async fn as_admin(database: &TestDatabase, sql: &str) {
+    connect(database)
+        .await
+        .expect("connects")
+        .batch_execute(sql)
+        .await
+        .expect("runs");
+}
+
+/// What each enrollment recorded, oldest first: its outcome and reason.
+async fn redemptions(database: &TestDatabase) -> Vec<Value> {
+    connect(database)
+        .await
+        .expect("connects")
+        .query(
+            "SELECT payload::text FROM identity.outbox_global
+             WHERE event_type = 'identity.enrollment_redeemed' ORDER BY occurred_at, id",
+            &[],
+        )
+        .await
+        .expect("reads")
+        .iter()
+        .map(|row| {
+            let payload: Value =
+                serde_json::from_str(row.try_get::<_, &str>(0).expect("a payload")).expect("JSON");
+            json!([payload["outcome"], payload["reason"]])
+        })
+        .collect()
+}
+
+/// The link opens a ceremony without being used up; finishing stores the passkey, uses up the link and the
+/// ceremony, records it, and signs no one in. The options ask for a discoverable passkey that verifies the user.
+#[tokio::test]
+async fn an_operator_enrolls_their_first_passkey_once() {
+    let (operators, database, kurt, link) = with_link().await;
+    let party = party();
+    let ceremony = operators
+        .begin_enrollment(&party, &link)
+        .await
+        .expect("begins");
+    let options: Value = serde_json::from_str(&ceremony.options).expect("JSON");
+    let selection = &options["publicKey"]["authenticatorSelection"];
+    assert_eq!(selection["residentKey"], json!("required"));
+    assert_eq!(selection["requireResidentKey"], json!(true));
+    assert_eq!(selection["userVerification"], json!("required"));
+    assert_eq!(
+        number(&database, "SELECT count(*) FROM identity.enrollments").await,
+        1,
+        "beginning uses nothing up"
+    );
+    let response = register(&ceremony.options, ORIGIN, true).await;
+    let token = ceremony.token.to_text();
+    assert_eq!(
+        operators
+            .finish_enrollment(&party, &token, &response, &actor())
+            .await,
+        Ok(kurt)
+    );
+    for (table, left) in [
+        ("passkeys", 1),
+        ("enrollments", 0),
+        ("ceremonies", 0),
+        ("sessions", 0),
+    ] {
+        let count = number(&database, &format!("SELECT count(*) FROM identity.{table}")).await;
+        assert_eq!(count, left, "{table}");
+    }
+    assert_eq!(
+        operators
+            .finish_enrollment(&party, &token, &response, &actor())
+            .await,
+        not_enrolling(),
+        "a ceremony finishes once"
+    );
+    assert_eq!(
+        operators.begin_enrollment(&party, &link).await.map(drop),
+        not_enrolling().map(drop),
+        "a link is good once"
+    );
+    assert_eq!(redemptions(&database).await, [json!(["changed", null])]);
+}
+
+/// Options as a hostile client would rewrite them, asking its authenticator not to verify the user.
+fn without_verification(options: &str) -> String {
+    let mut options: Value = serde_json::from_str(options).expect("JSON");
+    options["publicKey"]["authenticatorSelection"]["userVerification"] = json!("discouraged");
+    options.to_string()
+}
+
+/// A registration is refused when it does not verify the user, or comes from another port or a subdomain of the
+/// realm's origin, and so is one that is not a registration at all (#109). Each refusal leaves the link open, so
+/// the operator can try again.
+#[tokio::test]
+async fn hostile_clients_are_refused_and_the_link_stays_open() {
+    let (operators, database, _, link) = with_link().await;
+    let party = party();
+    for (origin, verifies, rewrite) in [
+        (ORIGIN, false, true),
+        ("https://ops.example.com:8443", true, false),
+        ("https://evil.ops.example.com", true, false),
+    ] {
+        let ceremony = operators
+            .begin_enrollment(&party, &link)
+            .await
+            .expect("begins");
+        let options = if rewrite {
+            without_verification(&ceremony.options)
+        } else {
+            ceremony.options.clone()
+        };
+        let response = register(&options, origin, verifies).await;
+        assert_eq!(
+            operators
+                .finish_enrollment(&party, &ceremony.token.to_text(), &response, &actor())
+                .await,
+            not_enrolling(),
+            "{origin}, verifies: {verifies}"
+        );
+    }
+    let ceremony = operators
+        .begin_enrollment(&party, &link)
+        .await
+        .expect("begins");
+    assert_eq!(
+        operators
+            .finish_enrollment(
+                &party,
+                &ceremony.token.to_text(),
+                "not a registration",
+                &actor()
+            )
+            .await,
+        not_enrolling()
+    );
+    assert_eq!(
+        number(&database, "SELECT count(*) FROM identity.passkeys").await,
+        0
+    );
+    assert_eq!(
+        number(&database, "SELECT count(*) FROM identity.enrollments").await,
+        1
+    );
+}
+
+/// A registration answers one ceremony's challenge: sent with another ceremony's token it is refused, and that
+/// ceremony is spent, while its own still finishes.
+#[tokio::test]
+async fn a_registration_finishes_only_its_own_ceremony() {
+    let (operators, _database, kurt, link) = with_link().await;
+    let party = party();
+    let first = operators
+        .begin_enrollment(&party, &link)
+        .await
+        .expect("begins");
+    let second = operators
+        .begin_enrollment(&party, &link)
+        .await
+        .expect("begins");
+    let response = register(&first.options, ORIGIN, true).await;
+    assert_eq!(
+        operators
+            .finish_enrollment(&party, &second.token.to_text(), &response, &actor())
+            .await,
+        not_enrolling()
+    );
+    assert_eq!(
+        operators
+            .finish_enrollment(&party, &first.token.to_text(), &response, &actor())
+            .await,
+        Ok(kurt)
+    );
+}
+
+/// Two tabs on one link: the first to finish stores its passkey, and the second is refused, since the operator
+/// has one now, and records why.
+#[tokio::test]
+async fn of_two_tabs_on_one_link_only_the_first_enrolls() {
+    let (operators, database, kurt, link) = with_link().await;
+    let party = party();
+    let mut finished = Vec::new();
+    let tabs = [
+        operators
+            .begin_enrollment(&party, &link)
+            .await
+            .expect("begins"),
+        operators
+            .begin_enrollment(&party, &link)
+            .await
+            .expect("begins"),
+    ];
+    for tab in &tabs {
+        let response = register(&tab.options, ORIGIN, true).await;
+        finished.push(
+            operators
+                .finish_enrollment(&party, &tab.token.to_text(), &response, &actor())
+                .await,
+        );
+    }
+    assert_eq!(finished, [Ok(kurt), not_enrolling()]);
+    assert_eq!(
+        number(&database, "SELECT count(*) FROM identity.passkeys").await,
+        1
+    );
+    assert_eq!(
+        redemptions(&database).await,
+        [json!(["changed", null]), json!(["refused", "enrolled"])]
+    );
+}
+
+/// What changes between a ceremony's two halves still counts: a disable, a new link in place of the one it began
+/// from, or five minutes passing each refuses the passkey, and the first two are recorded with their reason.
+#[tokio::test]
+async fn a_change_while_enrolling_refuses_the_passkey() {
+    for change in ["disable", "new link", "ended"] {
+        let (operators, database, kurt, link) = with_link().await;
+        let party = party();
+        let ceremony = operators
+            .begin_enrollment(&party, &link)
+            .await
+            .expect("begins");
+        let response = register(&ceremony.options, ORIGIN, true).await;
+        match change {
+            "disable" => drop(operators.disable(kurt, &actor()).await.expect("disables")),
+            "new link" => drop(operators.enroll(kurt, &actor()).await.expect("issues")),
+            _ => {
+                as_admin(
+                    &database,
+                    "UPDATE identity.ceremonies SET ends_at = now() - interval '1 second'",
+                )
+                .await;
+            }
+        }
+        assert_eq!(
+            operators
+                .finish_enrollment(&party, &ceremony.token.to_text(), &response, &actor())
+                .await,
+            not_enrolling(),
+            "{change}"
+        );
+        assert_eq!(
+            number(&database, "SELECT count(*) FROM identity.passkeys").await,
+            0,
+            "{change}"
+        );
+        let recorded = match change {
+            "disable" => vec![json!(["refused", "disabled"])],
+            "new link" => vec![json!(["refused", "expired"])],
+            _ => vec![],
+        };
+        assert_eq!(redemptions(&database).await, recorded, "{change}");
+    }
+}
+
+/// A link or ceremony token that is malformed, or well formed but unknown, is refused the same way.
+#[tokio::test]
+async fn unknown_tokens_are_refused_alike() {
+    let (operators, _database, _, _) = with_link().await;
+    let party = party();
+    let unknown = "ab".repeat(32);
+    for link in ["not a token", unknown.as_str()] {
+        assert_eq!(
+            operators.begin_enrollment(&party, link).await.map(drop),
+            not_enrolling().map(drop),
+            "{link}"
+        );
+        assert_eq!(
+            operators
+                .finish_enrollment(&party, link, "{}", &actor())
+                .await,
+            not_enrolling(),
+            "{link}"
+        );
+    }
+}
+
+/// Failures that are not the browser's are not hidden as one: no random source, a stored state that cannot be
+/// read, and a stored operator a registration cannot start for.
+#[tokio::test]
+async fn failures_of_the_server_are_told_apart() {
+    let (operators, database, _, link) = with_link().await;
+    let party = party();
+    let failing = Operators::with_fill(
+        PostgresOperators {
+            pool: app_pool(&database),
+        },
+        |_| Err(getrandom::Error::UNSUPPORTED),
+    );
+    assert_eq!(
+        failure(failing.begin_enrollment(&party, &link).await.map(drop)),
+        format!(
+            "temporarily unavailable: no secure random source: {}",
+            getrandom::Error::UNSUPPORTED
+        )
+    );
+    let ceremony = operators
+        .begin_enrollment(&party, &link)
+        .await
+        .expect("begins");
+    as_admin(
+        &database,
+        "UPDATE identity.ceremonies SET state = '{\"x\": 1}'",
+    )
+    .await;
+    let finished = operators
+        .finish_enrollment(&party, &ceremony.token.to_text(), "{}", &actor())
+        .await;
+    assert!(
+        failure(finished.map(drop))
+            .starts_with("storage failed: a stored passkey ceremony could not be read")
+    );
+    as_admin(
+        &database,
+        "ALTER TABLE identity.operators DROP CONSTRAINT operators_name_check;
+         UPDATE identity.operators SET name = ''",
+    )
+    .await;
+    let begun = operators.begin_enrollment(&party, &link).await.map(drop);
+    assert!(failure(begun).starts_with("invalid: no ceremony could start"));
+}
+
+/// Storing a passkey refuses a credential another operator's passkey has, and an operator who does not exist, and
+/// records each with its reason.
+#[tokio::test]
+async fn a_taken_credential_or_missing_operator_stores_nothing() {
+    use crate::domain::{NewPasskey, Redemption, TakenCeremony};
+    use crate::ports::OperatorStore;
+
+    let (operators, database, kurt, _) = with_link().await;
+    let lee = operators
+        .create(&OperatorName::parse("Lee Park").expect("a name"), &actor())
+        .await
+        .expect("creates");
+    let lee_link = operators.enroll(lee, &actor()).await.expect("issues");
+    as_admin(
+        &database,
+        &format!(
+            "INSERT INTO identity.passkeys (credential_id, operator_id, passkey, created_at)
+             VALUES (sha256('kurt'::bytea), {}, '{{}}', now())",
+            kurt.get()
+        ),
+    )
+    .await;
+    let store = PostgresOperators {
+        pool: app_pool(&database),
+    };
+    let passkey = NewPasskey {
+        credential_id: connect(&database)
+            .await
+            .expect("connects")
+            .query_one("SELECT sha256('kurt'::bytea)", &[])
+            .await
+            .expect("hashes")
+            .try_get(0)
+            .expect("bytes"),
+        passkey: "{}".to_string(),
+    };
+    for (operator, answer) in [(lee, Some(Redemption::Taken)), (OperatorId::new(99), None)] {
+        let ceremony = TakenCeremony {
+            operator,
+            link_hash: lee_link.hash(),
+            state: "{}".to_string(),
+        };
+        assert_eq!(
+            store.redeem_enrollment(&ceremony, &passkey, &actor()).await,
+            Ok(answer)
+        );
+    }
+    assert_eq!(
+        redemptions(&database).await,
+        [json!(["refused", "taken"]), json!(["refused", "unknown"])]
+    );
+}
+
+/// A relying party needs an origin whose host is a domain: passkeys cannot belong to an address.
+#[test]
+fn a_relying_party_needs_an_origin_with_a_domain() {
+    let refused: Vec<String> = ["not an origin", "data:text/plain,x", "https://127.0.0.1"]
+        .into_iter()
+        .map(|bad| failure(RelyingParty::new(bad).map(drop)))
+        .collect();
+    assert_eq!(
+        refused,
+        [
+            "invalid: \"not an origin\" is not an origin",
+            "invalid: \"data:text/plain,x\" is not an origin",
+            "invalid: \"https://127.0.0.1\" is not an origin",
+        ]
+    );
+}
+
+/// Each step of an enrollment fails as storage when the database refuses its function, never as the browser's
+/// mistake.
+#[tokio::test]
+async fn each_enrollment_step_fails_as_storage_when_refused() {
+    let party = party();
+    for (function, early) in [
+        ("enrollee(bytea)", true),
+        ("begin_ceremony(bytea, text, bigint, bytea, jsonb)", true),
+        ("take_ceremony(bytea, text)", false),
+        ("redeem_enrollment(bytea, bigint, bytea, jsonb)", false),
+    ] {
+        let (operators, database, _, link) = with_link().await;
+        let revoke = format!("REVOKE EXECUTE ON FUNCTION identity.{function} FROM tetsu_identity");
+        let outcome = if early {
+            as_admin(&database, &revoke).await;
+            operators.begin_enrollment(&party, &link).await.map(drop)
+        } else {
+            let ceremony = operators
+                .begin_enrollment(&party, &link)
+                .await
+                .expect("begins");
+            let response = register(&ceremony.options, ORIGIN, true).await;
+            as_admin(&database, &revoke).await;
+            operators
+                .finish_enrollment(&party, &ceremony.token.to_text(), &response, &actor())
+                .await
+                .map(drop)
+        };
+        let name = function.split('(').next().unwrap_or_default();
+        assert_eq!(
+            failure(outcome),
+            format!("storage failed: permission denied for function {name}")
+        );
+    }
+}
+
+/// Replaces one of Identity's functions with another of the same arguments, as Identity's role may run it.
+async fn replace(database: &TestDatabase, function: &str, returns: &str, body: &str) {
+    let arguments = &function[function.find('(').unwrap_or_default()..];
+    let name = &function[..function.find('(').unwrap_or_default()];
+    as_admin(
+        database,
+        &format!(
+            "DROP FUNCTION identity.{function};
+             CREATE FUNCTION identity.{name}{arguments} RETURNS {returns} LANGUAGE sql AS '{}';
+             GRANT EXECUTE ON FUNCTION identity.{function} TO tetsu_identity",
+            body.replace('\'', "''")
+        ),
+    )
+    .await;
+}
+
+/// An unreadable answer when beginning, a column of the wrong type, is a storage failure.
+#[tokio::test]
+async fn unreadable_enrollees_are_storage_failures() {
+    let party = party();
+    for (columns, values) in [
+        (
+            "operator_id text, user_handle bytea, name text",
+            "'1', '\\x00'::bytea, 'Kurt'",
+        ),
+        (
+            "operator_id bigint, user_handle text, name text",
+            "1::bigint, 'x', 'Kurt'",
+        ),
+        (
+            "operator_id bigint, user_handle bytea, name integer",
+            "1::bigint, '\\x00'::bytea, 1",
+        ),
+    ] {
+        let (operators, database, _, link) = with_link().await;
+        replace(
+            &database,
+            "enrollee(bytea)",
+            &format!("TABLE ({columns})"),
+            &format!("SELECT {values}"),
+        )
+        .await;
+        let begun = failure(operators.begin_enrollment(&party, &link).await.map(drop));
+        assert!(begun.starts_with("storage failed: "));
+    }
+}
+
+/// An unreadable ceremony, a column of the wrong type or an enrollment with no link, is a storage failure.
+#[tokio::test]
+async fn unreadable_ceremonies_are_storage_failures() {
+    let party = party();
+    let link = "sha256('x'::bytea)";
+    for (columns, values, said) in [
+        (
+            "operator_id text, link_hash bytea, state text",
+            format!("'1', {link}, '{{}}'"),
+            "storage failed: ",
+        ),
+        (
+            "operator_id bigint, link_hash text, state text",
+            "1::bigint, 'x', '{}'".to_string(),
+            "storage failed: ",
+        ),
+        (
+            "operator_id bigint, link_hash bytea, state integer",
+            format!("1::bigint, {link}, 1"),
+            "storage failed: ",
+        ),
+        (
+            "operator_id bigint, link_hash bytea, state text",
+            "1::bigint, null::bytea, '{}'".to_string(),
+            "storage failed: an enrollment ceremony has no link",
+        ),
+    ] {
+        let (operators, database, _, link) = with_link().await;
+        let ceremony = operators
+            .begin_enrollment(&party, &link)
+            .await
+            .expect("begins");
+        replace(
+            &database,
+            "take_ceremony(bytea, text)",
+            &format!("TABLE ({columns})"),
+            &format!("SELECT {values}"),
+        )
+        .await;
+        let finished = failure(
+            operators
+                .finish_enrollment(&party, &ceremony.token.to_text(), "{}", &actor())
+                .await
+                .map(drop),
+        );
+        assert!(finished.starts_with(said));
+    }
+}
+
+/// An unreadable redemption, of the wrong type or an answer the database never writes, is a storage failure.
+#[tokio::test]
+async fn unreadable_redemptions_are_storage_failures() {
+    let party = party();
+    for (returns, value, said) in [
+        (
+            "text",
+            "'maybe'",
+            "storage failed: redeeming a link answered \"maybe\"",
+        ),
+        ("integer", "1", "storage failed: "),
+    ] {
+        let (operators, database, _, link) = with_link().await;
+        let ceremony = operators
+            .begin_enrollment(&party, &link)
+            .await
+            .expect("begins");
+        let response = register(&ceremony.options, ORIGIN, true).await;
+        replace(
+            &database,
+            "redeem_enrollment(bytea, bigint, bytea, jsonb)",
+            returns,
+            &format!("SELECT {value}"),
+        )
+        .await;
+        let finished = failure(
+            operators
+                .finish_enrollment(&party, &ceremony.token.to_text(), &response, &actor())
+                .await
+                .map(drop),
+        );
+        assert!(finished.starts_with(said));
+    }
+}

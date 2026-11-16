@@ -86,8 +86,8 @@ mod support {
     /// the operator's ID.
     pub fn passkey_for(operator: i64) -> String {
         format!(
-            "INSERT INTO identity.passkeys (credential_id, operator_id, passkey, aaguid, created_at)
-             VALUES (sha256(int8send({operator}))::bytea, {operator}, '{{}}', gen_random_uuid(), now());"
+            "INSERT INTO identity.passkeys (credential_id, operator_id, passkey, created_at)
+             VALUES (sha256(int8send({operator}))::bytea, {operator}, '{{}}', now());"
         )
     }
 

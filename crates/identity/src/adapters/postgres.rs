@@ -1,5 +1,6 @@
 //! Identity's Postgres adapter. Driver types stay in this file (ADR-0007).
 
+use std::fmt::Write;
 use std::sync::OnceLock;
 
 use serde_json::{Value, json};
@@ -9,7 +10,8 @@ use tokio_postgres::Row;
 use tokio_postgres::types::{FromSql, ToSql};
 
 use crate::domain::{
-    Actor, Disabling, Error, Issue, OperatorId, OperatorName, OperatorSummary, Realm, Session,
+    Actor, Disabling, Enrollee, Error, Issue, NewPasskey, OperatorId, OperatorName,
+    OperatorSummary, Realm, Redemption, Session, TakenCeremony,
 };
 use crate::ports::OperatorStore;
 use crate::use_cases::Operators;
@@ -38,6 +40,12 @@ const END_OPERATOR_SESSIONS: &str = include_str!("../../sql/end_operator_session
 const END_REALM_SESSIONS: &str = include_str!("../../sql/end_realm_sessions.sql");
 const LIST_OPERATORS: &str = include_str!("../../sql/list_operators.sql");
 const ENABLE_OPERATOR: &str = include_str!("../../sql/enable_operator.sql");
+const ENROLLEE: &str = include_str!("../../sql/enrollee.sql");
+const BEGIN_CEREMONY: &str = include_str!("../../sql/begin_ceremony.sql");
+const TAKE_CEREMONY: &str = include_str!("../../sql/take_ceremony.sql");
+const REDEEM_ENROLLMENT: &str = include_str!("../../sql/redeem_enrollment.sql");
+/// The kind of ceremony enrollment keeps.
+const ENROLL: &str = "enroll";
 
 /// An event for the audit record: its type, and a payload of IDs and facts, never names or tokens (ADR-0045).
 type Recorded = Option<(&'static str, String)>;
@@ -85,8 +93,8 @@ pub fn postgres_store(pool: Pool) -> Operators<impl OperatorStore> {
     Operators::new(PostgresOperators { pool })
 }
 
-struct PostgresOperators {
-    pool: Pool,
+pub(crate) struct PostgresOperators {
+    pub(crate) pool: Pool,
 }
 
 /// Every statement runs alone in a transaction as Identity's role, which reaches sessions only through its lookup
@@ -272,6 +280,60 @@ impl OperatorStore for PostgresOperators {
         })
         .await?;
         Ok(issued.get().copied().flatten())
+    }
+
+    async fn enrollee(&self, link: &[u8; 32]) -> Result<Option<Enrollee>, Error> {
+        self.query(ENROLLEE, &[&link.as_slice()])
+            .await?
+            .first()
+            .map(enrollee_from)
+            .transpose()
+    }
+
+    async fn begin_enrollment(
+        &self,
+        token: &[u8; 32],
+        operator: OperatorId,
+        link: &[u8; 32],
+        state: &str,
+    ) -> Result<(), Error> {
+        let parameters: [&(dyn ToSql + Sync); 5] = [
+            &token.as_slice(),
+            &ENROLL,
+            &operator.get(),
+            &link.as_slice(),
+            &state,
+        ];
+        self.query(BEGIN_CEREMONY, &parameters).await.map(drop)
+    }
+
+    async fn take_enrollment(&self, token: &[u8; 32]) -> Result<Option<TakenCeremony>, Error> {
+        self.query(TAKE_CEREMONY, &[&token.as_slice(), &ENROLL])
+            .await?
+            .first()
+            .map(ceremony_from)
+            .transpose()
+    }
+
+    async fn redeem_enrollment(
+        &self,
+        ceremony: &TakenCeremony,
+        passkey: &NewPasskey,
+        actor: &Actor,
+    ) -> Result<Option<Redemption>, Error> {
+        let id = ceremony.operator.get();
+        let parameters: [&(dyn ToSql + Sync); 4] = [
+            &ceremony.link_hash.as_slice(),
+            &id,
+            &passkey.credential_id,
+            &passkey.passkey,
+        ];
+        let redeemed = OnceLock::new();
+        self.query_recording(REDEEM_ENROLLMENT, &parameters, &|rows| {
+            redemption(rows, id, &passkey.credential_id, actor, &redeemed)
+        })
+        .await?;
+        Ok(redeemed.get().copied().flatten())
     }
 
     async fn disable_operator(
@@ -469,6 +531,81 @@ fn issuance_event(issue: Option<Issue>, id: i64, actor: &Actor) -> (&'static str
         actor,
         outcome,
         json!({"operator_id": id, "reason": reason}),
+    )
+}
+
+/// The operator a link names, with the user handle and name a registration needs.
+fn enrollee_from(row: &Row) -> Result<Enrollee, Error> {
+    let bytes: Vec<u8> = column(row, "user_handle")?;
+    // Identity's function writes the handle with uuid_send, which always gives 16 bytes, so copying needs no check.
+    let mut user_handle = [0; 16];
+    for (slot, byte) in user_handle.iter_mut().zip(bytes) {
+        *slot = byte;
+    }
+    Ok(Enrollee {
+        operator: OperatorId::new(column(row, "operator_id")?),
+        user_handle,
+        name: column(row, "name")?,
+    })
+}
+
+/// A ceremony taken to finish. An enrollment always keeps its link, so one without is a storage failure.
+fn ceremony_from(row: &Row) -> Result<TakenCeremony, Error> {
+    let link: Option<Vec<u8>> = column(row, "link_hash")?;
+    Ok(TakenCeremony {
+        operator: OperatorId::new(column(row, "operator_id")?),
+        link_hash: link
+            .and_then(|link| link.try_into().ok())
+            .ok_or_else(|| Error::Storage("an enrollment ceremony has no link".to_string()))?,
+        state: column(row, "state")?,
+    })
+}
+
+/// Reads what redeeming a link came to, keeps it in `redeemed`, and makes the event it records.
+fn redemption(
+    rows: &[Row],
+    id: i64,
+    credential: &[u8],
+    actor: &Actor,
+    redeemed: &OnceLock<Option<Redemption>>,
+) -> Result<Option<(&'static str, String)>, Error> {
+    let redemption = rows
+        .first()
+        .map_or(Ok(None), |row| column::<Option<String>>(row, "redeemed"))
+        .and_then(|answer| answer.as_deref().map(redemption_from).transpose())?;
+    let _ = redeemed.set(redemption);
+    Ok(Some(redemption_event(redemption, id, credential, actor)))
+}
+
+/// An answer Identity's database never writes is a storage failure, never a guess.
+fn redemption_from(text: &str) -> Result<Redemption, Error> {
+    Redemption::parse(text)
+        .ok_or_else(|| Error::Storage(format!("redeeming a link answered {text:?}")))
+}
+
+/// The event redeeming a link records: changed when the passkey was stored, and refused otherwise, with the reason
+/// and the credential ID, which is public, never a secret.
+fn redemption_event(
+    redemption: Option<Redemption>,
+    id: i64,
+    credential: &[u8],
+    actor: &Actor,
+) -> (&'static str, String) {
+    let reason = redemption.map_or(Some("unknown"), Redemption::reason);
+    let outcome = if reason.is_none() {
+        "changed"
+    } else {
+        "refused"
+    };
+    let credential = credential.iter().fold(String::new(), |mut text, byte| {
+        let _ = write!(text, "{byte:02x}");
+        text
+    });
+    event(
+        "identity.enrollment_redeemed",
+        actor,
+        outcome,
+        json!({"operator_id": id, "credential": credential, "reason": reason}),
     )
 }
 
@@ -785,8 +922,8 @@ mod tests {
         let admin = tetsu_postgres::connect(&database).await.expect("connects");
         admin
             .execute(
-                "INSERT INTO identity.passkeys (credential_id, operator_id, passkey, aaguid, created_at)
-                 VALUES (sha256('lee'::bytea), $1, '{}', gen_random_uuid(), now())",
+                "INSERT INTO identity.passkeys (credential_id, operator_id, passkey, created_at)
+                 VALUES (sha256('lee'::bytea), $1, '{}', now())",
                 &[&lee.get()],
             )
             .await

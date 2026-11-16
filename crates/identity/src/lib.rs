@@ -7,15 +7,21 @@
 mod adapters;
 mod browser;
 mod domain;
+mod passkeys;
 mod ports;
 mod use_cases;
+
+#[cfg(test)]
+mod enrollment_tests;
 
 pub use adapters::postgres::postgres_store;
 pub use browser::{Change, ForChange, Origins, SignOut};
 pub use domain::{
-    Actor, Disabling, EnrollmentToken, Error, Issue, Limits, OperatorId, OperatorName,
-    OperatorSummary, Realm, Session, SessionToken,
+    Actor, Ceremony, CeremonyToken, Disabling, Enrollee, EnrollmentToken, Error, Issue, Limits,
+    NewPasskey, OperatorId, OperatorName, OperatorSummary, Realm, Redemption, Session,
+    SessionToken, TakenCeremony,
 };
+pub use passkeys::RelyingParty;
 pub use ports::OperatorStore;
 pub use use_cases::Operators;
 
