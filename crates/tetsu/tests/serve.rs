@@ -63,8 +63,29 @@ mod support {
     }
 
     /// Starts the server with extra settings, waits until it says it is listening, and returns it with the lines
-    /// it wrote before that.
+    /// it wrote before that. A free port is found by binding and releasing one, and the kernel may hand that port
+    /// to another socket, such as a test's database connection, before the server binds it; a server that could not
+    /// start is tried again on a fresh port, a few times, so that race never fails a test.
     pub fn start_with(settings: &Settings, env: &[(&str, &str)]) -> (Server, Vec<String>) {
+        for _ in 0..4 {
+            match try_start(settings, env) {
+                Ok(started) => return started,
+                Err(mut child) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+            }
+        }
+        try_start(settings, env)
+            .unwrap_or_else(|_| panic!("the server could not start on five ports"))
+    }
+
+    /// Starts the server once, on a port found free a moment before, and gives the child back if it says it could
+    /// not start.
+    fn try_start(
+        settings: &Settings,
+        env: &[(&str, &str)],
+    ) -> Result<(Server, Vec<String>), Child> {
         let port = TcpListener::bind("127.0.0.1:0")
             .unwrap()
             .local_addr()
@@ -80,19 +101,22 @@ mod support {
             .expect("the binary runs");
         let (stdout, mut before) = until_listening(BufReader::new(child.stdout.take().unwrap()));
         let line = before.pop().unwrap_or_default();
+        if message(&line).as_deref() == Some("could not start serving") {
+            return Err(child);
+        }
         assert_eq!(
             message(&line),
             Some(format!("serving on http://0.0.0.0:{port}")),
             "{line}"
         );
-        (
+        Ok((
             Server {
                 child,
                 stdout,
                 port,
             },
             before,
-        )
+        ))
     }
 
     /// The lines the server writes up to and including the one saying it is listening, or a failure after 10
