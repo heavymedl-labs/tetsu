@@ -329,7 +329,7 @@ async fn signing_out_ends_the_session_once_its_checks_pass() {
     let (database, operators, kurt) = with_kurt().await;
     let token = signed_in(&database, kurt).await;
     let (jar, form) = (text(&token), token.form_token().expect("a form token"));
-    let sign_out = |origin| Change::new([jar.as_str()], origin, &form);
+    let sign_out = |origin| Change::new([jar.as_str()], origin, None, &form);
     let from_elsewhere = sign_out(Some("https://evil.example"));
     assert_eq!(
         operators.end_session(&origins(), &from_elsewhere).await,
@@ -363,7 +363,7 @@ async fn signing_out_leaves_the_operators_other_sessions() {
     let token = signed_in(&database, kurt).await;
     let other = signed_in(&database, kurt).await;
     let (jar, form) = (text(&token), token.form_token().expect("a form token"));
-    let sign_out = Change::new([jar.as_str()], Some(ORIGIN), &form);
+    let sign_out = Change::new([jar.as_str()], Some(ORIGIN), None, &form);
     assert_eq!(
         operators.end_session(&origins(), &sign_out).await,
         Ok(SignOut::Ended)
@@ -434,7 +434,7 @@ async fn another_realms_session_is_neither_used_nor_ended() {
     .await;
     assert_eq!(operators.session([text(&token).as_str()]).await, Ok(None));
     let (jar, form) = (text(&token), token.form_token().expect("a form token"));
-    let sign_out = Change::new([jar.as_str()], Some(ORIGIN), &form);
+    let sign_out = Change::new([jar.as_str()], Some(ORIGIN), None, &form);
     assert_eq!(
         operators.end_session(&origins(), &sign_out).await,
         Ok(SignOut::NothingToEnd),
@@ -591,7 +591,7 @@ async fn a_statement_that_cannot_be_prepared_is_an_error() {
     let (database, operators, kurt) = with_kurt().await;
     let token = signed_in(&database, kurt).await;
     let (jar, form) = (text(&token), token.form_token().expect("a form token"));
-    let sign_out = Change::new([jar.as_str()], Some(ORIGIN), &form);
+    let sign_out = Change::new([jar.as_str()], Some(ORIGIN), None, &form);
     as_admin(&database, "DROP FUNCTION identity.end_session(bytea, text)").await;
     assert!(matches!(
         operators.end_session(&origins(), &sign_out).await,
@@ -626,7 +626,7 @@ async fn a_refused_commit_ends_no_session() {
         operators
             .end_session(
                 &origins(),
-                &Change::new([jar.as_str()], Some(ORIGIN), &form)
+                &Change::new([jar.as_str()], Some(ORIGIN), None, &form)
             )
             .await,
         Err(Error::Storage(
@@ -658,7 +658,7 @@ async fn a_change_needs_the_realms_origin_and_the_sessions_form_token() {
         other.form_token().expect("a form token"),
     );
     let jar = cookie(&session);
-    let change = |origin, form_token| Change::new([jar.as_str()], origin, form_token);
+    let change = |origin, form_token| Change::new([jar.as_str()], origin, None, form_token);
     for refused in [
         change(None, &form),
         change(Some("null"), &form),
@@ -691,7 +691,7 @@ async fn a_change_with_a_malformed_cookie_finds_no_session() {
     let (_database, operators) = migrated().await;
     let form = "ab".repeat(32);
     let jar = cookie("not a token");
-    let malformed = Change::new([jar.as_str()], Some(ORIGIN), &form);
+    let malformed = Change::new([jar.as_str()], Some(ORIGIN), None, &form);
     assert_eq!(
         operators.session_for_change(&origins(), &malformed).await,
         Ok(ForChange::Refused)
@@ -821,7 +821,7 @@ async fn signing_out_a_spent_session_has_nothing_to_end() {
     let token = signed_in(&database, kurt).await;
     as_admin(&database, "UPDATE identity.sessions SET ends_at = now()").await;
     let (jar, form) = (text(&token), token.form_token().expect("a form token"));
-    let sign_out = Change::new([jar.as_str()], Some(ORIGIN), &form);
+    let sign_out = Change::new([jar.as_str()], Some(ORIGIN), None, &form);
     assert_eq!(
         operators.session_for_change(&origins(), &sign_out).await,
         Ok(ForChange::NoSession),
@@ -840,7 +840,7 @@ async fn signing_out_a_spent_session_has_nothing_to_end() {
     )
     .await;
     let (jar, form) = (text(&token), token.form_token().expect("a form token"));
-    let sign_out = Change::new([jar.as_str()], Some(ORIGIN), &form);
+    let sign_out = Change::new([jar.as_str()], Some(ORIGIN), None, &form);
     assert_eq!(
         operators.end_session(&origins(), &sign_out).await,
         Ok(SignOut::NothingToEnd)
@@ -866,7 +866,7 @@ async fn an_end_that_returns_nothing_ended_nothing() {
     )
     .await;
     let (jar, form) = (text(&token), token.form_token().expect("a form token"));
-    let sign_out = Change::new([jar.as_str()], Some(ORIGIN), &form);
+    let sign_out = Change::new([jar.as_str()], Some(ORIGIN), None, &form);
     assert_eq!(
         operators.end_session(&origins(), &sign_out).await,
         Ok(SignOut::NothingToEnd)

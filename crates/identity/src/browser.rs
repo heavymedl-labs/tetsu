@@ -53,37 +53,44 @@ impl Realm {
 
 const ATTRIBUTES: &str = "Path=/; Secure; HttpOnly; SameSite=Lax";
 
-/// What a state-changing request brings for sign-in's checks: every `Cookie` header it carries, its `Origin` header,
-/// and the form token it submitted, as the page adapter reads them. Its parts are private, so the session token is
+/// What a state-changing request brings for sign-in's checks: every `Cookie` header it carries, its `Origin` and
+/// `Sec-Fetch-Site` headers, and the form token it submitted, as the page adapter reads them. Its parts are private, so the session token is
 /// always read through [`Realm::token_in`], and a cookie sent twice is never taken for one. It has no `Debug`, so it
 /// is never printed with a token inside.
 pub struct Change<'a> {
     cookies: Vec<&'a str>,
     origin: Option<&'a str>,
+    fetch_site: Option<&'a str>,
     form_token: &'a str,
 }
 
 impl<'a> Change<'a> {
     #[must_use]
+    /// A change from its request's `Cookie` headers, its `Origin`, its `Sec-Fetch-Site`, which [`Origins::admit`]
+    /// checks along with the origin, and the form token it submitted. Every part is required, so a page adapter
+    /// cannot leave a check out by forgetting it.
     pub fn new(
         cookies: impl IntoIterator<Item = &'a str>,
         origin: Option<&'a str>,
+        fetch_site: Option<&'a str>,
         form_token: &'a str,
     ) -> Self {
         Self {
             cookies: cookies.into_iter().collect(),
             origin,
+            fetch_site,
             form_token,
         }
     }
 
-    /// The realm's session token, if the request carries its cookie once, comes from one of these origins, and
+    /// The realm's session token, if the request carries its cookie once, is admitted by these origins, and
     /// carries that session's own form token, compared in constant time through `subtle`, which a test cannot time
     /// reliably (ADR-0048, `v5.0.0-3.5.1`).
     #[must_use]
     pub fn verified(&self, realm: Realm, origins: &Origins) -> Option<SessionToken> {
         let token = SessionToken::parse(realm.token_in(self.cookies.iter().copied())?)?;
-        (origins.allow(self.origin) && token.form_token_matches(self.form_token)).then_some(token)
+        (origins.admit(self.origin, self.fetch_site) && token.form_token_matches(self.form_token))
+            .then_some(token)
     }
 }
 
@@ -155,6 +162,15 @@ impl Origins {
     #[must_use]
     pub fn allow(&self, origin: Option<&str>) -> bool {
         origin.is_some_and(|origin| self.0.iter().any(|allowed| allowed == origin))
+    }
+
+    /// Whether a state-changing request may go on, with or without a session: its `Origin` must name one of these
+    /// exactly, and its `Sec-Fetch-Site`, when the browser sends one, must say it came from the same origin. Two
+    /// independent signals, so a single browser bug opens no gap (ADR-0059). A request before sign-in has nothing
+    /// else to check, so its page adapter calls this directly.
+    #[must_use]
+    pub fn admit(&self, origin: Option<&str>, fetch_site: Option<&str>) -> bool {
+        self.allow(origin) && fetch_site.is_none_or(|site| site == "same-origin")
     }
 }
 
@@ -290,7 +306,8 @@ mod tests {
         }
     }
 
-    /// A change passes only with the session cookie sent once, a listed origin, and that session's form token.
+    /// A change passes only with the session cookie sent once, a listed origin, no other site named as its source,
+    /// and that session's form token.
     #[test]
     fn a_change_is_verified_only_with_every_part_right() {
         let origins = Origins::parse(&["https://ops.example.com"]).expect("origins");
@@ -301,15 +318,16 @@ mod tests {
         );
         let origin = Some("https://ops.example.com");
         assert_eq!(
-            Change::new([cookie.as_str()], origin, &form).verified(Realm::Operator, &origins),
+            Change::new([cookie.as_str()], origin, None, &form).verified(Realm::Operator, &origins),
             Some(token.clone())
         );
         for change in [
-            Change::new([cookie.as_str(), cookie.as_str()], origin, &form),
-            Change::new([], origin, &form),
-            Change::new(["__Host-tetsu-operator=not-a-token"], origin, &form),
-            Change::new([cookie.as_str()], Some("https://evil.example"), &form),
-            Change::new([cookie.as_str()], origin, ""),
+            Change::new([cookie.as_str(), cookie.as_str()], origin, None, &form),
+            Change::new([], origin, None, &form),
+            Change::new(["__Host-tetsu-operator=not-a-token"], origin, None, &form),
+            Change::new([cookie.as_str()], Some("https://evil.example"), None, &form),
+            Change::new([cookie.as_str()], origin, None, ""),
+            Change::new([cookie.as_str()], origin, Some("cross-site"), &form),
         ] {
             assert_eq!(change.verified(Realm::Operator, &origins), None);
         }
@@ -384,6 +402,24 @@ mod tests {
         ] {
             assert!(!origins.allow(other), "{other:?}");
         }
+    }
+
+    /// A state-changing request is admitted only from a listed origin, and, when the browser says where the request
+    /// came from, only from the same origin: two independent signals, so one browser bug opens no gap (ADR-0059).
+    #[test]
+    fn a_request_is_admitted_only_from_its_own_origin_by_both_signals() {
+        let origins = Origins::parse(&["https://ops.example.com"]).expect("origins");
+        let ours = Some("https://ops.example.com");
+        assert!(origins.admit(ours, Some("same-origin")));
+        assert!(
+            origins.admit(ours, None),
+            "an older browser sends no Sec-Fetch-Site"
+        );
+        for site in ["cross-site", "same-site", "none", "", "Same-Origin"] {
+            assert!(!origins.admit(ours, Some(site)), "{site}");
+        }
+        assert!(!origins.admit(Some("https://evil.example"), Some("same-origin")));
+        assert!(!origins.admit(None, Some("same-origin")));
     }
 
     proptest! {
