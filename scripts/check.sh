@@ -139,7 +139,7 @@ fi
 plain=(--text --no-ext-diff --no-textconv --no-color --no-renames --src-prefix=a/ --dst-prefix=b/)
 merge="$(git merge-base "$base" HEAD)"
 # In CI, whether anything in the given paths changed since the base, which a successful run already checked: a
-# group of checks whose inputs are unchanged is skipped, and says so (ADR-0064). Outside CI every group runs.
+# group of checks whose inputs are unchanged is skipped, and the log says so (ADR-0064). Outside CI every group runs.
 changed() {
   [[ -z "${CI:-}" ]] || ! git diff --quiet "$merge" -- "$@"
 }
