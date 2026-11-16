@@ -10,7 +10,7 @@ on:
         description: Commit to check every change since. Empty means the last commit a successful manual run checked.
         required: false
 
-# Each job asks for what it needs, and nothing is granted to all of them.
+# Each job asks for only what it needs, and nothing is granted to all of them.
 permissions: {}
 
 concurrency:
