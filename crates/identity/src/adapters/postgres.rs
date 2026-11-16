@@ -59,6 +59,8 @@ const ENROLL: &str = "enroll";
 
 /// An event for the audit record: its type, and a payload of IDs and facts, never names or tokens (ADR-0045).
 type Recorded = Option<(&'static str, String)>;
+/// What a statement's rows came to, if anything, and the event that records it.
+type Decided<T> = Result<(Option<T>, Recorded), Error>;
 /// What makes a statement's event of the rows it returned.
 type MakesEvent<'a> = &'a (dyn Fn(&[Row]) -> Result<Recorded, Error> + Sync);
 
@@ -127,14 +129,11 @@ impl PostgresOperators {
         parameters: &[&(dyn ToSql + Sync)],
         event: impl Fn(Option<bool>) -> (&'static str, String) + Sync,
     ) -> Result<Option<bool>, Error> {
-        let done = OnceLock::new();
-        self.query_recording(statement, parameters, &|rows| {
+        self.decided(statement, parameters, |rows| {
             let answer = answered(rows, "done")?;
-            let _ = done.set(answer);
-            Ok(Some(event(answer)))
+            Ok((answer, Some(event(answer))))
         })
-        .await?;
-        Ok(done.get().copied().flatten())
+        .await
     }
 
     /// Runs a lookup function that ends sessions and counts them, or answers nothing for an unknown operator, and
@@ -145,14 +144,29 @@ impl PostgresOperators {
         parameters: &[&(dyn ToSql + Sync)],
         event: impl Fn(Option<u64>) -> (&'static str, String) + Sync,
     ) -> Result<Option<u64>, Error> {
-        let ended = OnceLock::new();
-        self.query_recording(statement, parameters, &|rows| {
+        self.decided(statement, parameters, |rows| {
             let count = counted(rows, "ended")?;
-            let _ = ended.set(count);
-            Ok(Some(event(count)))
+            Ok((count, Some(event(count))))
+        })
+        .await
+    }
+
+    /// Runs a statement whose answer `read` makes of the rows it returned, with the event it records, in the same
+    /// transaction, and returns the answer: none for an operator or passkey that does not exist.
+    async fn decided<T: Copy + Send + Sync>(
+        &self,
+        statement: &str,
+        parameters: &[&(dyn ToSql + Sync)],
+        read: impl Fn(&[Row]) -> Decided<T> + Sync,
+    ) -> Result<Option<T>, Error> {
+        let answer = OnceLock::new();
+        self.query_recording(statement, parameters, &|rows| {
+            let (decided, recorded) = read(rows)?;
+            let _ = answer.set(decided);
+            Ok(recorded)
         })
         .await?;
-        Ok(ended.get().copied().flatten())
+        Ok(answer.get().copied().flatten())
     }
 
     /// Runs a statement, and records the event `event` makes of what it returned, if any, in the same transaction,
@@ -237,12 +251,12 @@ impl OperatorStore for PostgresOperators {
         name: &OperatorName,
         actor: &Actor,
     ) -> Result<OperatorId, Error> {
-        let added = OnceLock::new();
-        self.query_recording(INSERT_OPERATOR, &[&name.as_str()], &|rows| {
-            creation(rows, actor, &added)
-        })
-        .await?;
-        created(added.get().copied().flatten())
+        created(
+            self.decided(INSERT_OPERATOR, &[&name.as_str()], |rows| {
+                creation(rows, actor)
+            })
+            .await?,
+        )
     }
 
     async fn use_session(&self, hash: &[u8; 32], realm: Realm) -> Result<Option<Session>, Error> {
@@ -267,12 +281,10 @@ impl OperatorStore for PostgresOperators {
     ) -> Result<Option<Issue>, Error> {
         let id = operator.get();
         let parameters: [&(dyn ToSql + Sync); 2] = [&hash.as_slice(), &id];
-        let issued = OnceLock::new();
-        self.query_recording(ISSUE_ENROLLMENT, &parameters, &|rows| {
-            issuance(rows, id, actor, &issued)
+        self.decided(ISSUE_ENROLLMENT, &parameters, |rows| {
+            issuance(rows, id, actor)
         })
-        .await?;
-        Ok(issued.get().copied().flatten())
+        .await
     }
 
     async fn enrollee(&self, link: &[u8; 32]) -> Result<Option<Enrollee>, Error> {
@@ -316,12 +328,10 @@ impl OperatorStore for PostgresOperators {
             &passkey.credential_id,
             &passkey.passkey,
         ];
-        let redeemed = OnceLock::new();
-        self.query_recording(REDEEM_ENROLLMENT, &parameters, &|rows| {
-            redemption(rows, id, &passkey.credential_id, actor, &redeemed)
+        self.decided(REDEEM_ENROLLMENT, &parameters, |rows| {
+            redemption(rows, id, &passkey.credential_id, actor)
         })
-        .await?;
-        Ok(redeemed.get().copied().flatten())
+        .await
     }
 
     async fn begin_sign_in(&self, token: &[u8; 32], state: &str) -> Result<(), Error> {
@@ -340,13 +350,12 @@ impl OperatorStore for PostgresOperators {
         let payload = json!({
             "operator_id": operator.map(OperatorId::get),
             "credential": credential.map(hex),
-            "reason": reason,
         });
         self.query_recording(RECORD, &[], &|_| {
-            Ok(Some(event(
+            Ok(Some(reasoned(
                 "identity.signed_in",
                 actor,
-                "refused",
+                Some(reason),
                 payload.clone(),
             )))
         })
@@ -382,12 +391,10 @@ impl OperatorStore for PostgresOperators {
             &passkey,
             &session.as_slice(),
         ];
-        let answer = OnceLock::new();
-        self.query_recording(SIGN_IN, &parameters, &|rows| {
-            signing(rows, signer, passkey, actor, &answer)
+        self.decided(SIGN_IN, &parameters, |rows| {
+            signing(rows, signer, passkey, actor)
         })
-        .await?;
-        Ok(answer.get().copied().flatten())
+        .await
     }
 
     async fn adder(&self, session: &[u8; 32]) -> Result<Option<Adder>, Error> {
@@ -439,12 +446,10 @@ impl OperatorStore for PostgresOperators {
             &passkey.credential_id,
             &passkey.passkey,
         ];
-        let answer = OnceLock::new();
-        self.query_recording(ADD_PASSKEY, &parameters, &|rows| {
-            adding(rows, addition.operator.get(), passkey, actor, &answer)
+        self.decided(ADD_PASSKEY, &parameters, |rows| {
+            adding(rows, addition.operator.get(), passkey, actor)
         })
-        .await?;
-        Ok(answer.get().copied().flatten())
+        .await
     }
 
     async fn remove_passkeys(
@@ -453,12 +458,8 @@ impl OperatorStore for PostgresOperators {
         actor: &Actor,
     ) -> Result<Option<Removal>, Error> {
         let id = operator.get();
-        let removed = OnceLock::new();
-        self.query_recording(REMOVE_PASSKEYS, &[&id], &|rows| {
-            removing(rows, id, actor, &removed)
-        })
-        .await?;
-        Ok(removed.get().copied().flatten())
+        self.decided(REMOVE_PASSKEYS, &[&id], |rows| removing(rows, id, actor))
+            .await
     }
 
     async fn disable_operator(
@@ -467,10 +468,8 @@ impl OperatorStore for PostgresOperators {
         actor: &Actor,
     ) -> Result<Option<Disabling>, Error> {
         let id = operator.get();
-        let disabling = OnceLock::new();
-        self.query_recording(DISABLE_OPERATOR, &[&id], &|rows| {
+        self.decided(DISABLE_OPERATOR, &[&id], |rows| {
             let found = rows.first().map(disabling_from).transpose()?.flatten();
-            let _ = disabling.set(found);
             let payload = found.map_or_else(
                 || json!({"operator_id": id}),
                 |done| {
@@ -482,15 +481,12 @@ impl OperatorStore for PostgresOperators {
                 },
             );
             let outcome = outcome(found.map(|done| done.done));
-            Ok(Some(event(
-                "identity.operator_disabled",
-                actor,
-                outcome,
-                payload,
-            )))
+            Ok((
+                found,
+                Some(event("identity.operator_disabled", actor, outcome, payload)),
+            ))
         })
-        .await?;
-        Ok(disabling.get().copied().flatten())
+        .await
     }
 
     async fn enable_operator(
@@ -569,6 +565,26 @@ fn event(
     (kind, payload.to_string())
 }
 
+/// An event whose reason decides its outcome: changed with none, and refused with one, which the payload names.
+fn reasoned(
+    kind: &'static str,
+    actor: &Actor,
+    reason: Option<&str>,
+    mut payload: Value,
+) -> (&'static str, String) {
+    payload["reason"] = json!(reason);
+    event(
+        kind,
+        actor,
+        if reason.is_none() {
+            "changed"
+        } else {
+            "refused"
+        },
+        payload,
+    )
+}
+
 /// The yes, no, or nothing a lookup function answers in a column; no row at all is nothing too.
 fn answered(rows: &[Row], name: &str) -> Result<Option<bool>, Error> {
     rows.first().map_or(Ok(None), |row| column(row, name))
@@ -591,17 +607,12 @@ fn nonnegative(count: i64) -> Result<u64, Error> {
     u64::try_from(count).map_err(|_| Error::Storage("a count is negative".to_string()))
 }
 
-/// Reads what a create found, keeps it in `added`, and makes the event it records: changed when it added the
+/// Reads what a create found, and makes the event it records: changed when it added the
 /// operator, and refused when the name was taken, naming
 /// who holds it if the statement could see them.
-fn creation(
-    rows: &[Row],
-    actor: &Actor,
-    added: &OnceLock<Option<(i64, bool)>>,
-) -> Result<Option<(&'static str, String)>, Error> {
+fn creation(rows: &[Row], actor: &Actor) -> Decided<(i64, bool)> {
     let found = rows.first().map(added_from).transpose()?;
-    let _ = added.set(found);
-    Ok(Some(creation_event(found, actor)))
+    Ok((found, Some(creation_event(found, actor))))
 }
 
 /// The event a create records for what it found.
@@ -632,20 +643,14 @@ fn created(found: Option<(i64, bool)>) -> Result<OperatorId, Error> {
     }
 }
 
-/// Reads what issuing a link came to, keeps it in `issued`, and makes the event it records: changed when a link
+/// Reads what issuing a link came to, and makes the event it records: changed when a link
 /// was issued, and refused otherwise, with the reason.
-fn issuance(
-    rows: &[Row],
-    id: i64,
-    actor: &Actor,
-    issued: &OnceLock<Option<Issue>>,
-) -> Result<Option<(&'static str, String)>, Error> {
+fn issuance(rows: &[Row], id: i64, actor: &Actor) -> Decided<Issue> {
     let issue = rows
         .first()
         .map_or(Ok(None), |row| column::<Option<String>>(row, "issued"))
         .and_then(|answer| answer.as_deref().map(issue_from).transpose())?;
-    let _ = issued.set(issue);
-    Ok(Some(issuance_event(issue, id, actor)))
+    Ok((issue, Some(issuance_event(issue, id, actor))))
 }
 
 /// An answer Identity's database never writes is a storage failure, never a guess.
@@ -655,17 +660,17 @@ fn issue_from(text: &str) -> Result<Issue, Error> {
 
 /// The event issuing a link records for what it came to.
 fn issuance_event(issue: Option<Issue>, id: i64, actor: &Actor) -> (&'static str, String) {
-    let (outcome, reason) = match issue {
-        Some(Issue::Issued) => ("changed", None),
-        Some(Issue::Disabled) => ("refused", Some("disabled")),
-        Some(Issue::Enrolled) => ("refused", Some("enrolled")),
-        None => ("refused", Some("unknown")),
+    let reason = match issue {
+        Some(Issue::Issued) => None,
+        Some(Issue::Disabled) => Some("disabled"),
+        Some(Issue::Enrolled) => Some("enrolled"),
+        None => Some("unknown"),
     };
-    event(
+    reasoned(
         "identity.enrollment_issued",
         actor,
-        outcome,
-        json!({"operator_id": id, "reason": reason}),
+        reason,
+        json!({"operator_id": id}),
     )
 }
 
@@ -698,20 +703,16 @@ fn ceremony_from(row: &Row) -> Result<TakenCeremony, Error> {
     })
 }
 
-/// Reads what redeeming a link came to, keeps it in `redeemed`, and makes the event it records.
-fn redemption(
-    rows: &[Row],
-    id: i64,
-    credential: &[u8],
-    actor: &Actor,
-    redeemed: &OnceLock<Option<Redemption>>,
-) -> Result<Option<(&'static str, String)>, Error> {
+/// Reads what redeeming a link came to, and makes the event it records.
+fn redemption(rows: &[Row], id: i64, credential: &[u8], actor: &Actor) -> Decided<Redemption> {
     let redemption = rows
         .first()
         .map_or(Ok(None), |row| column::<Option<String>>(row, "redeemed"))
         .and_then(|answer| answer.as_deref().map(redemption_from).transpose())?;
-    let _ = redeemed.set(redemption);
-    Ok(Some(redemption_event(redemption, id, credential, actor)))
+    Ok((
+        redemption,
+        Some(redemption_event(redemption, id, credential, actor)),
+    ))
 }
 
 /// An answer Identity's database never writes is a storage failure, never a guess.
@@ -729,17 +730,11 @@ fn redemption_event(
     actor: &Actor,
 ) -> (&'static str, String) {
     let reason = redemption.map_or(Some("unknown"), Redemption::reason);
-    let outcome = if reason.is_none() {
-        "changed"
-    } else {
-        "refused"
-    };
-    let credential = hex(credential);
-    event(
+    reasoned(
         "identity.enrollment_redeemed",
         actor,
-        outcome,
-        json!({"operator_id": id, "credential": credential, "reason": reason}),
+        reason,
+        json!({"operator_id": id, "credential": hex(credential)}),
     )
 }
 
@@ -774,26 +769,23 @@ fn disabling_from(row: &Row) -> Result<Option<Disabling>, Error> {
     }))
 }
 
-/// Reads what removing passkeys did, keeps it in `removed`, and makes the event it records: changed when it removed
+/// Reads what removing passkeys did, and makes the event it records: changed when it removed
 /// any, unchanged when there were none, and refused for an operator who does not exist.
-fn removing(
-    rows: &[Row],
-    id: i64,
-    actor: &Actor,
-    removed: &OnceLock<Option<Removal>>,
-) -> Result<Option<(&'static str, String)>, Error> {
+fn removing(rows: &[Row], id: i64, actor: &Actor) -> Decided<Removal> {
     let removal = rows.first().map(removal_from).transpose()?;
-    let _ = removed.set(removal);
-    Ok(Some(event(
-        "identity.passkeys_removed",
-        actor,
-        outcome(removal.map(|removal| removal.passkeys_removed > 0)),
-        json!({
-            "operator_id": id,
-            "passkeys_removed": removal.map(|removal| removal.passkeys_removed),
-            "sessions_ended": removal.map(|removal| removal.sessions_ended),
-        }),
-    )))
+    Ok((
+        removal,
+        Some(event(
+            "identity.passkeys_removed",
+            actor,
+            outcome(removal.map(|removal| removal.passkeys_removed > 0)),
+            json!({
+                "operator_id": id,
+                "passkeys_removed": removal.map(|removal| removal.passkeys_removed),
+                "sessions_ended": removal.map(|removal| removal.sessions_ended),
+            }),
+        )),
+    ))
 }
 
 /// A sign-in ceremony's state, if one was taken.
@@ -812,16 +804,10 @@ fn signer_from(row: &Row, credential: &[u8]) -> Result<Signer, Error> {
     })
 }
 
-/// Reads what signing in came to, keeps it in `answered`, and makes the event it records: changed when a session
+/// Reads what signing in came to, and makes the event it records: changed when a session
 /// started, and refused otherwise, with the reason, the credential ID, which is public, the session's public ID,
 /// and the passkey's flags. The function always answers one row, so none is a storage failure.
-fn signing(
-    rows: &[Row],
-    signer: &Signer,
-    passkey: &str,
-    actor: &Actor,
-    answered: &OnceLock<Option<SignIn>>,
-) -> Result<Option<(&'static str, String)>, Error> {
+fn signing(rows: &[Row], signer: &Signer, passkey: &str, actor: &Actor) -> Decided<SignIn> {
     let row = rows.first().ok_or_else(answered_nothing)?;
     let answer: Option<String> = column(row, "signed")?;
     let sign_in = answer.as_deref().map(sign_in_from).transpose()?;
@@ -829,29 +815,26 @@ fn signing(
         column(row, "session_id")?,
         sign_in == Some(SignIn::SignedIn),
     )?;
-    let _ = answered.set(sign_in);
     let reason = match sign_in {
         Some(SignIn::SignedIn) => None,
         Some(SignIn::Disabled) => Some("disabled"),
         Some(SignIn::Raced) => Some("raced"),
         None => Some("unknown"),
     };
-    Ok(Some(event(
-        "identity.signed_in",
-        actor,
-        if reason.is_none() {
-            "changed"
-        } else {
-            "refused"
-        },
-        json!({
-            "operator_id": signer.operator.get(),
-            "credential": hex(&signer.credential),
-            "reason": reason,
-            "session": session,
-            "flags": flags(passkey),
-        }),
-    )))
+    Ok((
+        sign_in,
+        Some(reasoned(
+            "identity.signed_in",
+            actor,
+            reason,
+            json!({
+                "operator_id": signer.operator.get(),
+                "credential": hex(&signer.credential),
+                "session": session,
+                "flags": flags(passkey),
+            }),
+        )),
+    ))
 }
 
 /// A passkey's flags as stored, for the audit record: whether it may be backed up, whether it is, and whether its
@@ -915,41 +898,32 @@ fn taken_addition(row: &Row, token: &[u8; 32], session: &[u8; 32]) -> Result<Tak
     })
 }
 
-/// Reads what adding a passkey came to, keeps it in `added`, and makes the event it records: changed when the
+/// Reads what adding a passkey came to, and makes the event it records: changed when the
 /// passkey was stored, and refused otherwise, with the reason, the credential ID, the sessions it ended, the adding
 /// session's public ID, and the passkey's flags. The function always answers one row, so none is a storage failure.
-fn adding(
-    rows: &[Row],
-    id: i64,
-    passkey: &NewPasskey,
-    actor: &Actor,
-    added: &OnceLock<Option<Addition>>,
-) -> Result<Option<(&'static str, String)>, Error> {
+fn adding(rows: &[Row], id: i64, passkey: &NewPasskey, actor: &Actor) -> Decided<Addition> {
     let row = rows.first().ok_or_else(answered_nothing)?;
     let (addition, ended) = added_and_ended(row)?;
     let session = session_named(
         column(row, "session_id")?,
         addition == Some(Addition::Added),
     )?;
-    let _ = added.set(addition);
     let reason = addition.map_or(Some("unknown"), Addition::reason);
-    Ok(Some(event(
-        "identity.passkey_added",
-        actor,
-        if reason.is_none() {
-            "changed"
-        } else {
-            "refused"
-        },
-        json!({
-            "operator_id": id,
-            "credential": hex(&passkey.credential_id),
-            "reason": reason,
-            "sessions_ended": ended,
-            "session": session,
-            "flags": flags(&passkey.passkey),
-        }),
-    )))
+    Ok((
+        addition,
+        Some(reasoned(
+            "identity.passkey_added",
+            actor,
+            reason,
+            json!({
+                "operator_id": id,
+                "credential": hex(&passkey.credential_id),
+                "sessions_ended": ended,
+                "session": session,
+                "flags": flags(&passkey.passkey),
+            }),
+        )),
+    ))
 }
 
 /// What adding a passkey answered, and how many of the operator's other live sessions it ended.

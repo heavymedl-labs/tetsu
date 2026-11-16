@@ -297,6 +297,22 @@ AS $$
     SELECT coalesce(bool_or(ended.live), false) FROM ended
 $$;
 
+-- Refuses any isolation level but read committed with TD002, naming what was
+-- refused. Every function that waits on an operator's row and then checks what
+-- changed calls it first: under another level, a row committed while it waited
+-- escapes its checks. Only Identity's functions call it; no other role may.
+CREATE FUNCTION require_read_committed(what text)
+RETURNS void
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+BEGIN
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION '% needs read committed', what USING ERRCODE = 'TD002';
+    END IF;
+END
+$$;
+
 -- Where an operator stands for enrollment, after taking their row for update,
 -- since both callers change what the operator holds: open, disabled, enrolled
 -- for one who holds a passkey already, or null for one who does not exist.
@@ -311,10 +327,7 @@ AS $$
 DECLARE
     was timestamptz;
 BEGIN
-    IF current_setting('transaction_isolation') <> 'read committed' THEN
-        RAISE EXCEPTION 'enrolling needs read committed'
-        USING ERRCODE = 'TD002';
-    END IF;
+    PERFORM identity.require_read_committed('enrolling');
     SELECT o.disabled_at INTO was
     FROM identity.operators AS o
     WHERE o.id = wanted_operator
@@ -444,10 +457,7 @@ AS $$
 DECLARE
     at timestamptz;
 BEGIN
-    IF current_setting('transaction_isolation') <> 'read committed' THEN
-        RAISE EXCEPTION 'beginning a ceremony needs read committed'
-        USING ERRCODE = 'TD002';
-    END IF;
+    PERFORM identity.require_read_committed('beginning a ceremony');
     PERFORM
     FROM identity.operators AS o
     WHERE o.id = wanted_operator AND o.disabled_at IS NULL
@@ -533,10 +543,7 @@ DECLARE
     at timestamptz := clock_timestamp();
     over bigint;
 BEGIN
-    IF current_setting('transaction_isolation') <> 'read committed' THEN
-        RAISE EXCEPTION 'beginning a sign-in needs read committed'
-        USING ERRCODE = 'TD002';
-    END IF;
+    PERFORM identity.require_read_committed('beginning a sign-in');
     DELETE FROM identity.ceremonies AS c
     WHERE c.ctid = any(array(
         SELECT ended.ctid
@@ -615,10 +622,7 @@ DECLARE
     who bigint;
     was timestamptz;
 BEGIN
-    IF current_setting('transaction_isolation') <> 'read committed' THEN
-        RAISE EXCEPTION 'signing in needs read committed'
-        USING ERRCODE = 'TD002';
-    END IF;
+    PERFORM identity.require_read_committed('signing in');
     -- Each moved field must be there on both sides, a counter a whole number
     -- an authenticator could send and the flags true or false, checked before
     -- any of them is compared; everything else must be the same text, not
@@ -837,10 +841,7 @@ DECLARE
     at timestamptz;
     was timestamptz;
 BEGIN
-    IF current_setting('transaction_isolation') <> 'read committed' THEN
-        RAISE EXCEPTION 'adding a passkey needs read committed'
-        USING ERRCODE = 'TD002';
-    END IF;
+    PERFORM identity.require_read_committed('adding a passkey');
     SELECT o.disabled_at INTO was
     FROM identity.operators AS o
     WHERE o.id = wanted_operator
@@ -1041,9 +1042,7 @@ DECLARE
     at timestamptz;
     was timestamptz;
 BEGIN
-    IF current_setting('transaction_isolation') <> 'read committed' THEN
-        RAISE EXCEPTION 'disabling needs read committed' USING ERRCODE = 'TD002';
-    END IF;
+    PERFORM identity.require_read_committed('disabling');
     sessions_ended := 0;
     links_ended := 0;
     -- The row first, waiting out any enable, so its answer is the state it
@@ -1090,10 +1089,7 @@ AS $$
 DECLARE
     at timestamptz;
 BEGIN
-    IF current_setting('transaction_isolation') <> 'read committed' THEN
-        RAISE EXCEPTION 'removing passkeys needs read committed'
-        USING ERRCODE = 'TD002';
-    END IF;
+    PERFORM identity.require_read_committed('removing passkeys');
     PERFORM
     FROM identity.operators AS o
     WHERE o.id = wanted_operator
@@ -1128,10 +1124,7 @@ AS $$
 DECLARE
     was timestamptz;
 BEGIN
-    IF current_setting('transaction_isolation') <> 'read committed' THEN
-        RAISE EXCEPTION 'enabling needs read committed'
-        USING ERRCODE = 'TD002';
-    END IF;
+    PERFORM identity.require_read_committed('enabling');
     SELECT o.disabled_at INTO was
     FROM identity.operators AS o
     WHERE o.id = wanted_operator
@@ -1159,10 +1152,7 @@ DECLARE
     at timestamptz;
     ended bigint;
 BEGIN
-    IF current_setting('transaction_isolation') <> 'read committed' THEN
-        RAISE EXCEPTION 'ending sessions needs read committed'
-        USING ERRCODE = 'TD002';
-    END IF;
+    PERFORM identity.require_read_committed('ending sessions');
     PERFORM
     FROM identity.operators AS o
     WHERE wanted_operator IS NULL OR o.id = wanted_operator
@@ -1216,6 +1206,7 @@ ALTER FUNCTION start_session(bytea, text, bigint)
 OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION use_session(bytea, text) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION end_session(bytea, text) OWNER TO tetsu_identity_lookup;
+ALTER FUNCTION require_read_committed(text) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION enrolling(bigint) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION holding(bigint) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION end_every_session(bigint, timestamptz)
