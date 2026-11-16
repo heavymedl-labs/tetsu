@@ -100,10 +100,15 @@ mod support {
             .spawn()
             .expect("the binary runs");
         let (stdout, mut before) = until_listening(BufReader::new(child.stdout.take().unwrap()));
-        let line = before.pop().unwrap_or_default();
-        if message(&line).as_deref() == Some("could not start serving") {
+        // A server that could not bind says so, then may log more as it stops, such as a refused export, so the
+        // line is looked for anywhere, not only last.
+        if before
+            .iter()
+            .any(|line| message(line).as_deref() == Some("could not start serving"))
+        {
             return Err(child);
         }
+        let line = before.pop().unwrap_or_default();
         assert_eq!(
             message(&line),
             Some(format!("serving on http://0.0.0.0:{port}")),
