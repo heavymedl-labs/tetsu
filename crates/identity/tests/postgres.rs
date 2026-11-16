@@ -18,7 +18,7 @@ mod support {
     use super::*;
 
     /// Starts an operator's session as a passkey sign-in would, as the test server's administrator, and returns its
-    /// token: only a sign-in may start one, so Identity's role cannot (ADR-0048).
+    /// token: only the sign-in function may start one, so Identity's role cannot call `start_session` (ADR-0048).
     pub async fn signed_in(database: &TestDatabase, operator: OperatorId) -> SessionToken {
         let mut bytes = [0u8; 32];
         getrandom::fill(&mut bytes).expect("random bytes");
