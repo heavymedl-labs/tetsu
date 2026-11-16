@@ -263,7 +263,8 @@ $$;
 -- what it did: issued; disabled, for an operator issued none; enrolled, for
 -- one who has a passkey already and adds another only after signing in
 -- (v5.0.0-6.4.1); or null for one that does not exist. It takes the
--- operator's row, so a passkey being stored for them is seen, and reads the
+-- operator's row, so a passkey being stored for them is seen, which holds only
+-- under read committed, so it refuses any other level with TD002. It reads the
 -- clock once, so every link lasts exactly an hour.
 CREATE FUNCTION issue_enrollment(wanted_hash bytea, wanted_operator bigint)
 RETURNS text
@@ -274,6 +275,10 @@ DECLARE
     at timestamptz;
     was timestamptz;
 BEGIN
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'issuing a link needs read committed'
+        USING ERRCODE = 'TD002';
+    END IF;
     SELECT o.disabled_at INTO was
     FROM identity.operators AS o
     WHERE o.id = wanted_operator
@@ -302,7 +307,8 @@ $$;
 
 -- Every operator, oldest first, with how many passkeys each holds and how many
 -- minutes their open enrollment link has left, if one is open. Only counts
--- and times leave: never a credential or a token's hash.
+-- and times leave: never a credential or a token's hash. One reading of the
+-- clock, the statement's, serves every row.
 CREATE FUNCTION list_operators()
 RETURNS TABLE (
     id bigint,
@@ -327,10 +333,10 @@ AS $$
         (
             SELECT
                 ceil(
-                    extract(EPOCH FROM e.ends_at - clock_timestamp()) / 60
+                    extract(EPOCH FROM e.ends_at - statement_timestamp()) / 60
                 )::bigint
             FROM identity.enrollments AS e
-            WHERE e.operator_id = o.id AND e.ends_at > clock_timestamp()
+            WHERE e.operator_id = o.id AND e.ends_at > statement_timestamp()
         ) AS link_minutes
     FROM identity.operators AS o
     ORDER BY o.id
@@ -352,40 +358,58 @@ AS $$
     INNER JOIN identity.operators AS o ON e.operator_id = o.id
     WHERE
         e.token_hash = wanted_link
-        AND e.ends_at > clock_timestamp()
+        AND e.ends_at > statement_timestamp()
         AND o.disabled_at IS NULL
         AND NOT EXISTS (
             SELECT FROM identity.passkeys AS p WHERE p.operator_id = o.id
         )
 $$;
 
--- Keeps a ceremony's state for five minutes under its token's hash, and
--- removes ceremonies that have ended, so none piles up.
-CREATE FUNCTION begin_ceremony(
+-- Keeps an enrollment ceremony's state under its token's hash, and says
+-- whether it did: only while the link is open, its operator enabled, and no
+-- passkey theirs, checked here rather than trusted from the caller. A
+-- ceremony lasts ten minutes, longer than the five a browser gives its
+-- authenticator, but never past its link. A link holds one ceremony at most:
+-- a newer one replaces it, as a new link replaces the last, so beginning again
+-- and again stores nothing more. The operator's ceremonies that have ended go
+-- too, through the index on their operator.
+CREATE FUNCTION begin_enrollment(
     wanted_hash bytea,
-    wanted_kind text,
     wanted_operator bigint,
     wanted_link bytea,
     wanted_state jsonb
 )
-RETURNS void
+RETURNS boolean
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
     at timestamptz := clock_timestamp();
 BEGIN
-    DELETE FROM identity.ceremonies AS c WHERE c.ends_at <= at;
+    DELETE FROM identity.ceremonies AS c
+    WHERE
+        c.operator_id = wanted_operator
+        AND (c.ends_at <= at OR c.link_hash = wanted_link);
     INSERT INTO identity.ceremonies
         (token_hash, kind, operator_id, link_hash, state, ends_at)
-    VALUES (
+    SELECT
         wanted_hash,
-        wanted_kind,
-        wanted_operator,
-        wanted_link,
+        'enroll',
+        e.operator_id,
+        e.token_hash,
         wanted_state,
-        at + interval '5 minutes'
-    );
+        least(at + interval '10 minutes', e.ends_at)
+    FROM identity.enrollments AS e
+    INNER JOIN identity.operators AS o ON e.operator_id = o.id
+    WHERE
+        e.token_hash = wanted_link
+        AND e.operator_id = wanted_operator
+        AND e.ends_at > at
+        AND o.disabled_at IS NULL
+        AND NOT EXISTS (
+            SELECT FROM identity.passkeys AS p WHERE p.operator_id = o.id
+        );
+    RETURN FOUND;
 END
 $$;
 
@@ -414,9 +438,11 @@ $$;
 -- one transaction, and says what came of it: redeemed; disabled; enrolled,
 -- for an operator who has a passkey already, as when two tabs finish one
 -- link; expired, for a link that ended or was replaced; taken, for a
--- credential another passkey has; or null for an operator who does not exist.
--- It takes the operator's row first, so a link being issued, a disable, or
--- another tab's passkey waits, and what it checks stays true until it commits.
+-- credential another passkey has, even one stored a moment before; or null
+-- for an operator who does not exist. It takes the operator's row first, so a
+-- link being issued, a disable, or another tab's passkey waits, and what it
+-- checks stays true until it commits, under read committed only, so it
+-- refuses any other level with TD002.
 CREATE FUNCTION redeem_enrollment(
     wanted_link bytea,
     wanted_operator bigint,
@@ -430,6 +456,10 @@ AS $$
 DECLARE
     was timestamptz;
 BEGIN
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'storing a passkey needs read committed'
+        USING ERRCODE = 'TD002';
+    END IF;
     SELECT o.disabled_at INTO was
     FROM identity.operators AS o
     WHERE o.id = wanted_operator
@@ -442,31 +472,34 @@ BEGIN
         SELECT FROM identity.passkeys AS p WHERE p.operator_id = wanted_operator
     ) THEN
         RETURN 'enrolled';
-    ELSIF EXISTS (
-        SELECT FROM identity.passkeys AS p
-        WHERE p.credential_id = wanted_credential
-    ) THEN
+    END IF;
+    -- A credential another operator's passkey has, however recently, undoes
+    -- the link's use and is a refusal, recorded like any other.
+    BEGIN
+        DELETE FROM identity.enrollments AS e
+        WHERE
+            e.token_hash = wanted_link
+            AND e.operator_id = wanted_operator
+            AND e.ends_at > clock_timestamp();
+        IF NOT FOUND THEN
+            RETURN 'expired';
+        END IF;
+        INSERT INTO identity.passkeys
+            (credential_id, operator_id, passkey, created_at)
+        VALUES (
+            wanted_credential, wanted_operator, wanted_passkey, clock_timestamp()
+        );
+    EXCEPTION WHEN unique_violation THEN
         RETURN 'taken';
-    END IF;
-    DELETE FROM identity.enrollments AS e
-    WHERE
-        e.token_hash = wanted_link
-        AND e.operator_id = wanted_operator
-        AND e.ends_at > clock_timestamp();
-    IF NOT FOUND THEN
-        RETURN 'expired';
-    END IF;
-    INSERT INTO identity.passkeys
-        (credential_id, operator_id, passkey, created_at)
-    VALUES
-        (wanted_credential, wanted_operator, wanted_passkey, clock_timestamp());
+    END;
     RETURN 'redeemed';
 END
 $$;
 
--- Disables an operator, then ends every session it holds in any realm and its
--- enrollment link (v5.0.0-7.4.2), and says whether it acted and how many live
--- ones it ended, spent ones going too: done is false for an operator already
+-- Disables an operator, then ends every session it holds in any realm, its
+-- enrollment link, and any passkey ceremony under way (v5.0.0-7.4.2), and
+-- says whether it acted and how many live sessions and links it ended, spent
+-- ones going too: done is false for an operator already
 -- disabled, and null for one that does not exist. Each step is its own
 -- statement, so the deletes see what a sign-in or link committed while the
 -- lock waited on the operator's row. One statement would not, and nor would
@@ -518,6 +551,7 @@ BEGIN
     )
 
     SELECT count(*) FILTER (WHERE gone.live) INTO links_ended FROM gone;
+    DELETE FROM identity.ceremonies AS c WHERE c.operator_id = wanted_operator;
     done := true;
     RETURN NEXT;
 END
@@ -592,9 +626,15 @@ BEGIN
 END
 $$;
 
--- Every function above is one of these lookups, for Identity's role alone.
-REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA identity FROM public;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA identity TO tetsu_identity;
+-- No routine here is anyone's by default; Identity's role may run exactly the
+-- lookups it calls, so a helper added later is no one's until granted.
+REVOKE EXECUTE ON ALL ROUTINES IN SCHEMA identity FROM public;
+GRANT EXECUTE ON FUNCTION start_session(bytea, text, bigint),
+use_session(bytea, text), end_session(bytea, text),
+issue_enrollment(bytea, bigint), list_operators(), enrollee(bytea),
+begin_enrollment(bytea, bigint, bytea, jsonb), take_ceremony(bytea, text),
+redeem_enrollment(bytea, bigint, bytea, jsonb), disable_operator(bigint),
+enable_operator(bigint), end_sessions(text, bigint) TO tetsu_identity;
 
 -- A new owner needs CREATE on the schema at the moment it takes a function,
 -- and no longer after.
@@ -606,7 +646,7 @@ ALTER FUNCTION end_session(bytea, text) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION issue_enrollment(bytea, bigint) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION list_operators() OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION enrollee(bytea) OWNER TO tetsu_identity_lookup;
-ALTER FUNCTION begin_ceremony(bytea, text, bigint, bytea, jsonb)
+ALTER FUNCTION begin_enrollment(bytea, bigint, bytea, jsonb)
 OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION take_ceremony(bytea, text) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION redeem_enrollment(bytea, bigint, bytea, jsonb)

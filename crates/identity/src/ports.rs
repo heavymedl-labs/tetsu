@@ -61,14 +61,16 @@ pub trait OperatorStore {
         link: &[u8; 32],
     ) -> impl Future<Output = Result<Option<Enrollee>, Error>> + Send;
 
-    /// Keeps an enrollment ceremony's state for five minutes under its token's hash, with the link it will redeem.
+    /// Keeps an enrollment ceremony's state under its token's hash, with the link it will redeem, for ten minutes
+    /// but never past the link, and replacing any earlier ceremony of that link. Says whether it did: not once the
+    /// link has ended, or its operator is disabled or holds a passkey.
     fn begin_enrollment(
         &self,
         token: &[u8; 32],
         operator: OperatorId,
         link: &[u8; 32],
         state: &str,
-    ) -> impl Future<Output = Result<(), Error>> + Send;
+    ) -> impl Future<Output = Result<bool, Error>> + Send;
 
     /// Takes an enrollment ceremony by its token's hash, once: it is gone after this, and returned only if it was
     /// still open.

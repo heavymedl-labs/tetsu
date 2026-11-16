@@ -677,10 +677,10 @@ async fn a_disable_answer_of_the_wrong_type_is_a_storage_failure() {
     }
 }
 
-/// Disabling and ending sessions refuse to run under repeatable read, where a session committed while they waited
-/// would survive them, whoever starts the transaction.
+/// Disabling, ending sessions, issuing a link, and storing a passkey refuse to run under repeatable read, where a
+/// row committed while they waited would escape their checks, whoever starts the transaction.
 #[tokio::test]
-async fn disabling_and_ending_sessions_need_read_committed() {
+async fn changes_that_wait_on_an_operator_need_read_committed() {
     let database = ready().await;
     let pool = pool(&database.as_app()).expect("a pool");
     postgres_store(pool.clone())
@@ -692,6 +692,8 @@ async fn disabling_and_ending_sessions_need_read_committed() {
         "SELECT * FROM identity.disable_operator(1)",
         "SELECT identity.end_sessions('operator', 1)",
         "SELECT identity.end_sessions('operator', null)",
+        "SELECT identity.issue_enrollment(sha256('a'::bytea), 1)",
+        "SELECT identity.redeem_enrollment(sha256('a'::bytea), 1, sha256('c'::bytea), '{}')",
     ] {
         let transaction = client
             .build_transaction()

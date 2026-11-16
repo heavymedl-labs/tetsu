@@ -67,7 +67,8 @@ impl<S: OperatorStore> Operators<S> {
 
     /// Begins enrolling an operator's first passkey from the token their enrollment link carries. The link stays
     /// open: only finishing uses it up, so a scanner that opens the page, or a ceremony the operator abandons, costs
-    /// nothing. The ceremony lasts five minutes, and its state never leaves the store.
+    /// nothing. The ceremony lasts ten minutes, never past the link, replaces any earlier one of the same link, and its
+    /// state never leaves the store.
     ///
     /// # Errors
     /// Fails with [`Error::Invalid`], the same for every cause, for a link that is malformed, unknown, ended, or
@@ -86,10 +87,15 @@ impl<S: OperatorStore> Operators<S> {
             .ok_or_else(not_enrolling)?;
         let (options, state) = party.begin_registration(enrollee.user_handle, &enrollee.name)?;
         let token = CeremonyToken::generate(self.fill)?;
-        self.store
+        let begun = self
+            .store
             .begin_enrollment(&token.hash(), enrollee.operator, &link.hash(), &state)
             .await?;
-        Ok(Ceremony { token, options })
+        if begun {
+            Ok(Ceremony { token, options })
+        } else {
+            Err(not_enrolling())
+        }
     }
 
     /// Finishes enrolling: verifies the browser's registration against its ceremony, then stores the passkey and

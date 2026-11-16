@@ -41,7 +41,7 @@ const END_REALM_SESSIONS: &str = include_str!("../../sql/end_realm_sessions.sql"
 const LIST_OPERATORS: &str = include_str!("../../sql/list_operators.sql");
 const ENABLE_OPERATOR: &str = include_str!("../../sql/enable_operator.sql");
 const ENROLLEE: &str = include_str!("../../sql/enrollee.sql");
-const BEGIN_CEREMONY: &str = include_str!("../../sql/begin_ceremony.sql");
+const BEGIN_ENROLLMENT: &str = include_str!("../../sql/begin_enrollment.sql");
 const TAKE_CEREMONY: &str = include_str!("../../sql/take_ceremony.sql");
 const REDEEM_ENROLLMENT: &str = include_str!("../../sql/redeem_enrollment.sql");
 /// The kind of ceremony enrollment keeps.
@@ -296,15 +296,10 @@ impl OperatorStore for PostgresOperators {
         operator: OperatorId,
         link: &[u8; 32],
         state: &str,
-    ) -> Result<(), Error> {
-        let parameters: [&(dyn ToSql + Sync); 5] = [
-            &token.as_slice(),
-            &ENROLL,
-            &operator.get(),
-            &link.as_slice(),
-            &state,
-        ];
-        self.query(BEGIN_CEREMONY, &parameters).await.map(drop)
+    ) -> Result<bool, Error> {
+        let parameters: [&(dyn ToSql + Sync); 4] =
+            [&token.as_slice(), &operator.get(), &link.as_slice(), &state];
+        begun(&self.query(BEGIN_ENROLLMENT, &parameters).await?)
     }
 
     async fn take_enrollment(&self, token: &[u8; 32]) -> Result<Option<TakenCeremony>, Error> {
@@ -532,6 +527,11 @@ fn issuance_event(issue: Option<Issue>, id: i64, actor: &Actor) -> (&'static str
         outcome,
         json!({"operator_id": id, "reason": reason}),
     )
+}
+
+/// Whether a ceremony was kept: the link may have ended, or its operator changed, since it was read.
+fn begun(rows: &[Row]) -> Result<bool, Error> {
+    rows.first().map_or(Ok(false), |row| column(row, "begun"))
 }
 
 /// The operator a link names, with the user handle and name a registration needs.
