@@ -70,7 +70,6 @@ async fn serve(operators: Operators<PostgresOperators>) -> SocketAddr {
         demo: true,
         stylesheet: "/assets/tetsu-test.css",
         script: SCRIPT,
-        icon: "/assets/tetsu-avatar-test.svg",
         report,
     };
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("binds");
@@ -331,7 +330,7 @@ async fn signing_out_clears_the_cookie() {
 #[tokio::test]
 async fn the_pages_run_only_tetsus_own_script() {
     let (address, _database, _) = serving().await;
-    for (path, action) in [("/ops/sign-in", "sign-in"), ("/ops/enroll", "enroll")] {
+    for path in ["/ops/sign-in", "/ops/enroll"] {
         let page = get(address, path, "").await;
         assert_eq!(
             (
@@ -353,24 +352,6 @@ async fn the_pages_run_only_tetsus_own_script() {
                 .contains(&format!("<script type=\"module\" src=\"{SCRIPT}\">")),
             "{path}"
         );
-        // An operator page shows no demo business, so no demo banner and no "Runs on Tetsu" footer.
-        for absent in ["role=\"note\"", "Runs on"] {
-            assert!(!page.body.contains(absent), "{absent} in {}", page.body);
-        }
-        // Each page's one action is a passkey island, under Tetsu's mark.
-        for shown in [
-            format!("<tetsu-passkey action=\"{action}\""),
-            "src=\"/assets/tetsu-avatar-test.svg\"".to_string(),
-        ] {
-            assert!(page.body.contains(&shown), "{shown} in {}", page.body);
-        }
-        // The button takes the shared button's look, in one class attribute.
-        assert!(
-            page.body
-                .contains("disabled:opacity-50 rounded-full font-medium focus-visible:outline-2"),
-            "{}",
-            page.body
-        );
     }
     let unknown = format!("__Host-tetsu-operator={}", "ab".repeat(32));
     for cookie in ["", unknown.as_str()] {
@@ -380,6 +361,26 @@ async fn the_pages_run_only_tetsus_own_script() {
             (303, Some("/ops/sign-in")),
             "{cookie}"
         );
+    }
+}
+
+/// Each page before sign-in offers its one action as a passkey island, in the shared button's look, under Tetsu's
+/// wordmark. It shows no demo business, so it has no demo banner and no "Runs on Tetsu" footer.
+#[tokio::test]
+async fn each_page_offers_one_passkey_island() {
+    let (address, _database, _) = serving().await;
+    for (path, action) in [("/ops/sign-in", "sign-in"), ("/ops/enroll", "enroll")] {
+        let page = get(address, path, "").await;
+        for absent in ["role=\"note\"", "Runs on"] {
+            assert!(!page.body.contains(absent), "{absent} in {}", page.body);
+        }
+        for shown in [
+            format!("<tetsu-passkey action=\"{action}\""),
+            "viewBox=\"0 0 564 144\"".to_string(),
+            "disabled:opacity-50 rounded-full font-medium focus-visible:outline-2".to_string(),
+        ] {
+            assert!(page.body.contains(&shown), "{shown} in {}", page.body);
+        }
     }
 }
 

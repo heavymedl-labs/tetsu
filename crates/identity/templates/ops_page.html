@@ -1,6 +1,7 @@
-{#- The shell of each operator page, after the layout of Linear's sign-in: one narrow column a third of the way
-    down, Tetsu's mark above a small heading, full-width choices, and a muted line under them. A page's struct adds
-    `script`, the passkey islands' hashed URL, and `icon`, Tetsu's mark, to what the shared page needs. -#}
+{#- The shell of each operator page, after the layout of Linear's sign-in: one narrow card in the middle of the
+    page, Tetsu's wordmark above a small heading, full-width choices, and a muted line under them. The card settles
+    into place as it fades in, and the wordmark's slots book in, so the page shows it is ready. A page's struct adds
+    `script`, the passkey islands' hashed URL, to what the shared page needs. -#}
 {% extends "../../../web/templates/page.html" %}
 {% block head %}<script type="module" src="{{ script }}"></script>{% endblock %}
 {#- An operator page shows no demo business, so it has no demo banner, and no "Runs on Tetsu" footer, as Linear's
@@ -8,9 +9,9 @@
 {% block banner %}{% endblock %}
 {% block footer %}{% endblock %}
 {% block body %}
-<main class="flex flex-1 justify-center px-6 pt-[18vh] pb-16 sm:pt-[22vh]">
-<div class="w-full max-w-72 text-center">
-<img src="{{ icon }}" alt="" width="40" height="40" class="mx-auto size-10">
+<main class="flex flex-1 items-center justify-center px-6 py-16">
+<div class="tetsu-settle w-full max-w-72 text-center">
+<div class="mx-auto h-8 w-fit text-ink">{% include "../../../web/templates/wordmark.html" %}</div>
 {% block card %}{% endblock %}
 <noscript><p class="mt-4 text-[13px] text-muted">Passkeys need JavaScript, which this browser has turned off.</p></noscript>
 </div>

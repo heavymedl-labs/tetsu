@@ -22,7 +22,7 @@ nothing can be booked or bought.{% endblock %}
 {%- let nav = [("/#product", "Product"), ("/#customers", "Customers"), ("/#why", "Why Tetsu"), ("/#pricing", "Pricing")] %}
 <header class="sticky top-0 z-40 border-b border-line/70 bg-canvas/75 backdrop-blur-md">
 <nav aria-label="Tetsu" class="mx-auto flex h-14 max-w-page items-center justify-between gap-6 px-6 lg:px-10">
-<a href="/" aria-label="Tetsu home" class="flex h-4 items-center text-ink focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent">{% include "art/wordmark.html" %}</a>
+<a href="/" aria-label="Tetsu home" class="flex h-4 items-center text-ink focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent">{% include "../../../web/templates/wordmark.html" %}</a>
 {% if demo %}<div class="hidden flex-1 items-center gap-8 pl-6 text-sm text-muted md:flex">
 {%- for (href, text) in nav %}
 <a href="{{ href }}" class="transition-colors hover:text-ink">{{ text }}</a>
@@ -56,7 +56,7 @@ nothing can be booked or bought.{% endblock %}
 <footer>
 <div class="mx-auto grid max-w-page grid-cols-2 gap-10 px-6 py-16 lg:px-10 text-sm sm:grid-cols-5">
 <div class="col-span-2">
-<div class="h-4 text-ink">{% include "art/wordmark.html" %}</div>
+<div class="h-4 text-ink">{% include "../../../web/templates/wordmark.html" %}</div>
 <p class="mt-4 max-w-xs text-muted">Scheduling, memberships, and payments for the businesses people book with.</p>
 </div>
 {% if demo %}
