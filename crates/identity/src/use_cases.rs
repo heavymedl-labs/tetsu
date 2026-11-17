@@ -103,12 +103,11 @@ impl<S: OperatorStore> Operators<S> {
     pub async fn finish_join(
         &self,
         party: &RelyingParty,
-        ceremony: &str,
-        response: &str,
+        answer: Answer<'_>,
         cookies: &[&str],
         actor: &Actor,
     ) -> Result<(OperatorId, SessionToken), Error> {
-        let held = CeremonyToken::parse(ceremony).ok_or_else(not_joining)?;
+        let held = CeremonyToken::parse(answer.ceremony).ok_or_else(not_joining)?;
         let taken = self
             .store
             .take_join(&held.hash())
@@ -121,7 +120,7 @@ impl<S: OperatorStore> Operators<S> {
             state: &taken.state,
         };
         let passkey = self
-            .registered(party, response, &pending, actor)
+            .registered(party, answer.response, &pending, actor)
             .await
             .map_err(|error| refusing(error, not_joining))?;
         let (started, session) = self.session_start(cookies)?;

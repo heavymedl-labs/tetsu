@@ -36,7 +36,15 @@ pub(crate) async fn joined() -> (
     let ceremony = operators.begin_join(&party, &link).await.expect("begins");
     let (response, kept) = register_keeping(&ceremony.options, ORIGIN, true).await;
     operators
-        .finish_join(&party, &ceremony.token.to_text(), &response, &[], &actor())
+        .finish_join(
+            &party,
+            Answer {
+                ceremony: &ceremony.token.to_text(),
+                response: &response,
+            },
+            &[],
+            &actor(),
+        )
         .await
         .expect("joins");
     as_admin(&database, "DELETE FROM identity.sessions").await;

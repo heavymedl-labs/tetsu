@@ -421,7 +421,7 @@ async fn before<S: OperatorStore>(
             .map(|begun| begun_json(&begun)),
         // Joining logs the operator in, with a session that rests on the link and is never fresh (ADR-0069).
         Before::FinishJoin => operators
-            .finish_join(&web.party, ceremony, &response, &cookies(&headers), &actor)
+            .finish_join(&web.party, answer, &cookies(&headers), &actor)
             .await
             .map(|(_, token)| logged_in_at(&token, ACCOUNT)),
     };

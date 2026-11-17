@@ -20,9 +20,22 @@ use sha2::{Digest, Sha256};
 use crate::adapters::postgres::PostgresOperators;
 use crate::domain::{NewPasskey, Redemption, SessionStart, SessionToken, TakenCeremony};
 use crate::ports::OperatorStore;
-use crate::{Actor, Error, Identity, OperatorId, OperatorName, Operators, RelyingParty};
+use crate::{Actor, Answer, Error, Identity, OperatorId, OperatorName, Operators, RelyingParty};
 
 pub(crate) const ORIGIN: &str = "https://ops.example.com";
+
+/// Finishes a join as the pages would, with no session presented, and says whose it was.
+async fn joining(
+    operators: &Operators<PostgresOperators>,
+    party: &RelyingParty,
+    ceremony: &str,
+    response: &str,
+) -> Result<OperatorId, Error> {
+    operators
+        .finish_join(party, Answer { ceremony, response }, &[], &actor())
+        .await
+        .map(|(operator, _)| operator)
+}
 
 /// A session for a redemption to start, under a new token's hash, with no browser session to end.
 fn starting() -> SessionStart {
@@ -281,19 +294,13 @@ async fn an_operator_joins_their_first_passkey_once() {
     let response = register(&ceremony.options, ORIGIN, true).await;
     let token = ceremony.token.to_text();
     assert_eq!(
-        operators
-            .finish_join(&party, &token, &response, &[], &actor())
-            .await
-            .map(|(operator, _)| operator),
+        joining(&operators, &party, &token, &response).await,
         Ok(kurt)
     );
     // The passkey, and the session joining began; the link and every ceremony are gone.
     assert_eq!(held(&database).await, [1, 0, 0, 1]);
     assert_eq!(
-        operators
-            .finish_join(&party, &token, &response, &[], &actor())
-            .await
-            .map(|(operator, _)| operator),
+        joining(&operators, &party, &token, &response).await,
         not_joining(),
         "a ceremony finishes once"
     );
@@ -334,10 +341,7 @@ async fn hostile_clients_are_refused_and_the_link_stays_open() {
         };
         let response = register(&options, origin, verifies).await;
         assert_eq!(
-            operators
-                .finish_join(&party, &ceremony.token.to_text(), &response, &[], &actor())
-                .await
-                .map(|(operator, _)| operator),
+            joining(&operators, &party, &ceremony.token.to_text(), &response).await,
             not_joining(),
             "{origin}, verifies: {verifies}"
         );
@@ -365,10 +369,7 @@ async fn a_malformed_registration_is_refused_and_recorded() {
     for response in ["not a registration", "{}"] {
         let ceremony = operators.begin_join(&party, &link).await.expect("begins");
         assert_eq!(
-            operators
-                .finish_join(&party, &ceremony.token.to_text(), response, &[], &actor())
-                .await
-                .map(|(operator, _)| operator),
+            joining(&operators, &party, &ceremony.token.to_text(), response).await,
             not_joining()
         );
     }
@@ -400,14 +401,8 @@ async fn a_registration_finishes_only_its_own_ceremony() {
         .expect("begins");
     let response = register(&kurts.options, ORIGIN, true).await;
     let finished = [
-        operators
-            .finish_join(&party, &lees.token.to_text(), &response, &[], &actor())
-            .await
-            .map(|(operator, _)| operator),
-        operators
-            .finish_join(&party, &kurts.token.to_text(), &response, &[], &actor())
-            .await
-            .map(|(operator, _)| operator),
+        joining(&operators, &party, &lees.token.to_text(), &response).await,
+        joining(&operators, &party, &kurts.token.to_text(), &response).await,
     ];
     assert_eq!(finished, [not_joining(), Ok(kurt)]);
 }
@@ -427,12 +422,7 @@ async fn a_newer_ceremony_replaces_an_older_one() {
     let mut finished = Vec::new();
     for tab in [&older, &newer] {
         let response = register(&tab.options, ORIGIN, true).await;
-        finished.push(
-            operators
-                .finish_join(&party, &tab.token.to_text(), &response, &[], &actor())
-                .await
-                .map(|(operator, _)| operator),
-        );
+        finished.push(joining(&operators, &party, &tab.token.to_text(), &response).await);
     }
     assert_eq!(finished, [not_joining(), Ok(kurt)]);
 }
@@ -485,10 +475,7 @@ async fn a_change_while_joining_refuses_the_passkey() {
             }
         }
         assert_eq!(
-            operators
-                .finish_join(&party, &ceremony.token.to_text(), &response, &[], &actor())
-                .await
-                .map(|(operator, _)| operator),
+            joining(&operators, &party, &ceremony.token.to_text(), &response).await,
             not_joining(),
             "{change}"
         );
@@ -529,8 +516,10 @@ async fn finish_rewritten(
     operators
         .finish_join(
             party,
-            &ceremony.token.to_text(),
-            &response.to_string(),
+            Answer {
+                ceremony: &ceremony.token.to_text(),
+                response: &response.to_string(),
+            },
             &[],
             &actor(),
         )
@@ -657,10 +646,7 @@ async fn unknown_tokens_are_refused_alike() {
             "{link}"
         );
         assert_eq!(
-            operators
-                .finish_join(&party, link, "{}", &[], &actor())
-                .await
-                .map(|(operator, _)| operator),
+            joining(&operators, &party, link, "{}").await,
             not_joining(),
             "{link}"
         );
@@ -690,9 +676,7 @@ async fn failures_of_the_server_are_told_apart() {
     // A join whose session cannot be given a token stores nothing: the session and passkey come in one step.
     let ceremony = operators.begin_join(&party, &link).await.expect("begins");
     let (response, _) = register_keeping(&ceremony.options, ORIGIN, true).await;
-    let finished = failing
-        .finish_join(&party, &ceremony.token.to_text(), &response, &[], &actor())
-        .await;
+    let finished = joining(&failing, &party, &ceremony.token.to_text(), &response).await;
     assert_eq!(failure(finished.map(drop)), unavailable);
     assert_eq!(held(&database).await, [0, 1, 0, 0]);
     let ceremony = operators.begin_join(&party, &link).await.expect("begins");
@@ -701,10 +685,7 @@ async fn failures_of_the_server_are_told_apart() {
         "UPDATE identity.ceremonies SET state = '{\"x\": 1}'",
     )
     .await;
-    let finished = operators
-        .finish_join(&party, &ceremony.token.to_text(), "{}", &[], &actor())
-        .await
-        .map(|(operator, _)| operator);
+    let finished = joining(&operators, &party, &ceremony.token.to_text(), "{}").await;
     assert!(
         failure(finished.map(drop))
             .starts_with("storage failed: a stored passkey ceremony could not be read")
@@ -803,20 +784,17 @@ async fn an_ended_link_or_oversized_passkey_stores_nothing() {
     let numbered: Vec<String> = (0..800).map(|n| format!("\"{n:04}\":1")).collect();
     let spaced = format!("{{{}}}", numbered.join(","));
     assert!(spaced.len() <= 8192);
-    let mut answers = vec![
-        store
-            .redeem_invite(
-                &unknown_link,
-                &fresh(vec![1; 16], "{}"),
-                &starting(),
-                &actor(),
-            )
-            .await,
-    ];
-    for (id, passkey) in [(1024, "{}"), (15, "{}"), (16, spaced.as_str())] {
+    let mut answers = Vec::new();
+    for (link, id, passkey) in [
+        (&unknown_link, 16, "{}"),
+        (&lees, 1024, "{}"),
+        (&lees, 15, "{}"),
+        (&lees, 16, spaced.as_str()),
+    ] {
+        let passkey = fresh(vec![1; id], passkey);
         answers.push(
             store
-                .redeem_invite(&lees, &fresh(vec![1; id], passkey), &starting(), &actor())
+                .redeem_invite(link, &passkey, &starting(), &actor())
                 .await,
         );
     }
@@ -915,10 +893,8 @@ async fn each_join_step_fails_as_storage_when_refused() {
             let ceremony = operators.begin_join(&party, &link).await.expect("begins");
             let response = register(&ceremony.options, ORIGIN, true).await;
             as_admin(&database, &revoke).await;
-            operators
-                .finish_join(&party, &ceremony.token.to_text(), &response, &[], &actor())
+            joining(&operators, &party, &ceremony.token.to_text(), &response)
                 .await
-                .map(|(operator, _)| operator)
                 .map(drop)
         };
         let name = function.split('(').next().unwrap_or_default();
@@ -1025,10 +1001,8 @@ async fn unreadable_ceremonies_are_storage_failures() {
         )
         .await;
         let finished = failure(
-            operators
-                .finish_join(&party, &ceremony.token.to_text(), "{}", &[], &actor())
+            joining(&operators, &party, &ceremony.token.to_text(), "{}")
                 .await
-                .map(|(operator, _)| operator)
                 .map(drop),
         );
         assert!(finished.starts_with(said));
@@ -1058,10 +1032,8 @@ async fn unreadable_redemptions_are_storage_failures() {
         )
         .await;
         let finished = failure(
-            operators
-                .finish_join(&party, &ceremony.token.to_text(), &response, &[], &actor())
+            joining(&operators, &party, &ceremony.token.to_text(), &response)
                 .await
-                .map(|(operator, _)| operator)
                 .map(drop),
         );
         assert!(finished.starts_with(said));
@@ -1087,7 +1059,15 @@ async fn joining_ends_the_session_the_browser_presented() {
         "SELECT count(*) FROM identity.sessions WHERE token_hash = sha256(decode('{earlier}', 'hex'))"
     );
     let refused = operators
-        .finish_join(&party, "not a ceremony", "{}", &[cookie.as_str()], &actor())
+        .finish_join(
+            &party,
+            Answer {
+                ceremony: "not a ceremony",
+                response: "{}",
+            },
+            &[cookie.as_str()],
+            &actor(),
+        )
         .await;
     assert!(refused.is_err());
     assert_eq!(number(&database, &held_earlier).await, 1);
@@ -1096,8 +1076,10 @@ async fn joining_ends_the_session_the_browser_presented() {
     let (_, token) = operators
         .finish_join(
             &party,
-            &ceremony.token.to_text(),
-            &response,
+            Answer {
+                ceremony: &ceremony.token.to_text(),
+                response: &response,
+            },
             &[cookie.as_str()],
             &actor(),
         )
