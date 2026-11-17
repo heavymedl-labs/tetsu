@@ -43,7 +43,7 @@ number, and add a row below. Never renumber.
 | [0035](0035-component-sources-and-look.md) | Component sources and look | Building a page or component, or choosing colors or type | Accepted |
 | [0036](0036-build-assets-where-used.md) | Build front-end assets where they are used | Building or deploying the site, or changing how assets are built | Accepted |
 | [0037](0037-fictional-customers-on-tetsus-page.md) | Fictional customers on Tetsu's page | Writing content for Tetsu's own pages | Accepted |
-| [0038](0038-color-scheme-control.md) | A color-scheme control without script | Changing colors, the color schemes, or the header's control | Accepted |
+| [0038](0038-color-scheme-control.md) | A color-scheme control without script | Changing colors, the color schemes, or the header's control | Superseded by 0070 |
 | [0039](0039-response-compression-and-page-budget.md) | Response compression and a page budget | Changing how responses are sent, adding page weight, or a page that holds a secret | Accepted |
 | [0040](0040-identity-and-sign-in.md) | Identity and login | Building login, signup, accounts, sessions, or anything operators use | Accepted |
 | [0041](0041-account-recovery.md) | Account recovery | Building recovery, recovery codes, anything that replaces a credential, or any link between an account and a client profile | Accepted |
@@ -74,7 +74,7 @@ number, and add a row below. Never renumber.
 | [0066](0066-public-repository.md) | A public repository | Changing who can see or run the repository, or licensing it | Accepted |
 | [0067](0067-sign-in-after-a-first-passkey.md) | Logging in after a first passkey | Building invites, joining, or signup for any realm | Accepted |
 | [0069](0069-logged-in-on-joining.md) | Logged in on joining | Building joining or freshness for operators and staff | Accepted |
-| [0070](0070-a-remembered-color-scheme.md) | A remembered color scheme, in the footer | Changing the color scheme control or what it remembers | Proposed |
+| [0070](0070-a-remembered-color-scheme.md) | A remembered color scheme, in the footer | Changing the color scheme control or what it remembers | Accepted |
 | [0068](0068-no-demo-note.md) | No demo note | Changing what marks a demo page | Proposed |
 
 ## Open decisions

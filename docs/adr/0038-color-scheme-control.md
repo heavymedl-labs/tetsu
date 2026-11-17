@@ -1,6 +1,6 @@
 # 0038. A color-scheme control without script
 
-- Status: Accepted
+- Status: Superseded by 0070
 - Date: 2026-11-11
 - Superseded by [ADR-0070](0070-a-remembered-color-scheme.md): the control moves to the footer and remembers
 - Supersedes the color-scheme rule in [ADR-0035](0035-component-sources-and-look.md)

@@ -1,6 +1,6 @@
 # 0070. A remembered color scheme, in the footer
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-17
 - Supersedes [ADR-0038](0038-color-scheme-control.md)
 
