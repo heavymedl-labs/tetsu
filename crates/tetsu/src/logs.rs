@@ -1,7 +1,7 @@
-//! Logs (ADR-0045): one JSON object a line on standard output, which every host collects, and the same lines
-//! exported over OTLP when an endpoint is set (ADR-0049). Each request's lines carry its request ID, the realm, the
-//! method, the route that answered, and the tenant once one is found, and never the path, query, or body, which
-//! could carry a name, an email, a code, or a token.
+//! Logs (ADR-0045): one JSON object a line on standard output, which every host collects, or text when it is a
+//! terminal (ADR-0071), and the same lines exported over OTLP when an endpoint is set (ADR-0049). Each request's
+//! lines carry its request ID, the realm, the method, the route that answered, and the tenant once one is found,
+//! and never the path, query, or body, which could carry a name, an email, a code, or a token.
 //!
 //! The span fields in [`SPAN_FIELDS`] and the values of `alert` are a contract with the backend's alert rules,
 //! written down in ADR-0049. Renaming one breaks a rule there without failing anything here.
@@ -27,7 +27,7 @@ use tracing_subscriber::filter::Targets;
 use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::layer::SubscriberExt;
 
-use crate::settings::Export;
+use crate::settings::{Export, LogFormat};
 
 /// The realm a request is for: the operators' at a path Identity's operator pages serve, and the customers' at any
 /// other (ADR-0048). Only the path, never its text, decides, so the label names no person.
@@ -53,14 +53,16 @@ pub const SPAN_FIELDS: [&str; 5] = [
     "tenant_id",
 ];
 
-/// Logs JSON lines to `writer`, and exports them through `export` when it is given. Each event's fields are at the
-/// top level of a line, and the fields of the span it happened in under `span`. Tetsu's own crates log from info
+/// Logs lines to `writer` in `format`, and exports them through `export` when it is given. In JSON, each event's
+/// fields are at the top level of a line, and the fields of the span it happened in under `span`. In text, the
+/// same fields follow the span's name and the message, for a person to read. Tetsu's own crates log from info
 /// up. Other crates log only warnings and errors, since no one has checked what they write for personal details.
 /// The exporter's own crates and the HTTP stack it sends through are never exported, so a failing export cannot
 /// log itself in a loop; their warnings and errors, such as a refused key, stay on standard output.
 pub fn subscriber<W>(
     writer: W,
     export: Option<&SdkLoggerProvider>,
+    format: LogFormat,
 ) -> impl tracing::Subscriber + Send + Sync
 where
     W: for<'writer> MakeWriter<'writer> + Send + Sync + 'static,
@@ -82,13 +84,17 @@ where
         targets.with_target(target, LevelFilter::OFF)
     })
     .with_default(LevelFilter::TRACE);
-    let lines = tracing_subscriber::fmt::layer()
-        .json()
-        .flatten_event(true)
-        .with_current_span(true)
-        .with_span_list(false)
-        .with_target(false)
-        .with_writer(writer);
+    let layout = tracing_subscriber::fmt::layer().with_target(false);
+    let lines = match format {
+        LogFormat::Json => layout
+            .json()
+            .flatten_event(true)
+            .with_current_span(true)
+            .with_span_list(false)
+            .with_writer(writer)
+            .boxed(),
+        LogFormat::Text => layout.compact().with_writer(writer).boxed(),
+    };
     let exported = export.map(|provider| {
         OpenTelemetryTracingBridge::builder(provider)
             .with_tracing_span_attributes(TracingSpanAttributes::allowlist(SPAN_FIELDS))
@@ -122,12 +128,12 @@ impl Logs {
 ///
 /// # Errors
 /// Fails if logging was already started.
-pub fn start(export: Result<Option<Export>, String>) -> Result<Logs, String> {
+pub fn start(export: Result<Option<Export>, String>, format: LogFormat) -> Result<Logs, String> {
     let (provider, problem) = match export.and_then(|export| export.map(exporter).transpose()) {
         Ok(provider) => (provider, None),
         Err(problem) => (None, Some(problem)),
     };
-    tracing::subscriber::set_global_default(subscriber(std::io::stdout, provider.as_ref()))
+    tracing::subscriber::set_global_default(subscriber(std::io::stdout, provider.as_ref(), format))
         .map_err(|error| format!("could not start logging: {error}"))?;
     if let Some(problem) = problem {
         tracing::warn!("logs are not exported: {problem}");
@@ -255,22 +261,50 @@ mod tests {
         }
     }
 
+    /// The lines written in `format` while `run` logs.
+    fn logged(format: LogFormat, run: impl FnOnce()) -> String {
+        let lines = Lines::default();
+        let writer = lines.clone();
+        tracing::subscriber::with_default(subscriber(move || writer.clone(), None, format), run);
+        String::from_utf8(lines.0.lock().unwrap().clone()).unwrap()
+    }
+
     /// Tetsu's own crates log from info up; anything else only from warn up, since no one reviewed what it writes
     /// for personal details.
     #[test]
     fn other_crates_log_only_warnings_and_errors() {
-        let lines = Lines::default();
-        let writer = lines.clone();
-        tracing::subscriber::with_default(subscriber(move || writer.clone(), None), || {
+        let text = logged(LogFormat::Json, || {
             tracing::info!(target: "tetsu_tenancy::adapters", "kept");
             tracing::info!(target: "deadpool_postgres", "dropped");
             tracing::warn!(target: "deadpool_postgres", "a warning kept");
             tracing::debug!(target: "tetsu", "dropped too");
         });
-        let text = String::from_utf8(lines.0.lock().unwrap().clone()).unwrap();
         assert!(text.contains("\"kept\""), "{text}");
         assert!(text.contains("a warning kept"), "{text}");
         assert!(!text.contains("dropped"), "{text}");
+    }
+
+    /// Text lines carry the same fields as JSON lines, the span's among them, through the same filters; only the
+    /// layout differs.
+    #[test]
+    fn text_lines_carry_the_same_fields_for_a_person_to_read() {
+        let text = logged(LogFormat::Text, || {
+            let span = tracing::info_span!(target: "tetsu", "request", realm = "operator");
+            let _entered = span.enter();
+            tracing::info!(target: "tetsu_tenancy::adapters", status = 200, "served");
+            tracing::info!(target: "deadpool_postgres", "dropped");
+        });
+        let line = text.lines().next().unwrap_or_default();
+        assert_eq!(text.lines().count(), 1, "{text}");
+        assert!(!line.starts_with('{'), "{line}");
+        for shown in [
+            " INFO ",
+            "request: served",
+            "status=200",
+            "realm=\"operator\"",
+        ] {
+            assert!(line.contains(shown), "{shown} in {line}");
+        }
     }
 
     /// What `subscriber` exports, captured in memory, after `run` logs through it.
@@ -279,7 +313,10 @@ mod tests {
         let provider = SdkLoggerProvider::builder()
             .with_simple_exporter(memory.clone())
             .build();
-        tracing::subscriber::with_default(subscriber(std::io::sink, Some(&provider)), run);
+        tracing::subscriber::with_default(
+            subscriber(std::io::sink, Some(&provider), LogFormat::Json),
+            run,
+        );
         memory
             .get_emitted_logs()
             .unwrap()
@@ -386,15 +423,12 @@ mod tests {
     /// A 5xx response's line names the server error alert; others carry no alert.
     #[test]
     fn a_server_error_is_marked_for_its_alert() {
-        let lines = Lines::default();
-        let writer = lines.clone();
-        tracing::subscriber::with_default(subscriber(move || writer.clone(), None), || {
+        let text = logged(LogFormat::Json, || {
             for status in [500, 503, 404, 200] {
                 let status = axum::http::StatusCode::from_u16(status).unwrap();
                 served(status, std::time::Duration::from_millis(3));
             }
         });
-        let text = String::from_utf8(lines.0.lock().unwrap().clone()).unwrap();
         let alerts: Vec<bool> = text
             .lines()
             .map(|line| line.contains("\"alert\":\"server_error\""))
@@ -411,9 +445,12 @@ mod tests {
         let lines = Lines::default();
         let writer = lines.clone();
         let panicked = std::thread::spawn(move || {
-            tracing::subscriber::with_default(subscriber(move || writer.clone(), None), || {
-                panic!("lee.park@example.com");
-            });
+            tracing::subscriber::with_default(
+                subscriber(move || writer.clone(), None, LogFormat::Json),
+                || {
+                    panic!("lee.park@example.com");
+                },
+            );
         })
         .join();
         assert!(panicked.is_err());

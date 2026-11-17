@@ -185,7 +185,9 @@ async fn refuse_reserved_addresses<S: tetsu_tenancy::TenantStore>(
 async fn run_serve() -> Result<(), String> {
     let stop = serve::stop_signal();
     let local = local()?;
-    let logs = logs::start(settings::export(|name| local.var(name)))?;
+    let terminal = std::io::IsTerminal::is_terminal(&std::io::stdout());
+    let format = settings::log_format(|name| local.var(name), terminal)?;
+    let logs = logs::start(settings::export(|name| local.var(name)), format)?;
     let started = tokio::spawn(async move { ready(&local).await })
         .await
         .unwrap_or_else(|_| Err("serving panicked while starting".into()));

@@ -177,6 +177,29 @@ pub fn demo(var: impl Fn(&str) -> Result<String, VarError>) -> Result<bool, Stri
     }
 }
 
+/// How log lines are laid out (ADR-0071): JSON, which a log service reads, or text, which a person reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogFormat {
+    Json,
+    Text,
+}
+
+/// The log layout `TETSU_LOG_FORMAT` names, `json` or `text`. Unset, logs are text when they reach a terminal and
+/// JSON anywhere else, so a host that collects standard output gets JSON without setting anything.
+///
+/// # Errors
+/// Fails if the setting names neither.
+pub fn log_format(
+    var: impl Fn(&str) -> Result<String, VarError>,
+    terminal: bool,
+) -> Result<LogFormat, String> {
+    match (value(&var, "TETSU_LOG_FORMAT")?.as_deref(), terminal) {
+        (Some("text"), _) | (None, true) => Ok(LogFormat::Text),
+        (Some("json"), _) | (None, false) => Ok(LogFormat::Json),
+        (Some(_), _) => Err("TETSU_LOG_FORMAT must be json or text".into()),
+    }
+}
+
 /// Where logs are exported over OTLP (ADR-0049), read from OpenTelemetry's standard names.
 #[derive(PartialEq, Eq)]
 pub struct Export {
@@ -449,6 +472,33 @@ mod tests {
                 origin_from(Some(bad))
                     .is_err_and(|why| why.starts_with("TETSU_ORIGIN must be an origin")),
                 "{bad}"
+            );
+        }
+    }
+
+    fn formatted(value: Option<&str>, terminal: bool) -> Result<LogFormat, String> {
+        log_format(
+            |name| match (name, value) {
+                ("TETSU_LOG_FORMAT", Some(value)) => Ok(value.to_string()),
+                _ => Err(VarError::NotPresent),
+            },
+            terminal,
+        )
+    }
+
+    /// Unset, logs are text a person reads when they reach a terminal, and JSON anywhere else, so a host that
+    /// collects standard output always gets JSON. The setting chooses either.
+    #[test]
+    fn logs_are_text_in_a_terminal_and_json_elsewhere_unless_set() {
+        assert_eq!(formatted(None, true), Ok(LogFormat::Text));
+        assert_eq!(formatted(None, false), Ok(LogFormat::Json));
+        assert_eq!(formatted(Some(""), false), Ok(LogFormat::Json));
+        for terminal in [true, false] {
+            assert_eq!(formatted(Some(" json "), terminal), Ok(LogFormat::Json));
+            assert_eq!(formatted(Some("text"), terminal), Ok(LogFormat::Text));
+            assert_eq!(
+                formatted(Some("JSON"), terminal),
+                Err("TETSU_LOG_FORMAT must be json or text".into())
             );
         }
     }

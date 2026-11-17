@@ -75,6 +75,7 @@ number, and add a row below. Never renumber.
 | [0067](0067-sign-in-after-a-first-passkey.md) | Logging in after a first passkey | Building invites, joining, or signup for any realm | Accepted |
 | [0069](0069-logged-in-on-joining.md) | Logged in on joining | Building joining or freshness for operators and staff | Accepted |
 | [0070](0070-a-remembered-color-scheme.md) | A remembered color scheme, in the footer | Changing the color scheme control or what it remembers | Accepted |
+| [0071](0071-readable-logs-in-a-terminal.md) | Readable logs in a terminal | Changing how log lines are laid out | Proposed |
 | [0068](0068-no-demo-note.md) | No demo note | Changing what marks a demo page | Proposed |
 
 ## Open decisions
