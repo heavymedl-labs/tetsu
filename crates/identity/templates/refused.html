@@ -1,0 +1,4 @@
+{% extends "../../../web/templates/page.html" %}
+{% import "../../../web/templates/components.html" as ui %}
+{% block title %}Not signed out · Tetsu{% endblock %}
+{% block body %}{% call ui::empty("403", "Not signed out", "This sign-out did not come from your own page, so nothing changed. Sign out from your page instead.") %}{% endcall %}{% endblock %}

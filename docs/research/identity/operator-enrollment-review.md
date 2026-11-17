@@ -25,6 +25,11 @@ Step 3 (commit 0ed6f47) mostly follows current practice, but it has one high-sev
 | 10 | Medium | Record redeemed, refused, and replaced events with source, and show link state in `operator list` | Step 4 |
 | 11 | Low | No automatic sign-in after enrollment, require user verification, check the RP ID, store the AAGUID, sweep expired rows | Step 4 |
 
+> **Corrected 2026-11-16.** The operator pages send `Referrer-Policy: same-origin`, not `no-referrer`: under
+> `no-referrer` a browser sends `Origin: null` with a posted form, which the origin check must refuse, so signing out
+> failed. `same-origin` still sends nothing to another site, and the link stays in the fragment, which no referrer
+> carries.
+
 ## One shared snapshot lets a disabled operator keep signing in
 
 `disable_operator` is a single statement. Its UPDATE CTE sets `disabled_at`, and two more CTEs delete the operator's sessions and enrollment row through `USING disabled`. The RETURNING join is the documented way to pass rows between sub-statements. But PostgreSQL states that **all sub-statements "are executed with the same snapshot ..., so they cannot 'see' one another's effects on the target tables"** ([PG 18, WITH queries](https://www.postgresql.org/docs/18/queries-with.html)). In READ COMMITTED, a blocked UPDATE re-checks only the rows its snapshot already found. It "does not see effects of those commands on other rows in the database" ([PG 18, transaction isolation](https://www.postgresql.org/docs/18/transaction-iso.html)). So when `start_session` holds the operator row `FOR SHARE` and has inserted a session, the disable blocks on the UPDATE. It then sets `disabled_at` after the sign-in commits, and its DELETE CTEs, still on the old snapshot, never see the new session. The reproduction printed `as committed (CTE disable_operator) → t; sessions left=1 links left=1 disabled=true`. `issue_enrollment` takes the same `FOR SHARE` lock, so it hits the same defect, and a link can survive for an hour on a disabled account.

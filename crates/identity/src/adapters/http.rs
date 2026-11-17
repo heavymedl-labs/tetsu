@@ -108,6 +108,13 @@ struct AccountPage {
 }
 
 #[derive(Template)]
+#[template(path = "refused.html")]
+struct RefusedPage {
+    demo: bool,
+    stylesheet: &'static str,
+}
+
+#[derive(Template)]
 #[template(path = "unavailable.html")]
 struct UnavailablePage {
     demo: bool,
@@ -194,17 +201,7 @@ async fn account<S: OperatorStore>(State(served): Shared<S>, headers: HeaderMap)
     match shown(&served, &cookies, &token).await {
         Ok(Some(page)) => page,
         Ok(None) => see_other(SIGN_IN),
-        Err(error) => {
-            (served.web.report)(&format!(
-                "identity: could not show an operator's page: {error}"
-            ));
-            let web = &served.web;
-            let page = UnavailablePage {
-                demo: web.demo,
-                stylesheet: web.stylesheet,
-            };
-            (StatusCode::SERVICE_UNAVAILABLE, self::page(&page)).into_response()
-        }
+        Err(error) => unavailable_page(&served.web, "could not show an operator's page", &error),
     }
 }
 
@@ -350,7 +347,8 @@ async fn signed<S: OperatorStore>(
 }
 
 /// Signs out from the operator's page's form, with its form token, and sends the browser to sign in with its
-/// cookie cleared, whether or not the session was still live.
+/// cookie cleared, whether or not the session was still live. A form posts and shows pages, so a sign-out refused
+/// or failed gets a page saying so, never a bare status or JSON.
 async fn sign_out<S: OperatorStore>(
     State(served): Shared<S>,
     headers: HeaderMap,
@@ -366,14 +364,32 @@ async fn sign_out<S: OperatorStore>(
         .end_session(&served.web.origins, &change)
         .await
     {
-        Ok(SignOut::Refused) => StatusCode::FORBIDDEN.into_response(),
+        Ok(SignOut::Refused) => {
+            let web = &served.web;
+            let refused = RefusedPage {
+                demo: web.demo,
+                stylesheet: web.stylesheet,
+            };
+            (StatusCode::FORBIDDEN, page(&refused)).into_response()
+        }
         Ok(SignOut::Ended | SignOut::NothingToEnd) => (
             [(header::SET_COOKIE, Realm::Operator.cleared_cookie())],
             see_other(SIGN_IN),
         )
             .into_response(),
-        Err(error) => unavailable(&served.web, &error),
+        Err(error) => unavailable_page(&served.web, "could not sign an operator out", &error),
     }
+}
+
+/// A page that says signing in is unavailable just now, for a request a person made by following a link or posting
+/// a form, with the detail reported to the operator, never shown.
+fn unavailable_page(web: &Web, what: &str, error: &Error) -> Response {
+    (web.report)(&format!("identity: {what}: {error}"));
+    let unavailable = UnavailablePage {
+        demo: web.demo,
+        stylesheet: web.stylesheet,
+    };
+    (StatusCode::SERVICE_UNAVAILABLE, page(&unavailable)).into_response()
 }
 
 /// The live session a signed-in request acts for, or the answer it gets instead: forbidden when it comes from
@@ -402,7 +418,7 @@ async fn acting<S: OperatorStore>(
 /// origins and says so in both ways a browser can (ADR-0059), or the answer it gets instead.
 fn admitted(web: &Web, headers: &HeaderMap, body: &Bytes) -> Result<Value, Refused> {
     let origin = text(headers, &header::ORIGIN);
-    let site = text(headers, &SEC_FETCH_SITE);
+    let site = fetch_site(headers);
     if web.origins.admit(origin, site) {
         json_in(headers, body)
     } else {
@@ -427,6 +443,14 @@ impl IntoResponse for Refused {
 }
 
 const SEC_FETCH_SITE: HeaderName = HeaderName::from_static("sec-fetch-site");
+
+/// The request's `Sec-Fetch-Site`, if sent. One sent but not readable as text counts as an empty value, which no
+/// check admits, never as one not sent, so a mangled header cannot stand in for an older browser's silence.
+fn fetch_site(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(SEC_FETCH_SITE)
+        .map(|value| value.to_str().unwrap_or_default())
+}
 
 /// The JSON object a request sends, if it says it sends JSON. Anything else is refused before it is read: a form
 /// or plain text, which a page on another site can send without asking, is unsupported.
@@ -522,7 +546,7 @@ fn change<'a>(headers: &'a HeaderMap, form: &'a str) -> Change<'a> {
     Change::new(
         cookies(headers),
         text(headers, &header::ORIGIN),
-        text(headers, &SEC_FETCH_SITE),
+        fetch_site(headers),
         form,
     )
 }

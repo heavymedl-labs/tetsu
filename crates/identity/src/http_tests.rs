@@ -417,6 +417,12 @@ async fn requests_before_sign_in_come_from_the_site_as_json() {
             ],
             vec![("Origin", ORIGIN), ("Sec-Fetch-Site", "cross-site"), json],
             vec![("Sec-Fetch-Site", "same-origin"), json],
+            // Sent but not readable as text is never taken for not sent.
+            vec![
+                ("Origin", ORIGIN),
+                ("Sec-Fetch-Site", "s\u{e9}me-origin"),
+                json,
+            ],
         ] {
             let refused = send(address, "POST", path, &headers, "{}").await;
             assert_eq!(
@@ -502,6 +508,12 @@ async fn signed_in_changes_need_the_session_and_its_form_token() {
     }
     let refused = sign_out(address, "https://evil.example", &cookie, &form).await;
     assert_eq!(refused.status, 403);
+    // A form shows pages, so the refusal is one that says nothing changed.
+    assert_eq!(
+        refused.header("content-type"),
+        Some("text/html; charset=utf-8")
+    );
+    assert!(refused.body.contains("Not signed out"), "{}", refused.body);
     assert_eq!(
         get(address, "/ops", &cookie).await.status,
         200,
@@ -537,6 +549,11 @@ async fn failures_of_the_server_are_unavailable() {
     as_admin(&database, &revoke("end_session(bytea, text)")).await;
     let out = sign_out(address, ORIGIN, &cookie, &form).await;
     assert_eq!(out.status, 503);
+    assert!(
+        out.body.contains("Signing in is unavailable just now"),
+        "{}",
+        out.body
+    );
     as_admin(&database, &revoke("use_session(bytea, text)")).await;
     assert_eq!(get(address, "/ops", &cookie).await.status, 503);
     let refused = post(
@@ -561,6 +578,9 @@ async fn failures_of_the_server_are_unavailable() {
     ));
     assert!(reported(
         "identity: a passkey request failed: storage failed"
+    ));
+    assert!(reported(
+        "identity: could not sign an operator out: storage failed"
     ));
 }
 

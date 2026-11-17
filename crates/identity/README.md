@@ -81,8 +81,9 @@ starts, finds, and ends their sessions. `postgres_store(pool)` returns it over P
   for later ceremonies. Every refusal reads the same to the browser, whichever part of Identity
   refuses it. Enrolling starts no session: the operator's session comes from
   a passkey sign-in, which the enrollment page begins at once on the same page, so it rests on the passkey, never
-  on the link ([ADR-0067](../../docs/adr/0067-sign-in-after-a-first-passkey.md)). Passkeys are discoverable, so signing in needs no name, and the account picker
-  shows each as "Tetsu operator · Name", the label first, where an authenticator's 64-byte cut never reaches it.
+  on the link ([ADR-0067](../../docs/adr/0067-sign-in-after-a-first-passkey.md)). Passkeys are discoverable, so
+  signing in needs no name, and the account picker shows each as "Tetsu operator · Name", the label first, where
+  an authenticator's 64-byte cut never reaches it.
   The AAGUID, which names a passkey's provider but is unverified without attestation, is not kept: `webauthn-rs`
   does not expose it, and reading it needs a CBOR decoder, a new dependency.
 - **Signing in with a passkey** takes two requests. Beginning names no passkey, so the browser offers the person's
@@ -180,14 +181,14 @@ starts, finds, and ends their sessions. `postgres_store(pool)` returns it over P
 
 `adapters/http.rs` serves `/ops/sign-in`, `/ops/enroll`, and `/ops`, the signed-in operator's page, with the JSON
 endpoints the passkey islands in `web/src/passkey/` call: `<tetsu-passkey>` runs a page's one passkey action, and
-`<tetsu-passkeys>` wraps the operator's list of passkeys. Pages follow the layout of Linear's sign-in in Tetsu's
-own look, load only Tetsu's own script, under a policy of their own, and are never cached. Signing in is by
-passkey alone, as ADR-0040 sets for operators. Endpoints read only a JSON object sent as `application/json`, answer `no-store`,
-and give each ceremony's one refusal; a failure of the server is `503` to the browser and reported to the operator.
-Signing in ends the session the browser presented, in the transaction that starts the new one. Signing out is a
-plain form that clears the cookie. The operator's page offers a second passkey only within ten minutes of signing
-in, as the database allows, and its `<tetsu-passkeys>` tells the operator's devices every passkey Tetsu holds,
-through the Signal API.
+`<tetsu-passkeys>` wraps the operator's list of passkeys. Pages take Linear's look, as ADR-0035 gives Tetsu's own
+pages, in a layout of Tetsu's own, load only Tetsu's own script, under a policy of their own, and are never cached.
+Signing in is by passkey alone, as ADR-0040 sets for operators. Endpoints read only a JSON object sent as
+`application/json`, answer `no-store`, and give each ceremony's one refusal; a failure of the server is `503` to
+the browser and reported to the operator. Signing in ends the session the browser presented, in the transaction
+that starts the new one. Signing out is a plain form that clears the cookie. The operator's page offers a second
+passkey only within ten minutes of signing in, as the database allows, and its `<tetsu-passkeys>` tells the
+operator's devices every passkey Tetsu holds, through the Signal API.
 
 ## Not yet
 
