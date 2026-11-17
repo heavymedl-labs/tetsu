@@ -3,7 +3,8 @@
     new login resets, to log in again. Once the session has ended it sends the page to log in, which says so
     (docs/research/identity/operator-lifecycles.md). Each part the island needs is marked with a data- attribute;
     the parts for the limit that is not near stay hidden. The dialog opens on a timer, so it takes focus on its
-    heading, never on a button a keystroke meant for the page could press. -#}
+    heading, never on a button a keystroke meant for the page could press, and the island ignores a dismissal in
+    its first second. -#}
 {% import "../../../web/templates/components.html" as shared %}
 <tetsu-session form-token="{{ form }}">
 <dialog aria-labelledby="tetsu-session-title" aria-describedby="tetsu-session-text" class="m-auto w-[calc(100%-3rem)] max-w-80 rounded-xl border border-line bg-canvas p-6 text-center text-ink shadow-lg backdrop:bg-black/40">

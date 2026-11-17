@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { call, Refused } from "../shared/http";
-import { type Browser, channel, define, RETRY, ready, STEP, spoken, WARN } from "./island";
+import { type Browser, channel, define, GRACE, RETRY, ready, SETTLE, spoken, WARN } from "./island";
+import { STEP } from "./timer";
 
 vi.mock("../shared/http", async (original) => ({
   ...(await original<typeof import("../shared/http")>()),
@@ -239,7 +240,7 @@ describe("a session island's dialog near the 8 hour limit", () => {
       const host = island();
       answers(lefts, [900, 27_900]);
       ready(host, page);
-      await elapse(0);
+      await elapse(GRACE);
       dialog(host).dispatchEvent(new Event("cancel"));
       await elapse(0);
       expect(asked.mock.calls.filter((made) => made.length === 3)).toHaveLength(stays);
@@ -495,5 +496,132 @@ describe("a session island's answers out of order", () => {
     read.fail?.(new Refused("you are logged out; log in again", 401));
     await elapse(0);
     expect(page.location.assign).not.toHaveBeenCalled();
+  });
+});
+
+describe("a session island's second doubts", () => {
+  it("ignores a dismissal in the dialog's first second, as meant for the page, keeping it open", async () => {
+    const { page } = browser();
+    const host = island();
+    answers([WARN, 28_000]);
+    ready(host, page);
+    await elapse(0);
+    const dismissal = new Event("cancel", { cancelable: true });
+    dialog(host).dispatchEvent(dismissal);
+    await elapse(0);
+    expect([dismissal.defaultPrevented, asked.mock.calls.length]).toEqual([true, 1]);
+  });
+
+  it("asks about an ending another tab reports after a moment, and does not pass it on", async () => {
+    const { page, listeners } = browser();
+    answers([900, 28_800]);
+    asked.mockRejectedValueOnce(new Refused("you are logged out; log in again", 401));
+    ready(island(), page);
+    await elapse(0);
+    page.channel.postMessage.mockClear();
+    listeners.message?.(new MessageEvent("message", { data: "ended" }));
+    await elapse(SETTLE - 1);
+    expect(asked).toHaveBeenCalledTimes(1);
+    await elapse(1);
+    expect(page.location.assign).toHaveBeenCalledWith("/ops/login?ended=1&next=/ops");
+    expect(page.channel.postMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("a session island whose stay or read fails", () => {
+  it("loads the page afresh when staying is refused for a form token from before another login", async () => {
+    const { page } = browser();
+    const host = island();
+    answers([WARN, 28_000]);
+    asked.mockRejectedValueOnce(new Refused("this request was refused", 403));
+    ready(host, page);
+    await elapse(0);
+    (host.querySelector("[data-stay]") as HTMLButtonElement).click();
+    await elapse(0);
+    expect(page.location.assign).toHaveBeenCalledWith("/ops");
+  });
+
+  it("keeps counting down when a request fails while the dialog is open", async () => {
+    const { page, listeners } = browser();
+    const host = island();
+    answers([WARN, 28_000]);
+    asked.mockRejectedValueOnce(
+      new Refused("logging in is unavailable just now; try again in a minute", 503),
+    );
+    ready(host, page);
+    await elapse(0);
+    listeners.message?.(new MessageEvent("message", { data: "renewed" }));
+    await elapse(0);
+    await elapse(61);
+    expect([dialog(host).open, left(host)]).toEqual([true, "59 seconds"]);
+  });
+});
+
+describe("a session island whose request never answers", () => {
+  it("still asks again in a minute", async () => {
+    const { page } = browser();
+    asked.mockImplementationOnce(() => new Promise(() => undefined));
+    answers([900, 28_800]);
+    ready(island(), page);
+    await elapse(RETRY - 1);
+    expect(asked).toHaveBeenCalledTimes(1);
+    await elapse(1);
+    expect(asked).toHaveBeenCalledTimes(2);
+  });
+
+  it("waits a minute, not a second, before asking again at the limit", async () => {
+    const { page } = browser();
+    answers([WARN, 28_000]);
+    asked.mockImplementation(() => new Promise(() => undefined));
+    ready(island(), page);
+    await elapse(WARN + 1);
+    expect(asked).toHaveBeenCalledTimes(2);
+    await elapse(RETRY - 1);
+    expect(asked).toHaveBeenCalledTimes(2);
+    await elapse(1);
+    expect(asked).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("a session island's countdown, at its edges", () => {
+  it("ignores a dismissal half a second in, and stays logged in on one after the grace", async () => {
+    const { page } = browser();
+    const host = island();
+    answers([WARN, 28_000], [900, 27_900]);
+    ready(host, page);
+    await vi.advanceTimersByTimeAsync((GRACE * 1000) / 2);
+    dialog(host).dispatchEvent(new Event("cancel", { cancelable: true }));
+    await elapse(0);
+    expect(asked).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync((GRACE * 1000) / 2);
+    dialog(host).dispatchEvent(new Event("cancel", { cancelable: true }));
+    await elapse(0);
+    expect(asked).toHaveBeenLastCalledWith("/ops/session", undefined, { form: "F1" });
+  });
+
+  it("keeps counting down when an ending another tab reports is asked about and never answered", async () => {
+    const { page, listeners } = browser();
+    const host = island();
+    answers([WARN, 28_000]);
+    ready(host, page);
+    await elapse(0);
+    asked.mockImplementationOnce(() => new Promise(() => undefined));
+    listeners.message?.(new MessageEvent("message", { data: "ended" }));
+    await elapse(SETTLE);
+    await elapse(60);
+    expect(left(host)).toBe("58 seconds");
+  });
+
+  it("asks again in a minute, not a second, for a request made at the very limit that never answers", async () => {
+    const { page, listeners } = browser();
+    answers([WARN, 28_000]);
+    ready(island(), page);
+    await elapse(WARN);
+    asked.mockImplementation(() => new Promise(() => undefined));
+    listeners.message?.(new MessageEvent("message", { data: "renewed" }));
+    await elapse(0);
+    const made = asked.mock.calls.length;
+    await elapse(1);
+    expect(asked).toHaveBeenCalledTimes(made);
   });
 });
