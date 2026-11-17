@@ -3,3 +3,8 @@
 [env]
 # The test Postgres that scripts/check.sh says how to start; a test checks the two match.
 TEST_DATABASE_URL = "postgres://postgres@localhost:54329/postgres"
+
+# `cargo tetsu <command>`, such as `cargo tetsu serve`, from the repository's root, where tetsu finds `.env`
+# (ADR-0050): the one binary, rebuilt first if anything changed.
+[alias]
+tetsu = "run -q -p tetsu --"

@@ -88,11 +88,11 @@ Once, with the test Postgres from [AGENTS.md](../../AGENTS.md#checks) running:
 ```bash
 cp .env.example .env
 psql postgres://postgres@localhost:54329/postgres -c 'CREATE DATABASE tetsu_local'
-cargo run -- migrate
-cargo run -- seed crates/tetsu/tests/fixtures/sample.toml
+cargo tetsu migrate
+cargo tetsu seed crates/tetsu/tests/fixtures/sample.toml
 ```
 
-Then `cargo run -- serve` serves `http://localhost:8080` until Ctrl+C. Settings come from `.env` for any the
+Then `cargo tetsu serve` serves `http://localhost:8080` until Ctrl+C. Settings come from `.env` for any the
 environment leaves unset ([ADR-0050](../../docs/adr/0050-local-settings-file.md)), so no command needs them typed.
 Stop the server when you are done.
 

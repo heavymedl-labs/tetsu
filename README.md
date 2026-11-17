@@ -35,9 +35,13 @@ With the test Postgres from [AGENTS.md](AGENTS.md#checks) running:
 
 ```bash
 cp .env.example .env
-cargo run -- migrate
-cargo run -- serve      # http://localhost:8080
+cargo tetsu migrate
+cargo tetsu serve       # http://localhost:8080
 ```
+
+`cargo tetsu` is an alias in `.cargo/config.toml` for `cargo run -q -p tetsu --`: it takes any `tetsu` command, such as
+`cargo tetsu operator create "Lee Park"`, and rebuilds first if anything changed. Run it from the repository's root,
+where `tetsu` reads `.env`.
 
 One-time setup is in [crates/tetsu](crates/tetsu/README.md#run-locally). `scripts/check.sh` runs every check.
 
