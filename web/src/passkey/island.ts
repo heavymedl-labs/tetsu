@@ -1,8 +1,8 @@
 // The passkey islands (ADR-0031): light-DOM Web Components that add behavior to markup the server renders.
 //
 // - <tetsu-passkey action="sign-in|enroll|add" form-token="…"> wraps a button and a status line, and runs one
-//   passkey ceremony when the button is pressed. Its state is an attribute, data-state, of ready, waiting, or failed,
-//   for styles to read (ADR-0032).
+//   passkey ceremony when the button is pressed. Its state is an attribute, data-state, of ready, waiting, done, or
+//   failed, for styles to read (ADR-0032).
 // - <tetsu-passkeys user="…" credentials="…"> wraps the list of an operator's passkeys, and tells their devices every
 //   passkey Tetsu holds, so a device can hide one Tetsu removed.
 
@@ -17,6 +17,13 @@ export interface Browser {
 }
 
 const ACTIONS: readonly Action[] = ["sign-in", "enroll", "add"];
+
+/** What the page says once an action is done, in the moment before the browser goes where the server says. */
+const DONE: Record<Action, string> = {
+  "sign-in": "Signed in.",
+  enroll: "Passkey created. Sign in with it next.",
+  add: "Passkey added.",
+};
 
 /** What the page says when a ceremony did not finish. A prompt ended by a newer one says nothing. */
 export function said(error: unknown): string {
@@ -73,7 +80,10 @@ export function ready(host: HTMLElement, browser: Browser): void {
     status.textContent = "Waiting for your device…";
     host.dataset.state = "waiting";
     try {
-      browser.location.assign(await ceremony(action, sent, device));
+      const next = await ceremony(action, sent, device);
+      status.textContent = DONE[action];
+      host.dataset.state = "done";
+      browser.location.assign(next);
     } catch (error) {
       status.textContent = said(error);
       host.dataset.state = "failed";

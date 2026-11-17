@@ -39,6 +39,8 @@
   --color-on-accent: var(--tetsu-color-on-accent);
   /* The brand's forge orange (docs/brand), for marks and fills rather than text. */
   --color-forge: var(--tetsu-color-forge);
+  --color-danger: var(--tetsu-color-danger);
+  --color-success: var(--tetsu-color-success);
 }
 
 /* Tailwind's dark variant, for the tokens below and any dark: utility: the system's scheme, unless the theme control
@@ -75,6 +77,10 @@
   --tetsu-color-accent: #b5481a;
   --tetsu-color-on-accent: #ffffff;
   --tetsu-color-forge: #e5622b;
+  /* What a request came to, as small text: refused or failed, and done. 5.5:1 or more on the page and on panels in
+     both schemes, past WCAG AA's 4.5:1. Light after Tailwind's red and green; dark Radix Colors' red and green 11. */
+  --tetsu-color-danger: #b42318;
+  --tetsu-color-success: #13702f;
 
   @variant dark {
     --tetsu-color-canvas: #111110;
@@ -90,6 +96,8 @@
     --tetsu-color-accent: #f2783f;
     --tetsu-color-on-accent: #111110;
     --tetsu-color-forge: #f07a45;
+    --tetsu-color-danger: #ff9592;
+    --tetsu-color-success: #3dd68c;
   }
 }
 

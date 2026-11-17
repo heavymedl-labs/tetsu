@@ -62,7 +62,7 @@ describe("a passkey island", () => {
     expect(run).toHaveBeenCalledWith("sign-in", {}, device);
     expect(page.location.assign).toHaveBeenCalledWith("/ops");
     expect(page.history.replaceState).not.toHaveBeenCalled();
-    expect([status(host), host.dataset.state]).toEqual(["Waiting for your device…", "waiting"]);
+    expect([status(host), host.dataset.state]).toEqual(["Signed in.", "done"]);
   });
 
   it("takes an enrollment link from the address, and clears it from the bar at once", async () => {
@@ -73,6 +73,7 @@ describe("a passkey island", () => {
     run.mockResolvedValue("/ops/sign-in");
     await press(host);
     expect(run).toHaveBeenCalledWith("enroll", { link: "L1" }, device);
+    expect(status(host)).toBe("Passkey created. Sign in with it next.");
   });
 
   it("sends the operator's form token when adding a passkey, or none the page lacks", async () => {
@@ -86,7 +87,21 @@ describe("a passkey island", () => {
       ready(host, browser());
       await press(host);
       expect(run).toHaveBeenCalledWith("add", { form }, device);
+      expect(status(host)).toBe("Passkey added.");
     }
+  });
+});
+
+describe("a passkey island at work", () => {
+  it("says it is waiting on the device while the ceremony runs", async () => {
+    const host = island('action="sign-in"');
+    ready(host, browser());
+    let finish: (next: string) => void = () => undefined;
+    run.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    button(host).click();
+    expect([status(host), host.dataset.state]).toEqual(["Waiting for your device…", "waiting"]);
+    finish("/ops");
+    await vi.waitFor(() => expect(host.dataset.state).toBe("done"));
   });
 });
 

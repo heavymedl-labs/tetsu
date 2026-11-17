@@ -1061,9 +1061,32 @@ mod tests {
     #[test]
     fn nothing_loops_and_nothing_moves_when_the_visitor_asks_for_less() {
         // motion.css's promises (WCAG 2.2.2 and 2.3.3). tetsu-play animates only a custom property that tells a
-        // figure to show itself on touch screens, so it moves nothing itself.
+        // figure to show itself on touch screens, so it moves nothing itself. Only the pending slots loop, while a
+        // request a person started runs, and they only fade: every loop is theirs, and their keyframes set opacity
+        // alone.
         let css = std::str::from_utf8(assets::find(assets::STYLESHEET).unwrap().bytes).unwrap();
-        assert!(!css.contains("infinite"), "something loops");
+        let loops: Vec<&str> = css
+            .match_indices("infinite")
+            .map(|(at, _)| {
+                let start = css[..at].rfind([';', '{']).unwrap() + 1;
+                let end = at + css[at..].find([';', '}']).unwrap();
+                &css[start..end]
+            })
+            // A class Tailwind names after its value holds the word too, but a selector loops nothing.
+            .filter(|found| !found.contains('{'))
+            .collect();
+        assert_eq!(loops.len(), 3, "{loops:?}");
+        for one in &loops {
+            assert!(
+                one.starts_with("animation:") && one.ends_with(" infinite tetsu-pending"),
+                "{one} loops"
+            );
+        }
+        let pending = &css[css.find("@keyframes tetsu-pending{").unwrap()..];
+        assert_eq!(
+            &pending[..pending.find("}}").unwrap()],
+            "@keyframes tetsu-pending{0%,to{opacity:.25}40%{opacity:1"
+        );
         let play = &css[css.find("@keyframes tetsu-play{").unwrap()..];
         assert_eq!(
             &play[..play.find('}').unwrap()],

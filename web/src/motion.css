@@ -1,5 +1,6 @@
-/* Motion (ADR-0035): CSS only, since pages run no scripts, and nothing moves when the visitor asks for less; only
-   fades of color and opacity on hover stay. Nothing loops, so nothing needs a pause control (WCAG 2.2.2). A test in
+/* Motion (ADR-0035): CSS only, and nothing moves when the visitor asks for less; only fades of color and opacity on
+   hover stay. Nothing loops but the pending slots, which fade, never move, and show only while a person waits on a
+   request they started, so they are not motion that starts by itself (WCAG 2.2.2), and stop when it ends. A test in
    serve.rs checks both against the built stylesheet. The brand's slots book in, sections rise as they arrive,
    and pages cross-fade. In the components layer, so a delay utility on an element still wins. */
 @media (prefers-reduced-motion: no-preference) {
@@ -56,6 +57,25 @@
   from {
     opacity: 0;
     transform: translateY(-10px);
+  }
+}
+
+/* The pending slots: three slots of the brand's grid, booking in one after another while a request runs. */
+@keyframes tetsu-pending {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
+/* What a request came to arrives: its line fades in as it settles 4px down. */
+@keyframes tetsu-note {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
   }
 }
 
