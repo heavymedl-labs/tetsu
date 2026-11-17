@@ -679,13 +679,22 @@ async fn failures_of_the_server_are_told_apart() {
         },
         |_| Err(getrandom::Error::UNSUPPORTED),
     );
+    let unavailable = format!(
+        "temporarily unavailable: no secure random source: {}",
+        getrandom::Error::UNSUPPORTED
+    );
     assert_eq!(
         failure(failing.begin_join(&party, &link).await.map(drop)),
-        format!(
-            "temporarily unavailable: no secure random source: {}",
-            getrandom::Error::UNSUPPORTED
-        )
+        unavailable
     );
+    // A join whose session cannot be given a token stores nothing: the session and passkey come in one step.
+    let ceremony = operators.begin_join(&party, &link).await.expect("begins");
+    let (response, _) = register_keeping(&ceremony.options, ORIGIN, true).await;
+    let finished = failing
+        .finish_join(&party, &ceremony.token.to_text(), &response, &[], &actor())
+        .await;
+    assert_eq!(failure(finished.map(drop)), unavailable);
+    assert_eq!(held(&database).await, [0, 1, 0, 0]);
     let ceremony = operators.begin_join(&party, &link).await.expect("begins");
     as_admin(
         &database,
