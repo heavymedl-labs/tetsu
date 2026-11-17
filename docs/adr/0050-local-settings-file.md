@@ -1,6 +1,7 @@
 # 0050. Local settings file
 
 - Status: Accepted
+- Production secrets rule superseded by [ADR-0073](0073-settings-files-per-environment.md)
 - Date: 2026-11-13
 
 ## Context
