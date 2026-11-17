@@ -293,3 +293,38 @@ async fn an_unreadable_time_left_is_unavailable() {
         );
     }
 }
+
+/// What the pages say of the limits is what the database holds them to: the login page's idle limit and the session
+/// dialog's 8 hours, read from a session just begun. So changing a limit in one place without the other fails here.
+#[tokio::test]
+async fn the_pages_say_the_limits_the_database_keeps() {
+    let (address, _database, cookie, _) = logged_in().await;
+    let (idle, absolute) = left(&get(address, "/ops/session", &cookie).await.json());
+    let minutes = (idle + 59) / 60;
+    let hours = (absolute + 3599) / 3600;
+    let login = get(address, "/ops/login", "").await;
+    let idle_told = format!("we log you out after {minutes} minutes without activity");
+    assert!(
+        login.body.contains(&idle_told),
+        "{idle_told} in {}",
+        login.body
+    );
+    let page = get(address, "/ops", &cookie).await;
+    let absolute_told = format!("Sessions last {hours} hours");
+    assert!(
+        page.body.contains(&absolute_told),
+        "{absolute_told} in {}",
+        page.body
+    );
+}
+
+/// A login page shown because the session ended on its own also clears the browser's cache of the operator's pages,
+/// as logging out does (ASVS 14.3.1); one shown for any other reason clears nothing.
+#[tokio::test]
+async fn a_login_after_the_session_ended_clears_the_cache() {
+    let (address, _database, _) = serving().await;
+    let ended = get(address, "/ops/login?ended=1", "").await;
+    assert_eq!(ended.header("clear-site-data"), Some("\"cache\""));
+    let plain = get(address, "/ops/login", "").await;
+    assert_eq!(plain.header("clear-site-data"), None);
+}

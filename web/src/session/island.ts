@@ -168,6 +168,13 @@ export function ready(host: HTMLElement, browser: Browser): void {
   parts.stay.addEventListener("click", clock.stay);
   parts.dialog.addEventListener("cancel", clock.cancelled);
   browser.channel?.addEventListener("message", clock.check);
+  // Logging out from any form on the page ends the session in every tab, so the others leave at once.
+  browser.page.addEventListener("submit", (event) => {
+    const form = event.target;
+    if (form instanceof HTMLFormElement && form.getAttribute("action")?.startsWith("/ops/logout")) {
+      browser.channel?.postMessage("ended");
+    }
+  });
   browser.page.addEventListener("visibilitychange", () => {
     if (browser.page.visibilityState === "visible") {
       void clock.check();

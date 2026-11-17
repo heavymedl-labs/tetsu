@@ -5,7 +5,7 @@
     the parts for the limit that is not near stay hidden. -#}
 {% import "../../../web/templates/components.html" as shared %}
 <tetsu-session form-token="{{ form }}">
-<dialog aria-labelledby="tetsu-session-title" aria-describedby="tetsu-session-text" class="m-auto w-[calc(100%-3rem)] max-w-80 rounded-xl border border-line bg-canvas p-6 text-center text-ink shadow-lg backdrop:bg-ink/30">
+<dialog aria-labelledby="tetsu-session-title" aria-describedby="tetsu-session-text" class="m-auto w-[calc(100%-3rem)] max-w-80 rounded-xl border border-line bg-canvas p-6 text-center text-ink shadow-lg backdrop:bg-black/40">
 <h2 id="tetsu-session-title" class="text-base font-medium"><span data-idle>You're about to be logged out</span><span data-absolute hidden>Your session is about to end</span></h2>
 <p id="tetsu-session-text" class="mt-2 text-[13px] text-pretty text-muted"><span data-idle>For your security, we'll log you out in</span><span data-absolute hidden>Sessions last 8 hours. Yours ends in</span> <span data-left>2 minutes</span>.</p>
 <button type="button" data-idle data-stay autofocus class="mt-6 {% call shared::button_style(false, false, true) %}{% endcall %}">Stay logged in</button>

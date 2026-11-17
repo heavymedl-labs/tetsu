@@ -10,7 +10,8 @@ SET statement_timeout = '30s';
 -- realm, by the database's clock, as use_session reads it: none for a session
 -- spent, of another realm, or of a disabled operator. It changes and removes
 -- nothing; use_session removes a spent session when it is next presented. Its
--- idle limit must match use_session's, which a test checks.
+-- idle limit must match use_session's, which a test checks; #142 gives the
+-- limits one home.
 CREATE FUNCTION session_left(wanted_hash bytea, wanted_realm text)
 RETURNS TABLE (idle_left bigint, absolute_left bigint)
 LANGUAGE sql VOLATILE SECURITY DEFINER

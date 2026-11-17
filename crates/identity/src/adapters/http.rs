@@ -9,7 +9,7 @@ use askama::Template;
 use axum::Router;
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, State};
-use axum::http::{HeaderMap, HeaderName, StatusCode, Uri, header};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{MethodRouter, get, post};
 use serde_json::{Value, json};
@@ -209,13 +209,24 @@ async fn login_page<S: OperatorStore>(
     let next = query(&uri, "next").and_then(return_path);
     match served.operators.session(cookies(&headers)).await {
         Ok(Some(_)) => see_other(next.unwrap_or(ACCOUNT)),
-        Ok(None) => page(&LoginPage {
-            demo: web.demo,
-            stylesheet: web.stylesheet,
-            script: web.script,
-            next: next.unwrap_or_default(),
-            ended: query(&uri, "ended") == Some("1"),
-        }),
+        Ok(None) => {
+            let ended = query(&uri, "ended") == Some("1");
+            let mut shown = page(&LoginPage {
+                demo: web.demo,
+                stylesheet: web.stylesheet,
+                script: web.script,
+                next: next.unwrap_or_default(),
+                ended,
+            });
+            // A session that ended on its own leaves nothing of the pages behind either, as logging out does
+            // (ASVS 14.3.1).
+            if ended {
+                shown
+                    .headers_mut()
+                    .insert(CLEAR_SITE_DATA, HeaderValue::from_static("\"cache\""));
+            }
+            shown
+        }
         Err(error) => unavailable_page(web, "could not show the login page", &error),
     }
 }

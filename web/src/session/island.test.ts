@@ -364,3 +364,35 @@ describe("channel", () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe("a session island when the operator logs out", () => {
+  it("tells the site's other tabs when a logout form on the page is sent, and nothing for other forms", async () => {
+    const { page, listeners } = browser();
+    ready(island(), page);
+    answers([900, 28_800]);
+    await elapse(0);
+    const form = (action: string | null) => {
+      const made = document.createElement("form");
+      if (action !== null) {
+        made.setAttribute("action", action);
+      }
+      return { target: made };
+    };
+    for (const sent of [form("/ops/passkeys"), form(null), { target: document.createElement("div") }]) {
+      listeners.submit?.(sent);
+    }
+    expect(page.channel.postMessage).not.toHaveBeenCalled();
+    for (const sent of [form("/ops/logout"), form("/ops/logout?next=/ops")]) {
+      listeners.submit?.(sent);
+    }
+    expect(page.channel.postMessage.mock.calls).toEqual([["ended"], ["ended"]]);
+  });
+
+  it("logs out alone in a browser with no channel to other tabs", () => {
+    const { page, listeners } = browser();
+    ready(island(), { ...page, channel: undefined });
+    const made = document.createElement("form");
+    made.setAttribute("action", "/ops/logout");
+    expect(() => listeners.submit?.({ target: made })).not.toThrow();
+  });
+});
