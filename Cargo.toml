@@ -26,7 +26,7 @@ opentelemetry = { version = "0.33.1", default-features = false, features = ["log
 opentelemetry-appender-tracing = { version = "0.33.1", default-features = false, features = ["experimental_span_attributes"] }
 opentelemetry-otlp = { version = "0.33.1", default-features = false, features = ["gzip-http", "http-proto", "internal-logs", "logs", "reqwest-blocking-client", "reqwest-rustls"] }
 opentelemetry_sdk = { version = "0.33.1", default-features = false, features = ["logs"] }
-# A virtual authenticator that makes real passkeys and plays hostile clients, for sign-in tests only (ADR-0058),
+# A virtual authenticator that makes real passkeys and plays hostile clients, for login tests only (ADR-0058),
 # with WebAuthn's bytes written as base64url, as a browser writes them.
 passkey = "0.6"
 passkey-types = { version = "0.6", features = ["serialize_bytes_as_base64_string"] }
@@ -55,10 +55,10 @@ tokio = { version = "1.54", features = ["macros", "net", "rt-multi-thread", "tim
 tokio-postgres = "0.7"
 tokio-postgres-rustls = "0.14"
 toml = { version = "1.2.1", default-features = false, features = ["parse", "serde", "std"] }
-# Passkey registration and discoverable sign-in (ADR-0047), with each ceremony's state kept in Postgres and never
-# sent to the browser, which needs the state serialisable. A sign-in stores a passkey only if its new JSON differs
+# Passkey registration and discoverable login (ADR-0047), with each ceremony's state kept in Postgres and never
+# sent to the browser, which needs the state serialisable. A login stores a passkey only if its new JSON differs
 # from the stored text in nothing but the counter and backup flags, so an upgrade that writes a passkey differently
-# turns every sign-in into a storage failure, an outage: rewrite the stored passkeys in a migration first.
+# turns every login into a storage failure, an outage: rewrite the stored passkeys in a migration first.
 webauthn-rs = { version = "0.6.2", features = ["conditional-ui", "danger-allow-state-serialisation"] }
 webpki-roots = "1"
 
