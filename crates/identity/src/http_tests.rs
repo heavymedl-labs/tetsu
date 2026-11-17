@@ -16,11 +16,12 @@ use crate::join_tests::{ORIGIN, as_admin, authenticate, party, register_keeping,
 use crate::{Operators, Origins};
 
 const SCRIPT: &str = "/assets/passkey-test.js";
+pub(crate) const SESSION_SCRIPT: &str = "/assets/session-test.js";
 const POLICY: &str = "default-src 'none'; object-src 'none'; script-src 'self'; connect-src 'self'; \
                       style-src 'self'; font-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; \
                       frame-ancestors 'none'";
 const REFUSED: &str = "this request was refused";
-const UNAVAILABLE: &str = "logging in is unavailable just now; try again in a minute";
+pub(crate) const UNAVAILABLE: &str = "logging in is unavailable just now; try again in a minute";
 
 /// What the operator was told, from every test, since `report` is a plain function.
 static REPORTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -29,7 +30,7 @@ fn report(line: &str) {
     REPORTED.lock().expect("reports").push(line.to_string());
 }
 
-fn reported(about: &str) -> bool {
+pub(crate) fn reported(about: &str) -> bool {
     REPORTED
         .lock()
         .expect("reports")
@@ -70,6 +71,7 @@ async fn serve(operators: Operators<PostgresOperators>) -> SocketAddr {
         demo: true,
         stylesheet: "/assets/tetsu-test.css",
         script: SCRIPT,
+        session_script: SESSION_SCRIPT,
         report,
     };
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("binds");
@@ -201,7 +203,7 @@ pub(crate) async fn logged_in() -> (SocketAddr, TestDatabase, String, String) {
 }
 
 /// One text value the database answers.
-async fn text(database: &TestDatabase, sql: &str) -> String {
+pub(crate) async fn text(database: &TestDatabase, sql: &str) -> String {
     tetsu_postgres::connect(database)
         .await
         .expect("connects")

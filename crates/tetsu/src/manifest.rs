@@ -37,12 +37,13 @@ pub fn files(json: &str) -> Result<Vec<(String, String)>, String> {
         .collect()
 }
 
-/// The files a page links to by name, the brand files (docs/brand) and the operator pages' script, by source and by
+/// The files a page links to by name, the brand files (docs/brand) and the operator pages' scripts, by source and by
 /// the constant that names each one's URL.
-const LINKED: [(&str, &str); 3] = [
+const LINKED: [(&str, &str); 4] = [
     ("../docs/brand/tetsu-avatar.svg", "ICON"),
     ("../docs/brand/tetsu-avatar.png", "TOUCH_ICON"),
     ("src/passkey/ops.ts", "PASSKEY_SCRIPT"),
+    ("src/session/ops.ts", "SESSION_SCRIPT"),
 ];
 
 /// The Rust source of the asset table: each built file's URL, content type, and bytes, read from `root` with

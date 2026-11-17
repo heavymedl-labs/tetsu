@@ -128,7 +128,9 @@ describe("a passkey island whose chained login is refused", () => {
     expect(run).toHaveBeenCalledWith("login", {}, device, expect.any(AbortSignal), expect.any(Function));
     expect(page.location.assign).toHaveBeenCalledWith("/ops");
   });
+});
 
+describe("a passkey island and what it sends", () => {
   it("sends a person whose session ended to log in, to return here after", async () => {
     run.mockRejectedValueOnce(new Refused("you are logged out; log in again", 401));
     const host = island('action="add" form-token="F1"');

@@ -3,7 +3,7 @@
 use crate::domain::{
     Account, Actor, Addition, Disabling, Error, Invitee, Issue, Login, NewPasskey, OperatorId,
     OperatorName, OperatorSummary, Realm, Redemption, Refusal, Removal, Session, SessionStart,
-    Signer, TakenAddition, TakenCeremony,
+    Signer, TakenAddition, TakenCeremony, TimeLeft,
 };
 use std::future::Future;
 
@@ -28,6 +28,15 @@ pub trait OperatorStore {
         hash: &[u8; 32],
         realm: Realm,
     ) -> impl Future<Output = Result<Option<Session>, Error>> + Send;
+
+    /// How long the live session stored under a token's hash in a realm has left, read without counting as a
+    /// request, so it renews nothing and removes nothing; none for a session spent, of another realm, or of a
+    /// disabled operator, as [`Self::use_session`] would find.
+    fn session_left(
+        &self,
+        hash: &[u8; 32],
+        realm: Realm,
+    ) -> impl Future<Output = Result<Option<TimeLeft>, Error>> + Send;
 
     /// Removes a session in a realm, and says whether it was live when it ended.
     fn delete_session(

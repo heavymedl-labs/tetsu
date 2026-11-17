@@ -4,7 +4,7 @@ use crate::browser::{Change, CheckedSession, ForChange, Logout, Origins};
 use crate::domain::{
     Account, Actor, Addition, Answer, Ceremony, CeremonyKind, CeremonyToken, Disabling, Error,
     Fill, InviteToken, Issue, Login, NewPasskey, OperatorId, OperatorName, OperatorSummary, Realm,
-    Redemption, Refusal, Removal, Session, SessionStart, SessionToken, Signer,
+    Redemption, Refusal, Removal, Session, SessionStart, SessionToken, Signer, TimeLeft,
 };
 use crate::passkeys::RelyingParty;
 use crate::ports::OperatorStore;
@@ -414,11 +414,28 @@ impl<S: OperatorStore> Operators<S> {
         &self,
         cookies: impl IntoIterator<Item = &'a str>,
     ) -> Result<Option<Session>, Error> {
-        match Realm::Operator
-            .token_in(cookies)
-            .and_then(SessionToken::parse)
-        {
+        match operator_token(cookies) {
             Some(token) => self.live(&token).await,
+            None => Ok(None),
+        }
+    }
+
+    /// How long the operator session named by a request's cookies has left, read without counting as a request,
+    /// so a page can warn before the idle limit without keeping the session alive: only the person's own requests
+    /// renew it (NIST SP 800-63B-4). None for a request with no live session, as [`Self::session`] would find.
+    ///
+    /// # Errors
+    /// Fails if storage fails.
+    pub async fn time_left<'a>(
+        &self,
+        cookies: impl IntoIterator<Item = &'a str>,
+    ) -> Result<Option<TimeLeft>, Error> {
+        match operator_token(cookies) {
+            Some(token) => {
+                self.store
+                    .session_left(&token.hash(), Realm::Operator)
+                    .await
+            }
             None => Ok(None),
         }
     }
@@ -471,6 +488,13 @@ impl<S: OperatorStore> Operators<S> {
     async fn live(&self, token: &SessionToken) -> Result<Option<Session>, Error> {
         self.store.use_session(&token.hash(), Realm::Operator).await
     }
+}
+
+/// The operator session's token among a request's cookies, if there is exactly one and it is well formed.
+fn operator_token<'a>(cookies: impl IntoIterator<Item = &'a str>) -> Option<SessionToken> {
+    Realm::Operator
+        .token_in(cookies)
+        .and_then(SessionToken::parse)
 }
 
 /// One answer for every way a join can fail, so a browser learns nothing about which links or operators

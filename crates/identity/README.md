@@ -48,6 +48,8 @@ starts, finds, and ends their sessions. `postgres_store(pool)` returns it over P
 
 - **Finding a session** runs on every logged-in request: one call to `use_session`, an update by primary key that
   returns the row. ADR-0040 asks for a benchmark of it, which comes with the session middleware.
+- **Reading a session's time left** runs once per logged-in page and again near each limit: one call to
+  `session_left`, a read by primary key that writes nothing.
 
 ## The operator command
 
@@ -186,9 +188,19 @@ pages, in a layout of Tetsu's own, load only Tetsu's own script, under a policy 
 Logging in is by passkey alone, as ADR-0040 sets for operators. Endpoints read only a JSON object sent as
 `application/json`, answer `no-store`, and give each ceremony's one refusal; a failure of the server is `503` to
 the browser and reported to the operator. Logging in ends the session the browser presented, in the transaction
-that starts the new one. Logging out is a plain form that clears the cookie. The operator's page offers a second
-passkey only within ten minutes of logging in, as the database allows, and its `<tetsu-passkeys>` tells the
-operator's devices every passkey Tetsu holds, through the Signal API.
+that starts the new one. Logging out is a plain form that clears the cookie and the browser's cache of the pages. The
+operator's page offers a second passkey only within ten minutes of logging in, as the database allows, and its
+`<tetsu-passkeys>` tells the operator's devices every passkey Tetsu holds, through the Signal API.
+
+The edges of a login follow [the operator lifecycles research](../../docs/research/identity/operator-lifecycles.md).
+A logged-in operator who opens the login page is sent on. A login returns to the page it was asked for, through
+`browser::return_path`, which accepts only `/ops` or a plain path under it, checked on the page and again when the
+login finishes. Every page a logged-in operator sees extends `logged_in.html`, which loads the session island in
+`web/src/session/`. `<tetsu-session>` reads `GET /ops/session`, the seconds to each limit by the database's clock,
+which renews nothing, and two minutes before a limit opens the page's dialog: before the idle limit to stay logged
+in, a `POST` with the form token that renews the session, and before the 8 hour limit to log in again. It keeps the
+site's tabs in step over a `BroadcastChannel`, asks again when the page is shown, and sends a page whose session has
+ended to `/ops/login?ended=1`, which says the operator was logged out for their security.
 
 ## Not yet
 

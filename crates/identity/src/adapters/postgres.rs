@@ -12,7 +12,7 @@ use tokio_postgres::types::{FromSql, ToSql};
 use crate::domain::{
     Account, Actor, Addition, CeremonyKind, Disabling, Error, HeldPasskey, Invitee, Issue, Login,
     NewPasskey, OperatorId, OperatorName, OperatorSummary, Realm, Redemption, Refusal, Removal,
-    Session, SessionStart, Signer, TakenAddition, TakenCeremony,
+    Session, SessionStart, Signer, TakenAddition, TakenCeremony, TimeLeft,
 };
 use crate::ports::OperatorStore;
 use crate::use_cases::Operators;
@@ -27,12 +27,17 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 2,
         sql: tetsu_postgres::OUTBOX,
     },
+    Migration {
+        version: 3,
+        sql: include_str!("../../migrations/0003_session_left.sql"),
+    },
 ];
 /// Identity's schema, which names the role its transactions act as (ADR-0042).
 const SCHEMA: &str = "identity";
 
 const INSERT_OPERATOR: &str = include_str!("../../sql/insert_operator.sql");
 const USE_SESSION: &str = include_str!("../../sql/use_session.sql");
+const SESSION_LEFT: &str = include_str!("../../sql/session_left.sql");
 const END_SESSION: &str = include_str!("../../sql/end_session.sql");
 const ISSUE_INVITE: &str = include_str!("../../sql/issue_invite.sql");
 const DISABLE_OPERATOR: &str = include_str!("../../sql/disable_operator.sql");
@@ -265,6 +270,20 @@ impl OperatorStore for PostgresOperators {
             .query(USE_SESSION, &[&hash.as_slice(), &realm.as_str()])
             .await?;
         rows.first().map(|row| session_from(row, hash)).transpose()
+    }
+
+    async fn session_left(&self, hash: &[u8; 32], realm: Realm) -> Result<Option<TimeLeft>, Error> {
+        let rows = self
+            .query(SESSION_LEFT, &[&hash.as_slice(), &realm.as_str()])
+            .await?;
+        rows.first()
+            .map(|row| {
+                Ok(TimeLeft {
+                    idle: column(row, "idle_left")?,
+                    absolute: column(row, "absolute_left")?,
+                })
+            })
+            .transpose()
     }
 
     async fn delete_session(&self, hash: &[u8; 32], realm: Realm) -> Result<bool, Error> {

@@ -1,0 +1,6 @@
+{#- The shell of each page a logged-in operator sees: an operator page that also loads the session script and carries
+    its island, so every such page warns before the session ends and leaves once it has. A page's struct adds
+    `session_script`, the session island's hashed URL, and `form`, the form token staying logged in sends. -#}
+{% extends "ops_page.html" %}
+{% block head %}{{ super() }}<script type="module" src="{{ session_script }}"></script>{% endblock %}
+{% block after %}{% include "session.html" %}{% endblock %}

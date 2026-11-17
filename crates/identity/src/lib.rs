@@ -30,7 +30,7 @@ pub use domain::{
     Account, Actor, Addition, Answer, Ceremony, CeremonyKind, CeremonyToken, Device, Disabling,
     Error, HeldPasskey, InviteToken, Invitee, Issue, Limits, Login, NewPasskey, OperatorId,
     OperatorName, OperatorSummary, Realm, Redemption, Refusal, Removal, Session, SessionStart,
-    SessionToken, Signer, TakenAddition, TakenCeremony,
+    SessionToken, Signer, TakenAddition, TakenCeremony, TimeLeft,
 };
 pub use passkeys::RelyingParty;
 pub use ports::OperatorStore;

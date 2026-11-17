@@ -15,7 +15,9 @@ use axum::routing::{MethodRouter, get, post};
 use serde_json::{Value, json};
 
 use crate::browser::{Change, ForChange, Logout, Origins, return_path};
-use crate::domain::{Actor, Answer, Ceremony, Device, Error, HeldPasskey, Realm, SessionToken};
+use crate::domain::{
+    Actor, Answer, Ceremony, Device, Error, HeldPasskey, Realm, Session, SessionToken, TimeLeft,
+};
 use crate::passkeys::{RelyingParty, base64url};
 use crate::ports::OperatorStore;
 use crate::use_cases::Operators;
@@ -30,11 +32,13 @@ const JOIN_FINISH: &str = "/ops/join/finish";
 const ADD_BEGIN: &str = "/ops/passkeys/begin";
 const ADD_FINISH: &str = "/ops/passkeys/finish";
 const LOGOUT: &str = "/ops/logout";
+/// How long the browser's session has left (GET), and staying logged in (POST), for the session island.
+const SESSION: &str = "/ops/session";
 /// Any other path under `/ops`: a login for anyone logged out, and not found for an operator.
 const ELSEWHERE: &str = "/ops/{*rest}";
 
 /// Every path Identity serves, which the composition root checks each start with a name no tenant may hold.
-pub const PATHS: [&str; 11] = [
+pub const PATHS: [&str; 12] = [
     ACCOUNT,
     LOGIN,
     LOGIN_BEGIN,
@@ -45,6 +49,7 @@ pub const PATHS: [&str; 11] = [
     ADD_BEGIN,
     ADD_FINISH,
     LOGOUT,
+    SESSION,
     ELSEWHERE,
 ];
 
@@ -68,14 +73,16 @@ const LOGGED_OUT: &str = "you are logged out; log in again";
 const UNAVAILABLE: &str = "logging in is unavailable just now; try again in a minute";
 
 /// What the pages need from the composition root: the relying party and the origins state-changing requests
-/// must come from, whether this is the demo, the shared stylesheet's and the passkey script's URLs, and where a
-/// failure the operator should see is reported (#27).
+/// must come from, whether this is the demo, the shared stylesheet's URL, the passkey script's, which every operator
+/// page loads, and the session script's, which a logged-in operator's pages load too, and where a failure the
+/// operator should see is reported (#27).
 pub struct Web {
     pub party: RelyingParty,
     pub origins: Origins,
     pub demo: bool,
     pub stylesheet: &'static str,
     pub script: &'static str,
+    pub session_script: &'static str,
     pub report: fn(&str),
 }
 
@@ -105,6 +112,7 @@ struct AccountPage {
     demo: bool,
     stylesheet: &'static str,
     script: &'static str,
+    session_script: &'static str,
     name: String,
     user: String,
     credentials: String,
@@ -120,6 +128,8 @@ struct NotFoundPage {
     demo: bool,
     stylesheet: &'static str,
     script: &'static str,
+    session_script: &'static str,
+    form: String,
 }
 
 #[derive(Template)]
@@ -159,6 +169,10 @@ where
         .route(ADD_BEGIN, logged_in_route::<S>(LoggedIn::BeginAdding))
         .route(ADD_FINISH, logged_in_route::<S>(LoggedIn::FinishAdding))
         .route(LOGOUT, post(logout::<S>))
+        .route(
+            SESSION,
+            get(time_left::<S>).merge(logged_in_route::<S>(LoggedIn::Stay)),
+        )
         .route(ELSEWHERE, get(elsewhere::<S>))
         .layer(DefaultBodyLimit::max(LARGEST_BODY))
         .with_state(Arc::new(Served { operators, web }))
@@ -220,35 +234,30 @@ async fn join_page<S>(State(served): Shared<S>) -> Response {
 /// The logged-in operator's page: their name, their passkeys, and a form token for what they may do next. A
 /// browser with no live session is sent to log in.
 async fn account<S: OperatorStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
-    let cookies = cookies(&headers);
-    let Some(token) = Realm::Operator
-        .token_in(cookies.iter().copied())
-        .and_then(SessionToken::parse)
-    else {
-        return see_other(LOGIN);
-    };
-    match shown(&served, &cookies, &token).await {
+    match shown(&served, &headers).await {
         Ok(Some(page)) => page,
         Ok(None) => see_other(LOGIN),
         Err(error) => unavailable_page(&served.web, "could not show an operator's page", &error),
     }
 }
 
-/// A path under `/ops` that Identity does not serve. Anyone without a live session is sent to log in, as at `/ops`,
-/// so the operator pages cannot be mapped from outside; an operator is told it is not found.
+/// A path under `/ops` that Identity does not serve. Anyone without a live session is sent to log in, returning here
+/// after, as at `/ops`, so the operator pages cannot be mapped from outside; an operator is told it is not found.
 async fn elsewhere<S: OperatorStore>(
     State(served): Shared<S>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
     let web = &served.web;
-    match served.operators.session(cookies(&headers)).await {
-        Ok(Some(_)) => (
+    match viewing(&served, &headers).await {
+        Ok(Some((_, form))) => (
             StatusCode::NOT_FOUND,
             page(&NotFoundPage {
                 demo: web.demo,
                 stylesheet: web.stylesheet,
                 script: web.script,
+                session_script: web.session_script,
+                form,
             }),
         )
             .into_response(),
@@ -257,38 +266,76 @@ async fn elsewhere<S: OperatorStore>(
     }
 }
 
+/// The live session a page's request comes with, which the request renews, and a form token for the page to carry;
+/// none for a request with no live session.
+async fn viewing<S: OperatorStore>(
+    served: &Served<S>,
+    headers: &HeaderMap,
+) -> Result<Option<(Session, String)>, Error> {
+    let cookies = cookies(headers);
+    let Some(token) = Realm::Operator
+        .token_in(cookies.iter().copied())
+        .and_then(SessionToken::parse)
+    else {
+        return Ok(None);
+    };
+    let Some(session) = served.operators.session(cookies.iter().copied()).await? else {
+        return Ok(None);
+    };
+    token.form_token().map(|form| Some((session, form)))
+}
+
 async fn shown<S: OperatorStore>(
     served: &Served<S>,
-    cookies: &[&str],
-    token: &SessionToken,
+    headers: &HeaderMap,
 ) -> Result<Option<Response>, Error> {
-    let Some(session) = served.operators.session(cookies.iter().copied()).await? else {
+    let Some((session, form)) = viewing(served, headers).await? else {
         return Ok(None);
     };
     // A session found live names an enabled operator, so an account is missing only if they were disabled since.
     let account = served.operators.account(&session).await?;
     let web = &served.web;
-    token.form_token().map(|form| {
-        account.map(|account| {
-            page(&AccountPage {
-                demo: web.demo,
-                stylesheet: web.stylesheet,
-                script: web.script,
-                name: account.name,
-                user: base64url(&account.user_handle),
-                credentials: account
-                    .passkeys
-                    .iter()
-                    .map(|passkey| base64url(&passkey.credential))
-                    .collect::<Vec<_>>()
-                    .join(" "),
-                can_add: account.passkeys.len() < 2,
-                fresh: fresh(session.started_at(), SystemTime::now()),
-                passkeys: account.passkeys.iter().map(described).collect(),
-                form,
-            })
+    Ok(account.map(|account| {
+        page(&AccountPage {
+            demo: web.demo,
+            stylesheet: web.stylesheet,
+            script: web.script,
+            session_script: web.session_script,
+            name: account.name,
+            user: base64url(&account.user_handle),
+            credentials: account
+                .passkeys
+                .iter()
+                .map(|passkey| base64url(&passkey.credential))
+                .collect::<Vec<_>>()
+                .join(" "),
+            can_add: account.passkeys.len() < 2,
+            fresh: fresh(session.started_at(), SystemTime::now()),
+            passkeys: account.passkeys.iter().map(described).collect(),
+            form,
         })
-    })
+    }))
+}
+
+/// How long the browser's session has left, read without renewing it, for the session island's clock: only the
+/// person's own requests renew a session (NIST SP 800-63B-4).
+async fn time_left<S: OperatorStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
+    let left = served.operators.time_left(cookies(&headers)).await;
+    answered(&served.web, left.map(left_json))
+}
+
+/// A session's time left as the island reads it, in whole seconds to each limit, or the answer to a session that
+/// has ended.
+fn left_json(left: Option<TimeLeft>) -> Response {
+    left.map_or_else(
+        || refusal(StatusCode::UNAUTHORIZED, LOGGED_OUT),
+        |left| {
+            json_out(
+                StatusCode::OK,
+                &json!({ "idle": left.idle, "absolute": left.absolute }),
+            )
+        },
+    )
 }
 
 /// How long after logging in an operator may add a passkey, which the database decides (ADR-0048, `v5.0.0-7.5.1`).
@@ -320,11 +367,13 @@ enum Before {
     FinishJoin,
 }
 
-/// A step of a ceremony a logged-in operator takes.
+/// A step a logged-in operator takes, with the page's form token.
 #[derive(Clone, Copy)]
 enum LoggedIn {
     BeginAdding,
     FinishAdding,
+    /// Staying logged in: the checks for a change have renewed the session, so this says how long it has now.
+    Stay,
 }
 
 /// Runs a step before login, once the request is admitted: begins or finishes logging in or joining.
@@ -367,8 +416,8 @@ async fn before<S: OperatorStore>(
     Ok(answered(web, answered_with))
 }
 
-/// Runs a logged-in operator's step, once the request has passed the checks for a change: begins or finishes
-/// adding a passkey.
+/// Runs a logged-in operator's step, once the request has passed the checks for a change, which renew the session:
+/// begins or finishes adding a passkey, or stays logged in.
 async fn logged_in<S: OperatorStore>(
     served: Arc<Served<S>>,
     headers: HeaderMap,
@@ -395,6 +444,7 @@ async fn logged_in<S: OperatorStore>(
                 .await
                 .map(|()| next(ACCOUNT))
         }
+        LoggedIn::Stay => operators.time_left(cookies(&headers)).await.map(left_json),
     };
     Ok(answered(web, answered_with))
 }

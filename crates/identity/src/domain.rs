@@ -773,6 +773,14 @@ fn no_randomness(error: getrandom::Error) -> Error {
     Error::Unavailable(format!("no secure random source: {error}"))
 }
 
+/// How long a live session has left before each of its realm's limits, in whole seconds by the store's clock: the
+/// idle limit, which a request renews, and the absolute one, which nothing does (ADR-0048).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TimeLeft {
+    pub idle: i64,
+    pub absolute: i64,
+}
+
 /// A logged-in operator's session, as stored. Printing it leaves out the hash of its token, which finds it.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Session {

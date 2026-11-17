@@ -165,32 +165,36 @@ class Presses {
         this.arrive(this.action, next);
       }
     } catch (error) {
-      const timedOut = controller.signal.reason === TIMED_OUT;
       // Ended by a later press, which now owns the clock and the page.
-      if (controller.signal.aborted && !timedOut) {
+      if (controller.signal.aborted && controller.signal.reason !== TIMED_OUT) {
         return;
       }
       this.stopClock();
-      // A session that ended goes to log in, which says so and returns here after.
-      if (error instanceof Refused && error.status === 401) {
-        this.say(said(error), "failed");
-        this.island.browser.location.assign(loggedOut(this.island.browser.location.pathname));
-        return;
-      }
-      // A join whose last request went out but whose answer was lost may have kept the passkey and spent
-      // the link, so its link is no use again; logging in is. A refusal means the server kept nothing.
-      if (this.action === "join" && this.lastSent.has(controller.signal) && !(error instanceof Refused)) {
-        this.toLogin();
-        this.say("Your passkey may have been created. Continue with passkey to log in.", "ready");
-        return;
-      }
-      this.say(
-        timedOut
-          ? "Your device did not answer within a minute, so the prompt was closed. Try again, or use the device you set up."
-          : said(error),
-        "failed",
-      );
+      this.failed(error, controller.signal);
     }
+  }
+
+  /** Says why a ceremony this press began did not finish, or moves on from it. */
+  private failed(error: unknown, signal: AbortSignal): void {
+    // A session that ended goes to log in, which says so and returns here after.
+    if (error instanceof Refused && error.status === 401) {
+      this.say(said(error), "failed");
+      this.island.browser.location.assign(loggedOut(this.island.browser.location.pathname));
+      return;
+    }
+    // A join whose last request went out but whose answer was lost may have kept the passkey and spent
+    // the link, so its link is no use again; logging in is. A refusal means the server kept nothing.
+    if (this.action === "join" && this.lastSent.has(signal) && !(error instanceof Refused)) {
+      this.toLogin();
+      this.say("Your passkey may have been created. Continue with passkey to log in.", "ready");
+      return;
+    }
+    this.say(
+      signal.reason === TIMED_OUT
+        ? "Your device did not answer within a minute, so the prompt was closed. Try again, or use the device you set up."
+        : said(error),
+      "failed",
+    );
   }
 
   /** Starts the clock on a ceremony, stopping any before it: a hint once it is slow, and its end once it is too
