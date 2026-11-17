@@ -210,6 +210,7 @@ async fn run_serve() -> Result<(), String> {
 /// Reads the settings, reaches the database, and binds the port: everything serving needs before it listens.
 async fn ready(local: &settings::Local) -> Result<(tokio::net::TcpListener, axum::Router), String> {
     let demo = settings::demo(|name| local.var(name))?;
+    let proxies = settings::proxies(|name| local.var(name))?;
     let address = settings::listen(|name| local.var(name))?;
     let pool = connect(local).await?;
     let operators = operator_pages(local, demo)?;
@@ -218,7 +219,7 @@ async fn ready(local: &settings::Local) -> Result<(tokio::net::TcpListener, axum
     let modules = tetsu_tenancy::router(tenants, demo, assets::STYLESHEET, report).merge(
         tetsu_identity::router(tetsu_identity::postgres_store(pool), operators),
     );
-    let app = serve::app(modules, demo, serve::not_found);
+    let app = serve::app(modules, demo, proxies, serve::not_found);
     let listener = tokio::net::TcpListener::bind(address)
         .await
         .map_err(|error| format!("could not listen on {address}: {error}"))?;

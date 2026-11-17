@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime};
 use askama::Template;
 use axum::Router;
 use axum::body::Bytes;
-use axum::extract::{DefaultBodyLimit, State};
+use axum::extract::{DefaultBodyLimit, Extension, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{MethodRouter, get, post};
@@ -16,12 +16,13 @@ use serde_json::{Value, json};
 
 use crate::browser::{Change, ForChange, Logout, Origins, return_path};
 use crate::domain::{
-    Actor, Answer, Ceremony, Device, Error, HeldPasskey, Realm, Session, SessionToken, TimeLeft,
+    Actor, Answer, Ceremony, Device, Error, HeldPasskey, RateLimit, Realm, Session, SessionToken,
+    TimeLeft,
 };
 use crate::passkeys::{RelyingParty, base64url};
 use crate::ports::OperatorStore;
 use crate::use_cases::Operators;
-use tetsu_kernel::Scheme;
+use tetsu_kernel::{Requester, Scheme};
 
 const ACCOUNT: &str = "/ops";
 const LOGIN: &str = "/ops/login";
@@ -197,9 +198,10 @@ fn before_route<S: OperatorStore + Send + Sync + 'static>(
     step: Before,
 ) -> MethodRouter<Arc<Served<S>>> {
     post(
-        move |State(served): Shared<S>, headers: HeaderMap, body: Bytes| {
-            before(served, headers, body, step)
-        },
+        move |State(served): Shared<S>,
+              Extension(from): Extension<Requester>,
+              headers: HeaderMap,
+              body: Bytes| { before(served, from, headers, body, step) },
     )
 }
 
@@ -411,28 +413,62 @@ enum LoggedIn {
     Stay,
 }
 
-/// Runs a step before login, once the request is admitted: begins or finishes logging in or joining.
+impl Before {
+    /// The rate limit each step is held to (ADR-0072).
+    fn limit(self) -> RateLimit {
+        match self {
+            Self::BeginLogin => RateLimit::LoginBegin,
+            Self::FinishLogin => RateLimit::LoginFailure,
+            Self::BeginJoin | Self::FinishJoin => RateLimit::Join,
+        }
+    }
+}
+
+/// Runs a step before login, once the request is admitted and its network has room under the step's rate limit,
+/// and counts a login that fails against its network.
 async fn before<S: OperatorStore>(
     served: Arc<Served<S>>,
+    from: Requester,
     headers: HeaderMap,
     body: Bytes,
     step: Before,
 ) -> Result<Response, Refused> {
     let sent = admitted(&served.web, &headers, &body)?;
+    let operators = &served.operators;
+    let result = match operators.admit(step.limit(), &from).await {
+        Ok(()) => stepped(&served, &headers, &sent, step).await,
+        Err(refused) => Err(refused),
+    };
+    let result = match result {
+        Err(Error::Invalid(why)) if step.limit() == RateLimit::LoginFailure => {
+            operators.failed(&from).await.and(Err(Error::Invalid(why)))
+        }
+        other => other,
+    };
+    Ok(answered(&served.web, result))
+}
+
+/// Begins or finishes logging in or joining.
+async fn stepped<S: OperatorStore>(
+    served: &Served<S>,
+    headers: &HeaderMap,
+    sent: &Value,
+    step: Before,
+) -> Result<Response, Error> {
     let (web, operators) = (&served.web, &served.operators);
-    let (ceremony, response) = answer_in(&sent);
+    let (ceremony, response) = answer_in(sent);
     let answer = Answer {
         ceremony,
         response: &response,
     };
-    let actor = browser(&headers, None);
-    let answered_with = match step {
+    let actor = browser(headers, None);
+    match step {
         Before::BeginLogin => operators
             .begin_login(&web.party)
             .await
             .map(|begun| begun_json(&begun)),
         Before::FinishLogin => operators
-            .finish_login(&web.party, answer, &cookies(&headers), &actor)
+            .finish_login(&web.party, answer, &cookies(headers), &actor)
             .await
             .map(|token| {
                 let to = sent["next"].as_str().and_then(return_path);
@@ -444,11 +480,10 @@ async fn before<S: OperatorStore>(
             .map(|begun| begun_json(&begun)),
         // Joining logs the operator in, with a session that rests on the link and is never fresh (ADR-0069).
         Before::FinishJoin => operators
-            .finish_join(&web.party, answer, &cookies(&headers), &actor)
+            .finish_join(&web.party, answer, &cookies(headers), &actor)
             .await
             .map(|(_, token)| logged_in_at(&token, ACCOUNT)),
-    };
-    Ok(answered(web, answered_with))
+    }
 }
 
 /// Runs a logged-in operator's step, once the request has passed the checks for a change, which renew the session:
@@ -653,8 +688,26 @@ fn answered(web: &Web, result: Result<Response, Error>) -> Response {
     match result {
         Ok(response) => response,
         Err(Error::Invalid(why)) => refusal(StatusCode::BAD_REQUEST, &why),
+        Err(Error::Limited(wait)) => limited(wait),
         Err(error) => unavailable(web, &error),
     }
+}
+
+/// A refusal by a rate limit, which says when to try again and never which limit it was (ADR-0072).
+pub(crate) fn limited(wait: Duration) -> Response {
+    let seconds = wait.as_secs().max(1);
+    let minutes = seconds.div_ceil(60);
+    let when = if minutes == 1 {
+        "a minute".to_string()
+    } else {
+        format!("{minutes} minutes")
+    };
+    let why = format!("too many tries from your network. Try again in {when}");
+    let mut response = refusal(StatusCode::TOO_MANY_REQUESTS, &why);
+    response
+        .headers_mut()
+        .insert(header::RETRY_AFTER, HeaderValue::from(seconds));
+    response
 }
 
 fn unavailable(web: &Web, error: &Error) -> Response {

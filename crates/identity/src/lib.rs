@@ -21,6 +21,8 @@ mod join_tests;
 #[cfg(test)]
 mod lifecycle_tests;
 #[cfg(test)]
+mod limit_tests;
+#[cfg(test)]
 mod login_tests;
 
 pub use adapters::http::{PATHS, Web, router};
@@ -29,8 +31,8 @@ pub use browser::{Change, CheckedSession, ForChange, Logout, Origins};
 pub use domain::{
     Account, Actor, Addition, Answer, Ceremony, CeremonyKind, CeremonyToken, Device, Disabling,
     Error, HeldPasskey, InviteToken, Invitee, Issue, Limits, Login, NewPasskey, OperatorId,
-    OperatorName, OperatorSummary, Realm, Redemption, Refusal, Removal, Session, SessionStart,
-    SessionToken, Signer, TakenAddition, TakenCeremony, TimeLeft,
+    OperatorName, OperatorSummary, RateLimit, Realm, Redemption, Refusal, Removal, Session,
+    SessionStart, SessionToken, Signer, TakenAddition, TakenCeremony, TimeLeft,
 };
 pub use passkeys::RelyingParty;
 pub use ports::OperatorStore;

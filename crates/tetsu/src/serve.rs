@@ -1,6 +1,7 @@
 //! `tetsu serve`: the public site, Tetsu's own page at the root and each tenant's page at its address (#76).
 
 use std::future::{Future, IntoFuture};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
 use askama::Template;
@@ -9,11 +10,12 @@ use crate::assets;
 use axum::Router;
 use axum::body::Bytes;
 use axum::extract::rejection::PathRejection;
-use axum::extract::{Path, State};
+use axum::extract::{ConnectInfo, Path, Request, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
+use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{MethodRouter, get};
-use tetsu_kernel::Scheme;
+use tetsu_kernel::{Requester, Scheme};
 use tower_http::CompressionLevel;
 use tower_http::compression::CompressionLayer;
 use tower_http::compression::predicate::{DefaultPredicate, NotForContentType, Predicate};
@@ -70,7 +72,12 @@ const DAILY: &str = "public, max-age=86400";
 /// answers, which is [`not_found`] outside tests. Modules set no fallback, since axum panics when two merged
 /// routers both have one (#90). In a demo environment every response also asks search engines not to index it
 /// (ADR-0018).
-pub fn app(modules: Router, demo: bool, not_found: fn(bool, Scheme) -> Response) -> Router {
+pub fn app(
+    modules: Router,
+    demo: bool,
+    proxies: usize,
+    not_found: fn(bool, Scheme) -> Response,
+) -> Router {
     site_routes(demo)
         .into_iter()
         .fold(Router::new(), |site, (path, route)| site.route(path, route))
@@ -80,8 +87,27 @@ pub fn app(modules: Router, demo: bool, not_found: fn(bool, Scheme) -> Response)
             std::future::ready(not_found(demo, scheme_of(&headers)))
         })
         .layer(axum::middleware::map_response_with_state(demo, secure))
+        .layer(axum::middleware::from_fn_with_state(proxies, requester))
         .layer(compression())
         .layer(axum::middleware::from_fn(crate::logs::request))
+}
+
+/// Notes the network each request came from, for the rate limits (ADR-0072): with `proxies` in front of Tetsu,
+/// the `X-Forwarded-For` entry the first of them added, or else the connection's own address. A request served
+/// without its connection's address, as a test's may be, comes from the unspecified address.
+async fn requester(State(proxies): State<usize>, mut request: Request, next: Next) -> Response {
+    let connection = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), |info| info.0.ip());
+    let forwarded = request.headers().get_all("x-forwarded-for");
+    let from = Requester::from_request(
+        connection,
+        forwarded.iter().filter_map(|value| value.to_str().ok()),
+        proxies,
+    );
+    request.extensions_mut().insert(from);
+    next.run(request).await
 }
 
 /// Brotli or gzip, as the browser asks (ADR-0039). Fonts are already compressed, so they go as they are. Quality 4
@@ -243,12 +269,15 @@ pub async fn run(
     grace: Duration,
 ) -> std::io::Result<()> {
     let (stopping, stopped) = tokio::sync::oneshot::channel::<()>();
-    let server = axum::serve(listener, app)
-        .with_graceful_shutdown(async move {
-            shutdown.await;
-            let _ = stopping.send(());
-        })
-        .into_future();
+    let server = axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(async move {
+        shutdown.await;
+        let _ = stopping.send(());
+    })
+    .into_future();
     let deadline = async move {
         // The sender goes only when the server has already stopped, which the other branch reports.
         if stopped.await.is_ok() {
@@ -378,7 +407,7 @@ mod tests {
         let address = listener.local_addr().unwrap();
         tokio::spawn(run(
             listener,
-            app(module(), demo, not_found),
+            app(module(), demo, 0, not_found),
             std::future::pending(),
             GRACE,
         ));
@@ -400,7 +429,7 @@ mod tests {
         let address = listener.local_addr().unwrap();
         tokio::spawn(run(
             listener,
-            app(module(), true, not_found),
+            app(module(), true, 0, not_found),
             std::future::pending(),
             GRACE,
         ));
@@ -630,7 +659,7 @@ mod tests {
         };
         let server = tokio::spawn(run(
             listener,
-            app(module(), true, not_found),
+            app(module(), true, 0, not_found),
             shutdown,
             grace,
         ));

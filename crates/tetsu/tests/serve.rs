@@ -31,7 +31,8 @@ mod support {
             .env("DATABASE_URL", settings.url())
             .env("DATABASE_TLS", "disable")
             .env("TETSU_DEMO", "true")
-            .env("TETSU_ORIGIN", "http://localhost:8080");
+            .env("TETSU_ORIGIN", "http://localhost:8080")
+            .env("TETSU_TRUSTED_PROXIES", "0");
         // A developer's or CI's own OpenTelemetry settings never reach a test server.
         for (name, _) in std::env::vars_os() {
             if name.to_string_lossy().starts_with("OTEL_") {
@@ -297,12 +298,27 @@ mod support {
     );
 
     pub fn get(server: &Server, path: &str) -> String {
-        let mut stream = TcpStream::connect(("127.0.0.1", server.port)).unwrap();
-        write!(
-            stream,
-            "GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+        sent(
+            server,
+            &format!("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"),
         )
-        .unwrap();
+    }
+
+    /// Begins a login as a browser on the site would, from the network `forwarded` names.
+    pub fn begin_login(server: &Server, forwarded: &str) -> String {
+        sent(
+            server,
+            &format!(
+                "POST /ops/login/begin HTTP/1.1\r\nHost: localhost\r\nOrigin: http://localhost:8080\r\n\
+                 X-Forwarded-For: {forwarded}\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\
+                 Connection: close\r\n\r\n{{}}"
+            ),
+        )
+    }
+
+    fn sent(server: &Server, request: &str) -> String {
+        let mut stream = TcpStream::connect(("127.0.0.1", server.port)).unwrap();
+        stream.write_all(request.as_bytes()).unwrap();
         let mut raw = String::new();
         stream.read_to_string(&mut raw).unwrap();
         raw
@@ -315,7 +331,8 @@ use std::process::Command;
 #[cfg(unix)]
 use support::{KEY, exported, one_visit_exported};
 use support::{
-    get, logged, message, ready, refused, served, start, start_marked, start_with, tetsu,
+    begin_login, get, logged, message, ready, refused, served, start, start_marked, start_with,
+    tetsu,
 };
 use tetsu_postgres::test_support::fresh_database;
 
@@ -520,6 +537,45 @@ async fn it_refuses_to_start_while_a_tenant_holds_a_reserved_address() {
     assert!(stderr.contains("reserved"), "{stderr}");
 }
 
+/// Behind one proxy, a network that begins too many logins is refused with when to try again, keyed on the
+/// entry the proxy added, whatever the client put before it; another network still begins (ADR-0072).
+#[tokio::test]
+async fn a_flood_of_logins_from_one_network_is_refused_and_no_other() {
+    let database = fresh_database().await.expect("a test database");
+    ready(&database);
+    let (server, _) = start_with(&database, &[("TETSU_TRUSTED_PROXIES", "1")]);
+    for n in 0..30 {
+        let begun = begin_login(&server, &format!("203.0.113.{n}, 192.0.2.1"));
+        assert!(begun.starts_with("HTTP/1.1 200"), "{n}: {begun}");
+    }
+    let refused = begin_login(&server, "198.51.100.1, 192.0.2.1");
+    assert!(refused.starts_with("HTTP/1.1 429"), "{refused}");
+    assert!(
+        refused.to_ascii_lowercase().contains("retry-after: 30"),
+        "{refused}"
+    );
+    assert!(refused.contains("Try again in a minute"), "{refused}");
+    let other = begin_login(&server, "192.0.2.1, 192.0.2.2");
+    assert!(other.starts_with("HTTP/1.1 200"), "{other}");
+}
+
+/// Rate limits key on a requester's network, so serving refuses to start without knowing how many proxies stand
+/// in front, rather than guess.
+#[tokio::test]
+async fn it_refuses_to_start_without_its_proxy_count() {
+    let database = fresh_database().await.expect("a test database");
+    let output = tetsu(&database, &["serve"])
+        .env_remove("TETSU_TRUSTED_PROXIES")
+        .output()
+        .expect("the binary runs");
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("TETSU_TRUSTED_PROXIES must be set"),
+        "{stderr}"
+    );
+}
+
 /// The operator pages need the site's own origin, for their passkeys and to tell their requests from another
 /// site's, so serving refuses to start without it.
 #[tokio::test]
@@ -554,6 +610,7 @@ fn it_refuses_to_start_without_a_database() {
     let output = Command::new(env!("CARGO_BIN_EXE_tetsu"))
         .arg("serve")
         .env("TETSU_DEMO", "true")
+        .env("TETSU_TRUSTED_PROXIES", "0")
         .env_remove("DATABASE_URL")
         .output()
         .expect("the binary runs");

@@ -390,6 +390,29 @@ impl Login {
     }
 }
 
+/// A rate limit on what a network may try before login (ADR-0072). Its numbers live in the store.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RateLimit {
+    /// Beginning a login, each counted.
+    LoginBegin,
+    /// Failing to log in: checked before each finish, and counted when one fails.
+    LoginFailure,
+    /// Beginning or finishing joining, each counted.
+    Join,
+}
+
+impl RateLimit {
+    /// The limit's name in the store.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::LoginBegin => "login_begin",
+            Self::LoginFailure => "login_failure",
+            Self::Join => "join",
+        }
+    }
+}
+
 /// A browser's answer to a passkey ceremony: the ceremony's token, and the response its authenticator gave, as
 /// JSON. Printing it leaves out the token.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -844,6 +867,8 @@ impl std::fmt::Debug for Session {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
     Invalid(String),
+    /// Refused by a rate limit (ADR-0072), worth trying again after this long.
+    Limited(std::time::Duration),
     /// Worth retrying: the connection dropped, or a cached statement went stale (ADR-0011).
     Unavailable(String),
     Storage(String),
@@ -855,6 +880,7 @@ impl std::fmt::Display for Error {
             Self::Invalid(why) => ("invalid", why),
             Self::Unavailable(why) => ("temporarily unavailable", why),
             Self::Storage(why) => ("storage failed", why),
+            Self::Limited(wait) => return write!(f, "limited: try again in {}s", wait.as_secs()),
         };
         write!(f, "{what}: {why}")
     }
@@ -1294,6 +1320,10 @@ mod tests {
             "temporarily unavailable: x"
         );
         assert_eq!(Error::Storage("x".into()).to_string(), "storage failed: x");
+        assert_eq!(
+            Error::Limited(std::time::Duration::from_secs(90)).to_string(),
+            "limited: try again in 90s"
+        );
     }
 
     proptest! {

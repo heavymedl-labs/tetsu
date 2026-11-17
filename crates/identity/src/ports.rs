@@ -2,10 +2,12 @@
 
 use crate::domain::{
     Account, Actor, Addition, Disabling, Error, Invitee, Issue, Login, NewPasskey, OperatorId,
-    OperatorName, OperatorSummary, Realm, Redemption, Refusal, Removal, Session, SessionStart,
-    Signer, TakenAddition, TakenCeremony, TimeLeft,
+    OperatorName, OperatorSummary, RateLimit, Realm, Redemption, Refusal, Removal, Session,
+    SessionStart, Signer, TakenAddition, TakenCeremony, TimeLeft,
 };
 use std::future::Future;
+use std::time::Duration;
+use tetsu_kernel::Requester;
 
 /// Where operators and their sessions are kept. A session is reached only by its token's hash and realm, one at a
 /// time (ADR-0048), and the store keeps each realm's limits beside its own clock, so no caller can stretch a
@@ -98,6 +100,17 @@ pub trait OperatorStore {
         operator: OperatorId,
         actor: &Actor,
     ) -> impl Future<Output = Result<Option<Disabling>, Error>> + Send;
+
+    /// Admits an attempt from a network under a limit, or says how long it must wait. A limit of attempts counts
+    /// it; the limit of failures only checks.
+    fn admit(
+        &self,
+        limit: RateLimit,
+        from: &Requester,
+    ) -> impl Future<Output = Result<Option<Duration>, Error>> + Send;
+
+    /// Counts a failed login from a network.
+    fn fail(&self, from: &Requester) -> impl Future<Output = Result<(), Error>> + Send;
 
     /// Keeps a login ceremony's state for ten minutes under its token's hash. It never refuses for the number
     /// open: past a bound, the oldest end.

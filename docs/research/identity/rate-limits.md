@@ -77,6 +77,24 @@ address within it at will. Wider prefixes, such as /48, catch more but also grou
 ([Better Auth](https://better-auth.com/docs/concepts/rate-limit) uses /64 by default). IPv4 keys on the full
 address.
 
+### Measured on the demo, 2026-11-17
+
+A temporary probe logged the forwarding headers of three requests to the demo, the requester's own address shown
+here as `<client>`:
+
+| Sent `X-Forwarded-For` | Arrived |
+| --- | --- |
+| `203.0.113.7` | `203.0.113.7, <client>, 162.159.x.x, 10.x.x.x` |
+| `203.0.113.7, 198.51.100.9` | `203.0.113.7, 198.51.100.9, <client>, 172.71.x.x, 10.x.x.x` |
+| none | `<client>, 162.159.x.x, 10.x.x.x` |
+
+- **Render appends to what the client sent,** so the leftmost entry, which Render's article reads, is forgeable.
+- **Three proxies add an entry each:** Cloudflare's edge adds the client, the hop from Cloudflare (`162.159.x.x` and
+  `172.71.x.x` are Cloudflare's) adds Cloudflare's address, and Render's balancer adds its own private one. The
+  client is always the third entry from the right, so `TETSU_TRUSTED_PROXIES` is `3`.
+- **`CF-Connecting-IP` and `True-Client-IP` arrive,** each holding the client's address. `X-Real-IP` and
+  `Forwarded` do not.
+
 ## Algorithms and storage
 
 - **A fixed window counts per address per period** and resets at its edge, letting up to twice the limit through

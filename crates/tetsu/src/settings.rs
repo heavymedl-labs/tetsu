@@ -142,6 +142,21 @@ pub fn database(var: impl Fn(&str) -> Result<String, VarError>) -> Result<Settin
     Ok(settings)
 }
 
+/// How many proxies stand in front of `tetsu serve`, each adding an `X-Forwarded-For` entry, from
+/// `TETSU_TRUSTED_PROXIES`: `0` locally, `3` on Render, as measured (ADR-0072). It has no default, since a wrong
+/// count lets a client choose the address its rate limits key on, or puts every client under one.
+///
+/// # Errors
+/// Fails if the setting is missing or not a whole number up to 10.
+pub fn proxies(var: impl Fn(&str) -> Result<String, VarError>) -> Result<usize, String> {
+    value(&var, "TETSU_TRUSTED_PROXIES")?
+        .and_then(|count| count.parse().ok())
+        .filter(|count| *count <= 10)
+        .ok_or_else(|| {
+            "TETSU_TRUSTED_PROXIES must be set to the number of proxies in front, 0 to 10".into()
+        })
+}
+
 /// Where `tetsu serve` listens. A host such as Render sets `PORT` and expects every interface, so with `PORT` it
 /// listens on `0.0.0.0`. Without it, it listens on this machine only, at port 8080.
 pub fn listen(var: impl Fn(&str) -> Result<String, VarError>) -> Result<SocketAddr, String> {
@@ -499,6 +514,37 @@ mod tests {
             assert_eq!(
                 formatted(Some("JSON"), terminal),
                 Err("TETSU_LOG_FORMAT must be json or text".into())
+            );
+        }
+    }
+
+    fn counted(value: Option<&str>) -> Result<usize, String> {
+        proxies(|name| match (name, value) {
+            ("TETSU_TRUSTED_PROXIES", Some(value)) => Ok(value.to_string()),
+            _ => Err(VarError::NotPresent),
+        })
+    }
+
+    #[test]
+    fn the_proxy_count_must_be_set_from_0_to_10() {
+        for (text, count) in [("0", 0), (" 3 ", 3), ("10", 10)] {
+            assert_eq!(counted(Some(text)), Ok(count), "{text}");
+        }
+        for bad in [
+            None,
+            Some(""),
+            Some("11"),
+            Some("-1"),
+            Some("three"),
+            Some("3.0"),
+        ] {
+            assert_eq!(
+                counted(bad),
+                Err(
+                    "TETSU_TRUSTED_PROXIES must be set to the number of proxies in front, 0 to 10"
+                        .into()
+                ),
+                "{bad:?}"
             );
         }
     }

@@ -2,17 +2,18 @@
 
 use std::fmt::Write;
 use std::sync::OnceLock;
+use std::time::Duration;
 
 use serde_json::{Value, json};
-use tetsu_kernel::Migration;
+use tetsu_kernel::{Migration, Requester};
 use tetsu_postgres::{Failure, ModuleTransaction, NewEvent, Pool};
 use tokio_postgres::Row;
 use tokio_postgres::types::{FromSql, ToSql};
 
 use crate::domain::{
     Account, Actor, Addition, CeremonyKind, Disabling, Error, HeldPasskey, Invitee, Issue, Login,
-    NewPasskey, OperatorId, OperatorName, OperatorSummary, Realm, Redemption, Refusal, Removal,
-    Session, SessionStart, Signer, TakenAddition, TakenCeremony, TimeLeft,
+    NewPasskey, OperatorId, OperatorName, OperatorSummary, RateLimit, Realm, Redemption, Refusal,
+    Removal, Session, SessionStart, Signer, TakenAddition, TakenCeremony, TimeLeft,
 };
 use crate::ports::OperatorStore;
 use crate::use_cases::Operators;
@@ -31,6 +32,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 3,
         sql: include_str!("../../migrations/0003_session_left.sql"),
     },
+    Migration {
+        version: 4,
+        sql: include_str!("../../migrations/0004_rate_limits.sql"),
+    },
 ];
 /// Identity's schema, which names the role its transactions act as (ADR-0042).
 const SCHEMA: &str = "identity";
@@ -48,6 +53,8 @@ const ENABLE_OPERATOR: &str = include_str!("../../sql/enable_operator.sql");
 const INVITEE: &str = include_str!("../../sql/invitee.sql");
 const REMOVE_PASSKEYS: &str = include_str!("../../sql/remove_passkeys.sql");
 const BEGIN_LOGIN: &str = include_str!("../../sql/begin_login.sql");
+const ADMIT: &str = include_str!("../../sql/admit.sql");
+const FAIL: &str = include_str!("../../sql/fail.sql");
 const TAKE_LOGIN: &str = include_str!("../../sql/take_login.sql");
 const SIGNER: &str = include_str!("../../sql/signer.sql");
 const LOGIN: &str = include_str!("../../sql/login.sql");
@@ -356,6 +363,26 @@ impl OperatorStore for PostgresOperators {
             redemption(rows, id, &passkey.credential_id, actor)
         })
         .await
+    }
+
+    async fn admit(&self, limit: RateLimit, from: &Requester) -> Result<Option<Duration>, Error> {
+        let rows = self
+            .query(ADMIT, &[&limit.as_str(), &from.as_bytes().as_slice()])
+            .await?;
+        rows.first()
+            .map(|row| column::<Option<i64>>(row, "wait"))
+            .transpose()
+            .map(|wait| {
+                wait.flatten()
+                    .map(|seconds| Duration::from_secs(seconds.unsigned_abs()))
+            })
+    }
+
+    async fn fail(&self, from: &Requester) -> Result<(), Error> {
+        let failure = RateLimit::LoginFailure.as_str();
+        self.query(FAIL, &[&failure, &from.as_bytes().as_slice()])
+            .await
+            .map(drop)
     }
 
     async fn begin_login(&self, token: &[u8; 32], state: &str) -> Result<(), Error> {
@@ -888,7 +915,7 @@ fn login_from(text: &str) -> Result<Login, Error> {
 }
 
 /// Bytes as lowercase hexadecimal, as events record credential IDs.
-fn hex(bytes: &[u8]) -> String {
+pub(crate) fn hex(bytes: &[u8]) -> String {
     bytes.iter().fold(String::new(), |mut text, byte| {
         let _ = write!(text, "{byte:02x}");
         text

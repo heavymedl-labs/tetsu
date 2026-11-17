@@ -3,11 +3,13 @@
 use crate::browser::{Change, CheckedSession, ForChange, Logout, Origins};
 use crate::domain::{
     Account, Actor, Addition, Answer, Ceremony, CeremonyKind, CeremonyToken, Disabling, Error,
-    Fill, InviteToken, Issue, Login, NewPasskey, OperatorId, OperatorName, OperatorSummary, Realm,
-    Redemption, Refusal, Removal, Session, SessionStart, SessionToken, Signer, TimeLeft,
+    Fill, InviteToken, Issue, Login, NewPasskey, OperatorId, OperatorName, OperatorSummary,
+    RateLimit, Realm, Redemption, Refusal, Removal, Session, SessionStart, SessionToken, Signer,
+    TimeLeft,
 };
 use crate::passkeys::RelyingParty;
 use crate::ports::OperatorStore;
+use tetsu_kernel::Requester;
 
 /// The operator realm's use cases over a store. It offers nothing that reaches the store, so no caller can read or
 /// write a session except through these.
@@ -148,12 +150,32 @@ impl<S: OperatorStore> Operators<S> {
             .ok_or_else(|| no_operator(operator))
     }
 
+    /// Admits an attempt from `from` under a rate limit (ADR-0072), counting it unless the limit counts only
+    /// failures.
+    ///
+    /// # Errors
+    /// Fails with [`Error::Limited`] and how long to wait, when the network has no room; or if storage fails.
+    pub async fn admit(&self, limit: RateLimit, from: &Requester) -> Result<(), Error> {
+        match self.store.admit(limit, from).await? {
+            Some(wait) => Err(Error::Limited(wait)),
+            None => Ok(()),
+        }
+    }
+
+    /// Counts a failed login from `from`, which the limit of failures then checks.
+    ///
+    /// # Errors
+    /// Fails if storage fails.
+    pub async fn failed(&self, from: &Requester) -> Result<(), Error> {
+        self.store.fail(from).await
+    }
+
     /// Begins a passkey login: a ceremony token for the browser to keep, and options that let it offer any of the
     /// person's passkeys. The ceremony lasts ten minutes, and its state never leaves the store.
     ///
     /// # Errors
-    /// Never refuses for the number of logins open: past a bound, the oldest end, so a flood of begins can end a
-    /// real one before its person answers until step 5's rate limits. Fails with [`Error::Unavailable`] if no
+    /// Never refuses for the number of logins open: past a bound, the oldest end, behind the rate limits the
+    /// HTTP adapter applies first (ADR-0072). Fails with [`Error::Unavailable`] if no
     /// secure random source can be read, and with [`Error::Storage`] if storage fails.
     pub async fn begin_login(&self, party: &RelyingParty) -> Result<Ceremony, Error> {
         // Starting a discoverable login cannot fail in webauthn-rs; were it to, it would be a storage failure.

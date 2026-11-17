@@ -3,6 +3,7 @@
 use std::fmt::Write as _;
 use std::net::SocketAddr;
 use std::sync::Mutex;
+use tetsu_kernel::Requester;
 
 use passkey::types::Passkey;
 use serde_json::{Value, json};
@@ -77,8 +78,26 @@ async fn serve(operators: Operators<PostgresOperators>) -> SocketAddr {
     };
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("binds");
     let address = listener.local_addr().expect("an address");
-    tokio::spawn(async move { axum::serve(listener, router(operators, web)).await });
+    let app = router(operators, web).layer(axum::middleware::from_fn(requester));
+    tokio::spawn(async move { axum::serve(listener, app).await });
     address
+}
+
+/// Notes each request's network as the site does behind one proxy: the last `X-Forwarded-For` entry, so a test
+/// names its network, or this machine.
+async fn requester(
+    mut request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let local = std::net::IpAddr::from([127, 0, 0, 1]);
+    let forwarded = request.headers().get_all("x-forwarded-for");
+    let from = Requester::from_request(
+        local,
+        forwarded.iter().filter_map(|value| value.to_str().ok()),
+        1,
+    );
+    request.extensions_mut().insert(from);
+    next.run(request).await
 }
 
 pub(crate) async fn send(
@@ -676,4 +695,71 @@ async fn the_scripts_fixture_has_the_options_shapes() {
         shape(&json!({"creation": add.json()["options"], "request": sign.json()["options"]})),
         shape(&fixture)
     );
+}
+
+/// Posts to a step before login from the network `from` names, as the site's proxy would add it.
+async fn post_from(address: SocketAddr, path: &str, from: &str, body: &Value) -> Reply {
+    let headers = [
+        ("Origin", ORIGIN),
+        ("Content-Type", "application/json"),
+        ("X-Forwarded-For", from),
+    ];
+    send(address, "POST", path, &headers, &body.to_string()).await
+}
+
+/// Each step before login is held to its limit: thirty login begins, ten join steps, and ten failed logins from
+/// one network, each then refused with when to try again; failed joins are not failed logins, and another network
+/// is not held back (ADR-0072).
+#[tokio::test]
+async fn each_step_before_login_is_held_to_its_network_s_limit() {
+    let (address, _database, _) = serving().await;
+    let bad = json!({"ceremony": "x", "response": {}, "link": "x"});
+    let statuses = async |path: &str, from: &str, times: usize| {
+        let mut seen = Vec::new();
+        for _ in 0..times {
+            seen.push(post_from(address, path, from, &bad).await.status);
+        }
+        seen
+    };
+    assert_eq!(
+        statuses("/ops/login/begin", "192.0.2.1", 31).await[29..],
+        [200, 429]
+    );
+    assert_eq!(statuses("/ops/join/begin", "192.0.2.2", 5).await, [400; 5]);
+    assert_eq!(
+        statuses("/ops/join/finish", "192.0.2.2", 6).await,
+        [400, 400, 400, 400, 400, 429]
+    );
+    assert_eq!(
+        statuses("/ops/login/finish", "192.0.2.2", 10).await,
+        [400; 10]
+    );
+    let refused = post_from(address, "/ops/login/finish", "192.0.2.2", &bad).await;
+    assert_eq!(refused.status, 429, "{}", refused.body);
+    assert_eq!(refused.header("retry-after"), Some("60"));
+    assert_eq!(
+        refused.body,
+        json!({"error": "too many tries from your network. Try again in a minute"}).to_string()
+    );
+    assert_eq!(statuses("/ops/login/finish", "192.0.2.3", 1).await, [400]);
+}
+
+/// A refusal by a limit says when in whole minutes, and asks for at least a second's wait.
+#[tokio::test]
+async fn a_limit_says_when_to_try_again() {
+    for (wait, retry, when) in [
+        (0, "1", "a minute"),
+        (60, "60", "a minute"),
+        (61, "61", "2 minutes"),
+        (3600, "3600", "60 minutes"),
+    ] {
+        let response = crate::adapters::http::limited(std::time::Duration::from_secs(wait));
+        assert_eq!(response.status(), 429);
+        assert_eq!(response.headers()["retry-after"], retry, "{wait}");
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("a body");
+        let said = format!("too many tries from your network. Try again in {when}");
+        assert_eq!(body, json!({ "error": said }).to_string(), "{wait}");
+    }
 }
