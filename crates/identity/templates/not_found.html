@@ -1,0 +1,9 @@
+{% extends "ops_page.html" %}
+{% import "../../../web/templates/components.html" as shared %}
+{% block title %}Not found – Tetsu{% endblock %}
+{% block noscript %}{% endblock %}
+{% block card %}
+<h1 class="mt-6 text-lg font-medium text-ink">Not found</h1>
+<p class="mt-2 text-[13px] text-pretty text-muted">Nothing is at this address.</p>
+<a href="/ops" class="mt-6 {% call shared::button_style(false, false, true) %}{% endcall %}">Back to your page</a>
+{% endblock %}

@@ -55,7 +55,6 @@ is in [AGENTS.md](AGENTS.md#checks), and docs also get the
 
 | ID | Rule | Path | Reason | Owner | Expires |
 | --- | --- | --- | --- | --- | --- |
-| E1 | Scripts need tests | `scripts/generate_brand.py` | One-off generator, and its output is checked by eye | Maintainer | 2027-02-04 |
 | E2 | Bash and Python coverage, duplication, and boundaries, and Bash complexity | `scripts/` | Tooling only, with no numeric limit, and too small to justify more tools yet, so the fresh review covers these | Maintainer | 2027-02-04 |
 | E4 | SQL coverage, duplication, and complexity | `crates/` | No good tool fits: module tests run every query against Postgres, and the fresh review covers the rest | Maintainer | 2027-02-04 |
 | E5 | CSS tests | `web/src/` | What CSS does shows only in a browser, and the browser tests ([ADR-0054](docs/adr/0054-browser-tests.md), [#129](https://github.com/heavymedl-labs/tetsu/issues/129)) fill this | Maintainer | 2027-02-10 |

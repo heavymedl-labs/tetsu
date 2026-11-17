@@ -447,7 +447,16 @@ mod tests {
                 .await
                 .unwrap();
             let body = String::from_utf8(body.to_vec()).unwrap();
-            assert!(body.contains("Nothing is at this address."), "{body}");
+            // As Linear's: the site's own header and footer around "404" in the brand's slots (ADR-0035).
+            for shown in [
+                "<title>Page not found – Tetsu</title>",
+                "<nav aria-label=\"Tetsu\"",
+                "<svg role=\"img\" aria-label=\"404\"",
+                "There is nothing booked at this address.",
+                "© 2026 Tetsu",
+            ] {
+                assert!(body.contains(shown), "{shown} in {body}");
+            }
             assert_eq!(body.contains("noindex"), demo, "{body}");
         }
     }
@@ -1152,6 +1161,17 @@ mod tests {
                 "&{entity} escaped twice"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn the_not_found_page_books_404_in_the_brands_slots() {
+        let response = super::not_found(true);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let page = String::from_utf8(body.to_vec()).unwrap();
+        let (booked, hot) = booked_cells(&page, "<main");
+        assert_eq!((booked.len(), hot), (30, vec![(2, 1)]));
     }
 
     #[test]

@@ -17,57 +17,9 @@
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#111110">
 {% endblock %}
 {% block body %}
-{%- let nav = [("/#product", "Product"), ("/#customers", "Customers"), ("/#why", "Why Tetsu"), ("/#pricing", "Pricing")] %}
-<header class="sticky top-0 z-40 border-b border-line/70 bg-canvas/75 backdrop-blur-md">
-<nav aria-label="Tetsu" class="mx-auto flex h-14 max-w-page items-center justify-between gap-6 px-6 lg:px-10">
-<a href="/" aria-label="Tetsu home" class="flex h-4 items-center text-ink focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent">{% include "../../../web/templates/wordmark.html" %}</a>
-{% if demo %}<div class="hidden flex-1 items-center gap-8 pl-6 text-sm text-muted md:flex">
-{%- for (href, text) in nav %}
-<a href="{{ href }}" class="transition-colors hover:text-ink">{{ text }}</a>
-{%- endfor %}
-</div>{% endif %}
-<div class="flex items-center gap-3 text-sm">
-{#- Light, dark, or the system's: radios that set the color scheme without script (tetsu.css), so the choice lasts
-    one page view. #}
-<fieldset class="flex rounded-full border border-line p-0.5 text-muted [&_svg]:size-4">
-<legend class="sr-only">Color scheme</legend>
-{%- for (k, (scheme, name)) in [("system", "System"), ("light", "Light"), ("dark", "Dark")].iter().enumerate() %}
-<label class="cursor-pointer rounded-full p-1 hover:text-ink has-checked:bg-line has-checked:text-ink has-focus-visible:outline-2 has-focus-visible:outline-accent"><input type="radio" name="scheme" id="tetsu-scheme-{{ scheme }}" class="sr-only"{% if k == 0 %} checked{% endif %}><span class="sr-only">{{ name }}</span>{% if k == 0 %}{% call ui::icon("system") %}{% endcall %}{% else if k == 1 %}{% call ui::icon("sun") %}{% endcall %}{% else %}{% call ui::icon("moon") %}{% endcall %}{% endif %}</label>
-{%- endfor %}
-</fieldset>
-{% if demo %}<div class="hidden sm:contents">{% call ui::button("/#pricing", small = true) %}See plans{% endcall %}</div>
-{#- The menu on small screens: a popover, without script, which Escape or a tap outside closes. Closing it once a
-    link is chosen needs a script, so it waits for islands (#88). It sits under its button where the browser can
-    anchor it, and under the header's corner where it cannot. #}
-<button type="button" popovertarget="tetsu-menu" class="flex cursor-pointer rounded-lg p-1.5 text-muted [anchor-name:--tetsu-menu] hover:text-ink focus-visible:outline-2 focus-visible:outline-accent md:hidden"><span class="sr-only">Menu</span>{% call ui::icon("menu") %}{% endcall %}</button>
-<div id="tetsu-menu" popover class="inset-auto top-16 right-6 m-0 mt-2 w-48 rounded-xl border border-line bg-surface p-2 text-ink shadow-lg [position-anchor:--tetsu-menu] supports-[top:anchor(bottom)]:top-[anchor(bottom)] supports-[top:anchor(bottom)]:right-[anchor(right)]">
-{%- for (href, text) in nav %}
-<a href="{{ href }}" class="block rounded-lg px-3 py-2 text-ink hover:bg-canvas">{{ text }}</a>
-{%- endfor %}
-</div>{% endif %}
-</div>
-</nav>
-</header>
+{% include "../../../web/templates/site_header.html" %}
 {% block page %}{% endblock %}
 {% endblock %}
 {% block footer %}
-<footer>
-<div class="mx-auto grid max-w-page grid-cols-2 gap-10 px-6 py-16 lg:px-10 text-sm sm:grid-cols-5">
-<div class="col-span-2">
-<div class="h-4 text-ink">{% include "../../../web/templates/wordmark.html" %}</div>
-<p class="mt-4 max-w-xs text-muted">Scheduling, memberships, and payments for the businesses people book with.</p>
-</div>
-{% if demo %}
-{% call ui::footer_column("Product", [("/#fill", "Classes and waitlists"), ("/#spots", "Spot maps"), ("/#book", "Appointments and rentals"), ("/#paid", "Memberships and payments")]) %}{% endcall %}
-{% call ui::footer_column("Built for", [("", "Gyms and studios"), ("", "Salons and spas"), ("", "Courts and rentals"), ("", "Campgrounds and stays"), ("", "Multi-location brands")]) %}{% endcall %}
-{% call ui::footer_column("Company", [("/#customers", "Customers"), ("/#why", "Why Tetsu"), ("/#pricing", "Pricing")]) %}{% endcall %}
-{%- endif %}
-</div>
-<div class="border-t border-line">
-<div class="mx-auto flex max-w-page justify-between px-6 py-6 lg:px-10 font-mono text-xs text-faint">
-<p>© 2026 Tetsu</p>
-<p>鉄 · iron</p>
-</div>
-</div>
-</footer>
+{% include "../../../web/templates/site_footer.html" %}
 {% endblock %}

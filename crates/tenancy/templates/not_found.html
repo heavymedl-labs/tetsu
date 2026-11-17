@@ -1,4 +1,7 @@
+{#- An address no business holds is the site's, so it gets the site's not-found page, Tetsu's header and footer
+    included. -#}
 {% extends "../../../web/templates/page.html" %}
-{% import "../../../web/templates/components.html" as ui %}
-{% block title %}Not found{% endblock %}
-{% block body %}{% call ui::empty("404", "Not found", "No business uses this address.") %}{% endcall %}{% endblock %}
+{% block title %}Page not found – Tetsu{% endblock %}
+{% block body %}{% include "../../../web/templates/site_header.html" %}
+{% include "../../../web/templates/not_found.html" %}{% endblock %}
+{% block footer %}{% include "../../../web/templates/site_footer.html" %}{% endblock %}

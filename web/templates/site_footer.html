@@ -1,0 +1,21 @@
+{#- Tetsu's own footer (ADR-0035), shared as the header is. It reads `demo`. -#}
+{% import "../../../web/templates/components.html" as ui %}
+<footer>
+<div class="mx-auto grid max-w-page grid-cols-2 gap-10 px-6 py-16 lg:px-10 text-sm sm:grid-cols-5">
+<div class="col-span-2">
+<div class="h-4 text-ink">{% include "../../../web/templates/wordmark.html" %}</div>
+<p class="mt-4 max-w-xs text-muted">Scheduling, memberships, and payments for the businesses people book with.</p>
+</div>
+{% if demo %}
+{% call ui::footer_column("Product", [("/#fill", "Classes and waitlists"), ("/#spots", "Spot maps"), ("/#book", "Appointments and rentals"), ("/#paid", "Memberships and payments")]) %}{% endcall %}
+{% call ui::footer_column("Built for", [("", "Gyms and studios"), ("", "Salons and spas"), ("", "Courts and rentals"), ("", "Campgrounds and stays"), ("", "Multi-location brands")]) %}{% endcall %}
+{% call ui::footer_column("Company", [("/#customers", "Customers"), ("/#why", "Why Tetsu"), ("/#pricing", "Pricing")]) %}{% endcall %}
+{%- endif %}
+</div>
+<div class="border-t border-line">
+<div class="mx-auto flex max-w-page justify-between px-6 py-6 lg:px-10 font-mono text-xs text-faint">
+<p>© 2026 Tetsu</p>
+<p>鉄 · iron</p>
+</div>
+</div>
+</footer>

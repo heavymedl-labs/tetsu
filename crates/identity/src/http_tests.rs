@@ -385,6 +385,37 @@ async fn each_page_offers_one_passkey_island() {
 }
 
 /// A passkey on one device is listed as one, not as synced.
+/// A path under `/ops` that Identity does not serve sends anyone logged out to log in, so no one can map the
+/// operator pages without a session, and tells a logged-in operator it is not found, on an operator page.
+#[tokio::test]
+async fn an_unknown_operator_path_is_a_login_or_not_found() {
+    let (address, _database, cookie, _) = logged_in().await;
+    let unknown = format!("__Host-tetsu-operator={}", "ab".repeat(32));
+    for path in ["/ops/nowhere", "/ops/a/b"] {
+        for logged_out in ["", unknown.as_str()] {
+            let page = get(address, path, logged_out).await;
+            assert_eq!(
+                (page.status, page.header("location")),
+                (303, Some("/ops/login")),
+                "{path} {logged_out}"
+            );
+        }
+        let page = get(address, path, &cookie).await;
+        assert_eq!(
+            (page.status, page.header("cache-control")),
+            (404, Some("no-store")),
+            "{path}"
+        );
+        for shown in [
+            "<title>Not found – Tetsu</title>",
+            "viewBox=\"0 0 564 144\"",
+            "href=\"/ops\"",
+        ] {
+            assert!(page.body.contains(shown), "{shown} in {}", page.body);
+        }
+    }
+}
+
 #[tokio::test]
 async fn a_passkey_on_one_device_is_listed_as_one() {
     let (address, database, cookie, _) = logged_in().await;
@@ -556,6 +587,7 @@ async fn failures_of_the_server_are_unavailable() {
     );
     as_admin(&database, &revoke("use_session(bytea, text)")).await;
     assert_eq!(get(address, "/ops", &cookie).await.status, 503);
+    assert_eq!(get(address, "/ops/nowhere", &cookie).await.status, 503);
     let refused = post(
         address,
         "/ops/passkeys/begin",

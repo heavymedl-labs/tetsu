@@ -343,7 +343,7 @@ async fn the_login_page_loads_its_script() {
 }
 
 #[tokio::test]
-async fn a_visitor_sees_a_tenants_page_tetsus_page_and_not_found_elsewhere() {
+async fn a_visitor_sees_a_tenants_page_and_tetsus_page() {
     let database = fresh_database().await.expect("a test database");
     ready(&database);
     let server = start(&database);
@@ -368,10 +368,6 @@ async fn a_visitor_sees_a_tenants_page_tetsus_page_and_not_found_elsewhere() {
         "{home}"
     );
 
-    let missing = get(&server, "/another-studio");
-    assert!(missing.starts_with("HTTP/1.1 404"), "{missing}");
-    assert!(!missing.contains("Sample Studio"), "{missing}");
-
     // The tenant's colors come as a stylesheet of their own, never sniffed as anything else.
     let theme = get(&server, "/sample-studio/theme.css");
     assert!(theme.starts_with("HTTP/1.1 200"), "{theme}");
@@ -384,11 +380,25 @@ async fn a_visitor_sees_a_tenants_page_tetsus_page_and_not_found_elsewhere() {
         theme_head.contains("x-content-type-options: nosniff"),
         "{theme}"
     );
+}
+
+#[tokio::test]
+async fn a_visitor_finds_nothing_at_an_address_no_one_serves() {
+    let database = fresh_database().await.expect("a test database");
+    ready(&database);
+    let server = start(&database);
+
+    let missing = get(&server, "/another-studio");
+    assert!(missing.starts_with("HTTP/1.1 404"), "{missing}");
+    assert!(!missing.contains("Sample Studio"), "{missing}");
 
     // A deeper path reaches the site's own fallback, and its not found page.
     let deeper = get(&server, "/sample-studio/extra");
     assert!(deeper.starts_with("HTTP/1.1 404"), "{deeper}");
-    assert!(deeper.contains("Nothing is at this address."), "{deeper}");
+    assert!(
+        deeper.contains("There is nothing booked at this address."),
+        "{deeper}"
+    );
     assert!(!deeper.contains("Sample Studio"), "{deeper}");
 }
 

@@ -63,7 +63,8 @@ The site's templates:
 
 | Path | Holds |
 | --- | --- |
-| `site.html` | The head tags, header, and footer of Tetsu's own pages |
+| `site.html` | The head tags of Tetsu's own pages, around the shared header and footer (`web/templates/site_header.html`, `site_footer.html`) |
+| `not_found.html` | The site's not-found page, around the shared one (`web/templates/not_found.html`), which Tenancy also shows |
 | `home.html`, `home/` | The root page, which lists its sections, one file each |
 | `home/panels/` | Each product picture on the root page |
 | `art/` | The wordmark and its booked slots (`brand.html`, shared with the hero board), the hero board, the figures, bands, and spot maps, drawn from rows of data where they can be, and the parts of the product pictures (`app.html`) |

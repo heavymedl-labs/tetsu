@@ -1,10 +1,7 @@
 {% import "../../../web/templates/brand.html" as brand %}
-{#- Tetsu's wordmark (docs/brand): booked slots (brand.html) on an open schedule grid, whose rows mark each
-    open slot with a dot. Colors come from the tokens, so it follows the color scheme. -#}
+{#- Tetsu's wordmark (docs/brand): booked slots on an open schedule grid, both from brand.html. Colors come from the
+    tokens, so it follows the color scheme. -#}
 <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 564 144" class="h-full w-auto overflow-visible">
-{%- let rows = [".#..###..#..###.#.#", "###.#.#.###.#...#.#", ".#..###..#..###.#.#", ".#..#....#....#.#.#", ".##.###..##.###.###"] %}
-{%- for (r, row) in rows.iter().enumerate() %}{% for (c, dot) in row.chars().enumerate() %}{% if dot.eq(&'.') %}
-<rect x="{{ c * 30 }}.75" y="{{ r * 30 }}.75" width="22.5" height="22.5" rx="3" fill="none" stroke="currentColor" stroke-width="1.5" class="tetsu-ghost"/>
-{%- endif %}{% endfor %}{% endfor %}
+{% call brand::ghosts() %}{% endcall %}
 {% call brand::slots() %}{% endcall %}
 </svg>

@@ -30,9 +30,11 @@ const JOIN_FINISH: &str = "/ops/join/finish";
 const ADD_BEGIN: &str = "/ops/passkeys/begin";
 const ADD_FINISH: &str = "/ops/passkeys/finish";
 const LOGOUT: &str = "/ops/logout";
+/// Any other path under `/ops`: a login for anyone logged out, and not found for an operator.
+const ELSEWHERE: &str = "/ops/{*rest}";
 
 /// Every path Identity serves, which the composition root checks each start with a name no tenant may hold.
-pub const PATHS: [&str; 10] = [
+pub const PATHS: [&str; 11] = [
     ACCOUNT,
     LOGIN,
     LOGIN_BEGIN,
@@ -43,6 +45,7 @@ pub const PATHS: [&str; 10] = [
     ADD_BEGIN,
     ADD_FINISH,
     LOGOUT,
+    ELSEWHERE,
 ];
 
 /// The operator pages' policy: the site's, with Tetsu's own script, its calls back to this origin, and forms
@@ -108,6 +111,14 @@ struct AccountPage {
 }
 
 #[derive(Template)]
+#[template(path = "not_found.html")]
+struct NotFoundPage {
+    demo: bool,
+    stylesheet: &'static str,
+    script: &'static str,
+}
+
+#[derive(Template)]
 #[template(path = "refused.html")]
 struct RefusedPage {
     demo: bool,
@@ -144,6 +155,7 @@ where
         .route(ADD_BEGIN, logged_in_route::<S>(LoggedIn::BeginAdding))
         .route(ADD_FINISH, logged_in_route::<S>(LoggedIn::FinishAdding))
         .route(LOGOUT, post(logout::<S>))
+        .route(ELSEWHERE, get(elsewhere::<S>))
         .layer(DefaultBodyLimit::max(LARGEST_BODY))
         .with_state(Arc::new(Served { operators, web }))
 }
@@ -202,6 +214,25 @@ async fn account<S: OperatorStore>(State(served): Shared<S>, headers: HeaderMap)
         Ok(Some(page)) => page,
         Ok(None) => see_other(LOGIN),
         Err(error) => unavailable_page(&served.web, "could not show an operator's page", &error),
+    }
+}
+
+/// A path under `/ops` that Identity does not serve. Anyone without a live session is sent to log in, as at `/ops`,
+/// so the operator pages cannot be mapped from outside; an operator is told it is not found.
+async fn elsewhere<S: OperatorStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
+    let web = &served.web;
+    match served.operators.session(cookies(&headers)).await {
+        Ok(Some(_)) => (
+            StatusCode::NOT_FOUND,
+            page(&NotFoundPage {
+                demo: web.demo,
+                stylesheet: web.stylesheet,
+                script: web.script,
+            }),
+        )
+            .into_response(),
+        Ok(None) => see_other(LOGIN),
+        Err(error) => unavailable_page(web, "could not answer an unknown operator path", &error),
     }
 }
 

@@ -12,7 +12,7 @@
 <div class="tetsu-settle w-full max-w-72 text-center">
 <div class="mx-auto h-8 w-fit text-ink">{% include "../../../web/templates/wordmark.html" %}</div>
 {% block card %}{% endblock %}
-<noscript><p class="mt-4 text-[13px] text-muted">Passkeys need JavaScript, which this browser has turned off.</p></noscript>
+{% block noscript %}<noscript><p class="mt-4 text-[13px] text-muted">Passkeys need JavaScript, which this browser has turned off.</p></noscript>{% endblock %}
 </div>
 </main>
 {% endblock %}

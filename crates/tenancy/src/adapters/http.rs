@@ -484,6 +484,15 @@ mod tests {
             !body.contains("Demo") && !body.contains("noindex"),
             "{body}"
         );
+        // An address no business holds gets the site's own not-found page, Tetsu's header and footer included.
+        for shown in [
+            "<title>Page not found – Tetsu</title>",
+            "<nav aria-label=\"Tetsu\"",
+            "<svg role=\"img\" aria-label=\"404\"",
+            "© 2026 Tetsu",
+        ] {
+            assert!(body.contains(shown), "{shown} in {body}");
+        }
     }
 
     #[tokio::test]
@@ -559,7 +568,10 @@ mod tests {
             let (status, kind, body) = get(serving(None, &names).await, path).await;
             assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
             assert_eq!(kind.as_deref(), Some("text/html; charset=utf-8"), "{path}");
-            assert!(body.contains("No business uses this address."), "{path}");
+            assert!(
+                body.contains("There is nothing booked at this address."),
+                "{path}"
+            );
             assert!(!body.contains("Anvil Row"), "{path}");
         }
     }
