@@ -59,7 +59,7 @@ describe("a passkey island", () => {
     expect([button(host).disabled, host.dataset.state]).toEqual([false, "ready"]);
     run.mockResolvedValue("/ops");
     await press(host);
-    expect(run).toHaveBeenCalledWith("sign-in", {}, device);
+    expect(run).toHaveBeenCalledWith("sign-in", {}, device, expect.any(AbortSignal));
     expect(page.location.assign).toHaveBeenCalledWith("/ops");
     expect(page.history.replaceState).not.toHaveBeenCalled();
     expect([status(host), host.dataset.state]).toEqual(["Signed in.", "done"]);
@@ -87,8 +87,8 @@ describe("a passkey island that enrolls", () => {
     signedIn("/ops");
     await vi.waitFor(() => expect(host.dataset.state).toBe("done"));
     expect(run.mock.calls).toEqual([
-      ["enroll", { link: "L1" }, device],
-      ["sign-in", {}, device],
+      ["enroll", { link: "L1" }, device, expect.any(AbortSignal)],
+      ["sign-in", {}, device, expect.any(AbortSignal)],
     ]);
     expect([status(host), host.querySelector("[data-label]")?.textContent]).toEqual([
       "Signed in.",
@@ -113,7 +113,7 @@ describe("a passkey island whose chained sign-in is refused", () => {
     run.mockReset();
     run.mockResolvedValue("/ops");
     await press(host);
-    expect(run).toHaveBeenCalledWith("sign-in", {}, device);
+    expect(run).toHaveBeenCalledWith("sign-in", {}, device, expect.any(AbortSignal));
     expect(page.location.assign).toHaveBeenCalledWith("/ops");
   });
 
@@ -127,7 +127,7 @@ describe("a passkey island whose chained sign-in is refused", () => {
       const host = island(attributes as string);
       ready(host, browser());
       await press(host);
-      expect(run).toHaveBeenCalledWith("add", { form }, device);
+      expect(run).toHaveBeenCalledWith("add", { form }, device, expect.any(AbortSignal));
       expect(status(host)).toBe("Passkey added.");
     }
   });
@@ -143,6 +143,68 @@ describe("a passkey island at work", () => {
     expect([status(host), host.dataset.state]).toEqual(["Waiting for your device…", "waiting"]);
     finish("/ops");
     await vi.waitFor(() => expect(host.dataset.state).toBe("done"));
+  });
+});
+
+describe("a passkey island pressed again", () => {
+  it("ends the first ceremony, and only the latest press speaks", async () => {
+    const host = island('action="sign-in"');
+    const page = browser();
+    ready(host, page);
+    const signals: AbortSignal[] = [];
+    let second: (next: string) => void = () => undefined;
+    run
+      .mockImplementationOnce((_action, _sent, _device, signal) => {
+        signals.push(signal);
+        return new Promise((_, refuse) =>
+          signal.addEventListener("abort", () => refuse(new DOMException("ended", "AbortError"))),
+        );
+      })
+      .mockImplementationOnce((_action, _sent, _device, signal) => {
+        signals.push(signal);
+        return new Promise((resolve) => (second = resolve));
+      });
+    button(host).click();
+    button(host).click();
+    await vi.waitFor(() => expect(signals).toHaveLength(2));
+    await new Promise((settled) => setTimeout(settled));
+    expect(signals.map((signal) => signal.aborted)).toEqual([true, false]);
+    expect([status(host), host.dataset.state]).toEqual(["Waiting for your device…", "waiting"]);
+    second("/ops");
+    await vi.waitFor(() => expect(host.dataset.state).toBe("done"));
+    expect(button(host).disabled).toBe(true);
+    expect(page.location.assign).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("a passkey island whose chained sign-in is refused or ended", () => {
+  it("keeps the chained sign-in's refusal from the server, rather than offering to sign in", async () => {
+    const host = island('action="enroll"');
+    ready(host, browser());
+    run
+      .mockResolvedValueOnce("/ops/sign-in")
+      .mockRejectedValueOnce(new Refused("this sign-in could not be completed"));
+    await press(host);
+    await vi.waitFor(() => expect(host.dataset.state).toBe("failed"));
+    expect(status(host)).toBe("This sign-in could not be completed.");
+  });
+
+  it("says nothing of a chained sign-in another press ended", async () => {
+    const host = island('action="enroll"');
+    ready(host, browser());
+    let chained: AbortSignal | undefined;
+    run.mockResolvedValueOnce("/ops/sign-in").mockImplementationOnce((_action, _sent, _device, signal) => {
+      chained = signal;
+      return new Promise((_, refuse) =>
+        signal.addEventListener("abort", () => refuse(new DOMException("ended", "AbortError"))),
+      );
+    });
+    run.mockImplementationOnce(() => new Promise(() => undefined));
+    button(host).click();
+    await vi.waitFor(() => expect(chained).toBeDefined());
+    button(host).click();
+    await new Promise((settled) => setTimeout(settled));
+    expect([status(host), host.dataset.state]).toEqual(["Waiting for your device…", "waiting"]);
   });
 });
 
@@ -170,6 +232,14 @@ describe("a passkey island that cannot go on", () => {
       expect(host.dataset.state).toBeUndefined();
       expect(host.querySelector("button")?.disabled ?? true).toBe(true);
     }
+  });
+});
+
+describe("a passkey island in a browser without passkeys", () => {
+  it("clears an enrollment's link from the address bar even where it cannot go on", () => {
+    const page = { ...browser(), passkeys: undefined };
+    ready(island('action="enroll"'), page);
+    expect(page.history.replaceState).toHaveBeenCalledWith(null, "", "/ops/enroll?from=mail");
   });
 
   it("says so where the browser cannot use passkeys, and keeps the button off", () => {

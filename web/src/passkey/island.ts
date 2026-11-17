@@ -74,7 +74,7 @@ function partsOf(host: HTMLElement): Parts | undefined {
 }
 
 /** Readies a `<tetsu-passkey>`, once: its button runs its action, if it has its parts and the browser can use
- * passkeys. */
+ * passkeys. An enrollment's link leaves the address bar first, whatever follows. */
 export function ready(host: HTMLElement, browser: Browser): void {
   // Connected again, as when moved, an island already readied keeps its one listener.
   if (host.dataset.state !== undefined) {
@@ -84,56 +84,89 @@ export function ready(host: HTMLElement, browser: Browser): void {
   if (parts === undefined) {
     return;
   }
+  const sent = sentFor(parts.action, host, browser);
   const device = browser.credentials;
   if (browser.passkeys === undefined || device === undefined) {
     parts.status.textContent = "This browser cannot use passkeys.";
     host.dataset.state = "failed";
     return;
   }
-  wire(host, parts, browser, device);
-}
-
-/** Runs the island's action each time its button is pressed, saying how it goes. */
-function wire(host: HTMLElement, parts: Parts, browser: Browser, device: CredentialsContainer): void {
-  let action = parts.action;
-  let sent = sentFor(action, host, browser);
-  const say = (words: string, state: string) => {
-    parts.status.textContent = words;
-    host.dataset.state = state;
-  };
-  const arrive = (done: Exclude<Action, "enroll">, next: string) => {
-    say(DONE[done], "done");
-    browser.location.assign(next);
-  };
-  // An operator's session comes from a passkey sign-in, never from the link that enrolled them, so a new passkey
-  // signs in at once, on this page (ADR-0067). A browser may refuse a prompt the person did not start by pressing
-  // something; the button then signs in instead.
-  const chain = async () => {
-    action = "sign-in";
-    sent = {};
-    parts.label.textContent = "Continue with passkey";
-    say("Passkey created. Confirm once more to sign in.", "waiting");
-    try {
-      arrive("sign-in", await ceremony("sign-in", sent, device));
-    } catch {
-      say("Passkey created. Continue with passkey to sign in.", "ready");
-    }
-  };
+  const presses = new Presses({ host, parts, browser, device }, sent);
+  parts.button.addEventListener("click", () => presses.press());
   parts.button.disabled = false;
   host.dataset.state = "ready";
-  parts.button.addEventListener("click", async () => {
-    say("Waiting for your device…", "waiting");
+}
+
+/** What a readied island works with. */
+interface Island {
+  host: HTMLElement;
+  parts: Parts;
+  browser: Browser;
+  device: CredentialsContainer;
+}
+
+/** The island's presses: each runs its action and says how it goes. A press ends any ceremony still under way,
+ * and only the latest press speaks: an ended one never writes to the page or moves it. */
+class Presses {
+  private action: Action;
+  private sent: Record<string, string>;
+  private pending: AbortController | undefined;
+
+  constructor(
+    private readonly island: Island,
+    sent: Record<string, string>,
+  ) {
+    this.action = island.parts.action;
+    this.sent = sent;
+  }
+
+  async press(): Promise<void> {
+    this.pending?.abort();
+    const controller = new AbortController();
+    this.pending = controller;
+    this.say("Waiting for your device…", "waiting");
     try {
-      const next = await ceremony(action, sent, device);
-      if (action === "enroll") {
-        await chain();
+      const next = await ceremony(this.action, this.sent, this.island.device, controller.signal);
+      if (this.action === "enroll") {
+        await this.chain(controller.signal);
       } else {
-        arrive(action, next);
+        this.arrive(this.action, next);
       }
     } catch (error) {
-      say(said(error), "failed");
+      if (!controller.signal.aborted) {
+        this.say(said(error), "failed");
+      }
     }
-  });
+  }
+
+  // An operator's session comes from a passkey sign-in, never from the link that enrolled them, so a new passkey
+  // signs in at once, on this page (ADR-0067). A browser may refuse a prompt the person did not start by pressing
+  // something; the button then signs in instead. A refusal from the server is said as any other.
+  private async chain(signal: AbortSignal): Promise<void> {
+    this.action = "sign-in";
+    this.sent = {};
+    this.island.parts.label.textContent = "Continue with passkey";
+    this.say("Passkey created. Confirm once more to sign in.", "waiting");
+    try {
+      this.arrive("sign-in", await ceremony("sign-in", this.sent, this.island.device, signal));
+    } catch (error) {
+      if (error instanceof Refused || signal.aborted) {
+        throw error;
+      }
+      this.say("Passkey created. Continue with passkey to sign in.", "ready");
+    }
+  }
+
+  private arrive(done: Exclude<Action, "enroll">, next: string): void {
+    this.say(DONE[done], "done");
+    this.island.parts.button.disabled = true;
+    this.island.browser.location.assign(next);
+  }
+
+  private say(words: string, state: string): void {
+    this.island.parts.status.textContent = words;
+    this.island.host.dataset.state = state;
+  }
 }
 
 /** Tells the operator's devices every passkey a `<tetsu-passkeys>` lists. A browser that cannot, or a device that
