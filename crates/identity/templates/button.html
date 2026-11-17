@@ -4,14 +4,14 @@
     settles in. -#}
 {% import "../../../web/templates/components.html" as shared %}
 {% macro passkey(action, form = "", secondary = false) %}
-<tetsu-passkey action="{{ action }}"{% if !form.is_empty() %} form-token="{{ form }}"{% endif %} class="group mt-8 block">
+<tetsu-passkey action="{{ action }}"{% if !form.is_empty() %} form-token="{{ form }}"{% endif %} class="group/passkey mt-8 block">
 <button type="button" disabled class="gap-2 disabled:cursor-not-allowed disabled:opacity-50 {% call shared::button_style(secondary, false, true) %}{% endcall %}">
-<span aria-hidden="true" class="hidden gap-[3px] group-data-[state=waiting]:inline-flex">
+<span aria-hidden="true" class="hidden gap-[3px] group-data-[state=waiting]/passkey:inline-flex">
 <span class="size-[5px] rounded-[1px] bg-current motion-safe:animate-[tetsu-pending_900ms_ease-in-out_infinite]"></span>
 <span class="size-[5px] rounded-[1px] bg-current motion-safe:animate-[tetsu-pending_900ms_ease-in-out_150ms_infinite]"></span>
 <span class="size-[5px] rounded-[1px] bg-forge motion-safe:animate-[tetsu-pending_900ms_ease-in-out_300ms_infinite]"></span>
 </span>
 <span data-label>{{ caller() }}</span></button>
-<p role="status" aria-live="polite" class="mt-3 min-h-5 text-[13px] text-pretty text-muted group-data-[state=done]:text-success group-data-[state=failed]:text-danger motion-safe:group-data-[state=done]:animate-[tetsu-note_240ms_ease-out_both] motion-safe:group-data-[state=failed]:animate-[tetsu-note_240ms_ease-out_both]"></p>
+<p role="status" aria-live="polite" class="mt-3 min-h-5 text-[13px] text-pretty text-muted group-data-[state=done]/passkey:text-success group-data-[state=failed]/passkey:text-danger motion-safe:group-data-[state=done]/passkey:animate-[tetsu-note_240ms_ease-out_both] motion-safe:group-data-[state=failed]/passkey:animate-[tetsu-note_240ms_ease-out_both]"></p>
 </tetsu-passkey>
 {% endmacro %}

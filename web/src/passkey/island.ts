@@ -34,8 +34,12 @@ export function said(error: unknown): string {
   if (!(error instanceof DOMException)) {
     return failed;
   }
+  // The island's own ended ceremonies never reach here, so this is the browser ending the prompt by itself.
   if (error.name === "AbortError") {
-    return "";
+    return "The passkey prompt closed before it finished. Try again.";
+  }
+  if (error.name === "InvalidStateError") {
+    return "Finish or close the passkey prompt that is already open, then try again.";
   }
   if (error.name === "NotAllowedError") {
     return "The passkey prompt closed without a passkey. Try again when you are ready.";
@@ -126,7 +130,13 @@ class Presses {
     this.pending = controller;
     this.say("Waiting for your device…", "waiting");
     try {
-      const next = await ceremony(this.action, this.sent, this.island.device, controller.signal);
+      const next = await ceremony(
+        this.action,
+        this.sent,
+        this.island.device,
+        controller.signal,
+        this.finishing,
+      );
       if (this.action === "enroll") {
         await this.chain(controller.signal);
       } else {
@@ -148,7 +158,10 @@ class Presses {
     this.island.parts.label.textContent = "Continue with passkey";
     this.say("Passkey created. Confirm once more to sign in.", "waiting");
     try {
-      this.arrive("sign-in", await ceremony("sign-in", this.sent, this.island.device, signal));
+      this.arrive(
+        "sign-in",
+        await ceremony("sign-in", this.sent, this.island.device, signal, this.finishing),
+      );
     } catch (error) {
       if (error instanceof Refused || signal.aborted) {
         throw error;
@@ -157,15 +170,22 @@ class Presses {
     }
   }
 
+  // Once a ceremony's last request is on its way, the server may keep what it sent, as a passkey and a spent link,
+  // so no press may end it: the button stays off until the next thing said.
+  private readonly finishing = (): void => {
+    this.island.parts.button.disabled = true;
+  };
+
   private arrive(done: Exclude<Action, "enroll">, next: string): void {
     this.say(DONE[done], "done");
-    this.island.parts.button.disabled = true;
     this.island.browser.location.assign(next);
   }
 
+  /** Says how it goes, and turns the button back on for anything but done, while the page moves on. */
   private say(words: string, state: string): void {
     this.island.parts.status.textContent = words;
     this.island.host.dataset.state = state;
+    this.island.parts.button.disabled = state === "done";
   }
 }
 
@@ -185,7 +205,8 @@ export function signal(host: HTMLElement, browser: Browser): void {
     .catch(() => undefined);
 }
 
-/** Registers both islands, each readied as the parser connects it to the page. */
+/** Registers both islands. The module is deferred, so each is readied as soon as it runs, for the markup already
+ * parsed. */
 export function define(registry: CustomElementRegistry, browser: Browser): void {
   registry.define(
     "tetsu-passkey",

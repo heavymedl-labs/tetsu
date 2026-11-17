@@ -58,7 +58,7 @@ describe("ceremony", () => {
   it("signs in: begins, asks the device for a passkey, finishes, and says where to go", async () => {
     const fetch = serve([200, { ceremony: "c1", options: fixture.request }], [200, { next: "/ops" }]);
     const phone = device(signed);
-    expect(await ceremony("sign-in", {}, phone, live())).toBe("/ops");
+    expect(await ceremony("sign-in", {}, phone, live(), vi.fn())).toBe("/ops");
     const asked = phone.get.mock.calls[0]?.[0] as CredentialRequestOptions;
     expect(asked.signal).toBeInstanceOf(AbortSignal);
     expect(asked.publicKey?.rpId).toBe("ops.example.com");
@@ -93,7 +93,7 @@ describe("ceremony, creating a passkey", () => {
         [200, { next: "/ops/sign-in" }],
       );
       const laptop = device(created);
-      expect(await ceremony(action, extra, laptop, live())).toBe("/ops/sign-in");
+      expect(await ceremony(action, extra, laptop, live(), vi.fn())).toBe("/ops/sign-in");
       expect(laptop.get).not.toHaveBeenCalled();
       const asked = laptop.create.mock.calls[0]?.[0] as CredentialCreationOptions;
       expect(asked.publicKey?.rp.name).toBe("Tetsu");
@@ -112,31 +112,57 @@ describe("ceremony, creating a passkey", () => {
 describe("a ceremony that does not finish", () => {
   it("throws the server's refusal, in its words", async () => {
     serve([400, { error: "this sign-in could not be completed" }]);
-    const refused = await ceremony("sign-in", {}, device(signed), live()).catch((error: unknown) => error);
+    const refused = await ceremony("sign-in", {}, device(signed), live(), vi.fn()).catch(
+      (error: unknown) => error,
+    );
     expect(refused).toBeInstanceOf(Refused);
     expect((refused as Refused).message).toBe("this sign-in could not be completed");
   });
 
   it("throws a plain refusal when the server gives no words, and when finishing is refused", async () => {
     serve([403, { error: 1 }]);
-    await expect(ceremony("sign-in", {}, device(signed), live())).rejects.toThrow(
+    await expect(ceremony("sign-in", {}, device(signed), live(), vi.fn())).rejects.toThrow(
       new Refused("this request was refused"),
     );
     serve([200, { ceremony: "c", options: fixture.request }], [400, { error: "no" }]);
-    await expect(ceremony("sign-in", {}, device(signed), live())).rejects.toThrow(new Refused("no"));
+    await expect(ceremony("sign-in", {}, device(signed), live(), vi.fn())).rejects.toThrow(new Refused("no"));
+  });
+});
+
+describe("a ceremony refused by the device or a proxy", () => {
+  it("treats no passkey from the device as the browser's refusal, finishing nothing", async () => {
+    const fetch = serve([200, { ceremony: "c", options: fixture.request }]);
+    const finishing = vi.fn();
+    const refused = await ceremony("sign-in", {}, device(null), live(), finishing).catch(
+      (error: unknown) => error,
+    );
+    const { name, message } = refused as DOMException;
+    expect([refused instanceof DOMException, name, message]).toEqual([
+      true,
+      "NotAllowedError",
+      "the device gave no passkey",
+    ]);
+    expect([fetch.mock.calls.length, finishing.mock.calls.length]).toEqual([1, 0]);
   });
 
-  it("refuses when the device gives no passkey, finishing nothing", async () => {
-    const fetch = serve([200, { ceremony: "c", options: fixture.request }]);
-    await expect(ceremony("sign-in", {}, device(null), live())).rejects.toThrow(
-      new Refused("the device gave no passkey"),
+  it("takes a refusal whose body is not JSON, as a proxy may send, for the server's", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response("<h1>Bad gateway</h1>", { status: 502 }));
+    vi.stubGlobal("fetch", fetch);
+    await expect(ceremony("sign-in", {}, device(signed), live(), vi.fn())).rejects.toThrow(
+      new Refused("this request was refused"),
     );
-    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("says it is finishing just before its last request, once", async () => {
+    const fetch = serve([200, { ceremony: "c", options: fixture.request }], [200, { next: "/ops" }]);
+    const finishing = vi.fn(() => expect(fetch).toHaveBeenCalledTimes(1));
+    await ceremony("sign-in", {}, device(signed), live(), finishing);
+    expect([finishing.mock.calls.length, fetch.mock.calls.length]).toEqual([1, 2]);
   });
 
   it("throws when the server says nowhere to go next, rather than going to a page that is not one", async () => {
     serve([200, { ceremony: "c", options: fixture.request }], [200, {}]);
-    await expect(ceremony("sign-in", {}, device(signed), live())).rejects.toThrow(
+    await expect(ceremony("sign-in", {}, device(signed), live(), vi.fn())).rejects.toThrow(
       new Refused("the server said nowhere to go next"),
     );
   });
@@ -147,7 +173,7 @@ describe("a ceremony's signal", () => {
     const fetch = serve([200, { ceremony: "c", options: fixture.request }], [200, { next: "/ops" }]);
     const phone = device(signed);
     const signal = live();
-    await ceremony("sign-in", {}, phone, signal);
+    await ceremony("sign-in", {}, phone, signal, vi.fn());
     const signals = fetch.mock.calls.map(([, init]) => init.signal);
     expect(signals).toEqual([signal, signal]);
     expect((phone.get.mock.calls[0] as [CredentialRequestOptions])[0].signal).toBe(signal);

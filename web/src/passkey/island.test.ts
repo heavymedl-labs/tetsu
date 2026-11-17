@@ -59,7 +59,7 @@ describe("a passkey island", () => {
     expect([button(host).disabled, host.dataset.state]).toEqual([false, "ready"]);
     run.mockResolvedValue("/ops");
     await press(host);
-    expect(run).toHaveBeenCalledWith("sign-in", {}, device, expect.any(AbortSignal));
+    expect(run).toHaveBeenCalledWith("sign-in", {}, device, expect.any(AbortSignal), expect.any(Function));
     expect(page.location.assign).toHaveBeenCalledWith("/ops");
     expect(page.history.replaceState).not.toHaveBeenCalled();
     expect([status(host), host.dataset.state]).toEqual(["Signed in.", "done"]);
@@ -87,8 +87,8 @@ describe("a passkey island that enrolls", () => {
     signedIn("/ops");
     await vi.waitFor(() => expect(host.dataset.state).toBe("done"));
     expect(run.mock.calls).toEqual([
-      ["enroll", { link: "L1" }, device, expect.any(AbortSignal)],
-      ["sign-in", {}, device, expect.any(AbortSignal)],
+      ["enroll", { link: "L1" }, device, expect.any(AbortSignal), expect.any(Function)],
+      ["sign-in", {}, device, expect.any(AbortSignal), expect.any(Function)],
     ]);
     expect([status(host), host.querySelector("[data-label]")?.textContent]).toEqual([
       "Signed in.",
@@ -113,7 +113,7 @@ describe("a passkey island whose chained sign-in is refused", () => {
     run.mockReset();
     run.mockResolvedValue("/ops");
     await press(host);
-    expect(run).toHaveBeenCalledWith("sign-in", {}, device, expect.any(AbortSignal));
+    expect(run).toHaveBeenCalledWith("sign-in", {}, device, expect.any(AbortSignal), expect.any(Function));
     expect(page.location.assign).toHaveBeenCalledWith("/ops");
   });
 
@@ -127,7 +127,13 @@ describe("a passkey island whose chained sign-in is refused", () => {
       const host = island(attributes as string);
       ready(host, browser());
       await press(host);
-      expect(run).toHaveBeenCalledWith("add", { form }, device, expect.any(AbortSignal));
+      expect(run).toHaveBeenCalledWith(
+        "add",
+        { form },
+        device,
+        expect.any(AbortSignal),
+        expect.any(Function),
+      );
       expect(status(host)).toBe("Passkey added.");
     }
   });
@@ -205,6 +211,25 @@ describe("a passkey island whose chained sign-in is refused or ended", () => {
     button(host).click();
     await new Promise((settled) => setTimeout(settled));
     expect([status(host), host.dataset.state]).toEqual(["Waiting for your device…", "waiting"]);
+  });
+});
+
+describe("a passkey island finishing", () => {
+  it("lets no press cut off a ceremony's last request, and turns back on once it is answered", async () => {
+    const host = island('action="enroll"');
+    ready(host, browser());
+    let answer: (error: unknown) => void = () => undefined;
+    run.mockImplementationOnce((_action, _sent, _device, _signal, finishing) => {
+      finishing();
+      return new Promise((_, refuse) => (answer = refuse));
+    });
+    button(host).click();
+    await vi.waitFor(() => expect(button(host).disabled).toBe(true));
+    button(host).click();
+    expect(run).toHaveBeenCalledTimes(1);
+    answer(new Refused("this enrollment link has ended or is not valid"));
+    await vi.waitFor(() => expect(host.dataset.state).toBe("failed"));
+    expect(button(host).disabled).toBe(false);
   });
 });
 
@@ -331,12 +356,16 @@ describe("define", () => {
 describe("said", () => {
   it.each([
     [new Refused("this request was refused"), "This request was refused."],
-    [new DOMException("ended", "AbortError"), ""],
+    [new DOMException("ended", "AbortError"), "The passkey prompt closed before it finished. Try again."],
+    [
+      new DOMException("pending", "InvalidStateError"),
+      "Finish or close the passkey prompt that is already open, then try again.",
+    ],
     [
       new DOMException("closed", "NotAllowedError"),
       "The passkey prompt closed without a passkey. Try again when you are ready.",
     ],
-    [new DOMException("odd", "InvalidStateError"), "Something went wrong. Try again in a minute."],
+    [new DOMException("odd", "SecurityError"), "Something went wrong. Try again in a minute."],
     [new TypeError("not base64url"), "Something went wrong. Try again in a minute."],
     // Only the browser's own errors are read by name.
     [
