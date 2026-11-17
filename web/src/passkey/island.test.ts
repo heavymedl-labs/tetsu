@@ -446,7 +446,11 @@ describe("a passkey island finishing", () => {
     await vi.waitFor(() => expect(button(host).disabled).toBe(true));
     button(host).click();
     expect(run).toHaveBeenCalledTimes(1);
-    answer(new Refused("this invite has ended; ask an operator for a new one"));
+    answer(
+      new Refused(
+        "this invite has ended; if you have already joined, log in, or ask an operator for a new one",
+      ),
+    );
     await vi.waitFor(() => expect(host.dataset.state).toBe("failed"));
     expect(button(host).disabled).toBe(false);
   });

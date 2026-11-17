@@ -450,11 +450,13 @@ async fn logged_in<S: OperatorStore>(
 }
 
 /// Logs out from the operator's page's form, with its form token, and sends the browser to log in with its
-/// cookie cleared, whether or not the session was still live. A form posts and shows pages, so a logout refused
-/// or failed gets a page saying so, never a bare status or JSON.
+/// cookie cleared, whether or not the session was still live, returning after to the checked page the form's address
+/// names, as the session dialog's "Log in again" does. A form posts and shows pages, so a logout refused or failed
+/// gets a page saying so, never a bare status or JSON.
 async fn logout<S: OperatorStore>(
     State(served): Shared<S>,
     headers: HeaderMap,
+    uri: Uri,
     body: Bytes,
 ) -> Response {
     let form = std::str::from_utf8(&body)
@@ -482,7 +484,7 @@ async fn logout<S: OperatorStore>(
                 (header::SET_COOKIE, Realm::Operator.cleared_cookie()),
                 (CLEAR_SITE_DATA, "\"cache\"".to_string()),
             ],
-            see_other(LOGIN),
+            see_other(&return_to(query(&uri, "next").unwrap_or_default())),
         )
             .into_response(),
         Err(error) => unavailable_page(&served.web, "could not log an operator out", &error),

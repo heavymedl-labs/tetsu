@@ -41,16 +41,18 @@ interface Parts {
   dialog: HTMLDialogElement;
   stay: HTMLButtonElement;
   left: Element;
+  logout: HTMLFormElement;
 }
 
 function partsOf(host: HTMLElement): Parts | undefined {
   const dialog = host.querySelector("dialog");
   const stay = host.querySelector<HTMLButtonElement>("button[data-stay]");
   const left = host.querySelector("[data-left]");
-  if (dialog === null || stay === null || left === null) {
+  const logout = host.querySelector("form");
+  if (dialog === null || stay === null || left === null || logout === null) {
     return undefined;
   }
-  return { dialog, stay, left };
+  return { dialog, stay, left, logout };
 }
 
 /** The island's clock: one timer at a time, set from what the server last said. */
@@ -160,6 +162,8 @@ export function ready(host: HTMLElement, browser: Browser): void {
     return;
   }
   host.dataset.ready = "";
+  // Logging out from the dialog, as "Log in again" before the 8 hour limit does, returns here after the next login.
+  parts.logout.setAttribute("action", `/ops/logout?next=${browser.location.pathname}`);
   const clock = new Clock(host, parts, browser);
   parts.stay.addEventListener("click", clock.stay);
   parts.dialog.addEventListener("cancel", clock.cancelled);

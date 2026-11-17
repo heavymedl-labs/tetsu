@@ -198,9 +198,10 @@ A logged-in operator who opens the login page is sent on. A login returns to the
 login finishes. Every page a logged-in operator sees extends `logged_in.html`, which loads the session island in
 `web/src/session/`. `<tetsu-session>` reads `GET /ops/session`, the seconds to each limit by the database's clock,
 which renews nothing, and two minutes before a limit opens the page's dialog: before the idle limit to stay logged
-in, a `POST` with the form token that renews the session, and before the 8 hour limit to log in again. It keeps the
+in, a `POST` with the form token that renews the session, and before the 8 hour limit to log in again, a logout that returns to the page after the next login. It keeps the
 site's tabs in step over a `BroadcastChannel`, asks again when the page is shown, and sends a page whose session has
-ended to `/ops/login?ended=1`, which says the operator was logged out for their security.
+ended to `/ops/login?ended=1`, which says the operator was logged out for their security. The login page says up
+front how long a session may sit idle (WCAG 2.2.6).
 
 ## Not yet
 

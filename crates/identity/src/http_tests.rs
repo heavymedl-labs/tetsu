@@ -80,7 +80,7 @@ async fn serve(operators: Operators<PostgresOperators>) -> SocketAddr {
     address
 }
 
-async fn send(
+pub(crate) async fn send(
     address: SocketAddr,
     method: &str,
     path: &str,
@@ -506,12 +506,12 @@ async fn refused_ceremonies_get_their_one_refusal() {
         (
             "/ops/join/begin",
             json!({"link": "not a link"}),
-            "this invite has ended; ask an operator for a new one",
+            "this invite has ended; if you have already joined, log in, or ask an operator for a new one",
         ),
         (
             "/ops/join/finish",
             json!({}),
-            "this invite has ended; ask an operator for a new one",
+            "this invite has ended; if you have already joined, log in, or ask an operator for a new one",
         ),
     ];
     for (path, body, refusal) in said {

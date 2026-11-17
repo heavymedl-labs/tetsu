@@ -6,7 +6,7 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-const PARTS = "<dialog><span data-left></span><button data-stay></button></dialog>";
+const PARTS = "<dialog><span data-left></span><button data-stay></button><form></form></dialog>";
 
 /** Loads the entry afresh, with `fetch` answering every read, and connects one island. */
 async function loaded(): Promise<{ host: HTMLElement; fetch: ReturnType<typeof vi.fn> }> {

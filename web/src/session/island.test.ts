@@ -38,7 +38,7 @@ function island(inside = PARTS): HTMLElement {
 
 const PARTS =
   "<dialog><span data-idle>Idle</span><span data-absolute hidden>Absolute</span><span data-left></span>" +
-  '<button type="button" data-idle data-stay>Stay</button></dialog>';
+  '<button type="button" data-idle data-stay>Stay</button><form method="post" action="/ops/logout"></form></dialog>';
 
 const dialog = (host: HTMLElement) => host.querySelector("dialog") as HTMLDialogElement;
 const left = (host: HTMLElement) => host.querySelector("[data-left]")?.textContent;
@@ -300,6 +300,14 @@ describe("a session island alone", () => {
 });
 
 describe("readying a session island", () => {
+  it("has its dialog's logout return to this page after the next login", () => {
+    const { page } = browser();
+    const host = island();
+    answers([900, 28_800]);
+    ready(host, page);
+    expect(host.querySelector("form")?.getAttribute("action")).toBe("/ops/logout?next=/ops");
+  });
+
   it("readies it once, however often it is connected", async () => {
     const { page } = browser();
     const host = island();
@@ -312,9 +320,10 @@ describe("readying a session island", () => {
 
   it("leaves one without its parts alone", async () => {
     for (const inside of [
-      "<span data-left></span><button data-stay></button>",
-      "<dialog><span data-left></span></dialog>",
-      "<dialog><button data-stay></button></dialog>",
+      "<span data-left></span><button data-stay></button><form></form>",
+      "<dialog><span data-left></span><form></form></dialog>",
+      "<dialog><button data-stay></button><form></form></dialog>",
+      "<dialog><span data-left></span><button data-stay></button></dialog>",
     ]) {
       const { page } = browser();
       const host = island(inside);

@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 use crate::http_tests::{
     SESSION_SCRIPT, UNAVAILABLE, form_on, get, join, logged_in, login_sending, logout, post,
-    reported, serving, text,
+    reported, send, serving, text,
 };
 use crate::join_tests::{ORIGIN, as_admin};
 
@@ -202,4 +202,36 @@ async fn a_failed_read_of_the_time_left_is_unavailable() {
     assert!(reported(
         "identity: a passkey request failed: storage failed"
     ));
+}
+
+/// Logging out may name the page to return to after logging in again, as the session dialog's "Log in again" does
+/// before the 8 hour limit; only a checked page is kept.
+#[tokio::test]
+async fn logging_out_may_return_to_a_checked_page_after_the_next_login() {
+    for (path, to) in [
+        (
+            "/ops/logout?next=/ops/passkeys",
+            "/ops/login?next=/ops/passkeys",
+        ),
+        ("/ops/logout?next=//evil.example", "/ops/login"),
+        ("/ops/logout", "/ops/login"),
+    ] {
+        let (address, _database, cookie, form) = logged_in().await;
+        let headers = [("Origin", ORIGIN), ("Cookie", cookie.as_str())];
+        let out = send(address, "POST", path, &headers, &format!("form={form}")).await;
+        assert_eq!(
+            (out.status, out.header("location")),
+            (303, Some(to)),
+            "{path}"
+        );
+    }
+}
+
+/// The login page says up front how long a session lasts without activity, so no one is surprised by it (WCAG 2.2.6).
+#[tokio::test]
+async fn the_login_page_says_how_long_a_session_may_sit_idle() {
+    let (address, _database, _) = serving().await;
+    let page = get(address, "/ops/login", "").await;
+    let told = "For your security, we log you out after 15 minutes without activity.";
+    assert!(page.body.contains(told), "{}", page.body);
 }

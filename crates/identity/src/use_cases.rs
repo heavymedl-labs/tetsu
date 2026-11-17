@@ -500,7 +500,9 @@ fn operator_token<'a>(cookies: impl IntoIterator<Item = &'a str>) -> Option<Sess
 /// One answer for every way a join can fail, so a browser learns nothing about which links or operators
 /// exist.
 fn not_joining() -> Error {
-    Error::Invalid("this invite has ended; ask an operator for a new one".to_string())
+    Error::Invalid(
+        "this invite has ended; if you have already joined, log in, or ask an operator for a new one".to_string(),
+    )
 }
 
 /// One answer for every way a login can fail, so a browser learns nothing about which passkeys or operators
