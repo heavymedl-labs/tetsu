@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decode } from "./base64url";
+import { decode } from "../shared/base64url";
 import { assertion, type CreationJSON, creation, type RequestJSON, registration, request } from "./convert";
 import fixture from "./fixtures/options.json";
 

@@ -65,14 +65,15 @@ const SIGNED_OUT: &str = "you are signed out; sign in again";
 const UNAVAILABLE: &str = "signing in is unavailable just now; try again in a minute";
 
 /// What the pages need from the composition root: the relying party and the origins state-changing requests
-/// must come from, whether this is the demo, the shared stylesheet's and the passkey script's URLs, and where a
-/// failure the operator should see is reported (#27).
+/// must come from, whether this is the demo, the shared stylesheet's, the passkey script's, and Tetsu's mark's
+/// URLs, and where a failure the operator should see is reported (#27).
 pub struct Web {
     pub party: RelyingParty,
     pub origins: Origins,
     pub demo: bool,
     pub stylesheet: &'static str,
     pub script: &'static str,
+    pub icon: &'static str,
     pub report: fn(&str),
 }
 
@@ -82,6 +83,7 @@ struct SignInPage {
     demo: bool,
     stylesheet: &'static str,
     script: &'static str,
+    icon: &'static str,
 }
 
 #[derive(Template)]
@@ -90,6 +92,7 @@ struct EnrollPage {
     demo: bool,
     stylesheet: &'static str,
     script: &'static str,
+    icon: &'static str,
 }
 
 #[derive(Template)]
@@ -98,6 +101,7 @@ struct AccountPage {
     demo: bool,
     stylesheet: &'static str,
     script: &'static str,
+    icon: &'static str,
     name: String,
     user: String,
     credentials: String,
@@ -167,6 +171,7 @@ async fn sign_in_page<S>(State(served): Shared<S>) -> Response {
         demo: web.demo,
         stylesheet: web.stylesheet,
         script: web.script,
+        icon: web.icon,
     })
 }
 
@@ -178,6 +183,7 @@ async fn enroll_page<S>(State(served): Shared<S>) -> Response {
         demo: web.demo,
         stylesheet: web.stylesheet,
         script: web.script,
+        icon: web.icon,
     })
 }
 
@@ -225,6 +231,7 @@ async fn shown<S: OperatorStore>(
                 demo: web.demo,
                 stylesheet: web.stylesheet,
                 script: web.script,
+                icon: web.icon,
                 name: account.name,
                 user: base64url(&account.user_handle),
                 credentials: account

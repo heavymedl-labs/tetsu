@@ -2,7 +2,7 @@
 // PublicKeyCredential's own JSON methods came in Safari 18.4, above the browser floor (ADR-0053), so this does
 // their work with base64url.
 
-import { decode, encode } from "./base64url";
+import { decode, encode } from "../shared/base64url";
 
 /** Options to create a passkey, as the server sends them. */
 export interface CreationJSON {

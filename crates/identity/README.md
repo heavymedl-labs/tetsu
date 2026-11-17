@@ -178,12 +178,15 @@ starts, finds, and ends their sessions. `postgres_store(pool)` returns it over P
 ## The operator pages
 
 `adapters/http.rs` serves `/ops/sign-in`, `/ops/enroll`, and `/ops`, the signed-in operator's page, with the JSON
-endpoints the passkey script in `web/src/passkey/` calls. Pages load only Tetsu's own script, under a policy of
-their own, and are never cached. Endpoints read only a JSON object sent as `application/json`, answer `no-store`,
+endpoints the passkey islands in `web/src/passkey/` call: `<tetsu-passkey>` runs a page's one passkey action, and
+`<tetsu-passkeys>` wraps the operator's list of passkeys. Pages follow the layout of Linear's sign-in in Tetsu's
+own look, load only Tetsu's own script, under a policy of their own, and are never cached. Signing in is by
+passkey alone, as ADR-0040 sets for operators. Endpoints read only a JSON object sent as `application/json`, answer `no-store`,
 and give each ceremony's one refusal; a failure of the server is `503` to the browser and reported to the operator.
 Signing in ends the session the browser presented, in the transaction that starts the new one. Signing out is a
 plain form that clears the cookie. The operator's page offers a second passkey only within ten minutes of signing
-in, as the database allows, and tells the operator's devices every passkey Tetsu holds, through the Signal API.
+in, as the database allows, and its `<tetsu-passkeys>` tells the operator's devices every passkey Tetsu holds,
+through the Signal API.
 
 ## Not yet
 

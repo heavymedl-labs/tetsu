@@ -70,6 +70,7 @@ async fn serve(operators: Operators<PostgresOperators>) -> SocketAddr {
         demo: true,
         stylesheet: "/assets/tetsu-test.css",
         script: SCRIPT,
+        icon: "/assets/tetsu-avatar-test.svg",
         report,
     };
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("binds");
@@ -256,10 +257,11 @@ async fn an_operator_enrolls_signs_in_and_adds_a_passkey() {
         .replace('+', "-")
         .replace('/', "_");
     for shown in [
+        "<tetsu-passkeys user=",
         "Kurt Medley",
         "Synced passkey",
-        "data-passkey=\"add\"",
-        &format!("data-user=\"{user}\""),
+        "action=\"add\"",
+        &format!("user=\"{user}\""),
     ] {
         assert!(page.body.contains(shown), "{shown} in {}", page.body);
     }
@@ -272,10 +274,7 @@ async fn an_operator_enrolls_signs_in_and_adds_a_passkey() {
         "{}",
         page.body
     );
-    assert!(
-        !page.body.contains("data-passkey=\"add\""),
-        "two is the most"
-    );
+    assert!(!page.body.contains("action=\"add\""), "two is the most");
 }
 
 /// Ten minutes after signing in, the page no longer offers to add a passkey, which the server would refuse, and
@@ -289,7 +288,7 @@ async fn a_stale_sign_in_is_told_to_sign_in_again_to_add_a_passkey() {
     )
     .await;
     let page = get(address, "/ops", &cookie).await;
-    assert!(!page.body.contains("data-passkey=\"add\""), "{}", page.body);
+    assert!(!page.body.contains("action=\"add\""), "{}", page.body);
     assert!(page.body.contains("sign out and sign in"), "{}", page.body);
 }
 
@@ -332,7 +331,7 @@ async fn signing_out_clears_the_cookie() {
 #[tokio::test]
 async fn the_pages_run_only_tetsus_own_script() {
     let (address, _database, _) = serving().await;
-    for path in ["/ops/sign-in", "/ops/enroll"] {
+    for (path, action) in [("/ops/sign-in", "sign-in"), ("/ops/enroll", "enroll")] {
         let page = get(address, path, "").await;
         assert_eq!(
             (
@@ -353,7 +352,15 @@ async fn the_pages_run_only_tetsus_own_script() {
             page.body
                 .contains(&format!("<script type=\"module\" src=\"{SCRIPT}\">")),
             "{path}"
-        ); // The button takes the shared button's look, in one class attribute.
+        );
+        // Each page's one action is a passkey island, under Tetsu's mark.
+        for shown in [
+            format!("<tetsu-passkey action=\"{action}\""),
+            "src=\"/assets/tetsu-avatar-test.svg\"".to_string(),
+        ] {
+            assert!(page.body.contains(&shown), "{shown} in {}", page.body);
+        }
+        // The button takes the shared button's look, in one class attribute.
         assert!(
             page.body
                 .contains("disabled:opacity-50 rounded-full font-medium focus-visible:outline-2"),

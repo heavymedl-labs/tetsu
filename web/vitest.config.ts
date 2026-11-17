@@ -19,6 +19,8 @@ export default defineConfig({
         statements: 90,
         // Tier 1. A glob that matches nothing applies no limit and says nothing, so moving this code moves this line.
         "web/src/passkey/**": { lines: 100, branches: 100, functions: 100, statements: 100 },
+        // Shared code the passkey island relies on is Tier 1 with it.
+        "web/src/shared/base64url.ts": { lines: 100, branches: 100, functions: 100, statements: 100 },
       },
     },
   },

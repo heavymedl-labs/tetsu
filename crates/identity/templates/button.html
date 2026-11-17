@@ -1,5 +1,9 @@
-{#- The one action a page offers, in the shared button's look, enabled by the passkey script once it can run it. -#}
+{#- The passkey island around the one passkey action a page offers: `<tetsu-passkey>` enables its button once it can
+    run the action, and says what happened in its status line. -#}
 {% import "../../../web/templates/components.html" as shared %}
-{% macro passkey(action, form = "") %}
-<button type="button" data-passkey="{{ action }}"{% if !form.is_empty() %} data-form="{{ form }}"{% endif %} disabled class="mt-8 w-full disabled:cursor-not-allowed disabled:opacity-50 {% call shared::button_style() %}{% endcall %}">{{ caller() }}</button>
+{% macro passkey(action, form = "", secondary = false) %}
+<tetsu-passkey action="{{ action }}"{% if !form.is_empty() %} form-token="{{ form }}"{% endif %} class="mt-8 block">
+<button type="button" disabled class="disabled:cursor-not-allowed disabled:opacity-50 {% call shared::button_style(secondary, false, true) %}{% endcall %}">{{ caller() }}</button>
+<p role="status" aria-live="polite" class="mt-3 min-h-5 text-[13px] text-pretty text-muted"></p>
+</tetsu-passkey>
 {% endmacro %}
