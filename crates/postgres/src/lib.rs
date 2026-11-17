@@ -3,6 +3,7 @@
 //! [`OUTBOX`] as one of its migrations, and one that consumes them adds [`INBOX`] and implements [`Consumer`].
 
 mod connection;
+mod database;
 mod events;
 mod failure;
 mod isolation;
@@ -13,6 +14,7 @@ mod scope;
 pub mod test_support;
 
 pub use connection::{Error, Settings, Tls, connect, pool};
+pub use database::create_database;
 pub use deadpool_postgres::{Object, Pool, Transaction};
 pub use events::{
     Applied, Consumer, Dispatcher, Event, INBOX, KEPT_FOR, MAX_ATTEMPTS, NewEvent, OUTBOX,

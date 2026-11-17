@@ -35,7 +35,7 @@ With the test Postgres from [AGENTS.md](AGENTS.md#checks) running:
 
 ```bash
 cp .env.example .env
-cargo tetsu migrate
+cargo tetsu setup       # creates the database if missing, then migrates
 cargo tetsu serve       # http://localhost:8080
 ```
 

@@ -47,7 +47,7 @@ pub async fn run(
 ) -> Result<Vec<String>, String> {
     match chore {
         Chore::Check => check(local).await,
-        Chore::Reset { schemas } => reset(local, &schemas).await,
+        Chore::Reset { schemas } => reset(local, &schemas, modules).await,
         Chore::Replay { producer, id } => replay(local, modules, &producer, &id).await,
         Chore::Rename { address, slug } => rename(local, &address, &slug).await,
     }
@@ -69,9 +69,13 @@ pub async fn check(local: &Local) -> Result<Vec<String>, String> {
     ))
 }
 
-/// Drops the named modules' schemas so the next migrate builds them afresh, only where `TETSU_DEMO` is true, since
-/// only the demo holds no real business's data.
-pub async fn reset(local: &Local, schemas: &[String]) -> Result<Vec<String>, String> {
+/// Drops the named modules' schemas, only where `TETSU_DEMO` is true, since only the demo holds no real business's
+/// data, then migrates, which builds them afresh.
+pub async fn reset(
+    local: &Local,
+    schemas: &[String],
+    modules: &[&dyn Module],
+) -> Result<Vec<String>, String> {
     if !settings::demo(|name| local.var(name))? {
         return Err("reset runs only where TETSU_DEMO is true, since it drops data".into());
     }
@@ -79,7 +83,13 @@ pub async fn reset(local: &Local, schemas: &[String]) -> Result<Vec<String>, Str
     tetsu_postgres::drop_module_schemas(&settings, schemas)
         .await
         .map_err(|error| crate::explain(&*error))?;
-    Ok(vec![format!("dropped: {}", schemas.join(", "))])
+    tetsu_postgres::migrate(&settings, modules)
+        .await
+        .map_err(|error| crate::explain(&*error))?;
+    Ok(vec![
+        format!("dropped: {}", schemas.join(", ")),
+        format!("migrated: {}", crate::names(modules)),
+    ])
 }
 
 /// Makes a stopped event due again, as the delivery role, from the outboxes of the modules the binary runs.

@@ -9,12 +9,13 @@ names no business that uses Tetsu. Its root page names fictional customers only 
 | Command | What it does |
 | --- | --- |
 | `tetsu` | Prints the version and the registered modules |
+| `tetsu setup` | Creates the database `DATABASE_URL` names if the server has none, then migrates. Never drops or changes a database that exists, so it is safe to run any time |
 | `tetsu migrate` | Runs each module's new migrations |
 | `tetsu seed <file or folder>` | Creates the tenants in seed files, and skips any whose slug exists |
 | `tetsu seed --check <file or folder>` | Checks seed files without a database |
 | `tetsu serve` | Serves the public pages, and the operator pages at `/ops`, until SIGTERM or SIGINT, then finishes open requests for up to 10 seconds. Refuses to start before `migrate`, or while a tenant holds an address now reserved for Tetsu's own pages |
 | `tetsu check` | Checks the server version, every isolation rule in the catalog, and that no module's role sees a tenant-owned row with no tenant set; fails naming each problem. Run as the owner role |
-| `tetsu reset <schema>...` | Drops module schemas so the next `migrate` builds them afresh. Only where `TETSU_DEMO` is true, and only modules' schemas; all or none |
+| `tetsu reset <schema>...` | Drops module schemas, then migrates, which builds them afresh. Only where `TETSU_DEMO` is true, and only modules' schemas; all or none |
 | `tetsu replay <schema> <event id>` | Makes an event that stopped retrying due again, from the outboxes of the module whose schema recorded it |
 | `tetsu rename <address> <new slug>` | Moves the tenant at an address, such as one a release has since reserved, to a new slug and its address |
 | `tetsu operator create <name>` | Creates an operator and prints their invite link, good once and for an hour. Prints a link only to a terminal |
@@ -88,10 +89,14 @@ Once, with the test Postgres from [AGENTS.md](../../AGENTS.md#checks) running:
 
 ```bash
 cp .env.example .env
-psql postgres://postgres@localhost:54329/postgres -c 'CREATE DATABASE tetsu_local'
-cargo tetsu migrate
+cargo tetsu setup
 cargo tetsu seed crates/tetsu/tests/fixtures/sample.toml
+cargo tetsu operator create "Your Name"   # prints your invite link
 ```
+
+The test Postgres keeps its data in memory, so after it restarts the database is gone: run `cargo tetsu setup` again.
+When a migration you have applied changes, `cargo tetsu reset <schema>` rebuilds that module's schema, since `.env`
+sets `TETSU_DEMO`.
 
 Then `cargo tetsu serve` serves `http://localhost:8080` until Ctrl+C. Settings come from `.env` for any the
 environment leaves unset ([ADR-0050](../../docs/adr/0050-local-settings-file.md)), so no command needs them typed.

@@ -179,7 +179,8 @@ gh workflow run deploy -f reset=tenancy,audit
 ```
 
 The Reset step checks the server against the floor, then drops the named schemas, records of applied files
-included, migrates, checks, and seeds as usual; it drops nothing if any name is not a module's schema. The demo
+included, and migrates; the deploy's own migrate then finds nothing new, and it checks and seeds as usual. It drops
+nothing if any name is not a module's schema. The demo
 serves errors from the drop until the deploy finishes.
 
 ## When `serve` refuses to start

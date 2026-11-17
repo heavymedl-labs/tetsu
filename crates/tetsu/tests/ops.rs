@@ -1,4 +1,5 @@
-//! The hosted chores the workflows run (#135): `check`, `reset`, `replay`, and `rename`, against a real Postgres.
+//! The hosted chores the workflows run (#135): `check`, `reset`, `replay`, and `rename`, and the local `setup`,
+//! against a real Postgres.
 
 use std::path::Path;
 use std::process::{Command, Output};
@@ -76,7 +77,7 @@ async fn check_passes_a_migrated_database_and_names_a_broken_rule() {
     assert!(err(&failed).contains("tenancy.locations"), "{failed:?}");
 }
 
-/// Reset drops only where `TETSU_DEMO` is true, and a migrate then builds the schemas afresh.
+/// Reset drops only where `TETSU_DEMO` is true, then migrates, which builds the schemas afresh.
 #[tokio::test]
 async fn reset_starts_the_demo_over_and_nowhere_else() {
     let database = seeded().await;
@@ -96,10 +97,13 @@ async fn reset_starts_the_demo_over_and_nowhere_else() {
     assert_eq!(schemas(&database).await, ["audit", "identity", "tenancy"]);
     let reset = tetsu(&database, &["reset", "tenancy", "audit"], Some("true"));
     assert!(reset.status.success(), "{reset:?}");
-    assert_eq!(out(&reset), "dropped: tenancy, audit\n");
-    assert_eq!(schemas(&database).await, ["identity"]);
-    let migrated = tetsu(&database, &["migrate"], None);
-    assert!(migrated.status.success(), "{migrated:?}");
+    assert_eq!(
+        out(&reset),
+        "dropped: tenancy, audit\nmigrated: tenancy, identity, audit\n"
+    );
+    assert_eq!(schemas(&database).await, ["audit", "identity", "tenancy"]);
+    let rerun = tetsu(&database, &["migrate"], None);
+    assert!(rerun.status.success(), "{rerun:?}");
     assert_eq!(schemas(&database).await, ["audit", "identity", "tenancy"]);
 }
 
@@ -143,5 +147,40 @@ async fn replay_names_a_module_that_records_events() {
     assert!(
         err(&missing).contains(&format!("no event {id} in identity's outboxes")),
         "{missing:?}"
+    );
+}
+
+/// Setup creates the database the settings name when the server has none, then migrates; run again, it finds the
+/// database and only migrates, so it is safe to run any time.
+#[tokio::test]
+async fn setup_creates_the_database_once_and_migrates() {
+    let database = fresh_database().await.expect("a test database");
+    let server = database.on_database("postgres").expect("the server");
+    connect(&server)
+        .await
+        .expect("connects")
+        .batch_execute(&format!(
+            "DROP DATABASE \"{}\" WITH (FORCE)",
+            database.name()
+        ))
+        .await
+        .expect("drops");
+    let first = tetsu(&database, &["setup"], None);
+    assert!(first.status.success(), "{first:?}");
+    assert_eq!(
+        out(&first),
+        "created the database\nmigrated: tenancy, identity, audit\n"
+    );
+    assert_eq!(schemas(&database).await, ["audit", "identity", "tenancy"]);
+    let again = tetsu(&database, &["setup"], None);
+    assert!(again.status.success(), "{again:?}");
+    assert_eq!(
+        out(&again),
+        "the database exists\nmigrated: tenancy, identity, audit\n"
+    );
+    let refused = tetsu(&database, &["setup", "now"], None);
+    assert!(
+        err(&refused).contains("setup takes no arguments"),
+        "{refused:?}"
     );
 }

@@ -76,6 +76,39 @@ impl Settings {
         }
     }
 
+    /// The same settings for another database on the same server, such as the server's own `postgres`, from which
+    /// the one these name can be created. Only a URL whose path names a database can name another.
+    ///
+    /// # Errors
+    /// Fails for settings that are not such a URL.
+    pub fn on_database(&self, database: &str) -> Result<Self, Error> {
+        let (address, query) = self
+            .url
+            .split_once('?')
+            .map_or((self.url.as_str(), None), |(address, query)| {
+                (address, Some(query))
+            });
+        let (scheme, server) = ["postgres://", "postgresql://"]
+            .iter()
+            .find_map(|scheme| Some((*scheme, address.strip_prefix(scheme)?)))
+            .and_then(|(scheme, rest)| {
+                let (server, name) = rest.split_once('/')?;
+                (!name.is_empty() && !name.contains('/')).then_some((scheme, server))
+            })
+            .ok_or("the database settings are not a postgres:// URL that names a database")?;
+        let url = query.map_or_else(
+            || format!("{scheme}{server}/{database}"),
+            |query| format!("{scheme}{server}/{database}?{query}"),
+        );
+        Ok(Self {
+            url,
+            tls: self.tls,
+            authorities: self.authorities.clone(),
+            connect_timeout: self.connect_timeout,
+            pool_wait: self.pool_wait,
+        })
+    }
+
     /// Replaces the connect timeout and the pool wait, so tests that wait them out need not take seconds.
     #[must_use]
     pub fn with_timeouts(mut self, connect: Duration, pool_wait: Duration) -> Self {

@@ -25,7 +25,7 @@ use tetsu_tenancy::Tenancy;
 
 /// Every module the binary runs, in the order their migrations apply.
 const MODULES: &[&dyn Module] = &[&Tenancy, &Identity, &Audit];
-const USAGE: &str = "usage: tetsu [migrate | seed [--check] <file or folder> | serve | check | reset <schema>... \
+const USAGE: &str = "usage: tetsu [setup | migrate | seed [--check] <file or folder> | serve | check | reset <schema>... \
                      | replay <schema> <event id> | rename <address> <new slug> \
                      | operator <create <name> | invite <id> | list | disable <id> | enable <id> \
                      | remove-passkeys <id> | end-sessions <id | --all>>]";
@@ -33,6 +33,7 @@ const USAGE: &str = "usage: tetsu [migrate | seed [--check] <file or folder> | s
 #[derive(Debug, PartialEq, Eq)]
 enum Command {
     Summary,
+    Setup,
     Migrate,
     Seed { path: PathBuf, check_only: bool },
     Serve,
@@ -45,6 +46,7 @@ fn parse(args: &[String]) -> Result<Command, String> {
         return Ok(Command::Summary);
     };
     match command.as_str() {
+        "setup" => bare(rest, Command::Setup, "setup takes no arguments"),
         "migrate" => bare(rest, Command::Migrate, "migrate takes no arguments"),
         "serve" => bare(
             rest,
@@ -112,6 +114,7 @@ async fn main() -> ExitCode {
 async fn run(command: Command) -> Result<(), String> {
     match command {
         Command::Summary => say(&summary(MODULES)),
+        Command::Setup => run_setup().await,
         Command::Migrate => run_migrate().await,
         Command::Seed { path, check_only } => run_seed(&path, check_only).await,
         Command::Serve => run_serve().await,
@@ -129,6 +132,22 @@ async fn run_operator(command: operator::Operator) -> Result<(), String> {
 /// Runs a hosted chore with the local settings, and prints what it reports.
 async fn run_chore(chore: ops::Chore) -> Result<(), String> {
     say_all(&ops::run(chore, &local()?, MODULES).await?)
+}
+
+/// Creates the database the settings name if the server has none, then migrates: a developer's one step to a
+/// database the server can run on, safe to repeat, since it never drops or changes one that exists.
+async fn run_setup() -> Result<(), String> {
+    let local = local()?;
+    let settings = settings::database(|name| local.var(name))?;
+    let created = tetsu_postgres::create_database(&settings)
+        .await
+        .map_err(|error| explain(&*error))?;
+    say(if created {
+        "created the database"
+    } else {
+        "the database exists"
+    })?;
+    run_migrate().await
 }
 
 /// Runs each module's new migrations.
@@ -305,7 +324,7 @@ fn args(words: &[&str]) -> Vec<String> {
     words.iter().map(ToString::to_string).collect()
 }
 
-fn names(modules: &[&dyn Module]) -> String {
+pub(crate) fn names(modules: &[&dyn Module]) -> String {
     if modules.is_empty() {
         return "none".to_string();
     }
@@ -368,6 +387,11 @@ mod tests {
     #[test]
     fn commands_are_parsed_exactly() {
         assert_eq!(parse(&args(&[])), Ok(Command::Summary));
+        assert_eq!(parse(&args(&["setup"])), Ok(Command::Setup));
+        assert_eq!(
+            parse(&args(&["setup", "now"])),
+            Err("setup takes no arguments".into())
+        );
         assert_eq!(parse(&args(&["migrate"])), Ok(Command::Migrate));
         assert_eq!(
             parse(&args(&["migrate", "now"])),
