@@ -48,7 +48,7 @@ impl RelyingParty {
     }
 
     /// Starts registering a passkey for a user handle and name: the options for the browser, and the state to keep
-    /// until it answers. The passkey must verify the user, and must be discoverable, so signing in needs no name.
+    /// until it answers. The passkey must verify the user, and must be discoverable, so logging in needs no name.
     /// Every realm shares one passkey domain until Tetsu has domains (ADR-0061), so the name a device's account
     /// picker shows says the passkey is an operator's. The credentials the operator already `held` are listed for the
     /// device to refuse, so it makes no second passkey where it has one. It fails only for a stored operator with no
@@ -87,7 +87,7 @@ impl RelyingParty {
         Ok((options.to_string(), json!(state).to_string()))
     }
 
-    /// Starts a sign-in: the options for the browser, and the state to keep until it answers. They name no passkey,
+    /// Starts a login: the options for the browser, and the state to keep until it answers. They name no passkey,
     /// so the browser offers the person's own, discoverable ones, and they ask for the prompt a button opens rather
     /// than the autofill `webauthn-rs` sets, which is easy to miss.
     pub(crate) fn begin_authentication(&self) -> Result<(String, String), Error> {
@@ -103,7 +103,7 @@ impl RelyingParty {
             .map_err(not_started)
     }
 
-    /// A sign-in's answer, read once, with the credential ID and user handle it names, so its passkey can be found
+    /// A login's answer, read once, with the credential ID and user handle it names, so its passkey can be found
     /// and checked. An answer that is not one fails with the credential ID it names, if it names one the record can
     /// keep: none past the 1023 bytes `WebAuthn` allows.
     pub(crate) fn identify(&self, response: &str) -> Result<Identified, Option<Vec<u8>>> {
@@ -124,7 +124,7 @@ impl RelyingParty {
         }
     }
 
-    /// Verifies a sign-in's answer against the state its ceremony began with and the passkey it names, and returns
+    /// Verifies a login's answer against the state its ceremony began with and the passkey it names, and returns
     /// the passkey as it should now be stored, with its counter and backup flags moved on. `webauthn-rs` refuses a
     /// counter that does not move forward, as a cloned authenticator's would not.
     ///
@@ -138,7 +138,7 @@ impl RelyingParty {
     ) -> Result<String, Error> {
         let state: DiscoverableAuthentication = serde_json::from_str(state).map_err(|error| {
             Error::Storage(format!(
-                "a stored sign-in ceremony could not be read: {error}"
+                "a stored login ceremony could not be read: {error}"
             ))
         })?;
         let mut passkey: Passkey = serde_json::from_str(passkey).map_err(|error| {
@@ -154,7 +154,7 @@ impl RelyingParty {
     }
 
     /// Verifies a browser's registration against the state its ceremony began with, and returns the passkey. A
-    /// registration whose client says the passkey is not discoverable is refused, since signing in could never find
+    /// registration whose client says the passkey is not discoverable is refused, since logging in could never find
     /// it; one that says nothing is taken, as some browsers say nothing. A refusal's reason, as the audit record
     /// names it, is `malformed`, `not_discoverable`, or `not_verified`. So is one listing a transport `WebAuthn`
     /// does not name, or one twice. Its size is checked where it is stored, measured as the table measures it.
@@ -234,7 +234,7 @@ pub(crate) fn base64url(bytes: &[u8]) -> String {
     text
 }
 
-/// A sign-in's answer, read once: the credential ID and user handle it names, and the answer itself, which stays
+/// A login's answer, read once: the credential ID and user handle it names, and the answer itself, which stays
 /// inside this file.
 pub(crate) struct Identified {
     pub(crate) credential: Vec<u8>,
@@ -242,7 +242,7 @@ pub(crate) struct Identified {
     response: PublicKeyCredential,
 }
 
-/// Why `webauthn-rs` refused a sign-in, as the audit record names it. A counter that does not move forward may mean
+/// Why `webauthn-rs` refused a login, as the audit record names it. A counter that does not move forward may mean
 /// a cloned authenticator (`WebAuthn` L3 §6.1.1); `webauthn-rs` checks it after the signature, so the authenticator
 /// said it. It checks user verification and backup eligibility before the signature, so anyone could claim
 /// either: they are recorded as `not_verified`, like any other refusal.

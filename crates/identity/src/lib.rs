@@ -1,4 +1,4 @@
-//! Identity: who signs in to Tetsu, their passkeys, and their sessions (ADR-0040, ADR-0048). Operators come first,
+//! Identity: who logs in to Tetsu, their passkeys, and their sessions (ADR-0040, ADR-0048). Operators come first,
 //! in slice 5; staff and customers follow.
 //!
 //! The public surface (ADR-0021): the use cases on [`Operators`], the driven port, the domain types they name, the
@@ -15,20 +15,20 @@ mod use_cases;
 #[cfg(test)]
 mod adding_tests;
 #[cfg(test)]
-mod enrollment_tests;
-#[cfg(test)]
 mod http_tests;
 #[cfg(test)]
-mod sign_in_tests;
+mod join_tests;
+#[cfg(test)]
+mod login_tests;
 
 pub use adapters::http::{PATHS, Web, router};
 pub use adapters::postgres::postgres_store;
-pub use browser::{Change, CheckedSession, ForChange, Origins, SignOut};
+pub use browser::{Change, CheckedSession, ForChange, Logout, Origins};
 pub use domain::{
     Account, Actor, Addition, Answer, Ceremony, CeremonyKind, CeremonyToken, Device, Disabling,
-    Enrollee, EnrollmentToken, Error, HeldPasskey, Issue, Limits, NewPasskey, OperatorId,
+    Error, HeldPasskey, InviteToken, Invitee, Issue, Limits, Login, NewPasskey, OperatorId,
     OperatorName, OperatorSummary, Realm, Redemption, Refusal, Removal, Session, SessionStart,
-    SessionToken, SignIn, Signer, TakenAddition, TakenCeremony,
+    SessionToken, Signer, TakenAddition, TakenCeremony,
 };
 pub use passkeys::RelyingParty;
 pub use ports::OperatorStore;

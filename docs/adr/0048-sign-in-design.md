@@ -1,4 +1,4 @@
-# 0048. Sign-in design
+# 0048. Login design
 
 - Status: Accepted
 - Date: 2026-11-11
@@ -16,15 +16,15 @@ answer". [ADR-0042](0042-tenant-isolation.md), [ADR-0043](0043-domain-event-deli
 [ADR-0047](0047-sign-in-libraries.md) supply storage, events, email, logging, and libraries. This ADR settles the
 details, so #20 can be broken into build tasks.
 
-Sign-ups and guest booking stay off until the Level 2 review, so on the demo every account is enrolled by command,
-and only fictional people sign in.
+Sign-ups and guest booking stay off until the Level 2 review, so on the demo every account is invited by command,
+and only fictional people log in.
 
 ## Decision
 
 ### The Identity module
 
 - **A new `identity` crate and schema** holds staff identities, staff roles, customer accounts, operators,
-  passkeys, Google links, sign-in attempts, sessions, recovery codes, recovery requests, and relinks. Client
+  passkeys, Google links, login attempts, sessions, recovery codes, recovery requests, and relinks. Client
   profiles stay a reference by ID until a Clients module owns them.
 - **Staff identities, their passkeys, operators, and sessions are global tables.** Staff roles, customer accounts
   and their passkeys, recovery requests, and relinks are tenant-owned (ADR-0042).
@@ -55,26 +55,26 @@ ADR-0040 leaves the roles to #20. A staff member holds one role at each business
 - **Tokens are 256 random bits,** stored only as SHA-256 hashes (ADR-0047), sent in `__Host-` cookies that are
   `Secure`, `HttpOnly`, and `SameSite=Lax` (`v5.0.0-3.3.3`).
 - **Each realm has its own cookie.** A customer's cookie holds one browser token, and the server keeps one customer
-  session per business under it, so Lee Park signed in at Anvil Row and Juniper Lane holds two separate sessions,
+  session per business under it, so Lee Park logged in at Anvil Row and Juniper Lane holds two separate sessions,
   each checked against the business in the path (`v5.0.0-8.4.1`).
 - **Timeouts,** with NIST SP 800-63B-4's Level 2 limits of 24 hours and 1 hour idle as the ceiling
   (`v5.0.0-7.1.1`):
 
   | Realm | Absolute | Idle | Why |
   | --- | --- | --- | --- |
-  | Customer | 24 hours | 1 hour | Level 2's ceiling; a passkey sign-in is one touch |
+  | Customer | 24 hours | 1 hour | Level 2's ceiling; a passkey login is one touch |
   | Staff | 12 hours | 1 hour | One working day at a front desk |
   | Operator | 8 hours | 15 minutes | Reaches every business |
 
-- **Signing out ends the session on the server,** and a fresh passkey sign-in within 10 minutes counts as "fresh"
+- **Logging out ends the session on the server,** and a fresh passkey login within 10 minutes counts as "fresh"
   for the changes ADR-0040 and ADR-0041 guard (`v5.0.0-7.5.1`).
 
 ### Forms and pages
 
 - **Every state-changing request checks its `Origin` header against the realm's hosts and carries a per-session
-  token,** and a short-lived pre-session record holds the token for forms before sign-in (`v5.0.0-3.5.1`).
-- **Sign-in pages keep `frame-ancestors 'none'`,** and the content security policy gains `script-src 'self'`,
-  `connect-src 'self'`, and a `form-action` that allows Tetsu and Google's sign-in (`v5.0.0-3.4.3`).
+  token,** and a short-lived pre-session record holds the token for forms before login (`v5.0.0-3.5.1`).
+- **Login pages keep `frame-ancestors 'none'`,** and the content security policy gains `script-src 'self'`,
+  `connect-src 'self'`, and a `form-action` that allows Tetsu and Google's login (`v5.0.0-3.4.3`).
 - **The passkey script is TypeScript,** built by Vite, and waits on CONSTRAINTS.md's exception E5 closing.
 
 ### Rate limits
@@ -90,19 +90,19 @@ alone, so a stranger cannot use up an owner's quota. Past a ceiling, Tetsu slows
 | Email codes sent | 3 per attempt, 10 per email and network address per hour, 30 per network address per hour |
 | Code guesses | 5 per code, then the attempt ends |
 | Failed code guesses per email, across every attempt | After 20 in 24 hours, a new code for that email waits, starting at 1 minute and doubling to 1 hour |
-| Failed passkey sign-ins | 10 per network address per 15 minutes, then a growing delay |
+| Failed passkey logins | 10 per network address per 15 minutes, then a growing delay |
 | Recovery requests | One pending per account, 3 per email and network address per day |
 | Notices | Never limited or batched; sent at least once per event (ADR-0043) |
 
 - **The per-email ceiling bounds guessing.** At its slowest, one email takes about 120 wrong guesses a day, so the
   chance of guessing one target's code within a year is about 1 in 2,300.
-- **The real owner always has a way past a stranger's requests.** A passkey sign-in is never slowed by code
+- **The real owner always has a way past a stranger's requests.** A passkey login is never slowed by code
   limits. And the "this wasn't me" link in a recovery notice, which only the email's holder receives, cancels the
   pending request and lets the owner start their own at once, past the recovery limits.
 
 ### Answers to ADR-0041's questions
 
-- **What cancels an email recovery:** a passkey sign-in to the account, a recovery code used on it, or the
+- **What cancels an email recovery:** a passkey login to the account, a recovery code used on it, or the
   "this wasn't me" link in its notice, after the request was made. The requester holds none of these, so they
   cannot cancel their own request by accident. An attacker who holds the account can cancel it, as ADR-0041
   accepts, and the real person then relinks in person, which the attacker can only dispute.
@@ -120,15 +120,15 @@ alone, so a stranger cannot use up an owner's quota. Past a ceiling, Tetsu slows
 
 ### The demo
 
-- **The maintainer enrolls demo staff and customers** through the operator command that ADR-0040 sets, run once per
-  fictional person, so every demo sign-in uses a real passkey. Email to fictional people lands in the capture
+- **The maintainer invites demo staff and customers** through the operator command that ADR-0040 sets, run once per
+  fictional person, so every demo login uses a real passkey. Email to fictional people lands in the capture
   mailbox, and email to the maintainer goes out for real (ADR-0044).
 - **Each realm is its own free demo service** until Tetsu has domains (ADR-0042), so ADR-0040's device test runs
   on the demo's realm hosts now and again on Tetsu's domains before the Level 2 review.
 
 ### Build order
 
-Sign-in is built in slices, each its own issue under #20, test first, each leaving the demo working:
+Login is built in slices, each its own issue under #20, test first, each leaving the demo working:
 
 1. Tenant isolation in the Postgres crate: roles, the tenant transaction, catalog checks, the version floor, and
    Tenancy moved onto them ([#63](https://github.com/heavymedl-labs/tetsu/issues/63),
@@ -136,28 +136,28 @@ Sign-in is built in slices, each its own issue under #20, test first, each leavi
 2. Structured logs, and the outbox, inbox, and dispatcher, with the audit consumer
 3. TypeScript tests, coverage, and boundaries in `web/`, closing E5
 4. The ADR-0047 spike: the library failure tests
-5. Operators: the enrollment command, passkey sign-in, sessions, sign-out, and the capture mailbox page
-6. Staff: roles, invites, recovery codes at enrollment, passkey sign-in, switching business
-7. Customers: accounts per business, enrollment by command on the demo, sign-in on each business's pages
+5. Operators: the invite command, passkey login, sessions, logout, and the capture mailbox page
+6. Staff: roles, invites, recovery codes on joining, passkey login, switching business
+7. Customers: accounts per business, invites by command on the demo, login on each business's pages
 8. Recovery: codes, email recovery, relinks, locks, and notices (ADR-0041)
 9. The device test, and the Tier 1 and ASVS review of the whole
-10. Google sign-in, before sign-ups open
+10. Google login, before sign-ups open
 
 ## Alternatives considered
 
 - **One cookie per business,** with a path attribute. `__Host-` cookies must use path `/`, so this would give up
   the prefix's protection.
 - **Longer customer sessions,** such as 30 days as many shops use. That is beyond NIST's Level 2 ceiling, which
-  ASVS 5.0.0 cites for session timeouts. A passkey makes signing in again a single touch.
+  ASVS 5.0.0 cites for session timeouts. A passkey makes logging in again a single touch.
 - **Roles as free-form permission sets per business.** Flexible, but nothing in the reference businesses needs it
   yet, and four fixed roles are easier to test.
 
 ## Consequences
 
 - #20 becomes a parent issue with one sub-issue per slice, in that order.
-- Recovery (slice 8) and Google sign-in (slice 10) complete before the Level 2 review, not before the first demo
-  sign-in.
-- The audit crate is the first event consumer, so slice 2 proves ADR-0043 before sign-in depends on it.
+- Recovery (slice 8) and Google login (slice 10) complete before the Level 2 review, not before the first demo
+  login.
+- The audit crate is the first event consumer, so slice 2 proves ADR-0043 before login depends on it.
 - Revisit the roles when the first real business asks for one that does not fit.
 
 ## Sources

@@ -12,7 +12,7 @@ zones sets when an alert matters, and every log line needs its tenant without le
 Until a client showcase is close, Tetsu runs only the demo, on free hosting, with fictional businesses rebuilt
 from their seed files ([ADR-0018](0018-demo-businesses-as-data.md)). No real business can sign up before the
 Level 2 review ([#83](https://github.com/heavymedl-labs/tetsu/issues/83)). So the decision has two parts: what the
-demo needs now, which sign-in builds on, and the targets production must meet before any real business arrives.
+demo needs now, which login builds on, and the targets production must meet before any real business arrives.
 
 ## Decision
 
@@ -29,7 +29,7 @@ demo needs now, which sign-in builds on, and the targets production must meet be
 - **Each request's log lines carry a request ID, the tenant's ID, and the realm,** never names, emails, codes,
   tokens, or request bodies. Identifiers that could find a person, such as an account ID, appear only where a log
   line needs them to be useful.
-- **Security events go to an audit record, not the log.** Sign-ins, passkey changes, recoveries, and relinks are
+- **Security events go to an audit record, not the log.** Logins, passkey changes, recoveries, and relinks are
   domain events ([ADR-0043](0043-domain-event-delivery.md)) that the audit consumer stores per tenant. Logs are
   for operating Tetsu and may be lost; the audit record may not.
 - **An event that stops retrying is logged at error level** with its ID, type, and consumer, so it can be found
@@ -82,10 +82,10 @@ These are targets. Each is met, and the restore tested, before the Level 2 revie
   The OpenTelemetry crates are pre-1.0 and change their API between minor versions, so upgrades take some work.
 - The Grafana Cloud key is a secret in the host's environment. Over the free limits, extra data is dropped, not
   billed.
-- Sign-in ([#20](https://github.com/heavymedl-labs/tetsu/issues/20)) can ship on the demo once logging and the
+- Login ([#20](https://github.com/heavymedl-labs/tetsu/issues/20)) can ship on the demo once logging and the
   audit consumer exist; nothing else here blocks it.
 - [#27](https://github.com/heavymedl-labs/tetsu/issues/27)'s production half gates the Level 2 review rather than
-  sign-in on the demo.
+  login on the demo.
 - Choosing an object storage provider for backups, an outside uptime check, and phone alerts each needs its own
   ADR, made with production hosting ([#104](https://github.com/heavymedl-labs/tetsu/issues/104)), as does a
   production observability plan beyond the free tier.

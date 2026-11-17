@@ -40,7 +40,7 @@ impl TestDatabase {
         &self.name
     }
 
-    /// The same database, signed in as the application role, as `tetsu serve` is (ADR-0042). Assumes the test server
+    /// The same database, logged in as the application role, as `tetsu serve` is (ADR-0042). Assumes the test server
     /// trusts local roles without a password, as CI's and check.sh's do.
     #[must_use]
     pub fn as_app(&self) -> Settings {

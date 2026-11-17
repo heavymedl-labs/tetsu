@@ -117,5 +117,5 @@ Row.
 - Data export and deletion, support access, and a Tetsu bill Avery
   understands.
 
-**Can wait:** native apps, self-serve sign-up, partner API access, payroll
+**Can wait:** native apps, self-serve signup, partner API access, payroll
 integration, and marketing tools.

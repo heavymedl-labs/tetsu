@@ -52,7 +52,7 @@
   }
 }
 
-/* A sign-in card's arrival: it settles a few pixels down into place as it fades in. */
+/* A login card's arrival: it settles a few pixels down into place as it fades in. */
 @keyframes tetsu-settle {
   from {
     opacity: 0;

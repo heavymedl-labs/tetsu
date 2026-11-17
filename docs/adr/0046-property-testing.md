@@ -7,7 +7,7 @@
 
 [ADR-0005](0005-testing-and-performance.md) requires property-based tests for Tier 1 code, names `proptest` as
 the leading option, and gives each tool its own ADR. Tenancy is the first Tier 1 module
-([#63](https://github.com/heavymedl-labs/tetsu/issues/63)), and sign-in follows. A test-only dependency is cheap to
+([#63](https://github.com/heavymedl-labs/tetsu/issues/63)), and login follows. A test-only dependency is cheap to
 replace and on no hot path, so [ADR-0010](0010-evaluating-technology.md)'s steps 1, 4, and 7 apply.
 
 **Criteria.** Generate structured values, such as slugs, names with any Unicode, and pairs of tenants, from

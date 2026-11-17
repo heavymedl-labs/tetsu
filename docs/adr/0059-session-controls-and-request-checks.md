@@ -24,7 +24,7 @@ ASVS 7.1.2 asks only that the policy be stated.
 ### Session controls
 
 - **No cap on concurrent sessions,** in any realm (`v5.0.0-7.1.2`). Each session is listed and can be ended, and
-  the limits are short. A cap would lock out a person whose old device is lost, or let an attacker who signs in evict
+  the limits are short. A cap would lock out a person whose old device is lost, or let an attacker who logs in evict
   the owner.
 - **Disabling or removing an account ends all its sessions in the same transaction** (`v5.0.0-7.4.2`), for
   operators, staff, and customers.
@@ -36,7 +36,7 @@ ASVS 7.1.2 asks only that the policy be stated.
   customer sessions is decided with them, in slices 6 and 7.
 - **People see and end their own sessions** (`v5.0.0-7.5.2`): each session's start, last request, a coarse device
   label, and which one is current, shown by each session's random public id, never by its token's hash. Ending one,
-  or all the others, needs a fresh passkey sign-in, within ADR-0048's 10 minutes. The list is reached only through
+  or all the others, needs a fresh passkey login, within ADR-0048's 10 minutes. The list is reached only through
   functions that find the account from the presented session's token, so no request can list another account's
   sessions. The device label is stored only as coarsely as the list shows it, and deleted with the session.
 
@@ -46,21 +46,21 @@ ASVS 7.1.2 asks only that the policy be stated.
   match one of the realm's origins, and its `Sec-Fetch-Site`, when present, must be `same-origin`. A missing or
   `null` Origin is refused. Two independent signals keep a single browser bug, such as Firefox's CVE-2026-8950, from
   opening a gap.
-- **A signed-in request also carries the session's form token,** masked with a fresh random pad on every page, so a
+- **A logged-in request also carries the session's form token,** masked with a fresh random pad on every page, so a
   compressed page never repeats it.
-- **Forms before sign-in carry no token.** The two header checks guard them, and need no state, so ADR-0048's
+- **Forms before login carry no token.** The two header checks guard them, and need no state, so ADR-0048's
   pre-session record is dropped.
 - **No GET changes state,** since `SameSite=Lax` sends the cookie on cross-site navigations, and pages that carry a
   form token are served with `Cache-Control: no-store`.
-- **Signing in ends any session the browser presented,** before starting a new one (`v5.0.0-7.2.4`).
+- **Logging in ends any session the browser presented,** before starting a new one (`v5.0.0-7.2.4`).
 
 ### Sessions, as built
 
 - **Postgres's clock is the only clock** for sessions, with each realm's limits kept in the SQL beside it.
-- **Each signed-in request writes its last request,** in the same call that checks the session. For a few operators
+- **Each logged-in request writes its last request,** in the same call that checks the session. For a few operators
   the write costs nothing that matters; frameworks that serve many users throttle it, and slice 7 revisits it when
   customers arrive.
-- **Spent sessions are removed when presented, or when their account next signs in.** Those of an account that never
+- **Spent sessions are removed when presented, or when their account next logs in.** Those of an account that never
   returns stay, as hashes no request can use, until slice 7 adds a sweep.
 - **Fifteen minutes idle stays the operator limit.** OWASP suggests 2 to 5 minutes for high-value applications, but
   NIST SP 800-63B-4 sets 15 minutes at its highest assurance level, AAL3, and an operator's every change still needs
@@ -82,7 +82,7 @@ ASVS 7.1.2 asks only that the policy be stated.
 ## Consequences
 
 - #110's later steps build the operator command's session controls, the `Sec-Fetch-Site` check, the session list,
-  and ending sessions on passkey changes and sign-in. The session list may move to a follow-up issue, done before
+  and ending sessions on passkey changes and login. The session list may move to a follow-up issue, done before
   slice 9's Level 2 review.
 - Staff and customer realms follow the same rules, with their administrators decided in slices 6 and 7.
 - Revisit the per-request write and the sweep at slice 7, and the idle limit if operators' actions widen.

@@ -1092,7 +1092,7 @@ async fn the_outbox_refuses_a_malformed_event() {
     } = world().await;
     let big = format!(r#"{{"note": "{}"}}"#, "a".repeat(65_536));
     for (kind, payload) in [
-        ("people.signed-in", JOINED.payload),
+        ("people.logged-in", JOINED.payload),
         ("joined", JOINED.payload),
         ("People.joined", JOINED.payload),
         ("people.joined", "[1, 2]"),

@@ -64,7 +64,7 @@ A reservation offers add to calendar, book a guest, and cancel.
   An account's history shows the result as "Penalty Cancel".
 - **Waitlist:** email up to 12 hours before class. Inside 12 hours, staff text or call, and move
   on if they miss you.
-- **Opening:** 4 and 8 pack memberships say class sign-up opens Sundays at noon.
+- **Opening:** 4 and 8 pack memberships say class signup opens Sundays at noon.
 - **Other:** no late arrivals, riders must be at least 13 and 4'11", and $2 shoe rental.
 
 ## Buying

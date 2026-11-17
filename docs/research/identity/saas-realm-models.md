@@ -1,25 +1,25 @@
-# Identity realms, sign-up, and sign-in in collaboration and developer SaaS (Linear, Slack, Notion, GitHub, Atlassian, Figma, Calendly)
+# Identity realms, signup, and login in collaboration and developer SaaS (Linear, Slack, Notion, GitHub, Atlassian, Figma, Calendly)
 
 Researched 2026-11-11. Vendor help pages were fetched on that date, except where noted. Where a claim comes from a third-party page or from search summaries, it says so. Claims recalled from background knowledge but not re-verified are listed only under Gaps.
 
-## 1. Global identity vs per-workspace accounts, and multi-workspace sign-in and switching
+## 1. Global identity vs per-workspace accounts, and multi-workspace login and switching
 
 ### Takeaway
 
-Most of these products use one global user with memberships in workspaces or organizations: Linear, Notion, Figma, GitHub, Atlassian, and probably Calendly. Slack is the exception. One email gives a separate account in each workspace, but a single email sign-in finds all of them. Several products also let one browser hold more than one global account (several emails) and switch between them.
+Most of these products use one global user with memberships in workspaces or organizations: Linear, Notion, Figma, GitHub, Atlassian, and probably Calendly. Slack is the exception. One email gives a separate account in each workspace, but a single email login finds all of them. Several products also let one browser hold more than one global account (several emails) and switch between them.
 
 ### Cited Findings
 
 - **Slack: per-workspace accounts.** "You can use the same email address to join as many workspaces as you'd like, but you'll have separate Slack accounts for each one." — [Slack: Join a Slack workspace](https://slack.com/help/articles/212675257-Join-a-Slack-workspace) (wording quoted in a search summary)
-- **Slack: one email confirmation finds every workspace.** One email address signs in to all of a person's workspaces. After confirming with a code, passkey, or SSO, the user picks a workspace from a list. Desktop adds more through "Add a workspace" > "Sign in to another workspace". Password-free sign-in sends "a code that allows you to sign in to any workspaces associated with your email address." — [Slack: Sign in to Slack](https://slack.com/help/articles/212681477-Sign-in-to-Slack)
+- **Slack: one email confirmation finds every workspace.** One email address logs in to all of a person's workspaces. After confirming with a code, passkey, or SSO, the user picks a workspace from a list. Desktop adds more through "Add a workspace" > "Sign in to another workspace". Password-free login sends "a code that allows you to sign in to any workspaces associated with your email address." — [Slack: Log in to Slack](https://slack.com/help/articles/212681477-Sign-in-to-Slack)
 - **Slack: user IDs differ per workspace.** A third-party test found that the same email had different user IDs in two workspaces, and that presence and status are set per workspace. This is a single unofficial test. — [slack.green](https://slack.green/en/blog/slack-multiple-workspaces)
-- **Slack: outside workspaces stay separate.** A university IT page says that signing in to a workspace outside its Enterprise Grid with the same email gives a separate account that is "not associated with" the university Slack account. — [U-M TeamDynamix](https://teamdynamix.umich.edu/TDClient/30/Portal/KB/ArticleDet?ID=10178)
-- **Linear: global user, several accounts per browser.** You can be logged in to several user accounts at once (several emails) and switch between their workspaces without signing in again. Each added email's workspaces appear under "Switch workspace". Signing out "will sign you out of all other sessions." — [Linear: Login methods](https://linear.app/docs/login-methods)
+- **Slack: outside workspaces stay separate.** A university IT page says that logging in to a workspace outside its Enterprise Grid with the same email gives a separate account that is "not associated with" the university Slack account. — [U-M TeamDynamix](https://teamdynamix.umich.edu/TDClient/30/Portal/KB/ArticleDet?ID=10178)
+- **Linear: global user, several accounts per browser.** You can be logged in to several user accounts at once (several emails) and switch between their workspaces without logging in again. Each added email's workspaces appear under "Switch workspace". Logging out "will sign you out of all other sessions." — [Linear: Login methods](https://linear.app/docs/login-methods)
 - **GitHub: global personal account.** Each GitHub account can be linked to exactly one external (SAML) identity per organization. Each external identity can be linked to exactly one GitHub account in an organization. In this model, one personal account belongs to many orgs. — [GitHub: About authentication with SAML SSO](https://docs.github.com/en/authentication/authenticating-with-saml-single-sign-on/about-authentication-with-saml-single-sign-on)
 - **GitHub EMU: identity owned by the enterprise.** Under Enterprise Managed Users, the IdP owns the lifecycle, username, profile, and org membership. "Managed user accounts cannot create public content or collaborate outside your enterprise." People therefore keep a separate personal account for open source. — [GitHub: About Enterprise Managed Users](https://docs.github.com/en/enterprise-cloud@latest/admin/managing-iam/understanding-iam-for-enterprises/about-enterprise-managed-users)
 - **Atlassian: global account, claimable by domain owners.** An Atlassian account becomes "managed" when an org verifies the email domain and then claims the account. Unclaimed accounts on a verified domain, and accounts on personal email, are "external users". The org can invite or remove external users but cannot edit or delete their accounts. — [Atlassian: What are managed accounts](https://support.atlassian.com/user-management/docs/what-are-managed-accounts/)
 - **Figma: org membership follows the email domain.** Members are users whose email matches one of the org's verified domains. Everyone else is a guest. — [Figma: Log in / SSO](https://help.figma.com/hc/en-us/articles/360040532333-Log-in-to-Figma); [Figma: Add members or guests](https://help.figma.com/hc/en-us/articles/360040453113-Add-members-or-guests-to-an-organization)
-- **Notion: one account, workspace-level sign-in rules.** Notion has help pages on creating, joining, and switching workspaces, and its login page says a user "may be asked to sign in with a specific provider when you open a workspace" if that workspace requires it. Sign-in rules are therefore checked per workspace on top of one account. — [Notion: Log in and out](https://www.notion.com/help/log-in-and-out); [Notion: Create, join & leave workspaces](https://www.notion.com/help/create-delete-and-switch-workspaces)
+- **Notion: one account, workspace-level login rules.** Notion has help pages on creating, joining, and switching workspaces, and its login page says a user "may be asked to sign in with a specific provider when you open a workspace" if that workspace requires it. Login rules are therefore checked per workspace on top of one account. — [Notion: Log in and out](https://www.notion.com/help/log-in-and-out); [Notion: Create, join & leave workspaces](https://www.notion.com/help/create-delete-and-switch-workspaces)
 
 ### Inferences
 
@@ -35,7 +35,7 @@ Most of these products use one global user with memberships in workspaces or org
 - Calendly's account model was not confirmed: whether one user can belong to more than one organization. The sources found tie an account to one login method at a time and do not settle membership in several organizations.
 - Figma's support for several logged-in accounts was not covered by the fetched page.
 
-## 2. Sign-in methods by plan, and sign-up flow steps
+## 2. Login methods by plan, and signup flow steps
 
 **Takeaway:**
 
@@ -43,7 +43,7 @@ The common baseline is Google OIDC plus passwordless email (a code, or a link an
 
 **Cited Findings:**
 
-- **Slack.** Methods: an email code (not a link), a passkey, Apple, Google, or SSO where required. Username and password are only for "Frontline Members", who then get an email verification code. 2FA asks for a 6-digit code where the workspace requires it. — [Slack: Sign in](https://slack.com/help/articles/212681477-Sign-in-to-Slack)
+- **Slack.** Methods: an email code (not a link), a passkey, Apple, Google, or SSO where required. Username and password are only for "Frontline Members", who then get an email verification code. 2FA asks for a 6-digit code where the workspace requires it. — [Slack: Log in](https://slack.com/help/articles/212681477-Sign-in-to-Slack)
 - **Linear: methods.** Google, email (a "login link or code" that works either way), passkeys (several devices, under Preferences > Account > Security & Access), and SAML. — [Linear: Login methods](https://linear.app/docs/login-methods)
 - **Linear: plans and admin rules.** Login restrictions need Business or Enterprise. "SAML authentication and IP restrictions are only available to workspaces on our Enterprise plan." Admins can require specific login methods. Owners and admins can always log in by any method, to prevent lockout. — [Linear: Login methods](https://linear.app/docs/login-methods)
 - **Linear: approved domains.** Approved email domains let anyone with a matching address join without an invite. Linear warns that a domain you cancel or transfer must be removed from the approved domains. — [Linear: Invite members](https://linear.app/docs/invite-members)
@@ -59,7 +59,7 @@ The common baseline is Google OIDC plus passwordless email (a code, or a link an
 
 **Inferences:**
 
-- The common sign-up flow is: choose Google, Microsoft, or Apple, or enter an email. Verify the email by a code (Slack, Notion), a link or code (Linear), or OAuth. Then either join a workspace (by invite or matching domain) or create one.
+- The common signup flow is: choose Google, Microsoft, or Apple, or enter an email. Verify the email by a code (Slack, Notion), a link or code (Linear), or OAuth. Then either join a workspace (by invite or matching domain) or create one.
 - Codes that work across devices are preferred over links alone. Slack and Notion use codes, and Linear offers both. Codes avoid the problem of a link opening in the wrong browser.
 - An owner exemption from enforced login methods (Linear, Calendly) is a standard lockout guard.
 - For Tetsu, domain auto-join probably matters less, because many small businesses use gmail.com. Invitation will be the main path. Note that Linear's domain-transfer warning echoes the risk in section 6.
@@ -67,7 +67,7 @@ The common baseline is Google OIDC plus passwordless email (a code, or a link an
 **Gaps:**
 
 - Plan tiers for Linear SCIM, Slack SAML and SCIM, and Notion SCIM were not confirmed in this pass.
-- Atlassian's sign-in methods for end users (Google, Microsoft, Apple, Slack login, passkeys) were not fetched.
+- Atlassian's login methods for end users (Google, Microsoft, Apple, Slack login, passkeys) were not fetched.
 - Whether GitHub supports passkeys, and on which plans, was not fetched. From background knowledge, GitHub made passkeys generally available in 2023, but this is unverified here.
 
 ## 3. MFA enforcement and account linking
@@ -78,16 +78,16 @@ Org-level enforcement is common: Slack, GitHub orgs, and Atlassian through authe
 
 **Cited Findings:**
 
-- **Slack.** Org owners and admins can make 2FA mandatory across workspaces, and new members must enroll before they can sign in. With SSO, the IdP should handle 2FA, but members not required to use SSO, and guests, still set up Slack 2FA. Admins can temporarily disable 2FA for a member who is locked out. — [Slack: Mandatory workspace 2FA](https://slack.com/help/articles/212221668-Mandatory-workspace-two-factor-authentication-)
+- **Slack.** Org owners and admins can make 2FA mandatory across workspaces, and new members must enroll before they can log in. With SSO, the IdP should handle 2FA, but members not required to use SSO, and guests, still set up Slack 2FA. Admins can temporarily disable 2FA for a member who is locked out. — [Slack: Mandatory workspace 2FA](https://slack.com/help/articles/212221668-Mandatory-workspace-two-factor-authentication-)
 - **Slack Grid sessions.** Org-level session duration and 2FA settings apply to all member and guest accounts. Salesforce training material says so, and sources conflict a little on which roles use Slack's native MFA. — [Salesforce Trailhead](https://trailhead.salesforce.com/content/learn/modules/identity-management-in-slack/explore-access-and-security-controls)
 - **GitHub mandate.** GitHub required 2FA for all users who contribute code on GitHub.com, rolling it out by group from March 13, 2023, with about 45 days' notice for each group. — [GitHub blog](https://github.blog/news-insights/product-news/raising-the-bar-for-software-security-github-2fa-begins-march-13/); [TechCrunch](https://techcrunch.com/2023/03/09/github-to-require-2fa-for-all-contributors-starting-from-march-13-to-secure-the-software-supply-chain/)
 - **GitHub orgs.** Org owners can require 2FA for members, outside collaborators, and billing managers. — [GitHub: Requiring 2FA in your organization](https://docs.github.com/en/organizations/keeping-your-organization-secure/managing-two-factor-authentication-for-your-organization/requiring-two-factor-authentication-in-your-organization)
 - **Atlassian: tiers.** Atlassian Guard Standard is needed for more than one authentication policy and for enforcing SSO, 2SV, and mobile session expiry. — [Atlassian: Authentication policy settings](https://support.atlassian.com/security-and-access-policies/docs/authentication-policy-settings-for-your-organizations/); [Atlassian Guard licensing](https://www.atlassian.com/licensing/atlassian-guard)
 - **Atlassian: 2SV rules.** With SSO, 2SV can only be set at the IdP. 2SV can be made optional for some managed accounts, but not for some external users only. — [Atlassian: Enforce two-step verification](https://support.atlassian.com/security-and-access-policies/docs/enforce-two-step-verification/)
 - **Atlassian: audits.** SSO-policy accounts can legitimately show no Atlassian 2SV, and audits should account for this. This comes from a third-party hardening guide. — [howtoharden.com](https://howtoharden.com/guides/atlassian/)
-- **Notion linking.** Google and Microsoft sign-in work only if the provider's email matches the Notion account email, so the match is made by email. Apple "Hide My Email" creates a new account that cannot be linked to an existing one. — [Notion: Log in and out](https://www.notion.com/help/log-in-and-out)
+- **Notion linking.** Google and Microsoft login work only if the provider's email matches the Notion account email, so the match is made by email. Apple "Hide My Email" creates a new account that cannot be linked to an existing one. — [Notion: Log in and out](https://www.notion.com/help/log-in-and-out)
 - **Calendly linking.** One login method is active at a time. Switching it needs a 6-digit email code. Users removed from an SSO org go back to their original method, such as Google. — [Calendly: Update login preferences](https://calendly.com/help/how-to-update-your-login-preferences); [Calendly: SAML SSO overview](https://help.calendly.com/hc/en-us/articles/360056867653)
-- **GitHub linked identities.** GitHub records an explicit link from a personal account to an IdP identity for each org. Signing in with an identity already linked to another account fails. Relinking warns that access to teams and orgs may be lost. PATs and SSH keys must be authorized separately for SSO orgs. — [GitHub: About authentication with SAML SSO](https://docs.github.com/en/authentication/authenticating-with-saml-single-sign-on/about-authentication-with-saml-single-sign-on)
+- **GitHub linked identities.** GitHub records an explicit link from a personal account to an IdP identity for each org. Logging in with an identity already linked to another account fails. Relinking warns that access to teams and orgs may be lost. PATs and SSH keys must be authorized separately for SSO orgs. — [GitHub: About authentication with SAML SSO](https://docs.github.com/en/authentication/authenticating-with-saml-single-sign-on/about-authentication-with-saml-single-sign-on)
 
 **Inferences:**
 
@@ -117,7 +117,7 @@ There are three patterns. (a) The tenant owns its identities outright, as in Git
 
 **Inferences:**
 
-- For Tetsu, pattern (c) fits best, perhaps with (b) later: SSO as a per-business requirement on top of a global staff account. Requiring SSO for one business should not lock a person out of their other businesses. That means enforcement is checked when the person enters a business, as Notion does ("when you open a workspace"), not when they sign in globally.
+- For Tetsu, pattern (c) fits best, perhaps with (b) later: SSO as a per-business requirement on top of a global staff account. Requiring SSO for one business should not lock a person out of their other businesses. That means enforcement is checked when the person enters a business, as Notion does ("when you open a workspace"), not when they log in globally.
 - If a business ever needs to own accounts outright, the EMU-style choice gives isolated accounts tied to the tenant. That runs against the global-staff model, so it is a separate decision.
 
 **Gaps:**
@@ -133,7 +133,7 @@ Little is documented officially. What is documented shows sessions owned by the 
 
 **Cited Findings:**
 
-- **Linear.** Signing out signs you out of all other sessions. Several accounts can be signed in at once, and switching between them needs no new sign-in. — [Linear: Login methods](https://linear.app/docs/login-methods)
+- **Linear.** Logging out logs you out of all other sessions. Several accounts can be logged in at once, and switching between them needs no new login. — [Linear: Login methods](https://linear.app/docs/login-methods)
 - **GitHub.** Access to an SSO org needs an active SAML session for that org, on top of the github.com session. — [GitHub: About authentication with SAML SSO](https://docs.github.com/en/authentication/authenticating-with-saml-single-sign-on/about-authentication-with-saml-single-sign-on)
 - **Atlassian.** Authentication policies, with Guard, control session and mobile-session expiry for each user group. — [Atlassian: Authentication policy settings](https://support.atlassian.com/security-and-access-policies/docs/authentication-policy-settings-for-your-organizations/)
 - **Slack Grid.** Session duration is set at the org level. — [Salesforce Trailhead](https://trailhead.salesforce.com/content/learn/modules/identity-management-in-slack/explore-access-and-security-controls)

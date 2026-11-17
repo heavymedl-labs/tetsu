@@ -28,9 +28,9 @@ Two shapes are common. In the first, a global identity holds the passkeys, and e
 
 **Inferences:**
 
-- Shape A: one global identity owns the passkeys. Give it a new random 64-byte user handle and register its passkeys with it. Each per-business account then points to the global identity, and signing in once yields a session that can reach every linked account. This gives one picker entry per person, which is the cleanest credential manager UX.
+- Shape A: one global identity owns the passkeys. Give it a new random 64-byte user handle and register its passkeys with it. Each per-business account then points to the global identity, and logging in once yields a session that can reach every linked account. This gives one picker entry per person, which is the cleanest credential manager UX.
 - Shape B: per-business accounts only, which is Tetsu today. Each account's random user handle yields its own discoverable passkey under the same RP ID. One person with N businesses sees N "Tetsu" entries, and the label (user.name, displayName) is all that tells them apart. Labels like "<alex@example.com> at Riverside Yoga" help. signalCurrentUserDetails can fix labels later.
-- Shape C: a hybrid. Existing per-business passkeys stay valid and still authenticate their own account. After sign-in the server resolves the account to the linked global identity. No re-enrollment is needed.
+- Shape C: a hybrid. Existing per-business passkeys stay valid and still authenticate their own account. After login the server resolves the account to the linked global identity. No re-enrollment is needed.
 - Sharing one user handle across per-business accounts would make each new registration overwrite the last on the same authenticator. That follows from the overwrite rule. Tetsu should not reuse a per-business user handle as the global one.
 - Under one RP ID, conditional mediation on a business's page offers every Tetsu passkey on the device, including those for other businesses, unless the RP sends an allow list. The picker labels reveal to anyone holding the device which businesses the person uses. A global identity reduces this to one entry.
 
@@ -43,7 +43,7 @@ Two shapes are common. In the first, a global identity holds the passkeys, and e
 ## Migration: adding a global identity after per-business accounts and passkeys exist
 
 **Takeaway:**
-Add the global identity as a new record that per-business accounts link to. Do not merge accounts, and do not change their user handles, so existing passkeys keep working. Link only after the person proves control of each account in the same session, for example by signing in to each one or by a fresh verified-email code. Auto-linking on a matching email is the known path to account takeover. Mindbody's 2025 universal account rollout shows the business side of the risk: sign-in breakage, and studios losing control of their own customer records.
+Add the global identity as a new record that per-business accounts link to. Do not merge accounts, and do not change their user handles, so existing passkeys keep working. Link only after the person proves control of each account in the same session, for example by logging in to each one or by a fresh verified-email code. Auto-linking on a matching email is the known path to account takeover. Mindbody's 2025 universal account rollout shows the business side of the risk: login breakage, and studios losing control of their own customer records.
 
 **Cited Findings:**
 
@@ -51,16 +51,16 @@ Add the global identity as a new record that per-business accounts link to. Do n
 - A studio operator wrote on Reddit (Sep 5, 2025) that under the rollout "the studios cannot change cc numbers or send a reset password email" and "MB believes that the studio customers are MB customers not studio customers." The rollout was "partially rolled back after public backlash." This is reported by Vibefam, a competitor, quoting Reddit. Treat it with care. — [Vibefam, Mindbody review 2026](https://vibefam.com/mindbody-review-pricing-features-pros-cons-2026/)
 - After a person syncs a new account, Mindbody says they may have two profiles at a business, one per email, and must ask each business to merge them. — [Mindbody support, account FAQ](https://support.mindbodyonline.com/s/article/I-already-have-an-account?language=en_US) (via search summary)
 - Mindbody's studio-side Merge Duplicate Clients tool cannot be fully reversed. An Unmask Merged Clients tool separates accidental merges. — [Mindbody support, Merge Duplicate Clients](https://support.mindbodyonline.com/s/article/203259603-Merge-Duplicate-Clients-tool?language=en_US) (via search summary)
-- Integrators report that duplicate emails, often from family members sharing a parent's email, block customers from signing in after Mindbody migrations. — [zingFit support](https://support.zingfit.com/en/articles/4336677-mindbody-data-migration-merging-duplicate-customers)
+- Integrators report that duplicate emails, often from family members sharing a parent's email, block customers from logging in after Mindbody migrations. — [zingFit support](https://support.zingfit.com/en/articles/4336677-mindbody-data-migration-merging-duplicate-customers)
 - Auth0 warns: "Insecurely linking accounts can allow malicious actors to access legitimate user accounts." Its guidance is that "your tenant should request authentication for both accounts before linking occurs" and "every manual account link should prompt the user to enter credentials." — [Auth0, User Account Linking](https://auth0.com/docs/manage-users/user-accounts/user-account-linking)
 - Account pre-hijacking: an attacker sets up the account before the victim does. Of 75 popular services tested, at least 35 were vulnerable. The root cause is not verifying identifier ownership before the account can be used. Variants include classic-federated merge, unexpired session, trojan identifier, unexpired email change, and non-verifying IdP. — [Sudhodanan and Paverd, USENIX Security 2022, arXiv 2205.10174](https://www.emergentmind.com/papers/2205.10174); [The Register](https://www.theregister.com/2022/05/25/web_pre_hijacking/); [Ravelin](https://www.ravelin.com/blog/what-is-account-pre-hijacking)
 - CVE-2026-35511 (Authorizer): an OAuth callback linked Google or GitHub logins to existing accounts with matching but unverified emails. The merge also marked the email verified and left the attacker's password working. — [SecureLayer7](https://securelayer7.net/lab/cve-2026-35511-authorizer-oauth-account-takeover-unverified-email-linking) (one vendor write-up, not checked against NVD)
-- better-auth: magic-link and email-OTP sign-in adopted pre-existing accounts and marked them verified, without revoking earlier sessions or passwords. — [SecureLayer7](https://securelayer7.net/lab/better-auth-pre-account-hijacking-magic-link-email-otp)
+- better-auth: magic-link and email-OTP login adopted pre-existing accounts and marked them verified, without revoking earlier sessions or passwords. — [SecureLayer7](https://securelayer7.net/lab/better-auth-pre-account-hijacking-magic-link-email-otp)
 
 **Inferences:**
 
 - Do not merge. Keep each per-business account and its random user handle. Add a link row from the global identity to each account. Existing passkeys then still authenticate their account, and the server follows the link. This avoids Mindbody's irreversible-merge and duplicate-profile problems.
-- Link only on explicit action, with proof for both sides. The person signs in to the global identity, then proves control of the per-business account in the same flow, by its passkey, a fresh email code, or Google. Offering "we found accounts at 3 businesses with this email, link them?" is fine as a suggestion, as Auth0's "suggested" mode does. Each link still needs proof.
+- Link only on explicit action, with proof for both sides. The person logs in to the global identity, then proves control of the per-business account in the same flow, by its passkey, a fresh email code, or Google. Offering "we found accounts at 3 businesses with this email, link them?" is fine as a suggestion, as Auth0's "suggested" mode does. Each link still needs proof.
 - An email that a business typed in for a walk-in customer is not proof the person controls it. Never treat a business-entered email as verified for linking.
 - When a link or adoption happens, revoke prior sessions and pending email changes on the adopted account. The pre-hijacking and better-auth cases show what goes wrong otherwise.
 - The global identity should not take over the business's tools. Mindbody's backlash came from studios losing password resets and card updates. Tetsu should keep the business's per-account controls working whether or not a global link exists.
@@ -137,7 +137,7 @@ For per-business customer records, Tetsu is most likely a processor for each bus
 ## Simplest consent UX patterns
 
 **Takeaway:**
-No primary source on multi-merchant consent UX was gathered here. The legal sources still point to a simple pattern. On a business's sign-up form, offer "Fill from my Tetsu profile." Show the exact fields that will be shared with that named business. Require one deliberate click. Remember the choice per business, and let the person view and revoke it in one list.
+No primary source on multi-merchant consent UX was gathered here. The legal sources still point to a simple pattern. On a business's signup form, offer "Fill from my Tetsu profile." Show the exact fields that will be shared with that named business. Require one deliberate click. Remember the choice per business, and let the person view and revoke it in one list.
 
 **Cited Findings:**
 
@@ -149,7 +149,7 @@ No primary source on multi-merchant consent UX was gathered here. The legal sour
 **Inferences:**
 
 - Prompt: "Share with Riverside Yoga: name, email, phone. [Share] [Edit] [Not now]." The business name and the field list are visible. Nothing is pre-ticked beyond the fields the form needs.
-- Pre-filled sign-up: the fields fill in, and the person can edit before submit. Submit is the deliberate act.
+- Pre-filled signup: the fields fill in, and the person can edit before submit. Submit is the deliberate act.
 - Remember consent per business and per field set. Ask again only when a business asks for a new field.
 - Revoke: a "Businesses you share with" page, like "Places You Go," with an unlink per row. Explain that already-shared data stays with the business and how to ask it to delete.
 - Profile edits: ask before pushing changes to businesses, or let the person choose "keep my details up to date at this business." Mindbody's automatic sync is the opposite default.

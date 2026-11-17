@@ -107,7 +107,7 @@ the application's own filters as a second layer.
   approval: one lookup role per module, since roles belong to the whole server and one per function would
   multiply them.)
 - **Staff identities and their passkeys are global,** as ADR-0040's realms require, while staff roles are
-  tenant-owned. "Which businesses can I work at" is one such function, keyed on the signed-in identity.
+  tenant-owned. "Which businesses can I work at" is one such function, keyed on the logged-in identity.
   Customer accounts belong to one business, so they are ordinary tenant-owned rows.
 
 ### Addresses and hosts
@@ -115,7 +115,7 @@ the application's own filters as a second layer.
 - **A business is reached by path,** such as `/anvil-row`, on Tetsu's host, as today. Sessions stay apart because
   each is bound to its business on the server ([ADR-0040](0040-identity-and-sign-in.md)).
 - **A business's own domain comes later.** Before one is served, the business proves it owns the domain, and each
-  host maps to exactly one tenant. Sign-in stays on Tetsu's hosts, as ADR-0040 decides. The rest waits for the
+  host maps to exactly one tenant. Login stays on Tetsu's hosts, as ADR-0040 decides. The rest waits for the
   first business that asks.
 - **While Tetsu has no domain, each demo realm runs as its own free Render service** from the one image, such as
   `tetsu-demo` for customers, `tetsu-demo-staff` for staff, and `tetsu-demo-ops` for operators. `onrender.com` is
@@ -177,7 +177,7 @@ the application's own filters as a second layer.
   Postgres crate. The catalog checks belong with [#25](https://github.com/heavymedl-labs/tetsu/issues/25).
 - Hosted test 8 runs on the demo's database: the application role under these rules, and the server's version.
 - [ARCHITECTURE.md](../../ARCHITECTURE.md) drops "provisional" from its tenancy section.
-- Sign-in ([#20](https://github.com/heavymedl-labs/tetsu/issues/20)) builds on this: customer accounts are
+- Login ([#20](https://github.com/heavymedl-labs/tetsu/issues/20)) builds on this: customer accounts are
   tenant-owned, staff identities global, and sessions found through a lookup function.
 - UUID keys make indexes about 10% larger than `bigint` in informal benchmarks, which is acceptable here.
 - Every module adds a role and default privileges in its first migration.

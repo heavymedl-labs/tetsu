@@ -1,21 +1,21 @@
-# Platform identity models: one consumer sign-in across many independent merchants
+# Platform identity models: one consumer login across many independent merchants
 
 Researched 2026-11-12. Sources are marked [primary] (the vendor's own help or developer docs), [press], [community], or [weak] (competitor marketing, review aggregators, SEO blogs). Many pages were read through search summaries rather than full fetches; those are marked (snippet).
 
 ## Shop Pay and Sign in with Shop (Shopify)
 
 **Takeaway:**
-Shopify runs a person-owned Shop identity above each store's own customer record. Sign-in with Shop is a standard OpenID Connect flow that gives the store only a stable public ID and an email, and it creates or matches a store-level customer record. Saved address and card stay on Shopify's servers and reach the store only when an order is placed. Merchants get it on by default once Shop Pay and customer accounts are on.
+Shopify runs a person-owned Shop identity above each store's own customer record. Login with Shop is a standard OpenID Connect flow that gives the store only a stable public ID and an email, and it creates or matches a store-level customer record. Saved address and card stay on Shopify's servers and reach the store only when an order is placed. Merchants get it on by default once Shop Pay and customer accounts are on.
 
 **Cited Findings:**
 
 - Shop Pay saves the buyer's email, payment method, and shipping and billing details on Shopify's PCI compliant servers. "This information is only shared with your store when an order is placed." [primary] — [Shopify Help: Shop Pay](https://help.shopify.com/manual/payments/shop-pay)
 - A buyer must enter an email at checkout to be offered saving; a phone number alone does not trigger the prompt. [primary] — [Shopify Help: Shop Pay](https://help.shopify.com/manual/payments/shop-pay)
-- Sign in with Shop "is automatically activated on stores using Shop Pay and customer accounts." Buyers who "already opted in to Shop Pay on any Shopify store" get faster checkout elsewhere. Buyer-side enrollment is opt-in at a checkout; merchant-side it is on by default. [primary] — [Shopify Help: Shop Pay](https://help.shopify.com/manual/payments/shop-pay); [Changelog: sign in with Shop added to new customer accounts](https://changelog.shopify.com/posts/sign-in-with-shop-added-to-new-customer-accounts) (snippet)
+- Sign in with Shop "is automatically activated on stores using Shop Pay and customer accounts." Buyers who "already opted in to Shop Pay on any Shopify store" get faster checkout elsewhere. Buyer-side enrollment is opt-in at a checkout; merchant-side it is on by default. [primary] — [Shopify Help: Shop Pay](https://help.shopify.com/manual/payments/shop-pay); [Changelog: log in with Shop added to new customer accounts](https://changelog.shopify.com/posts/sign-in-with-shop-added-to-new-customer-accounts) (snippet)
 - "Merchants will always have access to the email address associated with the Shop account used to sign in on their customer record." [primary] — [Changelog](https://changelog.shopify.com/posts/sign-in-with-shop-added-to-new-customer-accounts) (snippet)
-- A first-time Shop sign-in at a store automatically creates a customer account on that store (classic accounts), or a new customer profile if no email matches (new accounts). [primary] — [Changelog: classic customer accounts](https://changelog.shopify.com/posts/sign-in-with-shop-added-to-classic-customer-accounts); [Shopify Help: customer accounts](https://help.shopify.com/manual/customers/customer-accounts) (snippet)
+- A first-time Shop login at a store automatically creates a customer account on that store (classic accounts), or a new customer profile if no email matches (new accounts). [primary] — [Changelog: classic customer accounts](https://changelog.shopify.com/posts/sign-in-with-shop-added-to-classic-customer-accounts); [Shopify Help: customer accounts](https://help.shopify.com/manual/customers/customer-accounts) (snippet)
 - Developer flow: the store requests `scope=openid email`, receives an `id_token` with `sub` (a Shop public ID) and `email`, verifies it against JWKS, then looks up the customer record by stored public ID, else creates one "from sub and email." Payment receipts carry a nullable `shopUser.publicId`. [primary] — [shopify.dev: Identify Shop users](https://shopify.dev/docs/api/commerce-components/pay/identify-shop-users)
-- Shopify's Feb 2023 merchant blog: Shop cookies "immediately identify Shop users on brand storefronts"; users sign in with Shop credentials "including passkeys"; payment details and addresses "are automatically pre-filled at checkout"; claims Shop Pay users sign into customer accounts "up to 50% more" with Sign in with Shop. [vendor marketing] — [Shopify blog, 2023-02-09](https://www.shopify.com/blog/shop-sign-in-features)
+- Shopify's Feb 2023 merchant blog: Shop cookies "immediately identify Shop users on brand storefronts"; users log in with Shop credentials "including passkeys"; payment details and addresses "are automatically pre-filled at checkout"; claims Shop Pay users sign into customer accounts "up to 50% more" with Sign in with Shop. [vendor marketing] — [Shopify blog, 2023-02-09](https://www.shopify.com/blog/shop-sign-in-features)
 - Shopify's customer privacy stance: the merchant "legally controls your information," so Shopify forwards a buyer's access or deletion request to the merchant. [primary] — [Shopify customer privacy policy](https://shopify.com.au/legal/privacy/customers) (snippet)
 - Shopify added an option (March 2026) to enrich customer records with data from external identity providers. [primary] — [Shopify changelog 2026-03-17](https://changelog.shopify.com/posts/enrich-customer-records-with-data-from-external-identity-providers) (title only; not read)
 - Merchant complaint example: a merchant found a buyer had paid with Shop Pay though the merchant "never OK'd" it. [community] — [Shopify Community thread](https://community.shopify.com/t/i-never-okd-a-shop-pay-option-in-the-store-customer-just-used-it-will-merchant-be-paid-fully/266687)
@@ -28,7 +28,7 @@ Shopify runs a person-owned Shop identity above each store's own customer record
 
 **Gaps:**
 
-- No primary page found on one-time codes for Shop sign-in, the exact buyer consent screen, or a merchant toggle to disable Sign in with Shop alone.
+- No primary page found on one-time codes for Shop login, the exact buyer consent screen, or a merchant toggle to disable Sign in with Shop alone.
 - Did not find substantive organized merchant backlash; the Shop app's own marketing to buyers (cross-store recommendations) was not researched.
 
 ## Stripe Link
@@ -40,7 +40,7 @@ Link is a person-owned wallet recognized across every Stripe merchant by email p
 
 - "You can autofill information for any logged-in customer already using Link, regardless of whether they initially saved their information in Link with another business. The default Payment Element integration includes a Link prompt in the card form." [primary] — [Stripe docs: Link in the Payment Element](https://docs.stripe.com/payments/link/payment-element-link)
 - Returning users authenticate with a 6 digit one-time passcode. Prefilled values "are never stored unless the customer completes a Link sign-up." [primary] — [Stripe docs](https://docs.stripe.com/payments/link/payment-element-link)
-- Accelerated sign-up, which opts customers into saving details to Link by default, "is enabled by default"; "Link disables or limits this feature when local regulations prohibit it. Customers can opt out at any time." The prefill tool is on by default and can be disabled in the Dashboard. [primary] — [Stripe docs](https://docs.stripe.com/payments/link/payment-element-link)
+- Accelerated signup, which opts customers into saving details to Link by default, "is enabled by default"; "Link disables or limits this feature when local regulations prohibit it. Customers can opt out at any time." The prefill tool is on by default and can be disabled in the Dashboard. [primary] — [Stripe docs](https://docs.stripe.com/payments/link/payment-element-link)
 - Merchant receives "Transaction Data that includes your Personal Data and, with your separate consent, your bank account information." [primary] — [Link privacy policy](https://link.com/privacy-prior) (snippet)
 - For linked bank accounts, Stripe shows what the merchant requested and the user must consent; the consent pane "will not be modifiable by you or other merchants"; new data types need a new Stripe consent flow. [primary] — [Stripe: Financial Connections merchant guidelines](https://support.stripe.com/questions/financial-connections-merchant-guidelines) (snippet)
 - Merchants can turn Link off in payment method settings; third-party help shows merchants doing so. [primary, community] — [Stripe docs](https://docs.stripe.com/payments/link/payment-element-link); [Stora help: disable Link](https://intercom.help/stora/en/articles/9522953-disable-link-payments-in-stripe)
@@ -56,11 +56,11 @@ Link is a person-owned wallet recognized across every Stripe merchant by email p
 ## Mindbody Universal Account (2025)
 
 **Takeaway:**
-Mindbody always had a consumer-level Mindbody account plus a separate client profile in each studio's database, linked by matching name and email. Around July 31, 2025 it moved to a Universal Account that clients must sync to studio profiles; unsynced clients could not sign in or book. The claim of operator backlash and partial rollback rests on one competitor blog and was not confirmed by primary or press sources.
+Mindbody always had a consumer-level Mindbody account plus a separate client profile in each studio's database, linked by matching name and email. Around July 31, 2025 it moved to a Universal Account that clients must sync to studio profiles; unsynced clients could not log in or book. The claim of operator backlash and partial rollback rests on one competitor blog and was not confirmed by primary or press sources.
 
 **Cited Findings:**
 
-- Mindbody's FAQ: the account works across many businesses with one email and password, while each business keeps its own local client database; a client links the account to local profiles by clicking an emailed link; studio sign-up requires the same name and email as the Mindbody account. [primary] — [Mindbody account FAQ](https://support.mindbodyonline.com/s/article/I-already-have-an-account?language=en_US) (snippet; page did not render on fetch)
+- Mindbody's FAQ: the account works across many businesses with one email and password, while each business keeps its own local client database; a client links the account to local profiles by clicking an emailed link; studio signup requires the same name and email as the Mindbody account. [primary] — [Mindbody account FAQ](https://support.mindbodyonline.com/s/article/I-already-have-an-account?language=en_US) (snippet; page did not render on fetch)
 - Studio staff cannot edit a linked client's name or email; only the client can, at account.mindbodyonline.com or in the app. The Mindbody account section does not show on unlinked profiles. [primary] — [Mindbody: Client profile screen](https://support.mindbodyonline.com/s/article/201067303-Client-profile?language=en_US) (snippet)
 - A studio notice: "as of July 31, 2025, Mindbody ... introduced a Universal Account system," and "many clients have encountered temporary issues signing in if their studio accounts and universal accounts aren't synced." The fix is a sync banner at account.mindbodyonline.com, or linking the studio under "Places You Go"; passes, credits, and history carry over. [studio, secondary] — [Bay Studios](https://bay-studios.com/mindbody-universal-account-update/)
 - Before the change, a common consumer complaint was a separate account per studio ("Why does MindBody create separate accounts for every studio?"). [community, via competitor summary] — [Vibefam](https://vibefam.com/mindbody-reviews-reddit-2026/), citing [r/yoga](https://www.reddit.com/r/yoga/comments/1mgo5sh/why_does_mindbody_create_separate_accounts_for/) (not fetched)
@@ -71,7 +71,7 @@ Mindbody always had a consumer-level Mindbody account plus a separate client pro
 
 **Inferences:**
 
-- The failure mode was migration: forcing link-up of existing per-studio profiles to a platform identity broke sign-in for unsynced clients. Matching by exact name and email is brittle.
+- The failure mode was migration: forcing link-up of existing per-studio profiles to a platform identity broke login for unsynced clients. Matching by exact name and email is brittle.
 - Operator distrust centers on the platform also running a consumer marketplace that charges acquisition fees, so a shared identity reads as the platform claiming the customer.
 
 **Gaps:**
@@ -94,7 +94,7 @@ These are marketplace accounts: the consumer has one platform account across all
 
 **Inferences:**
 
-- Merchant objection is less about sign-in and more about attribution and control: a shared consumer account becomes a channel the platform can charge for and market through.
+- Merchant objection is less about login and more about attribution and control: a shared consumer account becomes a channel the platform can charge for and market through.
 
 **Gaps:**
 
@@ -166,11 +166,11 @@ Airbnb owns the guest relationship. Hosts get no real email, masked or limited p
 ## Cross-platform patterns
 
 **Takeaway:**
-The simplest consumer model is a marketplace account (Airbnb, Hipcamp, ClassPass). The model that keeps merchants comfortable while giving one sign-in is Shopify's: a person-owned platform identity that each merchant sees as an ordinary customer record in its own database, with minimal identity claims and saved details released only at transaction time.
+The simplest consumer model is a marketplace account (Airbnb, Hipcamp, ClassPass). The model that keeps merchants comfortable while giving one login is Shopify's: a person-owned platform identity that each merchant sees as an ordinary customer record in its own database, with minimal identity claims and saved details released only at transaction time.
 
 **Cited Findings:**
 
-- "Link once, record per merchant": Shop creates a store customer record from `sub` and `email` on first sign-in. [primary] — [shopify.dev](https://shopify.dev/docs/api/commerce-components/pay/identify-shop-users)
+- "Link once, record per merchant": Shop creates a store customer record from `sub` and `email` on first login. [primary] — [shopify.dev](https://shopify.dev/docs/api/commerce-components/pay/identify-shop-users)
 - "Share at transaction": Shop Pay details reach the store only on order; Link sends transaction data per payment. [primary] — [Shopify Help](https://help.shopify.com/manual/payments/shop-pay); [Link privacy](https://link.com/privacy-prior)
 - "Platform-owned consent screen per merchant" for sensitive data. [primary] — [Stripe Financial Connections guidelines](https://support.stripe.com/questions/financial-connections-merchant-guidelines)
 - "Client owns identity fields, merchant owns the rest": Mindbody locks name and email to the client. [primary] — [Mindbody client profile](https://support.mindbodyonline.com/s/article/201067303-Client-profile?language=en_US)

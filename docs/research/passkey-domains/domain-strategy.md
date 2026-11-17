@@ -1,4 +1,4 @@
-# Domain and hostname strategy for Tetsu sign-in and sessions
+# Domain and hostname strategy for Tetsu login and sessions
 
 Researched 2026-11-11. Context: Tetsu serves businesses at `/<slug>` on one host today, uses Rust/axum on
 Render behind Cloudflare, server-rendered with strict CSP, plans `__Host-` cookies, targets ASVS 5.0.0 L2.
@@ -11,7 +11,7 @@ Because Tetsu serves only its own server-rendered code (no tenant-authored scrip
 gives no script isolation between tenants but needs none; `__Host-` cookies then bind sessions to the one host.
 Subdomain-per-tenant buys origin isolation only if tenants can run content, and costs cookie-tossing exposure
 and same-site ambiguity unless the zone is on a separate registrable domain or the PSL; a PSL zone breaks
-any shared passkey RP ID across tenants, so central sign-in must live on a host outside the tenant suffix.
+any shared passkey RP ID across tenants, so central login must live on a host outside the tenant suffix.
 
 ### Cited Findings
 
@@ -82,12 +82,12 @@ any shared passkey RP ID across tenants, so central sign-in must live on a host 
   a passkey with RP ID `tetsu-sites.com` cannot be used from `anvil-row.tetsu-sites.com` (RP ID would be a
   public suffix). Each tenant subdomain would be its own RP ID, so a customer needs one passkey per business.
   Tetsu is also likely too small for PSL acceptance today.
-- A separate registrable domain for tenant pages (e.g. `tetsu.app` for staff/operator/sign-in,
+- A separate registrable domain for tenant pages (e.g. `tetsu.app` for staff/operator/login,
   `tetsusites.com` for public tenant pages) gives cross-site isolation from the app without the PSL, keeps one
   RP ID on the app domain, and Related Origin Requests could extend that RP ID to at most 4 other labels, not
   per-tenant custom domains.
 - Custom domains are each their own site: no cookie sharing with the app is possible, and passkeys bound to
-  `tetsu.app` cannot be used there except via ROR (capped at 5 labels), so sign-in on a custom domain must be a
+  `tetsu.app` cannot be used there except via ROR (capped at 5 labels), so login on a custom domain must be a
   redirect to the central host plus a handoff (section 4).
 
 ### Gaps
@@ -205,7 +205,7 @@ __Gaps:__
 - Cloudflare for SaaS prices are as of the 2026-08-14 page update; whether Cloudflare for SaaS can sit in front
   of a Render origin that itself uses Cloudflare for SaaS was not confirmed.
 
-## 4. Session establishment on tenant custom domains after central sign-in
+## 4. Session establishment on tenant custom domains after central login
 
 __Takeaway:__
 Use an OAuth-authorization-code-shaped handoff: central host authenticates, redirects to an exact,

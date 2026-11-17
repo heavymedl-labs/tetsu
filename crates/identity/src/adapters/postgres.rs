@@ -10,9 +10,9 @@ use tokio_postgres::Row;
 use tokio_postgres::types::{FromSql, ToSql};
 
 use crate::domain::{
-    Account, Actor, Addition, CeremonyKind, Disabling, Enrollee, Error, HeldPasskey, Issue,
+    Account, Actor, Addition, CeremonyKind, Disabling, Error, HeldPasskey, Invitee, Issue, Login,
     NewPasskey, OperatorId, OperatorName, OperatorSummary, Realm, Redemption, Refusal, Removal,
-    Session, SessionStart, SignIn, Signer, TakenAddition, TakenCeremony,
+    Session, SessionStart, Signer, TakenAddition, TakenCeremony,
 };
 use crate::ports::OperatorStore;
 use crate::use_cases::Operators;
@@ -34,29 +34,29 @@ const SCHEMA: &str = "identity";
 const INSERT_OPERATOR: &str = include_str!("../../sql/insert_operator.sql");
 const USE_SESSION: &str = include_str!("../../sql/use_session.sql");
 const END_SESSION: &str = include_str!("../../sql/end_session.sql");
-const ISSUE_ENROLLMENT: &str = include_str!("../../sql/issue_enrollment.sql");
+const ISSUE_INVITE: &str = include_str!("../../sql/issue_invite.sql");
 const DISABLE_OPERATOR: &str = include_str!("../../sql/disable_operator.sql");
 const END_OPERATOR_SESSIONS: &str = include_str!("../../sql/end_operator_sessions.sql");
 const END_REALM_SESSIONS: &str = include_str!("../../sql/end_realm_sessions.sql");
 const LIST_OPERATORS: &str = include_str!("../../sql/list_operators.sql");
 const ENABLE_OPERATOR: &str = include_str!("../../sql/enable_operator.sql");
-const ENROLLEE: &str = include_str!("../../sql/enrollee.sql");
+const INVITEE: &str = include_str!("../../sql/invitee.sql");
 const REMOVE_PASSKEYS: &str = include_str!("../../sql/remove_passkeys.sql");
-const BEGIN_SIGN_IN: &str = include_str!("../../sql/begin_sign_in.sql");
-const TAKE_SIGN_IN: &str = include_str!("../../sql/take_sign_in.sql");
+const BEGIN_LOGIN: &str = include_str!("../../sql/begin_login.sql");
+const TAKE_LOGIN: &str = include_str!("../../sql/take_login.sql");
 const SIGNER: &str = include_str!("../../sql/signer.sql");
-const SIGN_IN: &str = include_str!("../../sql/sign_in.sql");
+const LOGIN: &str = include_str!("../../sql/login.sql");
 const ACCOUNT: &str = include_str!("../../sql/account.sql");
 const ADDER: &str = include_str!("../../sql/adder.sql");
 const BEGIN_ADDITION: &str = include_str!("../../sql/begin_addition.sql");
 const TAKE_ADDITION: &str = include_str!("../../sql/take_addition.sql");
 const ADD_PASSKEY: &str = include_str!("../../sql/add_passkey.sql");
 const RECORD: &str = include_str!("../../sql/record.sql");
-const BEGIN_ENROLLMENT: &str = include_str!("../../sql/begin_enrollment.sql");
+const BEGIN_JOIN: &str = include_str!("../../sql/begin_join.sql");
 const TAKE_CEREMONY: &str = include_str!("../../sql/take_ceremony.sql");
-const REDEEM_ENROLLMENT: &str = include_str!("../../sql/redeem_enrollment.sql");
-/// The kind of ceremony enrollment keeps.
-const ENROLL: &str = "enroll";
+const REDEEM_INVITE: &str = include_str!("../../sql/redeem_invite.sql");
+/// The kind of ceremony join keeps.
+const JOIN: &str = "join";
 
 /// An event for the audit record: its type, and a payload of IDs and facts, never names or tokens (ADR-0045).
 type Recorded = Option<(&'static str, String)>;
@@ -219,9 +219,9 @@ async fn run(
 }
 
 /// How a statement failed. Identity's own functions raise three codes of their own, and each is a fault of the code
-/// that called them, so storage: TD001, a session started for an operator not enabled, which only a sign-in that
+/// that called them, so storage: TD001, a session started for an operator not enabled, which only a login that
 /// holds an enabled operator's row ever starts; TD002, an isolation level other than read committed; and TD003, a
-/// sign-in that would change more of a passkey than its counter and backup flags.
+/// login that would change more of a passkey than its counter and backup flags.
 fn sorted(error: &tokio_postgres::Error) -> Error {
     failed(tetsu_postgres::sort(error))
 }
@@ -274,7 +274,7 @@ impl OperatorStore for PostgresOperators {
         rows.first().map_or(Ok(false), |row| column(row, "ended"))
     }
 
-    async fn issue_enrollment(
+    async fn issue_invite(
         &self,
         hash: &[u8; 32],
         operator: OperatorId,
@@ -282,21 +282,19 @@ impl OperatorStore for PostgresOperators {
     ) -> Result<Option<Issue>, Error> {
         let id = operator.get();
         let parameters: [&(dyn ToSql + Sync); 2] = [&hash.as_slice(), &id];
-        self.decided(ISSUE_ENROLLMENT, &parameters, |rows| {
-            issuance(rows, id, actor)
-        })
-        .await
+        self.decided(ISSUE_INVITE, &parameters, |rows| issuance(rows, id, actor))
+            .await
     }
 
-    async fn enrollee(&self, link: &[u8; 32]) -> Result<Option<Enrollee>, Error> {
-        self.query(ENROLLEE, &[&link.as_slice()])
+    async fn invitee(&self, link: &[u8; 32]) -> Result<Option<Invitee>, Error> {
+        self.query(INVITEE, &[&link.as_slice()])
             .await?
             .first()
-            .map(enrollee_from)
+            .map(invitee_from)
             .transpose()
     }
 
-    async fn begin_enrollment(
+    async fn begin_join(
         &self,
         token: &[u8; 32],
         operator: OperatorId,
@@ -305,18 +303,18 @@ impl OperatorStore for PostgresOperators {
     ) -> Result<bool, Error> {
         let parameters: [&(dyn ToSql + Sync); 4] =
             [&token.as_slice(), &operator.get(), &link.as_slice(), &state];
-        begun(&self.query(BEGIN_ENROLLMENT, &parameters).await?)
+        begun(&self.query(BEGIN_JOIN, &parameters).await?)
     }
 
-    async fn take_enrollment(&self, token: &[u8; 32]) -> Result<Option<TakenCeremony>, Error> {
-        self.query(TAKE_CEREMONY, &[&token.as_slice(), &ENROLL])
+    async fn take_join(&self, token: &[u8; 32]) -> Result<Option<TakenCeremony>, Error> {
+        self.query(TAKE_CEREMONY, &[&token.as_slice(), &JOIN])
             .await?
             .first()
             .map(ceremony_from)
             .transpose()
     }
 
-    async fn redeem_enrollment(
+    async fn redeem_invite(
         &self,
         ceremony: &TakenCeremony,
         passkey: &NewPasskey,
@@ -331,14 +329,14 @@ impl OperatorStore for PostgresOperators {
             &passkey.passkey,
             &transports,
         ];
-        self.decided(REDEEM_ENROLLMENT, &parameters, |rows| {
+        self.decided(REDEEM_INVITE, &parameters, |rows| {
             redemption(rows, id, &passkey.credential_id, actor)
         })
         .await
     }
 
-    async fn begin_sign_in(&self, token: &[u8; 32], state: &str) -> Result<(), Error> {
-        self.query(BEGIN_SIGN_IN, &[&token.as_slice(), &state])
+    async fn begin_login(&self, token: &[u8; 32], state: &str) -> Result<(), Error> {
+        self.query(BEGIN_LOGIN, &[&token.as_slice(), &state])
             .await
             .map(drop)
     }
@@ -360,8 +358,8 @@ impl OperatorStore for PostgresOperators {
         .map(drop)
     }
 
-    async fn take_sign_in(&self, token: &[u8; 32]) -> Result<Option<String>, Error> {
-        taken_state(&self.query(TAKE_SIGN_IN, &[&token.as_slice()]).await?)
+    async fn take_login(&self, token: &[u8; 32]) -> Result<Option<String>, Error> {
+        taken_state(&self.query(TAKE_LOGIN, &[&token.as_slice()]).await?)
     }
 
     async fn signer(&self, credential: &[u8]) -> Result<Option<Signer>, Error> {
@@ -372,13 +370,13 @@ impl OperatorStore for PostgresOperators {
             .transpose()
     }
 
-    async fn sign_in(
+    async fn login(
         &self,
         signer: &Signer,
         passkey: &str,
         session: &SessionStart,
         actor: &Actor,
-    ) -> Result<Option<SignIn>, Error> {
+    ) -> Result<Option<Login>, Error> {
         let id = signer.operator.get();
         let credential = signer.credential.as_slice();
         let replacing = session.replacing.as_ref().map(<[u8; 32]>::as_slice);
@@ -390,8 +388,8 @@ impl OperatorStore for PostgresOperators {
             &session.hash.as_slice(),
             &replacing,
         ];
-        self.decided(SIGN_IN, &parameters, |rows| {
-            signing(rows, signer, passkey, actor)
+        self.decided(LOGIN, &parameters, |rows| {
+            logging_in(rows, signer, passkey, actor)
         })
         .await
     }
@@ -664,11 +662,11 @@ fn issuance_event(issue: Option<Issue>, id: i64, actor: &Actor) -> (&'static str
     let reason = match issue {
         Some(Issue::Issued) => None,
         Some(Issue::Disabled) => Some("disabled"),
-        Some(Issue::Enrolled) => Some("enrolled"),
+        Some(Issue::Joined) => Some("joined"),
         None => Some("unknown"),
     };
     reasoned(
-        "identity.enrollment_issued",
+        "identity.invite_issued",
         actor,
         reason,
         json!({"operator_id": id}),
@@ -684,22 +682,22 @@ fn begun(rows: &[Row]) -> Result<bool, Error> {
 }
 
 /// The operator a link names, with the user handle and name a registration needs.
-fn enrollee_from(row: &Row) -> Result<Enrollee, Error> {
-    Ok(Enrollee {
+fn invitee_from(row: &Row) -> Result<Invitee, Error> {
+    Ok(Invitee {
         operator: OperatorId::new(column(row, "operator_id")?),
         user_handle: user_handle(row)?,
         name: column(row, "name")?,
     })
 }
 
-/// A ceremony taken to finish. An enrollment always keeps its link, so one without is a storage failure.
+/// A ceremony taken to finish. A join always keeps its link, so one without is a storage failure.
 fn ceremony_from(row: &Row) -> Result<TakenCeremony, Error> {
     let link: Option<Vec<u8>> = column(row, "link_hash")?;
     Ok(TakenCeremony {
         operator: OperatorId::new(column(row, "operator_id")?),
         link_hash: link
             .and_then(|link| link.try_into().ok())
-            .ok_or_else(|| Error::Storage("an enrollment ceremony has no link".to_string()))?,
+            .ok_or_else(|| Error::Storage("a join ceremony has no link".to_string()))?,
         state: column(row, "state")?,
     })
 }
@@ -719,8 +717,8 @@ fn redemption(rows: &[Row], id: i64, credential: &[u8], actor: &Actor) -> Decide
 /// The event a ceremony's outcome is recorded under, refused or not.
 fn event_kind(kind: CeremonyKind) -> &'static str {
     match kind {
-        CeremonyKind::Enrollment => "identity.enrollment_redeemed",
-        CeremonyKind::SignIn => "identity.signed_in",
+        CeremonyKind::Join => "identity.invite_redeemed",
+        CeremonyKind::Login => "identity.logged_in",
         CeremonyKind::Addition => "identity.passkey_added",
     }
 }
@@ -741,7 +739,7 @@ fn redemption_event(
 ) -> (&'static str, String) {
     let reason = redemption.map_or(Some("unknown"), Redemption::reason);
     reasoned(
-        "identity.enrollment_redeemed",
+        "identity.invite_redeemed",
         actor,
         reason,
         json!({"operator_id": id, "credential": hex(credential)}),
@@ -798,7 +796,7 @@ fn removing(rows: &[Row], id: i64, actor: &Actor) -> Decided<Removal> {
     ))
 }
 
-/// A sign-in ceremony's state, if one was taken.
+/// A login ceremony's state, if one was taken.
 fn taken_state(rows: &[Row]) -> Result<Option<String>, Error> {
     rows.first().map(|row| column(row, "state")).transpose()
 }
@@ -814,27 +812,24 @@ fn signer_from(row: &Row, credential: &[u8]) -> Result<Signer, Error> {
     })
 }
 
-/// Reads what signing in came to, and makes the event it records: changed when a session
+/// Reads what logging in came to, and makes the event it records: changed when a session
 /// started, and refused otherwise, with the reason, the credential ID, which is public, the session's public ID,
 /// and the passkey's flags. The function always answers one row, so none is a storage failure.
-fn signing(rows: &[Row], signer: &Signer, passkey: &str, actor: &Actor) -> Decided<SignIn> {
+fn logging_in(rows: &[Row], signer: &Signer, passkey: &str, actor: &Actor) -> Decided<Login> {
     let row = rows.first().ok_or_else(answered_nothing)?;
-    let answer: Option<String> = column(row, "signed")?;
-    let sign_in = answer.as_deref().map(sign_in_from).transpose()?;
-    let session = session_named(
-        column(row, "session_id")?,
-        sign_in == Some(SignIn::SignedIn),
-    )?;
-    let reason = match sign_in {
-        Some(SignIn::SignedIn) => None,
-        Some(SignIn::Disabled) => Some("disabled"),
-        Some(SignIn::Raced) => Some("raced"),
+    let answer: Option<String> = column(row, "outcome")?;
+    let login = answer.as_deref().map(login_from).transpose()?;
+    let session = session_named(column(row, "session_id")?, login == Some(Login::SignedIn))?;
+    let reason = match login {
+        Some(Login::SignedIn) => None,
+        Some(Login::Disabled) => Some("disabled"),
+        Some(Login::Raced) => Some("raced"),
         None => Some("unknown"),
     };
     Ok((
-        sign_in,
+        login,
         Some(reasoned(
-            "identity.signed_in",
+            "identity.logged_in",
             actor,
             reason,
             json!({
@@ -865,8 +860,8 @@ fn answered_nothing() -> Error {
 }
 
 /// An answer Identity's database never writes is a storage failure, never a guess.
-fn sign_in_from(text: &str) -> Result<SignIn, Error> {
-    SignIn::parse(text).ok_or_else(|| Error::Storage(format!("signing in answered {text:?}")))
+fn login_from(text: &str) -> Result<Login, Error> {
+    Login::parse(text).ok_or_else(|| Error::Storage(format!("logging in answered {text:?}")))
 }
 
 /// Bytes as lowercase hexadecimal, as events record credential IDs.
@@ -877,13 +872,13 @@ fn hex(bytes: &[u8]) -> String {
     })
 }
 
-/// An account: an enrollee's columns from its first row, and a passkey from each row that names one. A passkey
+/// An account: an invitee's columns from its first row, and a passkey from each row that names one. A passkey
 /// whose stored flags are missing is a fault of storage, never a guess.
 fn account_from(rows: &[Row]) -> Result<Option<Account>, Error> {
     let Some(first) = rows.first() else {
         return Ok(None);
     };
-    let enrollee = enrollee_from(first)?;
+    let invitee = invitee_from(first)?;
     let mut passkeys = Vec::new();
     for row in rows {
         if let Some(credential) = column(row, "credential_id")? {
@@ -899,9 +894,9 @@ fn account_from(rows: &[Row]) -> Result<Option<Account>, Error> {
         }
     }
     Ok(Some(Account {
-        operator: enrollee.operator,
-        user_handle: enrollee.user_handle,
-        name: enrollee.name,
+        operator: invitee.operator,
+        user_handle: invitee.user_handle,
+        name: invitee.name,
         passkeys,
     }))
 }
@@ -1021,7 +1016,7 @@ mod tests {
         use tetsu_postgres::Pool;
         use tetsu_postgres::test_support::{TestDatabase, migrated_database};
 
-        /// A pool signed in as the application role, over a fresh database Identity has migrated, kept while
+        /// A pool logged in as the application role, over a fresh database Identity has migrated, kept while
         /// the test runs.
         pub async fn migrated() -> (Pool, TestDatabase) {
             let database = migrated_database(&[&crate::Identity])
@@ -1081,7 +1076,7 @@ mod tests {
             let payload: serde_json::Value = serde_json::from_str(&payload).expect("JSON");
             (kind, payload["outcome"].clone(), payload["reason"].clone())
         };
-        let kind = "identity.enrollment_issued";
+        let kind = "identity.invite_issued";
         assert_eq!(
             recorded(Some(Issue::Issued)),
             (kind, json!("changed"), json!(null))
@@ -1091,11 +1086,11 @@ mod tests {
             (kind, json!("refused"), json!("disabled"))
         );
         assert_eq!(
-            recorded(Some(Issue::Enrolled)),
-            (kind, json!("refused"), json!("enrolled"))
+            recorded(Some(Issue::Joined)),
+            (kind, json!("refused"), json!("joined"))
         );
         assert_eq!(recorded(None), (kind, json!("refused"), json!("unknown")));
-        assert_eq!(issue_from("enrolled"), Ok(Issue::Enrolled));
+        assert_eq!(issue_from("joined"), Ok(Issue::Joined));
         assert_eq!(
             issue_from("maybe"),
             Err(Error::Storage(
@@ -1213,7 +1208,7 @@ mod tests {
             .await
             .expect("disables");
         assert_eq!(
-            operators.enroll(kurt, &support::actor()).await.map(drop),
+            operators.invite(kurt, &support::actor()).await.map(drop),
             Err(Error::Invalid(format!(
                 "no enabled operator {}",
                 kurt.get()
@@ -1224,7 +1219,7 @@ mod tests {
     /// An operator who holds a passkey is issued no link, in this one build, which llvm-cov scores on its own, and
     /// an answer the database never writes is a storage failure.
     #[tokio::test]
-    async fn an_enrolled_operator_is_issued_no_link() {
+    async fn a_joined_operator_is_issued_no_link() {
         let (pool, database) = support::migrated().await;
         let operators = Operators::new(PostgresOperators { pool });
         let lee = operators
@@ -1244,23 +1239,23 @@ mod tests {
             .await
             .expect("stores a passkey");
         assert_eq!(
-            operators.enroll(lee, &support::actor()).await.map(drop),
+            operators.invite(lee, &support::actor()).await.map(drop),
             Err(Error::Invalid(format!(
-                "operator {} has a passkey already, and adds another after signing in",
+                "operator {} has a passkey already, and adds another after logging in",
                 lee.get()
             )))
         );
         admin
             .batch_execute(
-                "DROP FUNCTION identity.issue_enrollment(bytea, bigint);
-                 CREATE FUNCTION identity.issue_enrollment(bytea, bigint) RETURNS text
+                "DROP FUNCTION identity.issue_invite(bytea, bigint);
+                 CREATE FUNCTION identity.issue_invite(bytea, bigint) RETURNS text
                  LANGUAGE sql AS 'SELECT ''maybe''::text';
-                 GRANT EXECUTE ON FUNCTION identity.issue_enrollment(bytea, bigint) TO tetsu_identity",
+                 GRANT EXECUTE ON FUNCTION identity.issue_invite(bytea, bigint) TO tetsu_identity",
             )
             .await
             .expect("replaces");
         assert_eq!(
-            operators.enroll(lee, &support::actor()).await.map(drop),
+            operators.invite(lee, &support::actor()).await.map(drop),
             Err(Error::Storage(
                 "issuing a link answered \"maybe\"".to_string()
             ))
@@ -1283,17 +1278,17 @@ mod tests {
             .await
             .expect("creates");
         assert_eq!(
-            failing.enroll(kurt, &support::actor()).await.map(drop),
+            failing.invite(kurt, &support::actor()).await.map(drop),
             Err(Error::Unavailable(format!(
                 "no secure random source: {}",
                 getrandom::Error::UNSUPPORTED
             )))
         );
         let working = Operators::with_fill(PostgresOperators { pool }, getrandom::fill);
-        assert!(working.enroll(kurt, &support::actor()).await.is_ok());
+        assert!(working.invite(kurt, &support::actor()).await.is_ok());
         assert_eq!(
             working
-                .enroll(OperatorId::new(i64::MAX), &support::actor())
+                .invite(OperatorId::new(i64::MAX), &support::actor())
                 .await
                 .map(drop),
             Err(Error::Invalid(format!("no operator {}", i64::MAX)))
@@ -1302,14 +1297,14 @@ mod tests {
             .await
             .expect("connects")
             .batch_execute(
-                "REVOKE EXECUTE ON FUNCTION identity.issue_enrollment(bytea, bigint) FROM tetsu_identity",
+                "REVOKE EXECUTE ON FUNCTION identity.issue_invite(bytea, bigint) FROM tetsu_identity",
             )
             .await
             .expect("revokes");
         assert_eq!(
-            working.enroll(kurt, &support::actor()).await.map(drop),
+            working.invite(kurt, &support::actor()).await.map(drop),
             Err(Error::Storage(
-                "permission denied for function issue_enrollment".to_string()
+                "permission denied for function issue_invite".to_string()
             ))
         );
     }

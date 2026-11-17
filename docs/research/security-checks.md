@@ -170,7 +170,7 @@ From the ASVS 5.0 chapters:
 - V6.3: "L2 applications must force the use of multi-factor authentication." 6.3.3 (L2) adds that
   relaxing it "requires a fully documented rationale and a comprehensive set of mitigating controls".
 - 6.2.12 (L2): breached-password checks. 6.3.1 (L1): brute-force controls. 6.3.5 and 6.3.7 (L3):
-  notify users of suspicious sign-ins and of changed credentials.
+  notify users of suspicious logins and of changed credentials.
 - 8.4.1 (L2): cross-tenant controls in multi-tenant applications. 8.2.2 (L1): object-level access.
 - Meeting a level means meeting all requirements of the levels below it. A minor ASVS release needs
   compliance re-checked; a patch release does not. IDs are best cited as `v<version>-<id>`.

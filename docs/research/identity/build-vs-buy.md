@@ -6,7 +6,7 @@ Pages read on 2026-11-11 unless noted. Claims marked "(prior knowledge, not re-r
 
 ### Takeaway
 
-At Tetsu's scale, WorkOS AuthKit costs nothing per user up to 1M MAU. Each SAML connection costs $125/mo, which a B2B customer's plan can pay for. That makes it the cheapest hosted choice with the least lock-in. Its hosted, redirect-based sign-in also fits server-rendered pages with no JS. Clerk and Stytch are cheap per user but built around JS components. Auth0's B2B plans cost hundreds to thousands of dollars a month from the start.
+At Tetsu's scale, WorkOS AuthKit costs nothing per user up to 1M MAU. Each SAML connection costs $125/mo, which a B2B customer's plan can pay for. That makes it the cheapest hosted choice with the least lock-in. Its hosted, redirect-based login also fits server-rendered pages with no JS. Clerk and Stytch are cheap per user but built around JS components. Auth0's B2B plans cost hundreds to thousands of dollars a month from the start.
 
 ### Cited Findings
 
@@ -41,7 +41,7 @@ At Tetsu's scale, WorkOS AuthKit costs nothing per user up to 1M MAU. Each SAML 
 **AWS Cognito:**
 
 - SAML/OIDC federated users: 50 MAU free, then $0.015/MAU on every tier. — [AWS Cognito pricing](https://aws.amazon.com/cognito/pricing)
-- Direct and social sign-in: Essentials is $0.015/MAU after 10,000 free, and Plus is $0.02/MAU with no free tier. — [Frontegg](https://frontegg.com/guides/aws-cognito-pricing); [SSOJet](https://ssojet.com/blog/how-does-the-pricing-of-aws-cognito-compare-to-its-alternatives). Contradicted by [Wring](https://wring.co/blog/aws-cognito-pricing-guide), which says 50,000 free. The AWS table was not confirmed directly.
+- Direct and social login: Essentials is $0.015/MAU after 10,000 free, and Plus is $0.02/MAU with no free tier. — [Frontegg](https://frontegg.com/guides/aws-cognito-pricing); [SSOJet](https://ssojet.com/blog/how-does-the-pricing-of-aws-cognito-compare-to-its-alternatives). Contradicted by [Wring](https://wring.co/blog/aws-cognito-pricing-guide), which says 50,000 free. The AWS table was not confirmed directly.
 - Cost estimate, using the 10k free figure: $0 at 1k and 10k, and about $1,350/mo at 100k on Essentials. Federated SAML users add $0.015 each.
 
 **Microsoft Entra External ID:**
@@ -77,7 +77,7 @@ Self-hosting adds a second always-on stateful service, which a lone maintainer o
 
 - Zitadel moved from Apache 2.0 to AGPL 3.0 with v3.0 (released around 2025-03-31). Older versions keep their old licenses, SDKs stay Apache 2.0, and a commercial license exists for anyone who cannot use AGPL. Using its APIs without modifying the code triggers no reciprocal duties. — [Zitadel blog](https://zitadel.com/blog/apache-to-agpl); [Zitadel license FAQ](https://zitadel.com/license-faq)
 - Ory acquired BoxyHQ in May 2025 and relaunched SAML Jackson as Ory Polis, an SSO service for SAML and OIDC IdPs. Jackson was Apache 2.0. An Ory Enterprise License for Polis adds features, 24/7 support and CVE fixes. On Ory Network, SAML needs the Enterprise tier. — [Ory blog](https://www.ory.com/blog/introducing-ory-polis-for-enterprise-single-sign-on); [boxyhq/jackson](https://github.com/boxyhq/jackson); [Ory Polis docs](https://ory.com/docs/polis); [Ory community archive](https://archive.ory.sh/t/26852713/anyone-know-the-ory-position-of-saml-support-for-self-hosted)
-- Rauthy is a Rust OIDC/OAuth2 IdP with MFA, FIDO2/WebAuthn passwordless sign-in and HA deployments. Passkey-only accounts must pass user verification. It has NLnet funding. — [Rauthy docs](https://sebadob.github.io/rauthy); [GitHub sebadob/rauthy](https://github.com/sebadob/rauthy); [NLnet](https://nlnet.nl/project/Rauthy/)
+- Rauthy is a Rust OIDC/OAuth2 IdP with MFA, FIDO2/WebAuthn passwordless login and HA deployments. Passkey-only accounts must pass user verification. It has NLnet funding. — [Rauthy docs](https://sebadob.github.io/rauthy); [GitHub sebadob/rauthy](https://github.com/sebadob/rauthy); [NLnet](https://nlnet.nl/project/Rauthy/)
 
 ### Inferences (prior knowledge, not re-read; verify on the repos)
 
@@ -113,14 +113,14 @@ Passkeys, email OTP, TOTP, Argon2 and OIDC (Google) can be built from mature, ma
 **Inferences:**
 
 - Reuse map (crate facts are prior knowledge; check versions on crates.io):
-  - `openidconnect` and `oauth2` (ramosbugs) are mature, widely used and handle the Google sign-in flow.
+  - `openidconnect` and `oauth2` (ramosbugs) are mature, widely used and handle the Google login flow.
   - `webauthn-rs` handles passkeys. It is an opinionated, safe API, and Kanidm uses it in production.
   - `argon2` (RustCrypto password-hashes) is needed only if passwords are offered at all.
   - `totp-rs` handles TOTP.
   - `tower-sessions`, backed by a Postgres store, or a small session table written in-house, handles sessions.
   - `axum-login` is optional. It is a thin glue layer, and a hand-written extractor may be simpler and easier to audit.
   - `passkey-rs` (1Password) is mostly an authenticator and client library, not a relying-party server. Prefer webauthn-rs for the server.
-- Minimum to build: user, credential and session tables; email OTP with hashed, single-use, expiring codes and rate limits; a passkey register and sign-in flow; a Google OIDC callback that checks state, nonce and PKCE; TOTP or a passkey as the second factor; recovery codes; session rotation on privilege change; and an audit log. That is roughly 2–4k lines of Rust plus tests. It sits in ASVS V6/V7 territory and is Tier 1 under ADR-0005.
+- Minimum to build: user, credential and session tables; email OTP with hashed, single-use, expiring codes and rate limits; a passkey register and login flow; a Google OIDC callback that checks state, nonce and PKCE; TOTP or a passkey as the second factor; recovery codes; session rotation on privilege change; and an audit log. That is roughly 2–4k lines of Rust plus tests. It sits in ASVS V6/V7 territory and is Tier 1 under ADR-0005.
 - Email OTP and magic links by themselves are not MFA under ASVS 5.0 L2. MFA for every account means a passkey with user verification, or OTP plus TOTP or a passkey.
 - Passkeys work without JS. Doubtful: the WebAuthn API is JS-only (`navigator.credentials`). Passkeys therefore need a small same-origin script, which a strict CSP can allow with `script-src 'self'`. That is a real conflict with Tetsu's "no JavaScript yet" stance and is worth raising.
 
@@ -145,7 +145,7 @@ Hosted identity concentrates risk in the vendor's support and ops: Okta's 2023 s
 
 **Inferences:**
 
-- With a hosted IdP behind a redirect and Tetsu's own session cookie, an outage at the IdP blocks only new sign-ins. Users who are already signed in keep working. Clerk's model of short-lived tokens refreshed every minute couples every request to the vendor.
+- With a hosted IdP behind a redirect and Tetsu's own session cookie, an outage at the IdP blocks only new logins. Users who are already logged in keep working. Clerk's model of short-lived tokens refreshed every minute couples every request to the vendor.
 - Lock-in comes mainly from user IDs and stored credentials. Keep Tetsu's own user ID as the primary key and store the provider's subject as an external identity row.
 - Passkeys are bound to the relying-party ID (the domain), so they can move between vendors only when the domain is yours. A vendor-hosted domain, such as WorkOS without the $99 custom domain, strands passkeys on that domain.
 
@@ -169,7 +169,7 @@ Hybrid is the strongest fit. Build passkeys, email OTP, TOTP and Google OIDC in 
 
 - Port shape: an `IdentityProvider`-style port with adapters for "local" (passkey, OTP, TOTP), "oidc" (Google, and any broker), and later "saml-broker" through the same OIDC adapter. The broker choice stays reversible.
 - Mapping the three realms:
-  - Operators: local passkeys only, with no social sign-in, plus an optional SAML connection for the operator org later.
+  - Operators: local passkeys only, with no social login, plus an optional SAML connection for the operator org later.
   - Business staff: local plus Google, with SAML per business through the broker, and one person linked to many businesses through memberships.
   - Per-business customers: local passkey or email OTP, separate cookie scope and session table, no SAML.
 - WorkOS as broker costs $0 until the first SAML customer and needs no ops. Polis costs one more Render service plus Postgres or another DB, but avoids per-connection fees and a US vendor dependency.

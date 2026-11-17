@@ -2,7 +2,7 @@
 
 Research on 2026-11-14 for [#110](https://github.com/heavymedl-labs/tetsu/issues/110), steps 1 and 2 (commit
 `78424fb`), against current standards, frameworks, and browser behavior. It feeds step 3 (the enrollment command),
-step 4 (passkey sign-in and the operator pages), and an addendum to
+step 4 (passkey login and the operator pages), and an addendum to
 [ADR-0048](../../adr/0048-sign-in-design.md) for ASVS 5.0.0 items 7.1.2, 7.4.2, 7.4.3, 7.4.5, and 7.5.2.
 
 ## Summary
@@ -12,7 +12,7 @@ Tetsu's design matches or beats current practice almost everywhere. One real bug
 `\u{2000}__Host-tetsu-operator` reads as the real one and reopens the prefix bypass PortSwigger published in
 September 2025. Beyond that, three changes would bring the design in line with where practice moved in 2025 and 2026.
 Add a `Sec-Fetch-Site` check beside the Origin check. Mask the form token on each response, or retire it. Drop
-ADR-0048's pre-session record, since the Origin check already guards sign-in forms. Storage, expiry, and cookie
+ADR-0048's pre-session record, since the Origin check already guards login forms. Storage, expiry, and cookie
 attributes need no change. The ASVS session controls are missing, but the migration has not been applied anywhere,
 so they are cheap to prepare now.
 
@@ -55,12 +55,12 @@ with a fresh 32-byte pad, unmask, and compare in constant time. The other honest
 Go and Rails 8.2 do, once `Sec-Fetch-Site` lands. This review recommends masking. It keeps ADR-0048's two-control
 design and costs less than an ADR change.
 
-**Sign-in forms need no pre-session record.** OWASP still describes a pre-session token for login forms
+**Login forms need no pre-session record.** OWASP still describes a pre-session token for login forms
 ([OWASP CSRF](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html)).
 But the Origin check needs no session, so it already guards every unauthenticated POST. So does a `Sec-Fetch-Site`
 check, and Go and Rails rely on this ([rails/rails#56350](https://github.com/rails/rails/pull/56350)). A passkey
-sign-in also answers a single-use challenge that Tetsu stores (ADR-0047). ADR-0048's "short-lived pre-session record
-holds the token for forms before sign-in" adds state without adding a signal.
+login also answers a single-use challenge that Tetsu stores (ADR-0047). ADR-0048's "short-lived pre-session record
+holds the token for forms before login" adds state without adding a signal.
 
 ## Session storage and expiry
 
@@ -98,7 +98,7 @@ once, before any lock wait. As its comment says, a request is judged as of its o
 **Cleanup is better than most and leaves one gap.** Django and Kratos ship no automatic purge and tell you to
 schedule one ([Django sessions](https://docs.djangoproject.com/en/dev/topics/http/sessions/),
 [Kratos cleanup](https://www.ory.com/docs/kratos/cli/kratos-cleanup-sql)). Tetsu deletes a spent session when it is
-next presented, and starting a session deletes that operator's spent ones. An operator who never signs in again
+next presented, and starting a session deletes that operator's spent ones. An operator who never logs in again
 leaves rows behind. They hold only a hash and timestamps, so this is a retention question, not a security one. It
 matters more once rows carry a device label.
 
@@ -106,7 +106,7 @@ matters more once rows carry a device label.
 
 **`SameSite=Lax` with an explicit attribute is right.** OWASP prefers Strict but treats SameSite as defense in depth
 only ([OWASP sessions](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html)). Strict
-makes every emailed link land signed out. RFC 6265bis's remedy is a second Strict cookie for writes
+makes every emailed link land logged out. RFC 6265bis's remedy is a second Strict cookie for writes
 ([6265bis-19](https://www.ietf.org/archive/id/draft-ietf-httpbis-rfc6265bis-19.txt)). Chrome's two-minute
 "Lax+POST" exception applies only to cookies with no SameSite attribute, so the existing test that pins the
 attribute is worth keeping. `onrender.com` is on the Public Suffix List, so no other Render customer can toss cookies
@@ -128,7 +128,7 @@ server. A browser stores `\u{2000}__Host-name` as an ordinary cookie with no pre
 Unicode whitespace reads it as the protected name. Django and ASP.NET are affected, and Safari still accepts U+0085
 and U+00A0 in names ([PortSwigger Cookie Chaos](https://portswigger.net/research/cookie-chaos-how-to-bypass-host-and-secure-cookie-prefixes)).
 Rust's `str::trim` strips Unicode White_Space, and `token_in` calls `pair.trim()`. If the page adapter decodes the
-header as UTF-8, a planted cookie reaches `token_in` as the real one. The duplicate rule turns this into a sign-out
+header as UTF-8, a planted cookie reaches `token_in` as the real one. The duplicate rule turns this into a logout
 when a real cookie is present. With none present, it enables session fixation: the operator would act inside the
 attacker's session. HTTP's cookie grammar trims only space and tab, and `http::HeaderValue::to_str` refuses any byte
 outside visible ASCII, so fixing the trim and the adapter together closes it.
@@ -171,7 +171,7 @@ NIST requires a notice when an authenticator is added but no session termination
 ([NIST events](https://pages.nist.gov/800-63-4/sp800-63b/events/)).
 
 **Session lists show a device label, place, and times.** Keycloak, Linear, Kratos, and Better Auth show the browser
-and OS, IP or coarse location, last active, sign-in date, and a "current" badge, with per-row revoke and "end all
+and OS, IP or coarse location, last active, login date, and a "current" badge, with per-row revoke and "end all
 others" ([Linear](https://linear.app/docs/security-and-access.md),
 [Ory sessions](https://www.ory.com/docs/kratos/session-management/list-revoke-get-sessions)). IP addresses are
 personal data, so store only what the list shows, coarsened, and delete it with the session. Kratos keeps users'
@@ -212,7 +212,7 @@ pattern: functions that derive the operator from the presented hash and take no 
 3. **Re-enrollment after lost passkeys ends every session of that operator.** It is recovery, and recovery implies
    possible compromise.
 
-### Step 4: passkey sign-in and the operator pages
+### Step 4: passkey login and the operator pages
 
 1. **Read cookies with `HeaderMap::get_all(COOKIE)` and `HeaderValue::to_str`,** skipping any header that fails.
    Never use `get`, and never decode lossily.
@@ -220,14 +220,14 @@ pattern: functions that derive the operator from the presented hash and take no 
    to the Origin check, which already refuses a missing Origin.
 3. **Apply the Origin and Fetch Metadata checks to every unsafe request,** including passkey start and finish, which
    have no session. Use no pre-session token.
-4. **On sign-in, end any session the browser presented,** then start a new one (7.2.4). Sign-out stays a POST, and
-    every signed-in page shows it (7.4.4).
+4. **On login, end any session the browser presented,** then start a new one (7.2.4). Logout stays a POST, and
+    every logged-in page shows it (7.4.4).
 5. **Serve pages carrying a form token with `Cache-Control: no-store`,** and keep every GET free of state changes,
     since Lax sends the cookie on cross-site navigations.
 6. **After adding or removing a passkey, end the operator's other sessions** and keep the current one (7.4.3).
     #110 allows two passkeys, so adding the second one triggers this.
 7. **A "your sessions" page** lists live sessions with start, last seen, a coarse device label, and a current badge.
-    It ends one or all others after a fresh passkey sign-in, using ADR-0048's 10-minute freshness (7.5.2). If it does
+    It ends one or all others after a fresh passkey login, using ADR-0048's 10-minute freshness (7.5.2). If it does
     not fit #110, open it as a follow-up before slice 9's Level 2 review.
 
 ### The ADR-0048 addendum

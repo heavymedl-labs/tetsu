@@ -25,7 +25,7 @@ No managed Postgres host, Neon included, restores a single tenant. The common pa
 - For Tetsu on Neon, the workable path is: create a branch at the timestamp before the damage (or use Time Travel to read it), then copy one tenant's rows from that branch into the live branch with `WHERE tenant_id = $1`, table by table in foreign key order, inside one transaction. Never use instant restore for a one-tenant problem, because it rewinds every tenant.
 - Foreign keys: copy parents before children, or defer constraints for the transaction. Rows in the side copy may reference rows the live database has since deleted, or vice versa, so the copy step needs a merge policy (replace the tenant's rows entirely, or upsert by id).
 - Conflicting IDs: with one shared database and bigint identity columns, restored rows keep their original ids, which cannot collide with new rows because the sequence only moves forward. Collisions appear only when rows move between databases with separate sequences (see the ID section). Inserting explicit ids into a `GENERATED ALWAYS` identity column needs `OVERRIDING SYSTEM VALUE` (PostgreSQL INSERT syntax; not re-fetched in this session).
-- Rows that reference other tenants, and global tables (accounts, sign-in identities, platform settings), are the parts a tenant-filtered copy cannot restore cleanly. Keep them few, and keep tenant data from pointing into them except by stable ids.
+- Rows that reference other tenants, and global tables (accounts, login identities, platform settings), are the parts a tenant-filtered copy cannot restore cleanly. Keep them few, and keep tenant data from pointing into them except by stable ids.
 - Soft deletes and history (audit) tables shrink the need for restores: many "undo" cases become an update rather than a database operation. They cost storage and query complexity, and they do not help after a bad migration or bulk update unless history rows capture the old values.
 - Derive the table list from the catalog (every table with a `tenant_id` column) and test that it matches a declared list, so a new table cannot be silently skipped. AWS's hard-coded list is the failure mode to avoid.
 
@@ -148,7 +148,7 @@ Moves break on data that is not keyed by tenant: global accounts, cross-tenant l
 
 **Inferences::**
 
-- Classify every table now as tenant-owned (has `tenant_id`, moves with the tenant), global (lives in a global store, read by all cells), or forbidden (mixes tenants). For Tetsu, likely global: sign-in identities and people who book at several studios, the tenant routing table, plans and billing catalog. Tenant-owned: services, staff, schedules, bookings, clients as seen by a business.
+- Classify every table now as tenant-owned (has `tenant_id`, moves with the tenant), global (lives in a global store, read by all cells), or forbidden (mixes tenants). For Tetsu, likely global: login identities and people who book at several studios, the tenant routing table, plans and billing catalog. Tenant-owned: services, staff, schedules, bookings, clients as seen by a business.
 - A person who books at two businesses in different cells is the hardest case. Keep the global identity separate and give each tenant its own client row that references the global id, never a foreign key into another tenant's rows.
 - Queues: put `tenant_id` on every job so jobs can be drained or moved. Pause a tenant's jobs during the cutover.
 - Search indexes and caches: key by tenant and rebuild from the database after a move rather than copying.

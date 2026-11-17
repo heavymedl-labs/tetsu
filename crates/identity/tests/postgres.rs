@@ -1,11 +1,11 @@
-//! Operators and their sessions in Postgres (ADR-0040, ADR-0047, ADR-0048), signed in as the application role, as
+//! Operators and their sessions in Postgres (ADR-0040, ADR-0047, ADR-0048), logged in as the application role, as
 //! `tetsu serve` is. Postgres's clock is the only one a session follows, so tests move a stored session's times
 //! rather than pass a time in. Their shared setup is in `common`.
 
 use std::time::Duration;
 
 use tetsu_identity::{
-    Change, Error, ForChange, Identity, Origins, Realm, RelyingParty, SessionToken, SignOut,
+    Change, Error, ForChange, Identity, Logout, Origins, Realm, RelyingParty, SessionToken,
     postgres_store,
 };
 use tetsu_postgres::test_support::TestDatabase;
@@ -114,7 +114,7 @@ mod support {
 #[cfg(test)]
 mod common;
 
-use common::{actor, migrated, name, ready, signed_in, with_kurt};
+use common::{actor, logged_in, migrated, name, ready, with_kurt};
 use support::{
     as_admin, cookie, count, idle_seconds, origins, replaced_use_session, stored, text,
     use_session_with_wrong,
@@ -147,7 +147,7 @@ async fn identity_follows_the_isolation_rules() {
 #[tokio::test]
 async fn a_started_session_is_found_by_its_token_and_records_each_request() {
     let (database, operators, kurt) = with_kurt().await;
-    let token = signed_in(&database, kurt).await;
+    let token = logged_in(&database, kurt).await;
     assert!(
         stored(
             &database,
@@ -205,11 +205,11 @@ async fn each_operator_gets_their_own_id_and_a_random_user_handle() {
     assert_eq!(handles.try_get::<_, i64>("handles").expect("reads"), 2);
 }
 
-/// Only the token's SHA-256 hash is stored, so the stored row cannot sign anyone in (ADR-0047).
+/// Only the token's SHA-256 hash is stored, so the stored row cannot log anyone in (ADR-0047).
 #[tokio::test]
 async fn only_the_tokens_hash_is_stored() {
     let (database, _, kurt) = with_kurt().await;
-    let token = signed_in(&database, kurt).await;
+    let token = logged_in(&database, kurt).await;
     let text = token.to_text();
     assert!(
         stored(
@@ -225,7 +225,7 @@ async fn only_the_tokens_hash_is_stored() {
 #[tokio::test]
 async fn an_idle_session_ends_and_is_removed() {
     let (database, operators, kurt) = with_kurt().await;
-    let token = signed_in(&database, kurt).await;
+    let token = logged_in(&database, kurt).await;
     as_admin(
         &database,
         &format!(
@@ -261,7 +261,7 @@ async fn an_idle_session_ends_and_is_removed() {
 #[tokio::test]
 async fn a_busy_session_still_ends_at_its_absolute_limit() {
     let (database, operators, kurt) = with_kurt().await;
-    let token = signed_in(&database, kurt).await;
+    let token = logged_in(&database, kurt).await;
     as_admin(&database, "UPDATE identity.sessions SET ends_at = now()").await;
     assert_eq!(operators.session([text(&token).as_str()]).await, Ok(None));
     assert!(
@@ -274,7 +274,7 @@ async fn a_busy_session_still_ends_at_its_absolute_limit() {
 #[tokio::test]
 async fn the_last_request_never_moves_back() {
     let (database, operators, kurt) = with_kurt().await;
-    let token = signed_in(&database, kurt).await;
+    let token = logged_in(&database, kurt).await;
     as_admin(
         &database,
         "UPDATE identity.sessions SET last_seen_at = now() + interval '1 minute'",
@@ -297,7 +297,7 @@ async fn requests_at_the_same_moment_never_end_a_live_session() {
         .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
-    let token = text(&signed_in(&database, kurt).await);
+    let token = text(&logged_in(&database, kurt).await);
     let requests: Vec<_> = (0..16)
         .map(|_| {
             let (operators, token) = (operators.clone(), token.clone());
@@ -322,18 +322,18 @@ async fn a_token_no_session_holds_finds_none() {
     }
 }
 
-/// Signing out ends the session on the server, so its token signs no one in again; as a change of state, it passes
+/// Logging out ends the session on the server, so its token logs no one in again; as a change of state, it passes
 /// the origin and form-token checks first, and one that fails them ends nothing (ADR-0048).
 #[tokio::test]
-async fn signing_out_ends_the_session_once_its_checks_pass() {
+async fn logging_out_ends_the_session_once_its_checks_pass() {
     let (database, operators, kurt) = with_kurt().await;
-    let token = signed_in(&database, kurt).await;
+    let token = logged_in(&database, kurt).await;
     let (jar, form) = (text(&token), token.form_token().expect("a form token"));
-    let sign_out = |origin| Change::new([jar.as_str()], origin, None, &form);
-    let from_elsewhere = sign_out(Some("https://evil.example"));
+    let logout = |origin| Change::new([jar.as_str()], origin, None, &form);
+    let from_elsewhere = logout(Some("https://evil.example"));
     assert_eq!(
         operators.end_session(&origins(), &from_elsewhere).await,
-        Ok(SignOut::Refused)
+        Ok(Logout::Refused)
     );
     assert!(
         operators
@@ -343,30 +343,30 @@ async fn signing_out_ends_the_session_once_its_checks_pass() {
             .is_some(),
         "not ended"
     );
-    let own = sign_out(Some(ORIGIN));
+    let own = logout(Some(ORIGIN));
     assert_eq!(
         operators.end_session(&origins(), &own).await,
-        Ok(SignOut::Ended)
+        Ok(Logout::Ended)
     );
     assert_eq!(operators.session([jar.as_str()]).await, Ok(None));
     assert_eq!(
         operators.end_session(&origins(), &own).await,
-        Ok(SignOut::NothingToEnd),
+        Ok(Logout::NothingToEnd),
         "nothing left to end"
     );
 }
 
-/// Signing out ends that session alone; the operator's others go on.
+/// Logging out ends that session alone; the operator's others go on.
 #[tokio::test]
-async fn signing_out_leaves_the_operators_other_sessions() {
+async fn logging_out_leaves_the_operators_other_sessions() {
     let (database, operators, kurt) = with_kurt().await;
-    let token = signed_in(&database, kurt).await;
-    let other = signed_in(&database, kurt).await;
+    let token = logged_in(&database, kurt).await;
+    let other = logged_in(&database, kurt).await;
     let (jar, form) = (text(&token), token.form_token().expect("a form token"));
-    let sign_out = Change::new([jar.as_str()], Some(ORIGIN), None, &form);
+    let logout = Change::new([jar.as_str()], Some(ORIGIN), None, &form);
     assert_eq!(
-        operators.end_session(&origins(), &sign_out).await,
-        Ok(SignOut::Ended)
+        operators.end_session(&origins(), &logout).await,
+        Ok(Logout::Ended)
     );
     assert!(
         operators
@@ -377,7 +377,7 @@ async fn signing_out_leaves_the_operators_other_sessions() {
     );
 }
 
-/// Only a passkey sign-in starts a session, inside Identity's own functions, so Identity's role cannot start one
+/// Only a passkey login starts a session, inside Identity's own functions, so Identity's role cannot start one
 /// directly: no bug in the application can make a session that may add a passkey (ADR-0048).
 #[tokio::test]
 async fn identitys_role_cannot_start_a_session() {
@@ -420,12 +420,12 @@ async fn identitys_role_cannot_list_sessions() {
     );
 }
 
-/// A session in another realm is never an operator's, so a token from another realm's cookie signs no one in as an
+/// A session in another realm is never an operator's, so a token from another realm's cookie logs no one in as an
 /// operator, who reaches every business; nor does the operator realm extend or end it (ADR-0040).
 #[tokio::test]
 async fn another_realms_session_is_neither_used_nor_ended() {
     let (database, operators, kurt) = with_kurt().await;
-    let token = signed_in(&database, kurt).await;
+    let token = logged_in(&database, kurt).await;
     as_admin(
         &database,
         "ALTER TABLE identity.sessions DROP CONSTRAINT sessions_realm_check;
@@ -434,10 +434,10 @@ async fn another_realms_session_is_neither_used_nor_ended() {
     .await;
     assert_eq!(operators.session([text(&token).as_str()]).await, Ok(None));
     let (jar, form) = (text(&token), token.form_token().expect("a form token"));
-    let sign_out = Change::new([jar.as_str()], Some(ORIGIN), None, &form);
+    let logout = Change::new([jar.as_str()], Some(ORIGIN), None, &form);
     assert_eq!(
-        operators.end_session(&origins(), &sign_out).await,
-        Ok(SignOut::NothingToEnd),
+        operators.end_session(&origins(), &logout).await,
+        Ok(Logout::NothingToEnd),
         "not this realm's to end"
     );
     assert!(
@@ -515,21 +515,21 @@ async fn a_create_answer_that_cannot_be_read_is_a_storage_failure() {
 async fn a_stale_cached_statement_is_temporary_and_cleared() {
     let (database, operators) = migrated().await;
     let party = RelyingParty::new(ORIGIN).expect("a relying party");
-    operators.begin_sign_in(&party).await.expect("begins");
+    operators.begin_login(&party).await.expect("begins");
     as_admin(
         &database,
-        "DROP FUNCTION identity.begin_sign_in(bytea, jsonb);
-         CREATE FUNCTION identity.begin_sign_in(bytea, jsonb)
+        "DROP FUNCTION identity.begin_login(bytea, jsonb);
+         CREATE FUNCTION identity.begin_login(bytea, jsonb)
          RETURNS int LANGUAGE sql AS 'SELECT 1';
-         GRANT EXECUTE ON FUNCTION identity.begin_sign_in(bytea, jsonb) TO tetsu_identity",
+         GRANT EXECUTE ON FUNCTION identity.begin_login(bytea, jsonb) TO tetsu_identity",
     )
     .await;
     assert!(matches!(
-        operators.begin_sign_in(&party).await,
+        operators.begin_login(&party).await,
         Err(Error::Unavailable(why)) if why.starts_with(tetsu_postgres::STALE)
     ));
     assert!(
-        operators.begin_sign_in(&party).await.is_ok(),
+        operators.begin_login(&party).await.is_ok(),
         "the next request succeeds"
     );
 }
@@ -554,7 +554,7 @@ async fn an_operator_id_of_the_wrong_type_is_an_error() {
     as_admin(
         &database,
         "ALTER TABLE identity.sessions DROP CONSTRAINT sessions_operator_id_fkey;
-         ALTER TABLE identity.enrollments DROP CONSTRAINT enrollments_operator_id_fkey;
+         ALTER TABLE identity.invites DROP CONSTRAINT invites_operator_id_fkey;
          ALTER TABLE identity.passkeys DROP CONSTRAINT passkeys_operator_id_fkey;
          ALTER TABLE identity.ceremonies DROP CONSTRAINT ceremonies_operator_id_fkey;
          DROP TABLE identity.operators;
@@ -589,12 +589,12 @@ async fn a_transaction_that_cannot_begin_is_an_error() {
 #[tokio::test]
 async fn a_statement_that_cannot_be_prepared_is_an_error() {
     let (database, operators, kurt) = with_kurt().await;
-    let token = signed_in(&database, kurt).await;
+    let token = logged_in(&database, kurt).await;
     let (jar, form) = (text(&token), token.form_token().expect("a form token"));
-    let sign_out = Change::new([jar.as_str()], Some(ORIGIN), None, &form);
+    let logout = Change::new([jar.as_str()], Some(ORIGIN), None, &form);
     as_admin(&database, "DROP FUNCTION identity.end_session(bytea, text)").await;
     assert!(matches!(
-        operators.end_session(&origins(), &sign_out).await,
+        operators.end_session(&origins(), &logout).await,
         Err(Error::Storage(_))
     ));
     as_admin(&database, "DROP FUNCTION identity.use_session(bytea, text)").await;
@@ -603,16 +603,16 @@ async fn a_statement_that_cannot_be_prepared_is_an_error() {
         Err(Error::Storage(_))
     ));
     assert!(matches!(
-        operators.session_for_change(&origins(), &sign_out).await,
+        operators.session_for_change(&origins(), &logout).await,
         Err(Error::Storage(_))
     ));
 }
 
-/// A commit Postgres refuses was rolled back, so signing out ended nothing, and the refusal is never worth retrying.
+/// A commit Postgres refuses was rolled back, so logging out ended nothing, and the refusal is never worth retrying.
 #[tokio::test]
 async fn a_refused_commit_ends_no_session() {
     let (database, operators, kurt) = with_kurt().await;
-    let token = signed_in(&database, kurt).await;
+    let token = logged_in(&database, kurt).await;
     as_admin(
         &database,
         "CREATE FUNCTION identity.refuse() RETURNS trigger LANGUAGE plpgsql
@@ -645,8 +645,8 @@ async fn a_refused_commit_ends_no_session() {
 #[tokio::test]
 async fn a_change_needs_the_realms_origin_and_the_sessions_form_token() {
     let (database, operators, kurt) = with_kurt().await;
-    let token = signed_in(&database, kurt).await;
-    let other = signed_in(&database, kurt).await;
+    let token = logged_in(&database, kurt).await;
+    let other = logged_in(&database, kurt).await;
     as_admin(
         &database,
         "UPDATE identity.sessions SET last_seen_at = now() - interval '10 minutes'",
@@ -698,7 +698,7 @@ async fn a_change_with_a_malformed_cookie_finds_no_session() {
     );
     assert_eq!(
         operators.end_session(&origins(), &malformed).await,
-        Ok(SignOut::Refused)
+        Ok(Logout::Refused)
     );
 }
 
@@ -711,7 +711,7 @@ async fn requests_at_the_same_moment_never_revive_a_spent_session() {
         .create(&name("Kurt Medley"), &actor())
         .await
         .expect("creates");
-    let token = text(&signed_in(&database, kurt).await);
+    let token = text(&logged_in(&database, kurt).await);
     as_admin(
         &database,
         &format!(
@@ -733,7 +733,7 @@ async fn requests_at_the_same_moment_never_revive_a_spent_session() {
 }
 
 /// Starting a session removes that operator's spent sessions, spent by either limit, and nothing else: not their
-/// live ones, so signing in elsewhere signs no one out, and not another operator's.
+/// live ones, so logging in elsewhere logs no one out, and not another operator's.
 #[tokio::test]
 async fn starting_a_session_removes_only_the_operators_spent_ones() {
     let (database, operators, kurt) = with_kurt().await;
@@ -742,7 +742,7 @@ async fn starting_a_session_removes_only_the_operators_spent_ones() {
         .await
         .expect("creates");
     for operator in [kurt, kurt, kurt, ana] {
-        signed_in(&database, operator).await;
+        logged_in(&database, operator).await;
     }
     as_admin(
         &database,
@@ -763,7 +763,7 @@ async fn starting_a_session_removes_only_the_operators_spent_ones() {
         ),
     )
     .await;
-    signed_in(&database, kurt).await;
+    logged_in(&database, kurt).await;
     assert_eq!(
         count(&database, &format!("operator_id = {}", kurt.get())).await,
         2,
@@ -772,7 +772,7 @@ async fn starting_a_session_removes_only_the_operators_spent_ones() {
     assert_eq!(
         count(&database, &format!("operator_id = {}", ana.get())).await,
         1,
-        "another operator's sessions are not this sign-in's to remove"
+        "another operator's sessions are not this login's to remove"
     );
 }
 
@@ -781,7 +781,7 @@ async fn starting_a_session_removes_only_the_operators_spent_ones() {
 #[tokio::test]
 async fn a_spent_session_refreshed_meanwhile_is_not_removed() {
     let (database, operators, kurt) = with_kurt().await;
-    let token = text(&signed_in(&database, kurt).await);
+    let token = text(&logged_in(&database, kurt).await);
     as_admin(
         &database,
         &format!(
@@ -814,21 +814,21 @@ async fn a_spent_session_refreshed_meanwhile_is_not_removed() {
     assert_eq!(count(&database, "true").await, 1, "but did not remove it");
 }
 
-/// Signing out a session that had already ended removes it, and says there was nothing to end.
+/// Logging out a session that had already ended removes it, and says there was nothing to end.
 #[tokio::test]
-async fn signing_out_a_spent_session_has_nothing_to_end() {
+async fn logging_out_a_spent_session_has_nothing_to_end() {
     let (database, operators, kurt) = with_kurt().await;
-    let token = signed_in(&database, kurt).await;
+    let token = logged_in(&database, kurt).await;
     as_admin(&database, "UPDATE identity.sessions SET ends_at = now()").await;
     let (jar, form) = (text(&token), token.form_token().expect("a form token"));
-    let sign_out = Change::new([jar.as_str()], Some(ORIGIN), None, &form);
+    let logout = Change::new([jar.as_str()], Some(ORIGIN), None, &form);
     assert_eq!(
-        operators.session_for_change(&origins(), &sign_out).await,
+        operators.session_for_change(&origins(), &logout).await,
         Ok(ForChange::NoSession),
         "the checks pass, but the session has ended"
     );
-    signed_in(&database, kurt).await;
-    let token = signed_in(&database, kurt).await;
+    logged_in(&database, kurt).await;
+    let token = logged_in(&database, kurt).await;
     as_admin(
         &database,
         &format!(
@@ -840,10 +840,10 @@ async fn signing_out_a_spent_session_has_nothing_to_end() {
     )
     .await;
     let (jar, form) = (text(&token), token.form_token().expect("a form token"));
-    let sign_out = Change::new([jar.as_str()], Some(ORIGIN), None, &form);
+    let logout = Change::new([jar.as_str()], Some(ORIGIN), None, &form);
     assert_eq!(
-        operators.end_session(&origins(), &sign_out).await,
-        Ok(SignOut::NothingToEnd)
+        operators.end_session(&origins(), &logout).await,
+        Ok(Logout::NothingToEnd)
     );
     assert_eq!(
         count(&database, "true").await,
@@ -856,7 +856,7 @@ async fn signing_out_a_spent_session_has_nothing_to_end() {
 #[tokio::test]
 async fn an_end_that_returns_nothing_ended_nothing() {
     let (database, operators, kurt) = with_kurt().await;
-    let token = signed_in(&database, kurt).await;
+    let token = logged_in(&database, kurt).await;
     as_admin(
         &database,
         "DROP FUNCTION identity.end_session(bytea, text);
@@ -866,10 +866,10 @@ async fn an_end_that_returns_nothing_ended_nothing() {
     )
     .await;
     let (jar, form) = (text(&token), token.form_token().expect("a form token"));
-    let sign_out = Change::new([jar.as_str()], Some(ORIGIN), None, &form);
+    let logout = Change::new([jar.as_str()], Some(ORIGIN), None, &form);
     assert_eq!(
-        operators.end_session(&origins(), &sign_out).await,
-        Ok(SignOut::NothingToEnd)
+        operators.end_session(&origins(), &logout).await,
+        Ok(Logout::NothingToEnd)
     );
 }
 
@@ -878,7 +878,7 @@ async fn an_end_that_returns_nothing_ended_nothing() {
 async fn each_session_has_a_random_public_id() {
     let (database, _, kurt) = with_kurt().await;
     for _ in 0..3 {
-        signed_in(&database, kurt).await;
+        logged_in(&database, kurt).await;
     }
     assert_eq!(count(&database, "true").await, 3);
     assert!(
@@ -986,7 +986,7 @@ async fn a_change_whose_event_cannot_be_recorded_is_undone() {
 #[tokio::test]
 async fn a_disabled_operators_session_is_refused_and_removed() {
     let (database, operators, kurt) = with_kurt().await;
-    let token = signed_in(&database, kurt).await;
+    let token = logged_in(&database, kurt).await;
     as_admin(
         &database,
         "UPDATE identity.operators SET disabled_at = now()",

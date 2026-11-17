@@ -44,7 +44,7 @@ check, not by the service.
 ## Consequences
 
 - Codecov's free Developer plan is one user with unlimited private repositories and 250 private uploads a month,
-  read on third-party listings on 2026-11-13, to confirm at sign-up. CI runs on demand
+  read on third-party listings on 2026-11-13, to confirm at signup. CI runs on demand
   ([ADR-0023](0023-ci-on-demand.md)), a few times a day at most, so this fits. A second contributor needs a paid seat.
 - Codecov stores coverage reports: file paths and which lines ran. It does not store source code. It shows code by
   fetching it from GitHub when someone views a report, through its GitHub App, so installing that app grants

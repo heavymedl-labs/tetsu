@@ -59,6 +59,6 @@ Option 1 meets every criterion, is the common default, and needs one layer and t
 each request. Brotli at high quality is slow, so the layer's quality must stay moderate, which the budget test
 shows is enough.
 
-One risk comes with sign-in ([#20](https://github.com/heavymedl-labs/tetsu/issues/20)): compressing a response
+One risk comes with login ([#20](https://github.com/heavymedl-labs/tetsu/issues/20)): compressing a response
 that holds a secret beside text an attacker controls can leak the secret (the BREACH attack). Today's pages hold no
 secret. A page that does must turn compression off or mask the secret.

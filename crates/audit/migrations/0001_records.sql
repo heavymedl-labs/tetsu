@@ -1,6 +1,6 @@
 -- The audit record (ADR-0045): one row per event, kept per tenant, or
 -- globally for events that belong to no business, such as an operator's
--- sign-in. Rows are only ever added.
+-- login. Rows are only ever added.
 SET lock_timeout = '5s';
 SET statement_timeout = '30s';
 

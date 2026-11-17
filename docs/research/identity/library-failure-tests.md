@@ -1,14 +1,14 @@
-# Sign-in libraries: failure tests
+# Login libraries: failure tests
 
 Step 6 of [ADR-0010](../../adr/0010-evaluating-technology.md) for [ADR-0047](../../adr/0047-sign-in-libraries.md),
 run on 2026-11-14 for [#109](https://github.com/heavymedl-labs/tetsu/issues/109): webauthn-rs 0.6.2 and openidconnect
-4.1.0 against hostile sign-ins, in a throwaway crate on Rust 1.99.1. The spike's code is gone; slice 5 rewrites the
+4.1.0 against hostile logins, in a throwaway crate on Rust 1.99.1. The spike's code is gone; slice 5 rewrites the
 tests that matter in Tetsu.
 
 ## Method
 
 - **Passkeys:** 1Password's software authenticator (passkey-rs 0.6.0, with its pure-Rust crypto) made real
-  registrations and sign-ins against a webauthn-rs relying party for `tetsu.test`, with user verification required.
+  registrations and logins against a webauthn-rs relying party for `tetsu.test`, with user verification required.
   A hostile client was played by editing the options the server sent before the device saw them, and by writing the
   signed client data by hand so the device signed for any origin. passkey-rs writes binary fields as number arrays
   unless its `serialize_bytes_as_base64_string` feature is on; with it, its JSON matched webauthn-rs's as a
@@ -21,17 +21,17 @@ tests that matter in Tetsu.
 | Attack | Result |
 | --- | --- |
 | Registration where the device skipped user verification | Refused: `UserNotVerified` |
-| Sign-in where the device skipped user verification | Refused: `UserNotVerified` |
+| Login where the device skipped user verification | Refused: `UserNotVerified` |
 | Signed for another port (`:8443`), a subdomain, plain `http`, a longer domain, or a lookalike punycode domain | Refused: `InvalidRPOrigin` |
-| A sign-in replayed against the challenge it answered | **Accepted** |
-| The same sign-in against a fresh challenge | Refused: `MismatchedChallenge` |
+| A login replayed against the challenge it answered | **Accepted** |
+| The same login against a fresh challenge | Refused: `MismatchedChallenge` |
 | A cloned device whose signature counter is behind the stored one | Refused: `CredentialPossibleCompromise` |
-| A synced passkey whose counter is always 0, signing in three times | Accepted each time |
+| A synced passkey whose counter is always 0, logging in three times | Accepted each time |
 | One account's passkey offered for another account | Refused: `CredentialNotFound` |
-| The same person's passkey from another business, offered in a discoverable sign-in and finished with this business's keys | Refused: `CredentialNotFound` |
+| The same person's passkey from another business, offered in a discoverable login and finished with this business's keys | Refused: `CredentialNotFound` |
 | The same, finished with the keys of the account its user handle names, wherever that account is | Accepted |
 | A Google token for another client | Refused: `InvalidAudience` |
-| A Google token for another sign-in attempt | Refused: `InvalidNonce` |
+| A Google token for another login attempt | Refused: `InvalidNonce` |
 | A Google token from a lookalike or `http` issuer | Refused: `InvalidIssuer` |
 | An expired Google token | Refused: `Expired` |
 | A Google token signed by another key, with altered claims, or with `alg: none` | Refused: signature failure |
@@ -42,25 +42,25 @@ features, its defaults, or `reqwest` with `rustls-tls`.
 
 ## What Tetsu must do itself
 
-- **Each challenge is used once.** webauthn-rs keeps no record of which challenges it has seen, so a sign-in replayed
+- **Each challenge is used once.** webauthn-rs keeps no record of which challenges it has seen, so a login replayed
   against a challenge the server still holds succeeds. The server stores each challenge with its attempt, deletes it
   on first use, and expires it, so a replay meets a challenge that no longer exists.
 - **A backwards counter is a refusal and a security event.** webauthn-rs refuses it; Tetsu records it in the audit
-  log, and stores the counter from each successful sign-in.
-- **A discoverable sign-in looks its credential up within the business.** The library names the account a passkey
+  log, and stores the counter from each successful login.
+- **A discoverable login looks its credential up within the business.** The library names the account a passkey
   belongs to and accepts whatever keys it is handed, so the lookup is scoped to the realm and business before the
   key reaches it. `finish_discoverable_authentication` is deprecated for `_v2`, which takes the one credential.
-- **Customer sign-in needs webauthn-rs's `conditional-ui` feature,** where discoverable sign-in lives, against
+- **Customer login needs webauthn-rs's `conditional-ui` feature,** where discoverable login lives, against
   ADR-0047's "no optional features".
-- **Storing a sign-in's state between requests** in Postgres needs webauthn-rs's
-  `danger-allow-state-serialisation`; keeping it in memory does not, but loses sign-ins in progress on restart.
+- **Storing a login's state between requests** in Postgres needs webauthn-rs's
+  `danger-allow-state-serialisation`; keeping it in memory does not, but loses logins in progress on restart.
   Slice 5 decides. (Note: ADR-0047, accepted on 2026-11-14, chose Postgres.)
 
 ## Follow-up checks
 
 - **Google's issuer, for a code flow:** Google's discovery document declares `https://accounts.google.com`, signed
   with RS256 (read 2026-11-14), and a code flow verifies against the discovery document's issuer. The bare form
-  belongs to Google's older Sign-In flows, so Tetsu should not meet it; if it did, the sign-in fails closed.
+  belongs to Google's older Sign-In flows, so Tetsu should not meet it; if it did, the login fails closed.
 - **Advisories:** openidconnect has none in OSV. webauthn-rs has one, GHSA-22w3-693w-x895, rated low: with subdomains
   allowed, an origin was matched to the relying party ID by suffix without a dot, so `hermit-crab.example` could
   pass for `crab.example`. Tetsu never allows subdomains (ADR-0040), and 0.5.5 and the 0.6 line carry the fix. The
@@ -71,7 +71,7 @@ features, its defaults, or `reqwest` with `rustls-tls`.
 ## Weakest evidence
 
 - The software authenticator is not a phone or a security key. Platform quirks wait for the device test in slice 9.
-- The Google tokens were signed locally; slice 10 signs in against Google itself.
+- The Google tokens were signed locally; slice 10 logs in against Google itself.
 
 ## Sources
 

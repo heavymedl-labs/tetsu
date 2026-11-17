@@ -77,7 +77,7 @@ ASVS 5.0 requires `__Host-` cookies by default (3.3.3, L2), separate hostnames f
 
 **Takeaway:**
 
-Cookies cannot cross registrable domains, so each custom domain needs its own session cookie, set after a redirect handshake with a central auth domain or after a local sign-in. Substack does a cross-domain auth redirect that mints a separate session cookie on the custom domain. Shopify's new customer accounts put sign-in on a Shopify-hosted subdomain of the merchant (for example `account.<shop>`), using emailed one-time codes and Shopify-provisioned TLS. Customer accounts there are per store.
+Cookies cannot cross registrable domains, so each custom domain needs its own session cookie, set after a redirect handshake with a central auth domain or after a local login. Substack does a cross-domain auth redirect that mints a separate session cookie on the custom domain. Shopify's new customer accounts put login on a Shopify-hosted subdomain of the merchant (for example `account.<shop>`), using emailed one-time codes and Shopify-provisioned TLS. Customer accounts there are per store.
 
 **Cited Findings:**
 
@@ -85,13 +85,13 @@ Cookies cannot cross registrable domains, so each custom domain needs its own se
 - Third-party guides add more detail. The account domain is a subdomain such as `account.` of the store's custom primary domain, which must not be myshopify.com. Only one account domain applies across all markets. Legacy (password) customer accounts were deprecated in 2026. These are secondary sources. — [EasySell guide](https://easysellapp.com/blogs/wiki/shopify-new-customer-accounts-setup-2026); [Ecommerce Partners](https://ecommercepartners.com/2024/10/01/shopifys-new-customer-accounts-advantages-and-limitations/)
 - Substack on custom domains: the session is a `connect.sid` cookie set on the custom domain after Substack's cross-domain auth redirect. It is separate from the `substack.sid` cookie on substack.com, and the custom domain rejects the substack.com cookie. This comes from a third-party tool developer, not Substack docs. — [substack-mcp PR #166](https://github.com/conorbronsdon/substack-mcp/pull/166); [substack-mcp README](https://github.com/conorbronsdon/substack-mcp)
 - Substack requires custom domains on a subdomain such as `www.`. — [Substack support](https://support.substack.com/hc/en-us/articles/360051222571-How-do-I-set-up-my-custom-domain-on-Substack)
-- Clerk "satellite domains" give sign-in once across several domains of one application. The primary domain handles auth, and satellites sync through redirects. — [Clerk changelog 2023-09-01](https://clerk.com/changelog/2023-09-01)
+- Clerk "satellite domains" give login once across several domains of one application. The primary domain handles auth, and satellites sync through redirects. — [Clerk changelog 2023-09-01](https://clerk.com/changelog/2023-09-01)
 - AWS's Cognito pool-per-tenant guidance has you "redirect users to their tenant-specific instance" and build the routing UI. — [AWS Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/bp_user-pool-based-multi-tenancy.html)
 
 **Inferences:**
 
 - Two workable patterns for Tetsu:
-  - **(a) Local sign-in per domain.** Each custom domain serves its own sign-in pages, such as email one-time code or magic link, and sets its own host-only `__Host-` cookie. This fits per-business customer accounts well, because customers never need SSO across businesses.
+  - **(a) Local login per domain.** Each custom domain serves its own login pages, such as email one-time code or magic link, and sets its own host-only `__Host-` cookie. This fits per-business customer accounts well, because customers never need SSO across businesses.
   - **(b) Central auth host plus a one-time handoff code** (the Substack and Clerk satellite pattern). The custom domain redirects to `auth.tetsu…`, which authenticates and redirects back with a short-lived, single-use code bound to the target host and tenant. The custom domain exchanges it server-side for a local session. Use (b) only if a cross-domain identity is needed, which is mainly for staff.
 - With OIDC social login on custom domains, each domain needs a registered redirect URI. Many IdPs cap or reject dynamic redirect URIs, so a central callback host with signed `state` that carries the return host is the common workaround. The return host must be checked against the tenant's verified domains to avoid open redirects. This is my inference, not a source finding.
 - Certificates for tenant domains usually mean on-demand ACME, such as Caddy's on-demand TLS or cert-manager, gated by a check that the domain belongs to a verified tenant. Not researched here.
@@ -99,7 +99,7 @@ Cookies cannot cross registrable domains, so each custom domain needs its own se
 
 **Gaps:**
 
-- I found no source for Ghost members sign-in on custom domains. It is believed to be per-site magic links with cookies on the site domain, but this is unverified.
+- I found no source for Ghost members login on custom domains. It is believed to be per-site magic links with cookies on the site domain, but this is unverified.
 - No source for Webflow memberships or user accounts on custom domains (Webflow retired its User Accounts feature; status unverified).
 - No primary source for Shopify's current sender domain or cookie mechanics for the account subdomain.
 
@@ -123,8 +123,8 @@ Never link or merge identities on an email match alone. Pre-hijacking research f
 **Inferences:**
 
 - For Tetsu: store `federated_identity(realm, tenant_id NULL for staff, issuer, subject)` with a unique key on `(issuer, subject[, tenant_id])`. Email is a contact attribute, not a key.
-- To link a Google login to an existing password or code account, require the user to be signed in to the existing account first. Alternatively, require a fresh proof of control through the existing account's factor. Never auto-merge on `email_verified`.
-- Defeat pre-hijacking at sign-up. Don't create a usable account until the email is verified. When verification completes, expire every session and pending token created before it. Expire email-change tokens.
+- To link a Google login to an existing password or code account, require the user to be logged in to the existing account first. Alternatively, require a fresh proof of control through the existing account's factor. Never auto-merge on `email_verified`.
+- Defeat pre-hijacking at signup. Don't create a usable account until the email is verified. When verification completes, expire every session and pending token created before it. Expire email-change tokens.
 - Domain auto-join for staff (for example "anyone @chainsalon.com joins") is risky for small businesses: domains lapse, and personal-domain email is shared. Prefer explicit invitations. If auto-join is ever added, require DNS verification and periodic re-checks.
 
 **Gaps:**
@@ -149,7 +149,7 @@ Put `tenant_id` on every tenant-scoped identity table: customer accounts, custom
 - Customer email uniqueness: `UNIQUE (tenant_id, lower(email))`, or use citext. This lets the same person hold independent accounts at two businesses, matching the Cognito and Clerk isolated-pool model. Staff: `UNIQUE (lower(email))` globally, with `membership UNIQUE (tenant_id, user_id)`.
 - Use composite foreign keys `(tenant_id, customer_id)`, so a booking cannot reference a customer from another tenant even through an app bug. Postgres enforces this without RLS.
 - Login and reset tokens should be stored hashed with `tenant_id` and `realm`, and lookups should filter on both. This is the database side of the session binding in section 2.
-- Sign-in lookups happen before tenant context is known for staff. A login path that bypasses RLS should be a narrow, separately reviewed function, such as a `SECURITY DEFINER` function returning only an ID and hash.
+- Login lookups happen before tenant context is known for staff. A login path that bypasses RLS should be a narrow, separately reviewed function, such as a `SECURITY DEFINER` function returning only an ID and hash.
 - Email case and Unicode normalization affect uniqueness and account confusion. Not researched here.
 
 **Gaps:**
@@ -173,7 +173,7 @@ The most mature prior art is healthcare patient-portal "proxy access". The guard
 
 **Inferences:**
 
-- Model separate entities for Tetsu: a `customer_account`, which signs in, has a verified contact, and is tenant-scoped, and a `client_profile`, the person receiving the service, which may have no email. Link them with `account_profile(account_id, profile_id, relationship: self|guardian|carer)`. A booking references the profile and records the booking account.
+- Model separate entities for Tetsu: a `customer_account`, which logs in, has a verified contact, and is tenant-scoped, and a `client_profile`, the person receiving the service, which may have no email. Link them with `account_profile(account_id, profile_id, relationship: self|guardian|carer)`. A booking references the profile and records the booking account.
 - When a family shares one email, make it one account with several profiles, not several accounts on the same email. This keeps uniqueness on `(tenant_id, email)` and avoids login ambiguity.
 - Moving a dependent to their own account (coming of age) should create a new account and grant `self` on the existing profile. Revoking the guardian link should be explicit and audited. Data ownership and consent rules vary by jurisdiction (COPPA, GDPR Art. 8) and were not researched here.
 

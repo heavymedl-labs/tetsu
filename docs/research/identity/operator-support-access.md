@@ -17,7 +17,7 @@ The mature pattern is "no standing access": the operator files a scoped, ticket-
 - Unapproved requests expire after 12 hours; approved access lasts at most 4 hours (engineer may request less) and is revoked automatically — [Microsoft Learn](https://learn.microsoft.com/en-us/purview/customer-lockbox-requests)
 - After approval the engineer acts "by using pre-approved cmdlets" (a constrained tool surface, not free-form access) — [Microsoft Learn](https://learn.microsoft.com/en-us/purview/customer-lockbox-requests)
 - Internally, Microsoft's "Lockbox" requires a second person, who "can't be the requestor", to approve any elevation; "no Microsoft personnel have permission to access customer content on an ongoing basis" (least privilege + just-in-time) — [Microsoft Learn](https://learn.microsoft.com/en-us/purview/customer-lockbox-requests)
-- Notification emails deliberately contain no sign-in links (anti-phishing) — [Microsoft Learn](https://learn.microsoft.com/en-us/purview/customer-lockbox-requests)
+- Notification emails deliberately contain no login links (anti-phishing) — [Microsoft Learn](https://learn.microsoft.com/en-us/purview/customer-lockbox-requests)
 - Licensing: included in M365/O365 E5 (G5 for government) or via add-on, i.e. sold as a premium compliance feature — [Microsoft Learn](https://learn.microsoft.com/en-us/purview/customer-lockbox-requests)
 - No built-in alert on approval; Microsoft points customers to Defender for Cloud Apps policies — [Microsoft Learn](https://learn.microsoft.com/en-us/purview/customer-lockbox-requests)
 
@@ -109,7 +109,7 @@ Lockbox shows the target: operator actions appear in the customer's own audit lo
 
 - Log at least: grant requested/approved/denied/expired/revoked; every operator read of tenant data (not only writes), every action, operator identity, tenant, ticket, IP, device, timestamp UTC (ASVS 16.2.2).
 - Store operator-access events append-only in a separate store from tenant data, and render a tenant-filtered view to the business ("Tetsu staff accessed your account").
-- Notify business owners in-app and by email (without sign-in links) on request, approval, first use and expiry.
+- Notify business owners in-app and by email (without login links) on request, approval, first use and expiry.
 - Hash-chaining or signing log entries is one way to meet 16.4.2; Google's signed approvals are precedent. No source fetched on log hash chains specifically.
 
 **Gaps:**
@@ -134,7 +134,7 @@ Support tools are a prime target because they hold cross-tenant power. Attackers
 
 **Inferences:**
 
-- The "change email + reset password" capability (Retool, Mailchimp) is the account-takeover primitive. Operators should never change a business's sign-in email or credentials directly; ASVS 6.4.6 (admins may start a reset but not choose the password) applies.
+- The "change email + reset password" capability (Retool, Mailchimp) is the account-takeover primitive. Operators should never change a business's login email or credentials directly; ASVS 6.4.6 (admins may start a reset but not choose the password) applies.
 - Breadth of who holds support access matters (Twitter's 1,000+); keep the operator set small and grants per-ticket.
 - Support artifacts customers upload (HAR files) can carry live tokens; sanitize or reject them, and expire operator-visible uploads.
 - Customer-visible logs let customers detect abuse (1Password and BeyondTrust caught Okta 2023 first).

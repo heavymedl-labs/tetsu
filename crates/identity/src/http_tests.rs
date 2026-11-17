@@ -12,7 +12,7 @@ use tokio::net::{TcpListener, TcpStream};
 
 use crate::adapters::http::{PATHS, Web, router};
 use crate::adapters::postgres::PostgresOperators;
-use crate::enrollment_tests::{ORIGIN, as_admin, authenticate, party, register_keeping, with_link};
+use crate::join_tests::{ORIGIN, as_admin, authenticate, party, register_keeping, with_link};
 use crate::{Operators, Origins};
 
 const SCRIPT: &str = "/assets/passkey-test.js";
@@ -20,7 +20,7 @@ const POLICY: &str = "default-src 'none'; object-src 'none'; script-src 'self'; 
                       style-src 'self'; font-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; \
                       frame-ancestors 'none'";
 const REFUSED: &str = "this request was refused";
-const UNAVAILABLE: &str = "signing in is unavailable just now; try again in a minute";
+const UNAVAILABLE: &str = "logging in is unavailable just now; try again in a minute";
 
 /// What the operator was told, from every test, since `report` is a plain function.
 static REPORTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -130,38 +130,38 @@ async fn get(address: SocketAddr, path: &str, cookie: &str) -> Reply {
     send(address, "GET", path, &[("Cookie", cookie)], "").await
 }
 
-/// Enrolls with the link through the pages' endpoints, as the script would, and returns the passkey the device
+/// Joins with the link through the pages' endpoints, as the script would, and returns the passkey the device
 /// keeps.
-async fn enroll(address: SocketAddr, link: &str) -> Passkey {
-    let begun = post(address, "/ops/enroll/begin", "", &json!({ "link": link }))
+async fn join(address: SocketAddr, link: &str) -> Passkey {
+    let begun = post(address, "/ops/join/begin", "", &json!({ "link": link }))
         .await
         .json();
     let (response, kept) = register_keeping(&begun["options"].to_string(), ORIGIN, true).await;
     let response: Value = serde_json::from_str(&response).expect("JSON");
     let finished = post(
         address,
-        "/ops/enroll/finish",
+        "/ops/join/finish",
         "",
         &json!({"ceremony": begun["ceremony"], "response": response}),
     )
     .await;
     assert_eq!(
         (finished.status, finished.json()),
-        (200, json!({"next": "/ops/sign-in"}))
+        (200, json!({"next": "/ops/login"}))
     );
     kept
 }
 
-/// Signs in through the pages' endpoints, as the script would, and returns the session cookie set.
-async fn sign_in(address: SocketAddr, passkey: Passkey) -> String {
-    let begun = post(address, "/ops/sign-in/begin", "", &json!({}))
+/// Logs in through the pages' endpoints, as the script would, and returns the session cookie set.
+async fn login(address: SocketAddr, passkey: Passkey) -> String {
+    let begun = post(address, "/ops/login/begin", "", &json!({}))
         .await
         .json();
     let response = authenticate(&begun["options"].to_string(), ORIGIN, passkey, true).await;
     let response: Value = serde_json::from_str(&response).expect("JSON");
     let finished = post(
         address,
-        "/ops/sign-in/finish",
+        "/ops/login/finish",
         "",
         &json!({"ceremony": begun["ceremony"], "response": response}),
     )
@@ -182,12 +182,12 @@ fn form_on(page: &str) -> String {
     after.split('"').next().unwrap_or_default().to_string()
 }
 
-/// Kurt Medley, enrolled and signed in through the pages: the server, the database, his cookie, and the form token
+/// Kurt Medley, joined and logged in through the pages: the server, the database, his cookie, and the form token
 /// his page carries.
-async fn signed_in() -> (SocketAddr, TestDatabase, String, String) {
+async fn logged_in() -> (SocketAddr, TestDatabase, String, String) {
     let (address, database, link) = serving().await;
-    let passkey = enroll(address, &link).await;
-    let cookie = sign_in(address, passkey).await;
+    let passkey = join(address, &link).await;
+    let cookie = login(address, passkey).await;
     let page = get(address, "/ops", &cookie).await;
     (address, database, cookie, form_on(&page.body))
 }
@@ -226,24 +226,24 @@ async fn add_passkey(address: SocketAddr, cookie: &str, form: &str) -> Reply {
     post(address, "/ops/passkeys/finish", cookie, &finish).await
 }
 
-/// Posts the operator page's sign-out form from `origin`.
-async fn sign_out(address: SocketAddr, origin: &str, cookie: &str, form: &str) -> Reply {
+/// Posts the operator page's logout form from `origin`.
+async fn logout(address: SocketAddr, origin: &str, cookie: &str, form: &str) -> Reply {
     let headers = [("Origin", origin), ("Cookie", cookie)];
     send(
         address,
         "POST",
-        "/ops/sign-out",
+        "/ops/logout",
         &headers,
         &format!("form={form}"),
     )
     .await
 }
 
-/// An operator enrolls and signs in as the passkey script would, sees their page, and adds a second passkey; with
+/// An operator joins and logs in as the passkey script would, sees their page, and adds a second passkey; with
 /// two, the page offers no third.
 #[tokio::test]
-async fn an_operator_enrolls_signs_in_and_adds_a_passkey() {
-    let (address, database, cookie, form) = signed_in().await;
+async fn an_operator_joins_logs_in_and_adds_a_passkey() {
+    let (address, database, cookie, form) = logged_in().await;
     let page = get(address, "/ops", &cookie).await;
     assert_eq!(
         (page.status, page.header("content-security-policy")),
@@ -276,11 +276,11 @@ async fn an_operator_enrolls_signs_in_and_adds_a_passkey() {
     assert!(!page.body.contains("action=\"add\""), "two is the most");
 }
 
-/// Ten minutes after signing in, the page no longer offers to add a passkey, which the server would refuse, and
+/// Ten minutes after logging in, the page no longer offers to add a passkey, which the server would refuse, and
 /// says how to get it back.
 #[tokio::test]
-async fn a_stale_sign_in_is_told_to_sign_in_again_to_add_a_passkey() {
-    let (address, database, cookie, _) = signed_in().await;
+async fn a_stale_login_is_told_to_login_again_to_add_a_passkey() {
+    let (address, database, cookie, _) = logged_in().await;
     as_admin(
         &database,
         "UPDATE identity.sessions SET started_at = now() - interval '11 minutes'",
@@ -288,12 +288,12 @@ async fn a_stale_sign_in_is_told_to_sign_in_again_to_add_a_passkey() {
     .await;
     let page = get(address, "/ops", &cookie).await;
     assert!(!page.body.contains("action=\"add\""), "{}", page.body);
-    assert!(page.body.contains("sign out and sign in"), "{}", page.body);
+    assert!(page.body.contains("log out and log in"), "{}", page.body);
 }
 
-/// A sign-in counts as fresh for under ten minutes, and one that starts after now counts too.
+/// A login counts as fresh for under ten minutes, and one that starts after now counts too.
 #[test]
-fn a_sign_in_is_fresh_for_under_ten_minutes() {
+fn a_login_is_fresh_for_under_ten_minutes() {
     use std::time::{Duration, SystemTime};
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
     let started = |seconds: i64| {
@@ -311,26 +311,26 @@ fn a_sign_in_is_fresh_for_under_ten_minutes() {
     );
 }
 
-/// Signing out clears the cookie and sends the browser to sign in, and the operator's page then does the same.
+/// Logging out clears the cookie and sends the browser to log in, and the operator's page then does the same.
 #[tokio::test]
-async fn signing_out_clears_the_cookie() {
-    let (address, _database, cookie, form) = signed_in().await;
-    let out = sign_out(address, ORIGIN, &cookie, &form).await;
+async fn logging_out_clears_the_cookie() {
+    let (address, _database, cookie, form) = logged_in().await;
+    let out = logout(address, ORIGIN, &cookie, &form).await;
     let cleared = "__Host-tetsu-operator=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0";
     assert_eq!(
         (out.status, out.header("location"), out.header("set-cookie")),
-        (303, Some("/ops/sign-in"), Some(cleared))
+        (303, Some("/ops/login"), Some(cleared))
     );
     let page = get(address, "/ops", &cookie).await;
-    assert_eq!(page.header("location"), Some("/ops/sign-in"));
+    assert_eq!(page.header("location"), Some("/ops/login"));
 }
 
-/// The pages before sign-in load Tetsu's own script under the operator pages' policy, and are kept by no cache. A
-/// browser with no live session asking for the operator's page is sent to sign in.
+/// The pages before login load Tetsu's own script under the operator pages' policy, and are kept by no cache. A
+/// browser with no live session asking for the operator's page is sent to log in.
 #[tokio::test]
 async fn the_pages_run_only_tetsus_own_script() {
     let (address, _database, _) = serving().await;
-    for path in ["/ops/sign-in", "/ops/enroll"] {
+    for path in ["/ops/login", "/ops/join"] {
         let page = get(address, path, "").await;
         assert_eq!(
             (
@@ -341,7 +341,7 @@ async fn the_pages_run_only_tetsus_own_script() {
             (200, Some(POLICY), Some("no-store")),
             "{path}"
         );
-        // A posted form, such as signing out, then carries the page's real origin, not null.
+        // A posted form, such as logging out, then carries the page's real origin, not null.
         assert_eq!(
             page.header("referrer-policy"),
             Some("same-origin"),
@@ -358,18 +358,18 @@ async fn the_pages_run_only_tetsus_own_script() {
         let page = get(address, "/ops", cookie).await;
         assert_eq!(
             (page.status, page.header("location")),
-            (303, Some("/ops/sign-in")),
+            (303, Some("/ops/login")),
             "{cookie}"
         );
     }
 }
 
-/// Each page before sign-in offers its one action as a passkey island, in the shared button's look, under Tetsu's
+/// Each page before login offers its one action as a passkey island, in the shared button's look, under Tetsu's
 /// wordmark. It shows no demo business, so it has no demo banner and no "Runs on Tetsu" footer.
 #[tokio::test]
 async fn each_page_offers_one_passkey_island() {
     let (address, _database, _) = serving().await;
-    for (path, action) in [("/ops/sign-in", "sign-in"), ("/ops/enroll", "enroll")] {
+    for (path, action) in [("/ops/login", "login"), ("/ops/join", "join")] {
         let page = get(address, path, "").await;
         for absent in ["role=\"note\"", "Runs on"] {
             assert!(!page.body.contains(absent), "{absent} in {}", page.body);
@@ -387,7 +387,7 @@ async fn each_page_offers_one_passkey_island() {
 /// A passkey on one device is listed as one, not as synced.
 #[tokio::test]
 async fn a_passkey_on_one_device_is_listed_as_one() {
-    let (address, database, cookie, _) = signed_in().await;
+    let (address, database, cookie, _) = logged_in().await;
     as_admin(
         &database,
         "UPDATE identity.passkeys SET passkey = jsonb_set(passkey, '{cred,backup_state}', 'false')",
@@ -397,17 +397,17 @@ async fn a_passkey_on_one_device_is_listed_as_one() {
     assert!(page.body.contains("Passkey on one device"), "{}", page.body);
 }
 
-/// A request before sign-in is read only if it comes from the site, as both its origin and, when sent, its
+/// A request before login is read only if it comes from the site, as both its origin and, when sent, its
 /// `Sec-Fetch-Site` say, and only as a JSON object; each endpoint refuses alike.
 #[tokio::test]
-async fn requests_before_sign_in_come_from_the_site_as_json() {
+async fn requests_before_login_come_from_the_site_as_json() {
     let (address, _database, _) = serving().await;
     let json = ("Content-Type", "application/json");
     for path in [
-        "/ops/sign-in/begin",
-        "/ops/sign-in/finish",
-        "/ops/enroll/begin",
-        "/ops/enroll/finish",
+        "/ops/login/begin",
+        "/ops/login/finish",
+        "/ops/join/begin",
+        "/ops/join/finish",
     ] {
         for headers in [
             vec![
@@ -434,7 +434,7 @@ async fn requests_before_sign_in_come_from_the_site_as_json() {
     }
     let begin = |kind: &'static str, body: &'static str| {
         let headers = [("Origin", ORIGIN), ("Content-Type", kind)];
-        async move { send(address, "POST", "/ops/sign-in/begin", &headers, body).await }
+        async move { send(address, "POST", "/ops/login/begin", &headers, body).await }
     };
     assert_eq!(begin("text/plain", "{}").await.status, 415);
     for body in ["[]", "not JSON"] {
@@ -457,19 +457,19 @@ async fn refused_ceremonies_get_their_one_refusal() {
     let (address, _database, _) = serving().await;
     let said = [
         (
-            "/ops/sign-in/finish",
+            "/ops/login/finish",
             json!({"ceremony": 1}),
-            "this sign-in could not be completed",
+            "this login could not be completed",
         ),
         (
-            "/ops/enroll/begin",
+            "/ops/join/begin",
             json!({"link": "not a link"}),
-            "this enrollment link has ended or is not valid",
+            "this invite link has ended or is not valid",
         ),
         (
-            "/ops/enroll/finish",
+            "/ops/join/finish",
             json!({}),
-            "this enrollment link has ended or is not valid",
+            "this invite link has ended or is not valid",
         ),
     ];
     for (path, body, refusal) in said {
@@ -482,12 +482,12 @@ async fn refused_ceremonies_get_their_one_refusal() {
     }
 }
 
-/// A signed-in change needs the session's form token from the site, and a live session: without the token it is
-/// forbidden, once signed out it is unauthorized, and it is read only as JSON. Signing out from elsewhere is
+/// A logged-in change needs the session's form token from the site, and a live session: without the token it is
+/// forbidden, once logged out it is unauthorized, and it is read only as JSON. Logging out from elsewhere is
 /// forbidden and ends nothing.
 #[tokio::test]
-async fn signed_in_changes_need_the_session_and_its_form_token() {
-    let (address, _database, cookie, form) = signed_in().await;
+async fn logged_in_changes_need_the_session_and_its_form_token() {
+    let (address, _database, cookie, form) = logged_in().await;
     for path in ["/ops/passkeys/begin", "/ops/passkeys/finish"] {
         let refused = post(address, path, &cookie, &json!({})).await;
         assert_eq!(
@@ -506,20 +506,20 @@ async fn signed_in_changes_need_the_session_and_its_form_token() {
             "{path}"
         );
     }
-    let refused = sign_out(address, "https://evil.example", &cookie, &form).await;
+    let refused = logout(address, "https://evil.example", &cookie, &form).await;
     assert_eq!(refused.status, 403);
     // A form shows pages, so the refusal is one that says nothing changed.
     assert_eq!(
         refused.header("content-type"),
         Some("text/html; charset=utf-8")
     );
-    assert!(refused.body.contains("Not signed out"), "{}", refused.body);
+    assert!(refused.body.contains("Not logged out"), "{}", refused.body);
     assert_eq!(
         get(address, "/ops", &cookie).await.status,
         200,
-        "still signed in"
+        "still logged in"
     );
-    sign_out(address, ORIGIN, &cookie, &form).await;
+    logout(address, ORIGIN, &cookie, &form).await;
     let ended = post(
         address,
         "/ops/passkeys/begin",
@@ -529,7 +529,7 @@ async fn signed_in_changes_need_the_session_and_its_form_token() {
     .await;
     assert_eq!(
         (ended.status, ended.json()),
-        (401, json!({"error": "you are signed out; sign in again"}))
+        (401, json!({"error": "you are logged out; log in again"}))
     );
 }
 
@@ -539,7 +539,7 @@ async fn failures_of_the_server_are_unavailable() {
     let revoke = |function: &str| {
         format!("REVOKE EXECUTE ON FUNCTION identity.{function} FROM tetsu_identity")
     };
-    let (address, database, cookie, form) = signed_in().await;
+    let (address, database, cookie, form) = logged_in().await;
     as_admin(&database, &revoke("account(bytea)")).await;
     let page = get(address, "/ops", &cookie).await;
     assert_eq!(
@@ -547,10 +547,10 @@ async fn failures_of_the_server_are_unavailable() {
         (503, Some("no-store"))
     );
     as_admin(&database, &revoke("end_session(bytea, text)")).await;
-    let out = sign_out(address, ORIGIN, &cookie, &form).await;
+    let out = logout(address, ORIGIN, &cookie, &form).await;
     assert_eq!(out.status, 503);
     assert!(
-        out.body.contains("Signing in is unavailable just now"),
+        out.body.contains("Logging in is unavailable just now"),
         "{}",
         out.body
     );
@@ -567,8 +567,8 @@ async fn failures_of_the_server_are_unavailable() {
         (refused.status, refused.json()),
         (503, json!({ "error": UNAVAILABLE }))
     );
-    as_admin(&database, &revoke("begin_sign_in(bytea, jsonb)")).await;
-    let refused = post(address, "/ops/sign-in/begin", "", &json!({})).await;
+    as_admin(&database, &revoke("begin_login(bytea, jsonb)")).await;
+    let refused = post(address, "/ops/login/begin", "", &json!({})).await;
     assert_eq!(
         (refused.status, refused.json()),
         (503, json!({ "error": UNAVAILABLE }))
@@ -580,7 +580,7 @@ async fn failures_of_the_server_are_unavailable() {
         "identity: a passkey request failed: storage failed"
     ));
     assert!(reported(
-        "identity: could not sign an operator out: storage failed"
+        "identity: could not log an operator out: storage failed"
     ));
 }
 
@@ -601,10 +601,10 @@ fn shape(value: &Value) -> Value {
 }
 
 /// The passkey script is tested against a fixture of the options these endpoints send, so the fixture must keep
-/// their shape: registering with a passkey held, and signing in.
+/// their shape: registering with a passkey held, and logging in.
 #[tokio::test]
 async fn the_scripts_fixture_has_the_options_shapes() {
-    let (address, _database, cookie, form) = signed_in().await;
+    let (address, _database, cookie, form) = logged_in().await;
     let add = post(
         address,
         "/ops/passkeys/begin",
@@ -612,7 +612,7 @@ async fn the_scripts_fixture_has_the_options_shapes() {
         &json!({ "form": form }),
     )
     .await;
-    let sign = post(address, "/ops/sign-in/begin", "", &json!({})).await;
+    let sign = post(address, "/ops/login/begin", "", &json!({})).await;
     let fixture: Value = serde_json::from_str(include_str!(
         "../../../web/src/passkey/fixtures/options.json"
     ))

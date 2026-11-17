@@ -8,7 +8,7 @@ use tokio_postgres::error::SqlState;
 
 use crate::connection::Error;
 
-/// The role `tetsu serve` signs in as. It holds no rights of its own and acts through module roles.
+/// The role `tetsu serve` logs in as. It holds no rights of its own and acts through module roles.
 pub const APP_ROLE: &str = "tetsu_app";
 /// The role the dispatcher acts as: it reads and settles every tenant's outbox rows, and nothing else (ADR-0043).
 pub const DELIVERY_ROLE: &str = "tetsu_delivery";

@@ -24,7 +24,7 @@ pub async fn ready() -> TestDatabase {
         .expect("a migrated test database")
 }
 
-/// A migrated database, with Identity's use cases over it as the application role, as `tetsu serve` signs in.
+/// A migrated database, with Identity's use cases over it as the application role, as `tetsu serve` logs in.
 pub async fn migrated() -> (TestDatabase, Operators<impl OperatorStore>) {
     let database = ready().await;
     let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
@@ -41,9 +41,9 @@ pub async fn with_kurt() -> (TestDatabase, Operators<impl OperatorStore>, Operat
     (database, operators, kurt)
 }
 
-/// Starts an operator's session as a passkey sign-in would, as the test server's administrator, and returns its
-/// token: only the sign-in function may start one, so Identity's role cannot call `start_session` (ADR-0048).
-pub async fn signed_in(database: &TestDatabase, operator: OperatorId) -> SessionToken {
+/// Starts an operator's session as a passkey login would, as the test server's administrator, and returns its
+/// token: only the login function may start one, so Identity's role cannot call `start_session` (ADR-0048).
+pub async fn logged_in(database: &TestDatabase, operator: OperatorId) -> SessionToken {
     let mut bytes = [0u8; 32];
     getrandom::fill(&mut bytes).expect("random bytes");
     let text = bytes.iter().fold(String::new(), |mut text, byte| {

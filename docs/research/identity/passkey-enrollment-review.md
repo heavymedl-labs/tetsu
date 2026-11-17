@@ -22,7 +22,7 @@ audit record its evidence.
 
 | Rank | Severity | Change | When |
 | --- | --- | --- | --- |
-| 1 | High | `issue_enrollment` and `redeem_enrollment` refuse any isolation but read committed (TD002), as disable does | Now |
+| 1 | High | `issue_invite` and `redeem_invite` refuse any isolation but read committed (TD002), as disable does | Now |
 | 2 | Medium | One open ceremony per link; begin re-checks the link as it stores; sweep only the operator's ended ceremonies | Now |
 | 3 | Medium | A credential ID stored a moment before is a recorded `taken`, not a storage error | Now |
 | 4 | Medium | Refuse a registration whose client says it is not discoverable | Now |
@@ -33,16 +33,16 @@ audit record its evidence.
 | 9 | Low | Disable ends the operator's ceremonies; read the clock once per statement; correct the AAGUID note | Now |
 | 10 | Medium | Record begin and every refusal, with source, IP, and user agent; store AAGUID, transports, and a label | Step 4d |
 | 11 | Low | Tell "start again" from "this link has ended" in the browser | Step 4d |
-| 12 | Medium | Sign-in ceremonies: nullable operator, a bounded sweep, an index on `ends_at`, a global cap | Step 4c |
-| 13 | Medium | Sign-in: row-locked counter updates, user handle checked against the credential, two passkeys at most | Step 4c |
+| 12 | Medium | Login ceremonies: nullable operator, a bounded sweep, an index on `ends_at`, a global cap | Step 4c |
+| 13 | Medium | Login: row-locked counter updates, user handle checked against the credential, two passkeys at most | Step 4c |
 | 14 | Medium | Rate limits for enrollment begin and finish, in ADR-0048's table | Step 5 |
 | 15 | Decided | How an operator with an unusable passkey gets back in: `operator remove-passkeys` | Done |
 
 ## Isolation the functions trust but do not check
 
-`issue_enrollment` refuses an operator who holds a passkey by reading `passkeys` after taking the operator's row.
+`issue_invite` refuses an operator who holds a passkey by reading `passkeys` after taking the operator's row.
 Under repeatable read its snapshot predates the wait, so a passkey committed meanwhile is invisible. The database
-review reproduced it: a redeem held the row, `issue_enrollment` under repeatable read waited, then issued a link to
+review reproduced it: a redeem held the row, `issue_invite` under repeatable read waited, then issued a link to
 an operator who now had a passkey. Serializable did no better, since the redeem was read committed and only locked
 the row, which PostgreSQL does not count as a conflict
 ([PostgreSQL 18, transaction isolation](https://www.postgresql.org/docs/18/transaction-iso.html)). The application
@@ -59,7 +59,7 @@ anti-automation
 and WebAuthn practice keeps one outstanding challenge per user. A link now holds one ceremony; a newer one replaces
 it, as a new link replaces the last. Begin re-checks the link, the operator, and "no passkey yet" in the statement
 that stores it, rather than trusting its caller, and sweeps only that operator's ended ceremonies through their
-index. Sign-in ceremonies in step 4c need no link, so anyone can start one; they will need a sweep that never
+index. Login ceremonies in step 4c need no link, so anyone can start one; they will need a sweep that never
 waits (`FOR UPDATE SKIP LOCKED` with a limit), an index on `ends_at`, and a global cap.
 
 ## Edges that turned refusals into storage errors
@@ -78,9 +78,9 @@ waits (`FOR UPDATE SKIP LOCKED` with a limit), an index on `ends_at`, and a glob
   removed in the third cycle: it refused `smart-card`, which WebAuthn names, accepted `test`, which it does not,
   and protected nothing, since with no attestation `webauthn-rs` stores no transports.
 
-## A passkey signing in could never find
+## A passkey logging in could never find
 
-Step 4c signs operators in without a name, so their passkeys must be discoverable. `webauthn-rs` deliberately does
+Step 4c logs operators in without a name, so their passkeys must be discoverable. `webauthn-rs` deliberately does
 not require it, since it can exhaust a security key's slots
 ([webauthn-rs discussion 442](https://github.com/kanidm/webauthn-rs/discussions/442)), so Tetsu sets
 `residentKey: required` on the options itself, as web.dev recommends for passkeys
@@ -125,7 +125,7 @@ link holder could forge it.
   "start again; your link is still open" from "this link has ended; ask for a new one" without revealing anything.
   NIST asks for clear instructions after a binding mishap. Begin's refusals stay one answer. Begin runs from a
   button's POST, never on page load.
-- **Step 4c, sign-in.** Check that `response.userHandle` names the credential's operator (WebAuthn L3 §7.2); update
+- **Step 4c, login.** Check that `response.userHandle` names the credential's operator (WebAuthn L3 §7.2); update
   the counter and backup state under the passkey's row lock; enforce two passkeys at most, under the operator's
   lock, with the TD002 guard; and pass `excludeCredentials` when adding the second.
 - **Step 5.** Enrollment needs rows in ADR-0048's rate-limit table, per network address, for begin and finish.
@@ -133,12 +133,12 @@ link holder could forge it.
 ## A decision for the maintainer
 
 An operator whose only passkey becomes unusable, for example one lost before a second is added, could not get a new
-link, since `enroll` refuses an operator who holds a passkey. ADR-0057 has such an operator given a new account and
+link, since `invite` refuses an operator who holds a passkey. ADR-0057 has such an operator given a new account and
 the old one removed, but operator names are unique, and nothing removes an operator. Two tabs racing on one link
 can also leave a device holding a passkey Tetsu refused, which the server cannot prevent.
 
 The maintainer chose `tetsu operator remove-passkeys <id>`: it removes the operator's passkeys, ends their sessions
-and any ceremony, and is recorded, after which `enroll` issues a link as for a new operator. The operator keeps
+and any ceremony, and is recorded, after which `invite` issues a link as for a new operator. The operator keeps
 their account and its audit record. ADR-0057's recovery wording should be amended to match.
 
 ## What is already right
@@ -152,6 +152,6 @@ their account and its audit record. ADR-0057's recovery wording should be amende
   requires user
   verification. The user handle is random and holds nothing personal.
 - Every refusal reads the same to the browser, while storage faults are told apart.
-- No one is signed in after enrolling, as NIST and OWASP advise.
+- No one is logged in after enrolling, as NIST and OWASP advise.
 - Definer functions pin `search_path`, belong to a role that cannot log in, and are callable only by Identity's
   role.

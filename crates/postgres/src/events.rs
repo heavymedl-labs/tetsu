@@ -42,7 +42,7 @@ fn recorded() -> &'static watch::Sender<u64> {
     RECORDED.get_or_init(|| watch::channel(0).0)
 }
 
-/// An event to record: a fact in the past tense, such as `identity.signed_in`, its version, and a JSON payload of
+/// An event to record: a fact in the past tense, such as `identity.logged_in`, its version, and a JSON payload of
 /// IDs and facts, never personal details. Its type is written in code, so the outbox is its check: a type other
 /// than `module.fact` in lowercase letters, digits, and underscores, or a payload that is not a JSON object of at
 /// most 64 KiB, is refused there (ADR-0060).

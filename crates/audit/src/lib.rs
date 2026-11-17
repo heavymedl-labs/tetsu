@@ -1,6 +1,6 @@
-//! Audit: the record of security events, such as sign-ins and recoveries, kept per tenant and never lost
+//! Audit: the record of security events, such as logins and recoveries, kept per tenant and never lost
 //! (ADR-0045). It builds the record from domain events (ADR-0043), and keeps events that belong to no business,
-//! such as an operator's sign-in, in a global record.
+//! such as an operator's login, in a global record.
 //!
 //! The public surface (ADR-0021): the module's registration, [`Audit`], and the adapter constructor,
 //! [`consumer`], which the composition root hands to the dispatcher.

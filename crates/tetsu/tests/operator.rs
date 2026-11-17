@@ -69,14 +69,14 @@ use support::{err, operator, operator_in, out, with_kurt};
 
 /// A link never reaches a pipe, so no CI log or redirect captures one, and nothing is created when it is refused.
 #[tokio::test]
-async fn no_enrollment_link_is_printed_to_a_pipe() {
+async fn no_invite_link_is_printed_to_a_pipe() {
     let database = with_kurt().await;
     let app = database.as_app();
-    for args in [&["create", "Lee Park"][..], &["enroll", "1"]] {
+    for args in [&["create", "Lee Park"][..], &["invite", "1"]] {
         let refused = operator(&app, args);
         assert_eq!(refused.status.code(), Some(1), "{args:?}");
         assert!(
-            err(&refused).contains("an enrollment link prints only to a terminal"),
+            err(&refused).contains("an invite link prints only to a terminal"),
             "{refused:?}"
         );
         assert_eq!(out(&refused), "");
@@ -90,7 +90,7 @@ async fn no_enrollment_link_is_printed_to_a_pipe() {
 
 /// The commands that print no link run anywhere, and say what they did.
 #[tokio::test]
-async fn operators_are_listed_signed_out_and_disabled() {
+async fn operators_are_listed_logged_out_and_disabled() {
     let database = with_kurt().await;
     let app = database.as_app();
     for (args, said) in [
@@ -101,12 +101,9 @@ async fn operators_are_listed_signed_out_and_disabled() {
         (&["end-sessions", "--all"], "ended 0 operator sessions\n"),
         (
             &["disable", "1"],
-            "disabled operator 1, ending 0 sessions and 0 enrollment links\n",
+            "disabled operator 1, ending 0 sessions and 0 invite links\n",
         ),
-        (
-            &["enable", "1"],
-            "enabled operator 1, who signs in afresh\n",
-        ),
+        (&["enable", "1"], "enabled operator 1, who logs in afresh\n"),
         (&["list"], "1  Kurt Medley  enabled  0 passkeys\n"),
     ] {
         let output = operator(&app, args);

@@ -75,7 +75,7 @@ straight to the processor's hosted fields and never reach Tetsu
 Customers use the booking pages in a browser on Tetsu's address; a business's own domain
 waits on [#8](https://github.com/heavymedl-labs/tetsu/issues/8). These are server-rendered
 HTML with Web Component islands. A business can embed them in its own site as a frame for
-browsing, and signing in and paying always happen at the top level
+browsing, and logging in and paying always happen at the top level
 ([ADR-0031](docs/adr/0031-front-end-model-revised.md)). The staff app, native customer apps, and
 sites businesses build call the API. The staff app's technology is open
 ([#14](https://github.com/heavymedl-labs/tetsu/issues/14)), with WebAssembly the
@@ -241,8 +241,8 @@ flowchart TB
     server["Tetsu server<br/>resolves the tenant on every request"]
     db[("PostgreSQL<br/>tenant ID on every row,<br/>row-level security")]
 
-    a -- staff and customers sign in to --> server
-    b -- staff and customers sign in to --> server
+    a -- staff and customers log in to --> server
+    b -- staff and customers log in to --> server
     server -- queries scoped to one tenant, SQL --> db
 
     classDef actor fill:#f1f5f9,stroke:#64748b,color:#0f172a
@@ -255,7 +255,7 @@ flowchart TB
 
 ### Request flow
 
-Provisional: one booking, end to end. Sign-in, tenant isolation, and event
+Provisional: one booking, end to end. Login, tenant isolation, and event
 delivery follow [ADR-0040](docs/adr/0040-identity-and-sign-in.md),
 [ADR-0042](docs/adr/0042-tenant-isolation.md), and
 [ADR-0043](docs/adr/0043-domain-event-delivery.md).

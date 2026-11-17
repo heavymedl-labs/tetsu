@@ -45,15 +45,15 @@ number, and add a row below. Never renumber.
 | [0037](0037-fictional-customers-on-tetsus-page.md) | Fictional customers on Tetsu's page | Writing content for Tetsu's own pages | Accepted |
 | [0038](0038-color-scheme-control.md) | A color-scheme control without script | Changing colors, the color schemes, or the header's control | Accepted |
 | [0039](0039-response-compression-and-page-budget.md) | Response compression and a page budget | Changing how responses are sent, adding page weight, or a page that holds a secret | Accepted |
-| [0040](0040-identity-and-sign-in.md) | Identity and sign-in | Building sign-in, sign-up, accounts, sessions, or anything operators use | Accepted |
+| [0040](0040-identity-and-sign-in.md) | Identity and login | Building login, signup, accounts, sessions, or anything operators use | Accepted |
 | [0041](0041-account-recovery.md) | Account recovery | Building recovery, recovery codes, anything that replaces a credential, or any link between an account and a client profile | Accepted |
 | [0042](0042-tenant-isolation.md) | Tenant isolation | Storing tenant data, adding a table or module schema, writing a query, or adding a database role | Accepted |
 | [0043](0043-domain-event-delivery.md) | Domain event delivery | Recording or consuming a domain event, or sending a webhook | Accepted |
 | [0044](0044-email-delivery.md) | Email delivery | Sending email, or choosing an email provider | Accepted |
 | [0045](0045-operations-baseline.md) | Operations baseline | Logging, auditing, backups, alerts, or recovery targets | Accepted |
 | [0046](0046-property-testing.md) | Property testing | Writing property tests for Tier 1 code | Accepted |
-| [0047](0047-sign-in-libraries.md) | Sign-in libraries | Adding or upgrading a sign-in crate, or hashing tokens and codes | Accepted |
-| [0048](0048-sign-in-design.md) | Sign-in design | Building sign-in, sessions, staff roles, rate limits, or recovery | Accepted |
+| [0047](0047-sign-in-libraries.md) | Login libraries | Adding or upgrading a login crate, or hashing tokens and codes | Accepted |
+| [0048](0048-sign-in-design.md) | Login design | Building login, sessions, staff roles, rate limits, or recovery | Accepted |
 | [0049](0049-log-export.md) | Log export | Exporting logs, or changing what a log line carries off the host | Accepted |
 | [0050](0050-local-settings-file.md) | Local settings file | Running `tetsu` locally, or adding a setting | Accepted |
 | [0051](0051-coverage-reporting.md) | Coverage reporting | Reporting or showing test coverage | Proposed |
@@ -62,9 +62,9 @@ number, and add a row below. Never renumber.
 | [0054](0054-browser-tests.md) | Browser tests | Changing pages, styles, or interactions, or testing in a browser | Proposed |
 | [0055](0055-fault-injection-tests.md) | Fault injection tests | Testing how Tetsu handles Postgres or network failures | Proposed |
 | [0056](0056-typescript-tests.md) | TypeScript tests | Writing or testing TypeScript in `web/` | Accepted |
-| [0057](0057-operator-passkeys-before-level-2.md) | Operator passkeys and email before the Level 2 review | Building operator sign-in, or sending email before #111 | Accepted |
-| [0058](0058-test-authenticator.md) | A virtual authenticator for sign-in tests | Testing passkey enrollment or sign-in | Accepted |
-| [0059](0059-session-controls-and-request-checks.md) | Session controls and cross-site request checks | Building sessions, sign-out, session lists, or checks on state-changing requests | Accepted |
+| [0057](0057-operator-passkeys-before-level-2.md) | Operator passkeys and email before the Level 2 review | Building operator login, or sending email before #111 | Accepted |
+| [0058](0058-test-authenticator.md) | A virtual authenticator for login tests | Testing passkey enrollment or login | Accepted |
+| [0059](0059-session-controls-and-request-checks.md) | Session controls and cross-site request checks | Building sessions, logout, session lists, or checks on state-changing requests | Accepted |
 | [0060](0060-database-hardening.md) | Database hardening after the design review | Writing a migration, a table, or connection settings | Accepted |
 | [0061](0061-one-service-until-domains.md) | One service and two logins until Tetsu has domains | Deploying, adding a realm, or adding a database login | Accepted |
 | [0062](0062-seeding-from-the-deploy.md) | Seeding the demo from Tetsu's deploy | Changing how demo businesses reach the demo | Accepted |
@@ -72,7 +72,7 @@ number, and add a row below. Never renumber.
 | [0064](0064-ci-skips-unchanged-work.md) | CI skips work whose inputs are unchanged | Changing which checks a CI run skips | Accepted |
 | [0065](0065-arm-runner-for-checks.md) | An Arm runner for the checks job | Changing which runners CI uses | Accepted |
 | [0066](0066-public-repository.md) | A public repository | Changing who can see or run the repository, or licensing it | Accepted |
-| [0067](0067-sign-in-after-a-first-passkey.md) | Signing in after a first passkey | Building enrollment, invites, or sign-up for any realm | Accepted |
+| [0067](0067-sign-in-after-a-first-passkey.md) | Logging in after a first passkey | Building invites, joining, or signup for any realm | Accepted |
 
 ## Open decisions
 

@@ -22,12 +22,12 @@ business is a tenant, isolated in the database itself, and industries add only w
 
 - **Tenancy:** each business's address and page, kept apart by row-level security
 - **Audit:** a record of security events that is never lost
-- **Identity:** operators, who enroll a passkey from a one-time link and sign in with it at `/ops`, with
+- **Identity:** operators, who join with a passkey from a one-time invite link and log in with it at `/ops`, with
   server-side sessions whose tokens are stored only as hashes
 - **Domain events:** delivered once through an outbox, retried, and logged when they stop
 - **Operations:** JSON logs with alert fields, exported to any OTLP backend
 
-Next: sign-in ([#20](https://github.com/heavymedl-labs/tetsu/issues/20)), then bookings and payments.
+Next: login ([#20](https://github.com/heavymedl-labs/tetsu/issues/20)), then bookings and payments.
 
 ## Run it
 
@@ -56,7 +56,7 @@ Free tiers for now, each behind a setting or a port so it can be swapped
 | Database | [Neon](https://neon.com), Postgres 18 ([ADR-0012](docs/adr/0012-first-hosting-and-deploys.md)) | Live |
 | Code, CI, images | [GitHub](https://github.com/heavymedl-labs/tetsu) ([ADR-0023](docs/adr/0023-ci-on-demand.md), [ADR-0033](docs/adr/0033-deploys-on-demand.md)) | Live |
 | Logs and alerts | [Grafana Cloud](https://grafana.com/products/cloud/) ([ADR-0049](docs/adr/0049-log-export.md)) | Live |
-| Email | [Resend](https://resend.com) ([ADR-0044](docs/adr/0044-email-delivery.md)) | With sign-in |
+| Email | [Resend](https://resend.com) ([ADR-0044](docs/adr/0044-email-delivery.md)) | With login |
 
 ## License
 

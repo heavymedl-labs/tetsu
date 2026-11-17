@@ -75,7 +75,7 @@ These are compared, not pass or fail.
 | # | Criterion | How it is judged |
 | --- | --- | --- |
 | W1 | Operating burden | Who patches the OS and Postgres, who tests failover, and what wakes someone at night, for a one-person team with agents. Weighs most, per the limit above |
-| W2 | Monthly cost | Milestone 1 (marketing site, sign-in, staging), within the limit above, and milestone 3 (two live businesses, high availability) |
+| W2 | Monthly cost | Milestone 1 (marketing site, login, staging), within the limit above, and milestone 3 (two live businesses, high availability) |
 | W3 | Availability | What one instance, host, or zone failing does, and how long recovery takes without a person |
 | W4 | Database latency | Round trip from app to Postgres, and whether connections pass through a pooler |
 | W5 | Cost to leave | Hours to move, using a drill rather than a guess where possible |
@@ -112,10 +112,10 @@ The failover test settles this when we move.
 | --- | --- | --- |
 | Render free web service, app | **Pick** | Runs our image. With no payment method it suspends rather than bills, so the cost is a true $0. Moving to a paid Render plan needs no new host. Sleeps after 15 minutes, takes about a minute to wake, runs on 0.1 CPU, and is not meant for production |
 | Neon, Postgres | **Pick** | Postgres 18.6, 1 GB per project, a direct endpoint, and no weekly pause. Sleeps after 5 minutes, 100 CU-hours a month, 6-hour restore window |
-| Cloudflare R2, files | Pick when needed | 10 GB free, with no outbound fees. The marketing site and sign-in store no files, so this can wait. Developer guides disagree on whether enabling it needs a payment method, so check first |
+| Cloudflare R2, files | Pick when needed | 10 GB free, with no outbound fees. The marketing site and login store no files, so this can wait. Developer guides disagree on whether enabling it needs a payment method, so check first |
 | Cloudflare Workers, app | Out on M1 | Free for 100,000 requests a day, with 10 ms of CPU each. Rust runs as WebAssembly, so our binary and its Axum and Tokio stack would not run unchanged |
 | Cloudflare Containers, app | Out, not free | Needs the $5 Workers Paid plan, and a Worker starts and routes to each container. Worth a look as a paid option: no egress fees, and about $12 a month always on at 1/4 vCPU and 1 GiB by our arithmetic, plus active CPU. We have not confirmed connections to outside Postgres |
-| Cloudflare CDN, in front of the app | To try | Free DNS, TLS, and cache rules. Caching marketing pages could hide Render's slow wake. One developer reports free accounts do not reliably cache HTML, so test it. Sign-in and any tenant page must never be cached |
+| Cloudflare CDN, in front of the app | To try | Free DNS, TLS, and cache rules. Caching marketing pages could hide Render's slow wake. One developer reports free accounts do not reliably cache HTML, so test it. Login and any tenant page must never be cached |
 | Google Cloud Run | Fallback | Wakes faster, with real CPU and a larger free quota: 2 million requests and 180,000 vCPU-seconds a month. Needs a billing account and has no spending limit of its own. It was the pick while we planned to benchmark in this phase |
 | Render free Postgres | Out | Expires after 30 days, with no backups |
 | Supabase | Out on M3 | Hosted projects are on Postgres 17, with no 18 announced. 500 MB, and free projects pause after a week. It is a database and backend, not a host for our image; its Compute product is in private alpha. Point-in-time recovery costs $100 a month. Its auth overlaps [#9](https://github.com/heavymedl-labs/tetsu/issues/9) |

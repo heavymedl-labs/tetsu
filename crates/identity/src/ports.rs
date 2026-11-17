@@ -1,9 +1,9 @@
 //! The driven port Identity calls out through.
 
 use crate::domain::{
-    Account, Actor, Addition, Disabling, Enrollee, Error, Issue, NewPasskey, OperatorId,
+    Account, Actor, Addition, Disabling, Error, Invitee, Issue, Login, NewPasskey, OperatorId,
     OperatorName, OperatorSummary, Realm, Redemption, Refusal, Removal, Session, SessionStart,
-    SignIn, Signer, TakenAddition, TakenCeremony,
+    Signer, TakenAddition, TakenCeremony,
 };
 use std::future::Future;
 
@@ -36,27 +36,27 @@ pub trait OperatorStore {
         realm: Realm,
     ) -> impl Future<Output = Result<bool, Error>> + Send;
 
-    /// Stores an operator's enrollment link under its token's hash, good for an hour, replacing any earlier one,
+    /// Stores an operator's invite link under its token's hash, good for an hour, replacing any earlier one,
     /// and says what came of it: an operator who is disabled or holds a passkey is issued none, and one who does
     /// not exist is none.
-    fn issue_enrollment(
+    fn issue_invite(
         &self,
         hash: &[u8; 32],
         operator: OperatorId,
         actor: &Actor,
     ) -> impl Future<Output = Result<Option<Issue>, Error>> + Send;
 
-    /// The operator an enrollment link's hash names, while the link is open, the operator enabled, and no passkey
+    /// The operator an invite link's hash names, while the link is open, the operator enabled, and no passkey
     /// theirs yet. Reading it uses nothing up.
-    fn enrollee(
+    fn invitee(
         &self,
         link: &[u8; 32],
-    ) -> impl Future<Output = Result<Option<Enrollee>, Error>> + Send;
+    ) -> impl Future<Output = Result<Option<Invitee>, Error>> + Send;
 
-    /// Keeps an enrollment ceremony's state under its token's hash, with the link it will redeem, for ten minutes
+    /// Keeps a join ceremony's state under its token's hash, with the link it will redeem, for ten minutes
     /// but never past the link, and replacing any earlier ceremony of that link. Says whether it did: not once the
     /// link has ended, or its operator is disabled or holds a passkey.
-    fn begin_enrollment(
+    fn begin_join(
         &self,
         token: &[u8; 32],
         operator: OperatorId,
@@ -64,23 +64,23 @@ pub trait OperatorStore {
         state: &str,
     ) -> impl Future<Output = Result<bool, Error>> + Send;
 
-    /// Takes an enrollment ceremony by its token's hash, once: it is gone after this, and returned only if it was
+    /// Takes a join ceremony by its token's hash, once: it is gone after this, and returned only if it was
     /// still open.
-    fn take_enrollment(
+    fn take_join(
         &self,
         token: &[u8; 32],
     ) -> impl Future<Output = Result<Option<TakenCeremony>, Error>> + Send;
 
     /// Stores an operator's first passkey and uses up the ceremony's link, in one transaction, and says what came of
     /// it, or none for an operator who does not exist.
-    fn redeem_enrollment(
+    fn redeem_invite(
         &self,
         ceremony: &TakenCeremony,
         passkey: &NewPasskey,
         actor: &Actor,
     ) -> impl Future<Output = Result<Option<Redemption>, Error>> + Send;
 
-    /// Disables an operator, ending every session and enrollment link they hold, and says what it did, or none for
+    /// Disables an operator, ending every session and invite link they hold, and says what it did, or none for
     /// an operator who does not exist.
     fn disable_operator(
         &self,
@@ -88,9 +88,9 @@ pub trait OperatorStore {
         actor: &Actor,
     ) -> impl Future<Output = Result<Option<Disabling>, Error>> + Send;
 
-    /// Keeps a sign-in ceremony's state for ten minutes under its token's hash. It never refuses for the number
+    /// Keeps a login ceremony's state for ten minutes under its token's hash. It never refuses for the number
     /// open: past a bound, the oldest end.
-    fn begin_sign_in(
+    fn begin_login(
         &self,
         token: &[u8; 32],
         state: &str,
@@ -104,8 +104,8 @@ pub trait OperatorStore {
         actor: &Actor,
     ) -> impl Future<Output = Result<(), Error>> + Send;
 
-    /// Takes a sign-in ceremony's state by its token's hash, once, if it was still open.
-    fn take_sign_in(
+    /// Takes a login ceremony's state by its token's hash, once, if it was still open.
+    fn take_login(
         &self,
         token: &[u8; 32],
     ) -> impl Future<Output = Result<Option<String>, Error>> + Send;
@@ -117,16 +117,16 @@ pub trait OperatorStore {
         credential: &[u8],
     ) -> impl Future<Output = Result<Option<Signer>, Error>> + Send;
 
-    /// Stores a passkey's verified new state, if no other sign-in changed it meanwhile and it is still the signer's
+    /// Stores a passkey's verified new state, if no other login changed it meanwhile and it is still the signer's
     /// operator's, and starts the operator's session under a token's hash, in one transaction, recording it; says
     /// what came of it, or none for a passkey that no longer exists or is no longer theirs.
-    fn sign_in(
+    fn login(
         &self,
         signer: &Signer,
         passkey: &str,
         session: &SessionStart,
         actor: &Actor,
-    ) -> impl Future<Output = Result<Option<SignIn>, Error>> + Send;
+    ) -> impl Future<Output = Result<Option<Login>, Error>> + Send;
 
     /// The account a live session's hash names, if the operator is enabled. Reading it changes nothing.
     fn account(

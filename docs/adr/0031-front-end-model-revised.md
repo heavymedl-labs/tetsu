@@ -7,10 +7,10 @@
 ## Context
 
 [ADR-0030](0030-front-end-model.md) put Tetsu's Web Components on businesses' own pages and handed them a
-sign-in token. Reviews the same day found that fails ASVS Level 2, which
+login token. Reviews the same day found that fails ASVS Level 2, which
 [ADR-0029](0029-security-target-revised.md) requires with no accepted risks for identity and money
 ([research](../research/front-end-model.md#review-on-2026-11-09)). A business's page runs scripts Tetsu does not
-control, which can read a token, overlay or imitate a signed-in frame, or send forms with a customer's cookies.
+control, which can read a token, overlay or imitate a logged-in frame, or send forms with a customer's cookies.
 Browsers also block cookies in frames on other sites. Stripe's hosted Checkout and Shopify's Buy Button keep
 checkout at the top level for these reasons, and [#14](https://github.com/heavymedl-labs/tetsu/issues/14) had
 already set the rule that an embed is the same content without the site's outer layout.
@@ -26,17 +26,17 @@ nothing ties Tetsu to one JavaScript framework. This is how.
 - **Islands add behavior, not markup.** They are light-DOM Web Components on Tetsu's own pages. New content comes
   as HTML fragments Askama renders; a library for that, such as htmx, needs its own ADR.
 - **An embed is a frame of Tetsu's page, for browsing only.** Embeddable pages, and every request they make,
-  ignore the session and change nothing, so nothing signed in is ever framed. A small `<tetsu-embed>` element,
+  ignore the session and change nothing, so nothing logged in is ever framed. A small `<tetsu-embed>` element,
   usable in any framework or none, places the frame and checks every message it gets (`v5.0.0-3.5.5`).
-- **Signing in and paying happen at the top level, never in a frame of a business's page.** Payment uses the
+- **Logging in and paying happen at the top level, never in a frame of a business's page.** Payment uses the
   processor's hosted page or card fields, as [ADR-0004](0004-security.md) allows.
 - **Each business names the exact `https://` sites that may frame its pages.** Framing is decided in one place,
   the composition root's security-header layer, and fails closed: anything else gets `frame-ancestors 'none'`
   (`v5.0.0-3.4.6`). That layer and the list's validation are Tier 1.
 - **Every form that changes state is protected against forgery** (`v5.0.0-3.5.1`), never by `SameSite` alone.
 - **A business with developers builds on Tetsu's public data through the API** from its own backend. Acting for a
-  signed-in customer that way waits on [#9](https://github.com/heavymedl-labs/tetsu/issues/9) and
-  [#12](https://github.com/heavymedl-labs/tetsu/issues/12), so it cannot skip Tetsu's sign-in rules.
+  logged-in customer that way waits on [#9](https://github.com/heavymedl-labs/tetsu/issues/9) and
+  [#12](https://github.com/heavymedl-labs/tetsu/issues/12), so it cannot skip Tetsu's login rules.
 - **The design system has three layers:** design tokens in the Design Tokens Community Group's format (2025.10),
   generated into `--tetsu-*` CSS properties; base CSS on them; and Web Components, the islands and
   `<tetsu-embed>`. A business's theme is token values stored with the tenant.
@@ -45,7 +45,7 @@ nothing ties Tetsu to one JavaScript framework. This is how.
 
 Open, with owners: tools and packaging for the design system
 ([#86](https://github.com/heavymedl-labs/tetsu/issues/86)); the staff app, performance budgets, accessibility, and
-native apps (#14); addresses and domains (#8); customer sign-in (#9); payment processors
+native apps (#14); addresses and domains (#8); customer login (#9); payment processors
 ([#10](https://github.com/heavymedl-labs/tetsu/issues/10)); and the API (#12). How each piece is built is in its
 issue: embedding in [#89](https://github.com/heavymedl-labs/tetsu/issues/89), tokens and styles in
 [#84](https://github.com/heavymedl-labs/tetsu/issues/84) and [#87](https://github.com/heavymedl-labs/tetsu/issues/87),
@@ -54,9 +54,9 @@ islands in [#88](https://github.com/heavymedl-labs/tetsu/issues/88).
 ## Alternatives considered
 
 - **ADR-0030 as written.** Exposes the token to the host page's scripts, and has no control over who embeds.
-- **Sign-in and payment inside a frame.** Keeps the flow on the business's page, but browsers block the session
-  cookie, and the host page can overlay or imitate a signed-in frame.
-- **Sign-in on a subdomain of the business's own domain.** First-party, so it works in Safari, but same-site with
+- **Login and payment inside a frame.** Keeps the flow on the business's page, but browsers block the session
+  cookie, and the host page can overlay or imitate a logged-in frame.
+- **Login on a subdomain of the business's own domain.** First-party, so it works in Safari, but same-site with
   the host page, whose scripts can then post forms with the customer's cookies, and the business controls its DNS.
   It waits on #8.
 - **Components on the host page behind a backend run by Tetsu.** Keeps tokens off the page, but the component, its
@@ -79,7 +79,7 @@ islands in [#88](https://github.com/heavymedl-labs/tetsu/issues/88).
 
 **Weakest evidence.** No browser test of embedding yet, and no measure of drop-off at the new tab.
 
-**Revisit** if framed sign-in becomes reliable and safe from the host page, if drop-off proves high, when #8
+**Revisit** if framed login becomes reliable and safe from the host page, if drop-off proves high, when #8
 decides domains, or if the islands outgrow plain Web Components.
 
 ## Sources

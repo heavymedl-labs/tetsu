@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-14
-- Supersedes, until the Level 2 review, [ADR-0040](0040-identity-and-sign-in.md)'s rule that operators sign in with
+- Supersedes, until the Level 2 review, [ADR-0040](0040-identity-and-sign-in.md)'s rule that operators log in with
   attested hardware keys, at least two each, and [ADR-0041](0041-account-recovery.md)'s rule for an operator who
   loses both
 - Moves [ADR-0044](0044-email-delivery.md)'s SMTP adapter, and the choice of its library, from
@@ -10,7 +10,7 @@
 
 ## Context
 
-ADR-0040 has operators sign in with hardware keys whose attestation is checked against the key maker's pinned
+ADR-0040 has operators log in with hardware keys whose attestation is checked against the key maker's pinned
 roots, at least two keys each, because the operator realm reaches every business. The maintainer, the only
 operator, has no hardware keys, and does not want to require them while Tetsu holds only fictional data.
 
@@ -20,22 +20,22 @@ passkey belongs to `onrender.com` hosts and is thrown away when Tetsu's domains 
 proof of which device holds it, and rules out synced passkeys.
 
 ADR-0044 places the SMTP adapter, and the choice of its library, in #110. Slice 5 of
-[ADR-0048](0048-sign-in-design.md) sends no email to a real person: operators enroll by command, and the capture
+[ADR-0048](0048-sign-in-design.md) sends no email to a real person: operators are invited by command, and the capture
 mailbox shows what demo accounts would receive.
 
 ## Decision
 
-- **Until the Level 2 review, an operator signs in with any passkey that verifies the user,** synced passkeys
+- **Until the Level 2 review, an operator logs in with any passkey that verifies the user,** synced passkeys
   included, with no attestation check. Every other operator rule stands: the operator realm's own host and relying
-  party ID, enrollment only through ADR-0040's command printed to its terminal, sessions of 8 hours and 15 minutes
-  idle (ADR-0048), rate limits, and an audit entry for every sign-in.
+  party ID, invites only through ADR-0040's command printed to its terminal, sessions of 8 hours and 15 minutes
+  idle (ADR-0048), rate limits, and an audit entry for every login.
 - **Each operator enrolls two passkeys,** on different devices or passkey managers, so losing one does not mean
-  enrolling again. The command enrolls the first; the second is added after a fresh sign-in, as ADR-0040 requires
+  joining again. The invite sets up the first; the second is added after a fresh login, as ADR-0040 requires
   of any added passkey.
 - **An operator who loses both** gets a new account from ADR-0040's command, and the old one is removed with its
   sessions.
 - **Attested hardware keys return as a gate before the Level 2 review,** together with Tetsu's domains
-  ([#102](https://github.com/heavymedl-labs/tetsu/issues/102)). Every operator enrolls again there in any case,
+  ([#102](https://github.com/heavymedl-labs/tetsu/issues/102)). Every operator joins again there in any case,
   since a passkey cannot move from `onrender.com` to Tetsu's domain, and ADR-0040's and ADR-0041's operator rules
   apply again in full. No real business's data is ever reachable with a synced operator passkey.
 - **#110 builds ADR-0044's `Mailer` port, its capture adapter, and the operator page that reads it.** The SMTP

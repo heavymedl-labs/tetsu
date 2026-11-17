@@ -7,9 +7,9 @@
 
 ## Context
 
-Sign-in sends email: codes for signing up and recovering, recovery notices that must never be lost, and dispute
+Login sends email: codes for signing up and recovering, recovery notices that must never be lost, and dispute
 links ([ADR-0040](0040-identity-and-sign-in.md), [ADR-0041](0041-account-recovery.md)). ADR-0040 asked for an email
-provider, chosen in its own ADR, before sign-in.
+provider, chosen in its own ADR, before login.
 
 Tetsu has no domain until a client showcase is close. Every reputable provider needs a domain the sender
 controls, with SPF, DKIM, and DMARC records, before it delivers to other people, and Gmail and Yahoo have required
@@ -56,7 +56,7 @@ Email goes out through a **driven port,** over SMTP, through **Resend's free tie
 
 ## Consequences
 
-- Sign-in ([#20](https://github.com/heavymedl-labs/tetsu/issues/20)) sends real email to the maintainer from the
+- Login ([#20](https://github.com/heavymedl-labs/tetsu/issues/20)) sends real email to the maintainer from the
   start, and captures the rest, at no cost.
 - The SMTP library is chosen through ADR-0010 when the adapter is built, in
   [#110](https://github.com/heavymedl-labs/tetsu/issues/110).

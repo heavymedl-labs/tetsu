@@ -1,16 +1,16 @@
-//! The operator command (ADR-0040, ADR-0059): creates operators and issues their enrollment links, lists them,
+//! The operator command (ADR-0040, ADR-0059): creates operators and issues their invite links, lists them,
 //! disables and enables them, and ends their sessions. Identity records each change for the audit record, with
 //! who ran the command and what came of it.
 //!
-//! An enrollment link is printed only to a terminal, never to a pipe, so it cannot land in CI's output or a log by
+//! An invite link is printed only to a terminal, never to a pipe, so it cannot land in CI's output or a log by
 //! accident. That guards against mistakes; the trust boundary is access to the database, which this command
-//! signs in to directly (ADR-0040, `v5.0.0-6.4.1`).
+//! logs in to directly (ADR-0040, `v5.0.0-6.4.1`).
 
 use std::env::VarError;
 use std::io::Read;
 
 use tetsu_identity::{
-    Actor, Disabling, EnrollmentToken, OperatorId, OperatorName, OperatorStore, OperatorSummary,
+    Actor, Disabling, InviteToken, OperatorId, OperatorName, OperatorStore, OperatorSummary,
     Operators, Removal,
 };
 
@@ -20,7 +20,7 @@ use crate::settings::{self, Local};
 #[derive(Debug, PartialEq, Eq)]
 pub enum Operator {
     Create { name: OperatorName },
-    Enroll { id: OperatorId },
+    Invite { id: OperatorId },
     List,
     Disable { id: OperatorId },
     Enable { id: OperatorId },
@@ -29,7 +29,7 @@ pub enum Operator {
     EndAllSessions,
 }
 
-const USAGE: &str = "operator takes create <name>, enroll <id>, list, disable <id>, enable <id>, remove-passkeys \
+const USAGE: &str = "operator takes create <name>, invite <id>, list, disable <id>, enable <id>, remove-passkeys \
                      <id>, or end-sessions <id | --all>";
 
 /// The operator command its words name, with its arguments checked.
@@ -38,7 +38,7 @@ pub fn parse(rest: &[String]) -> Result<Operator, String> {
         return Err(USAGE.into());
     };
     match (command.as_str(), arguments) {
-        // A name like an option, such as --help, is a mistake, never an operator to create and enroll.
+        // A name like an option, such as --help, is a mistake, never an operator to create and join.
         ("create", [name]) if name.trim_start().starts_with('-') => Err(USAGE.into()),
         ("create", [name]) => OperatorName::parse(name)
             .map(|name| Operator::Create { name })
@@ -53,7 +53,7 @@ pub fn parse(rest: &[String]) -> Result<Operator, String> {
 /// A command that acts on one operator, with that operator's ID.
 fn with_id(command: &str, text: &str) -> Result<Operator, String> {
     let named: fn(OperatorId) -> Operator = match command {
-        "enroll" => |id| Operator::Enroll { id },
+        "invite" => |id| Operator::Invite { id },
         "disable" => |id| Operator::Disable { id },
         "enable" => |id| Operator::Enable { id },
         "remove-passkeys" => |id| Operator::RemovePasskeys { id },
@@ -73,10 +73,10 @@ pub async fn run(
     local: impl FnOnce() -> Result<Local, String>,
     terminal: bool,
 ) -> Result<Vec<String>, String> {
-    let issues_link = matches!(operator, Operator::Create { .. } | Operator::Enroll { .. });
+    let issues_link = matches!(operator, Operator::Create { .. } | Operator::Invite { .. });
     if issues_link && !terminal {
         return Err(
-            "an enrollment link prints only to a terminal, never to a log or a pipe (ADR-0040); run this in one"
+            "an invite link prints only to a terminal, never to a log or a pipe (ADR-0040); run this in one"
                 .into(),
         );
     }
@@ -101,7 +101,7 @@ fn link_origin(local: &Local) -> Result<String, String> {
     settings::origin(|name| local.var(name))
 }
 
-/// Who is signed in to run the command, read from the process's own environment and never from `.env`, which
+/// Who is logged in to run the command, read from the process's own environment and never from `.env`, which
 /// holds settings, not who someone is: `SUDO_USER` first, so `sudo` does not hide the person, then `USER`, then
 /// `LOGNAME`, each skipped when unset or blank. A value that is not UTF-8 names no one, rather than falling through
 /// to the next. It is asserted, not proven: database access is what grants the command (ADR-0061).
@@ -150,8 +150,8 @@ async fn act(
 ) -> Result<Vec<String>, String> {
     let said = match operator {
         Operator::Create { name } => return create(operators, &name, origin, by).await,
-        Operator::Enroll { id } => operators
-            .enroll(id, by)
+        Operator::Invite { id } => operators
+            .invite(id, by)
             .await
             .map(|token| vec![link(origin, &token)]),
         Operator::List => operators
@@ -164,7 +164,7 @@ async fn act(
             .map(|done| vec![disabled(id, done)]),
         Operator::Enable { id } => operators.enable(id, by).await.map(|done| {
             vec![if done {
-                format!("enabled operator {}, who signs in afresh", id.get())
+                format!("enabled operator {}, who logs in afresh", id.get())
             } else {
                 format!("operator {} was already enabled", id.get())
             }]
@@ -185,7 +185,7 @@ async fn act(
     said.map_err(|error| error.to_string())
 }
 
-/// Creates an operator and issues their first enrollment link. These are two steps, so if the second fails the
+/// Creates an operator and issues their first invite link. These are two steps, so if the second fails the
 /// operator exists without a link, and the error names them so the link can be issued again.
 async fn create(
     operators: &Operators<impl OperatorStore>,
@@ -197,9 +197,9 @@ async fn create(
         .create(name, by)
         .await
         .map_err(|error| error.to_string())?;
-    let token = operators.enroll(id, by).await.map_err(|error| {
+    let token = operators.invite(id, by).await.map_err(|error| {
         format!(
-            "created operator {id}, but could not issue their enrollment link: {error}; run tetsu operator enroll {id}",
+            "created operator {id}, but could not issue their invite link: {error}; run tetsu operator invite {id}",
             id = id.get()
         )
     })?;
@@ -209,11 +209,11 @@ async fn create(
     ])
 }
 
-/// What disabling an operator did, with how many sessions and enrollment links it ended.
+/// What disabling an operator did, with how many sessions and invite links it ended.
 /// What removing an operator's passkeys did, and what they do next.
 fn removed(id: OperatorId, removal: Removal) -> String {
     format!(
-        "removed {} passkeys of operator {id}, ending {} sessions; issue a link with tetsu operator enroll {id}",
+        "removed {} passkeys of operator {id}, ending {} sessions; issue a link with tetsu operator invite {id}",
         removal.passkeys_removed,
         removal.sessions_ended,
         id = id.get()
@@ -223,7 +223,7 @@ fn removed(id: OperatorId, removal: Removal) -> String {
 fn disabled(id: OperatorId, done: Disabling) -> String {
     if done.done {
         format!(
-            "disabled operator {}, ending {} sessions and {} enrollment links",
+            "disabled operator {}, ending {} sessions and {} invite links",
             id.get(),
             done.sessions_ended,
             done.links_ended
@@ -256,12 +256,12 @@ fn listed(operator: &OperatorSummary) -> String {
     )
 }
 
-/// The enrollment link, with the token in the fragment, which a browser never sends to the server or in a
+/// The invite link, with the token in the fragment, which a browser never sends to the server or in a
 /// `Referer`, so it stays out of the server's logs. A browser's history keeps it, and a container run with a
 /// terminal (`docker run -t`) logs it, which is why it is good once and for an hour.
-fn link(origin: &str, token: &EnrollmentToken) -> String {
+fn link(origin: &str, token: &InviteToken) -> String {
     format!(
-        "enrollment link, good once and for an hour: {origin}/ops/enroll#{}",
+        "invite link, good once and for an hour: {origin}/ops/join#{}",
         token.to_text()
     )
 }
@@ -282,7 +282,7 @@ mod tests {
                     name: OperatorName::parse("Kurt Medley").unwrap(),
                 },
             ),
-            (&["enroll", "7"], Operator::Enroll { id: kurt }),
+            (&["invite", "7"], Operator::Invite { id: kurt }),
             (&["list"], Operator::List),
             (&["disable", "7"], Operator::Disable { id: kurt }),
             (&["enable", "7"], Operator::Enable { id: kurt }),
@@ -322,7 +322,7 @@ mod tests {
             Operator::Create {
                 name: OperatorName::parse("Kurt Medley").unwrap(),
             },
-            Operator::Enroll {
+            Operator::Invite {
                 id: OperatorId::parse("7").unwrap(),
             },
         ] {
@@ -330,7 +330,7 @@ mod tests {
                 .await
                 .unwrap_err();
             assert!(
-                refused.starts_with("an enrollment link prints only to a terminal"),
+                refused.starts_with("an invite link prints only to a terminal"),
                 "{refused}"
             );
         }
@@ -340,7 +340,7 @@ mod tests {
     #[tokio::test]
     async fn a_link_needs_the_sites_origin() {
         let refused = run(
-            Operator::Enroll {
+            Operator::Invite {
                 id: OperatorId::parse("7").unwrap(),
             },
             || Ok(Local::default()),
@@ -493,11 +493,10 @@ mod tests {
         )
         .await;
         assert_eq!(created[0], "created operator 1, Kurt Medley");
-        let prefix =
-            "enrollment link, good once and for an hour: https://ops.example.com/ops/enroll#";
+        let prefix = "invite link, good once and for an hour: https://ops.example.com/ops/join#";
         for line in [
             &created[1],
-            &said(&operators, Operator::Enroll { id: kurt }).await[0],
+            &said(&operators, Operator::Invite { id: kurt }).await[0],
         ] {
             let token = line
                 .strip_prefix(prefix)
@@ -541,7 +540,7 @@ mod tests {
             )
             .await,
             [
-                "removed 0 passkeys of operator 1, ending 0 sessions; issue a link with tetsu operator enroll 1"
+                "removed 0 passkeys of operator 1, ending 0 sessions; issue a link with tetsu operator invite 1"
             ]
         );
     }
@@ -560,7 +559,7 @@ mod tests {
         .await;
         assert_eq!(
             said(&operators, Operator::Disable { id: kurt }).await,
-            ["disabled operator 1, ending 0 sessions and 1 enrollment links"]
+            ["disabled operator 1, ending 0 sessions and 1 invite links"]
         );
         assert_eq!(
             said(&operators, Operator::Disable { id: kurt }).await,
@@ -571,12 +570,12 @@ mod tests {
             ["1  Kurt Medley  disabled  0 passkeys"]
         );
         assert_eq!(
-            act(&operators, Operator::Enroll { id: kurt }, ORIGIN, &by()).await,
+            act(&operators, Operator::Invite { id: kurt }, ORIGIN, &by()).await,
             Err("invalid: no enabled operator 1".into())
         );
         assert_eq!(
             said(&operators, Operator::Enable { id: kurt }).await,
-            ["enabled operator 1, who signs in afresh"]
+            ["enabled operator 1, who logs in afresh"]
         );
         assert_eq!(
             said(&operators, Operator::Enable { id: kurt }).await,
@@ -606,7 +605,7 @@ mod tests {
             .await
             .unwrap()
             .batch_execute(
-                "REVOKE EXECUTE ON FUNCTION identity.issue_enrollment(bytea, bigint) FROM tetsu_identity",
+                "REVOKE EXECUTE ON FUNCTION identity.issue_invite(bytea, bigint) FROM tetsu_identity",
             )
             .await
             .unwrap();
@@ -618,8 +617,8 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            refused.starts_with("created operator 1, but could not issue their enrollment link: ")
-                && refused.ends_with("; run tetsu operator enroll 1"),
+            refused.starts_with("created operator 1, but could not issue their invite link: ")
+                && refused.ends_with("; run tetsu operator invite 1"),
             "{refused}"
         );
     }

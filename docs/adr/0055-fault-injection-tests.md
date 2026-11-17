@@ -50,7 +50,7 @@ tools. Evidence is in the [research](../research/browser-and-system-testing.md#s
 - Toxiproxy 2.13.0 was released on 2026-10-14, MIT, by Shopify; read 2026-11-13.
 - Contributors start one more container, which `scripts/check.sh` names when it is missing, as it does for the test
   Postgres. CI gains a service container.
-- Tests learn how Tetsu fails before a real outage shows it. The sign-in libraries' failure tests
+- Tests learn how Tetsu fails before a real outage shows it. The login libraries' failure tests
   ([#109](https://github.com/heavymedl-labs/tetsu/issues/109)) can use the same helper.
 - Replacing Toxiproxy means rewriting one helper; the tests name faults, not the tool.
 - Revisit if faults inside Tetsu need testing too, or the project moves to per-test containers.

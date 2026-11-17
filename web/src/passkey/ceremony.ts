@@ -1,13 +1,13 @@
-// One passkey ceremony with Tetsu's server: begin, ask the device, finish. Signing in, enrolling, and adding a
+// One passkey ceremony with Tetsu's server: begin, ask the device, finish. Logging in, joining, and adding a
 // passkey differ only in their endpoints and in which call they make on the device.
 
 import { assertion, type CreationJSON, creation, type RequestJSON, registration, request } from "./convert";
 
-export type Action = "sign-in" | "enroll" | "add";
+export type Action = "login" | "join" | "add";
 
 const ENDPOINTS: Record<Action, string> = {
-  "sign-in": "/ops/sign-in",
-  enroll: "/ops/enroll",
+  login: "/ops/login",
+  join: "/ops/join",
   add: "/ops/passkeys",
 };
 
@@ -29,7 +29,7 @@ async function call(path: string, body: object, signal: AbortSignal): Promise<Re
   return json;
 }
 
-/** Runs one ceremony on `device`, sending `sent` with both halves: the enrollment link, or the operator's form
+/** Runs one ceremony on `device`, sending `sent` with both halves: the invite link, or the operator's form
  * token. `signal` ends it, its requests and the device's prompt alike, as when the person presses again, until
  * `finishing` is called, just before the last request: from then the server may have kept what it sent, so the
  * caller lets nothing end it. Returns where the page goes once it is done. */
@@ -42,7 +42,7 @@ export async function ceremony(
 ): Promise<string> {
   const endpoint = ENDPOINTS[action];
   const begun = await call(`${endpoint}/begin`, sent, signal);
-  const signing = action === "sign-in";
+  const signing = action === "login";
   const credential = signing
     ? await device.get(request(begun.options as RequestJSON, signal))
     : await device.create(creation(begun.options as CreationJSON, signal));

@@ -9,7 +9,7 @@ export interface CreationJSON {
   publicKey: PublicKeyCredentialCreationOptionsJSON;
 }
 
-/** Options to sign in, as the server sends them. */
+/** Options to log in, as the server sends them. */
 export interface RequestJSON {
   publicKey: PublicKeyCredentialRequestOptionsJSON;
 }
@@ -66,7 +66,7 @@ export function registration(credential: PublicKeyCredential): object {
   };
 }
 
-/** A signed sign-in, as the server reads it. */
+/** A signed login, as the server reads it. */
 export function assertion(credential: PublicKeyCredential): object {
   const response = credential.response as AuthenticatorAssertionResponse;
   return {

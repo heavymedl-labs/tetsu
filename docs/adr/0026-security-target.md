@@ -13,13 +13,13 @@ Level 3.
 
 Tetsu will hold several businesses' customer records, staff accounts, and payment records. Card data stays
 with the processor ([ADR-0004](0004-security.md)). The walking skeleton holds only fictional data, but its
-sign-in ([#20](https://github.com/heavymedl-labs/tetsu/issues/20)) is the one real businesses will use.
+login ([#20](https://github.com/heavymedl-labs/tetsu/issues/20)) is the one real businesses will use.
 
 ## Decision
 
 - **Tetsu targets ASVS 5.0 Level 2.**
 - **Tier 1 areas meet Level 2 as they are built.** These are identity and access, tenant isolation, and
-  money, as [ADR-0005](0005-testing-and-performance.md) defines them. So sign-in in #20 is built to Level 2
+  money, as [ADR-0005](0005-testing-and-performance.md) defines them. So login in #20 is built to Level 2
   from its first version, not raised later.
 - **Everything else meets Level 1 during the walking skeleton,** while only fictional data exists.
 - **The whole application meets Level 2 before the first real business's data arrives** in milestone 2. A
@@ -30,7 +30,7 @@ sign-in ([#20](https://github.com/heavymedl-labs/tetsu/issues/20)) is the one re
 
 ## Alternatives considered
 
-- **Level 1 throughout.** ASVS's own startup example, and the least work. But sign-in and tenant isolation
+- **Level 1 throughout.** ASVS's own startup example, and the least work. But login and tenant isolation
   built to Level 1 would need rework before real data, and Tetsu holds many businesses' data, not one.
 - **Level 2 for everything from the start.** Safest, but slows the walking skeleton on areas, such as the
   demo page, that hold nothing sensitive yet.
@@ -41,7 +41,7 @@ sign-in ([#20](https://github.com/heavymedl-labs/tetsu/issues/20)) is the one re
 
 ## Consequences
 
-- Sign-in and tenant isolation take longer, since each needs its Level 2 requirements met and named.
+- Login and tenant isolation take longer, since each needs its Level 2 requirements met and named.
 - Milestone 2 gains a review before go live, tracked in
   [#83](https://github.com/heavymedl-labs/tetsu/issues/83).
 - A requirement may turn out not to fit, such as one for a feature Tetsu does not have. The review records

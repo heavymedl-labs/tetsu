@@ -1,5 +1,5 @@
-//! What the operator command does to operators and sessions (ADR-0040, ADR-0059), in Postgres, signed in as the
-//! application role: enrollment links, disabling an operator, ending sessions, and the audit events each records.
+//! What the operator command does to operators and sessions (ADR-0040, ADR-0059), in Postgres, logged in as the
+//! application role: invite links, disabling an operator, ending sessions, and the audit events each records.
 //! Their shared setup is in `common`.
 
 use std::fmt::Write;
@@ -56,7 +56,7 @@ mod support {
             .expect("breaks it");
     }
 
-    /// Returns once some statement in the database is waiting on a lock, as a disable does on a row a sign-in
+    /// Returns once some statement in the database is waiting on a lock, as a disable does on a row a login
     /// holds.
     pub async fn waits_for_a_lock(database: &TestDatabase) {
         let client = connect(database).await.expect("connects");
@@ -79,7 +79,7 @@ mod support {
         panic!("nothing waited on a lock");
     }
 
-    /// SQL that stores a passkey for an operator, as enrollment will, with a credential ID of 16 bytes made from
+    /// SQL that stores a passkey for an operator, as join will, with a credential ID of 16 bytes made from
     /// the operator's ID.
     pub fn passkey_for(operator: i64) -> String {
         format!(
@@ -114,28 +114,28 @@ mod support {
 #[cfg(test)]
 mod common;
 
-use common::{actor, migrated, name, ready, signed_in, with_kurt};
+use common::{actor, logged_in, migrated, name, ready, with_kurt};
 use support::{as_admin, disabled, events, kurt_and_pool, number, passkey_for, waits_for_a_lock};
 
 /// The link's token is stored only as its SHA-256 hash, is good for an hour, and a new one replaces the last; each
 /// issue is recorded with the operator's ID and nothing of the token (ADR-0040, ADR-0047).
 #[tokio::test]
-async fn an_enrollment_link_is_stored_hashed_for_an_hour_and_replaced() {
+async fn an_invite_link_is_stored_hashed_for_an_hour_and_replaced() {
     let (database, operators, kurt) = with_kurt().await;
-    let first = operators.enroll(kurt, &actor()).await.expect("issues");
+    let first = operators.invite(kurt, &actor()).await.expect("issues");
     let second = operators
-        .enroll(kurt, &actor())
+        .invite(kurt, &actor())
         .await
         .expect("issues again");
     assert_ne!(first.to_text(), second.to_text());
     assert_eq!(
-        number(&database, "SELECT count(*) FROM identity.enrollments").await,
+        number(&database, "SELECT count(*) FROM identity.invites").await,
         1,
         "one open link per operator"
     );
     let stored = |token: &str| {
         format!(
-            "SELECT count(*) FROM identity.enrollments
+            "SELECT count(*) FROM identity.invites
              WHERE token_hash = sha256(decode('{token}', 'hex'))
                AND ends_at - issued_at = interval '1 hour'"
         )
@@ -150,8 +150,8 @@ async fn an_enrollment_link_is_stored_hashed_for_an_hour_and_replaced() {
         events(&database).await,
         [
             ("identity.operator_created".into(), changed),
-            ("identity.enrollment_issued".into(), issued.clone()),
-            ("identity.enrollment_issued".into(), issued),
+            ("identity.invite_issued".into(), issued.clone()),
+            ("identity.invite_issued".into(), issued),
         ]
     );
 }
@@ -159,12 +159,12 @@ async fn an_enrollment_link_is_stored_hashed_for_an_hour_and_replaced() {
 /// Disabling ends every session and the open link in one step, records it once, and from then on the operator starts
 /// no session and is issued no link (`v5.0.0-7.4.2`).
 #[tokio::test]
-async fn a_disabled_operator_is_signed_out_and_signs_in_nowhere() {
+async fn a_disabled_operator_is_logged_out_and_logs_in_nowhere() {
     let (database, operators, kurt) = with_kurt().await;
     for _ in 0..2 {
-        signed_in(&database, kurt).await;
+        logged_in(&database, kurt).await;
     }
-    operators.enroll(kurt, &actor()).await.expect("issues");
+    operators.invite(kurt, &actor()).await.expect("issues");
     assert_eq!(
         operators.disable(kurt, &actor()).await,
         Ok(disabled(true, 2, 1))
@@ -174,7 +174,7 @@ async fn a_disabled_operator_is_signed_out_and_signs_in_nowhere() {
         Ok(disabled(false, 0, 0)),
         "already disabled"
     );
-    for table in ["sessions", "enrollments"] {
+    for table in ["sessions", "invites"] {
         assert_eq!(
             number(&database, &format!("SELECT count(*) FROM identity.{table}")).await,
             0,
@@ -185,7 +185,7 @@ async fn a_disabled_operator_is_signed_out_and_signs_in_nowhere() {
         "no enabled operator {}",
         kurt.get()
     )));
-    assert_eq!(operators.enroll(kurt, &actor()).await.map(|_| ()), refused);
+    assert_eq!(operators.invite(kurt, &actor()).await.map(|_| ()), refused);
     let disabled: Vec<_> = events(&database)
         .await
         .into_iter()
@@ -204,7 +204,7 @@ async fn an_unknown_operator_is_issued_no_link() {
     let (database, operators) = migrated().await;
     let nobody = OperatorId::parse("42").expect("an ID");
     assert_eq!(
-        operators.enroll(nobody, &actor()).await.map(|_| ()),
+        operators.invite(nobody, &actor()).await.map(|_| ()),
         Err(Error::Invalid("no operator 42".into()))
     );
     let no_operator = Err(Error::Invalid("no operator 42".into()));
@@ -228,7 +228,7 @@ async fn an_unknown_operator_is_issued_no_link() {
     assert_eq!(
         events(&database).await,
         [
-            ("identity.enrollment_issued".into(), unissued),
+            ("identity.invite_issued".into(), unissued),
             ("identity.operator_disabled".into(), refused.clone()),
             ("identity.operator_enabled".into(), refused),
             ("identity.sessions_ended".into(), ended),
@@ -246,7 +246,7 @@ async fn sessions_end_for_one_operator_or_all() {
         .await
         .expect("creates");
     for operator in [kurt, kurt, lee] {
-        signed_in(&database, operator).await;
+        logged_in(&database, operator).await;
     }
     assert_eq!(operators.end_sessions(kurt, &actor()).await, Ok(2));
     assert_eq!(operators.end_sessions(kurt, &actor()).await, Ok(0));
@@ -302,19 +302,19 @@ async fn operators_are_listed_oldest_first() {
     assert!(listed[0].created_at <= listed[1].created_at);
 }
 
-/// A disable that starts while a sign-in or a link is still being written waits for it, then ends what it wrote:
+/// A disable that starts while a login or a link is still being written waits for it, then ends what it wrote:
 /// it never leaves a session or a link behind (`v5.0.0-7.4.2`). The writer holds its transaction open until
 /// Postgres shows the disable waiting on the operator's row, so the order is the same on every run.
 #[tokio::test]
-async fn a_disable_waits_for_a_sign_in_or_link_being_written_then_ends_it() {
+async fn a_disable_waits_for_a_login_or_link_being_written_then_ends_it() {
     for (table, writes) in [
         (
             "sessions",
             "SELECT identity.start_session(sha256('a'::bytea), 'operator', $1)",
         ),
         (
-            "enrollments",
-            "SELECT identity.issue_enrollment(sha256('a'::bytea), $1)",
+            "invites",
+            "SELECT identity.issue_invite(sha256('a'::bytea), $1)",
         ),
     ] {
         let database = ready().await;
@@ -324,7 +324,7 @@ async fn a_disable_waits_for_a_sign_in_or_link_being_written_then_ends_it() {
             .create(&name("Kurt Medley"), &actor())
             .await
             .expect("creates");
-        // Only a sign-in starts a session, so the administrator stands in for one.
+        // Only a login starts a session, so the administrator stands in for one.
         let mut admin = connect(&database).await.expect("connects");
         let writing = admin.transaction().await.expect("begins");
         writing
@@ -349,9 +349,9 @@ async fn a_disable_waits_for_a_sign_in_or_link_being_written_then_ends_it() {
     }
 }
 
-/// Ending an operator's sessions while a sign-in is still being written waits for it, then ends it too.
+/// Ending an operator's sessions while a login is still being written waits for it, then ends it too.
 #[tokio::test]
-async fn ending_sessions_waits_for_a_sign_in_being_written() {
+async fn ending_sessions_waits_for_a_login_being_written() {
     for all in [false, true] {
         let database = ready().await;
         let pool = pool(&database.as_app()).expect("a pool");
@@ -360,7 +360,7 @@ async fn ending_sessions_waits_for_a_sign_in_being_written() {
             .create(&name("Kurt Medley"), &actor())
             .await
             .expect("creates");
-        // Only a sign-in starts a session, so the administrator stands in for one.
+        // Only a login starts a session, so the administrator stands in for one.
         let mut admin = connect(&database).await.expect("connects");
         let writing = admin.transaction().await.expect("begins");
         writing
@@ -387,11 +387,11 @@ async fn ending_sessions_waits_for_a_sign_in_being_written() {
     }
 }
 
-/// An operator enabled again signs in afresh: their sessions stayed ended, and each change is recorded.
+/// An operator enabled again logs in afresh: their sessions stayed ended, and each change is recorded.
 #[tokio::test]
-async fn an_operator_enabled_again_signs_in_afresh() {
+async fn an_operator_enabled_again_logs_in_afresh() {
     let (database, operators, kurt) = with_kurt().await;
-    signed_in(&database, kurt).await;
+    logged_in(&database, kurt).await;
     assert_eq!(
         operators.enable(kurt, &actor()).await,
         Ok(false),
@@ -404,11 +404,11 @@ async fn an_operator_enabled_again_signs_in_afresh() {
         0,
         "sessions stay ended"
     );
-    signed_in(&database, kurt).await;
+    logged_in(&database, kurt).await;
     operators
-        .enroll(kurt, &actor())
+        .invite(kurt, &actor())
         .await
-        .expect("may enroll again");
+        .expect("may join again");
     let enabled: Vec<_> = events(&database)
         .await
         .into_iter()
@@ -423,10 +423,10 @@ async fn an_operator_enabled_again_signs_in_afresh() {
 async fn links_issued_at_once_leave_one() {
     let (database, operators, kurt) = with_kurt().await;
     let by = actor();
-    let (first, second) = tokio::join!(operators.enroll(kurt, &by), operators.enroll(kurt, &by));
+    let (first, second) = tokio::join!(operators.invite(kurt, &by), operators.invite(kurt, &by));
     let held = |token: &str| {
         format!(
-            "SELECT count(*) FROM identity.enrollments WHERE token_hash = sha256(decode('{token}', 'hex'))"
+            "SELECT count(*) FROM identity.invites WHERE token_hash = sha256(decode('{token}', 'hex'))"
         )
     };
     let first = number(&database, &held(&first.expect("issues").to_text())).await;
@@ -434,9 +434,9 @@ async fn links_issued_at_once_leave_one() {
     assert_eq!(first + second, 1);
 }
 
-/// Identity's own role reaches enrollment links only through its functions, so no request can list them.
+/// Identity's own role reaches invite links only through its functions, so no request can list them.
 #[tokio::test]
-async fn identitys_role_cannot_read_enrollment_links() {
+async fn identitys_role_cannot_read_invite_links() {
     let database = ready().await;
     let pool = pool(&database.as_app()).expect("a pool");
     let mut client = pool.get().await.expect("a connection");
@@ -444,7 +444,7 @@ async fn identitys_role_cannot_read_enrollment_links() {
         .await
         .expect("begins");
     let refused = transaction
-        .query("SELECT token_hash FROM identity.enrollments", &[])
+        .query("SELECT token_hash FROM identity.invites", &[])
         .await
         .expect_err("refused");
     assert_eq!(
@@ -460,7 +460,7 @@ async fn each_command_fails_as_storage_when_the_database_refuses_it() {
     let (database, operators, kurt) = with_kurt().await;
     as_admin(
         &database,
-        "REVOKE EXECUTE ON FUNCTION identity.issue_enrollment(bytea, bigint),
+        "REVOKE EXECUTE ON FUNCTION identity.issue_invite(bytea, bigint),
            identity.disable_operator(bigint), identity.enable_operator(bigint),
            identity.remove_passkeys(bigint), identity.end_sessions(text, bigint),
            identity.list_operators() FROM tetsu_identity;
@@ -468,7 +468,7 @@ async fn each_command_fails_as_storage_when_the_database_refuses_it() {
     )
     .await;
     let storage = |result: Result<(), Error>| matches!(result, Err(Error::Storage(_)));
-    assert!(storage(operators.enroll(kurt, &actor()).await.map(drop)));
+    assert!(storage(operators.invite(kurt, &actor()).await.map(drop)));
     assert!(storage(operators.disable(kurt, &actor()).await.map(drop)));
     assert!(storage(operators.enable(kurt, &actor()).await.map(drop)));
     assert!(storage(
@@ -506,7 +506,7 @@ async fn an_answer_of_the_wrong_type_is_a_storage_failure() {
     let (database, operators, kurt) = with_kurt().await;
     let mut replaced = String::new();
     for (function, arguments) in [
-        ("issue_enrollment", "bytea, bigint"),
+        ("issue_invite", "bytea, bigint"),
         ("disable_operator", "bigint"),
         ("enable_operator", "bigint"),
         ("end_sessions", "text, bigint"),
@@ -521,7 +521,7 @@ async fn an_answer_of_the_wrong_type_is_a_storage_failure() {
     }
     as_admin(&database, &replaced).await;
     let storage = |result: Result<(), Error>| matches!(result, Err(Error::Storage(_)));
-    assert!(storage(operators.enroll(kurt, &actor()).await.map(drop)));
+    assert!(storage(operators.invite(kurt, &actor()).await.map(drop)));
     assert!(storage(operators.disable(kurt, &actor()).await.map(drop)));
     assert!(storage(operators.enable(kurt, &actor()).await.map(drop)));
     assert!(storage(
@@ -622,9 +622,9 @@ async fn a_disable_answer_of_the_wrong_type_is_a_storage_failure() {
     }
 }
 
-/// Disabling, enabling, ending sessions, issuing a link, beginning or finishing an enrollment, signing in, and
+/// Disabling, enabling, ending sessions, issuing a link, beginning or finishing a join, logging in, and
 /// beginning or finishing an addition refuse to run under repeatable read, where a row committed while they waited
-/// would escape their checks, whoever starts the transaction; so does beginning a sign-in, whose sweep would fail
+/// would escape their checks, whoever starts the transaction; so does beginning a login, whose sweep would fail
 /// there when begins overlap.
 #[tokio::test]
 async fn changes_that_wait_on_an_operator_need_read_committed() {
@@ -634,13 +634,13 @@ async fn changes_that_wait_on_an_operator_need_read_committed() {
         "SELECT * FROM identity.disable_operator(1)",
         "SELECT identity.end_sessions('operator', 1)",
         "SELECT identity.end_sessions('operator', null)",
-        "SELECT identity.issue_enrollment(sha256('a'::bytea), 1)",
-        "SELECT identity.redeem_enrollment(sha256('a'::bytea), 1, sha256('c'::bytea), '{}', '')",
-        "SELECT identity.begin_enrollment(sha256('t'::bytea), 1, sha256('a'::bytea), '{}')",
+        "SELECT identity.issue_invite(sha256('a'::bytea), 1)",
+        "SELECT identity.redeem_invite(sha256('a'::bytea), 1, sha256('c'::bytea), '{}', '')",
+        "SELECT identity.begin_join(sha256('t'::bytea), 1, sha256('a'::bytea), '{}')",
         "SELECT identity.enable_operator(1)",
         "SELECT * FROM identity.remove_passkeys(1)",
-        "SELECT * FROM identity.sign_in(sha256('c'::bytea), 1, '{}', '{}', sha256('s'::bytea), null)",
-        "SELECT identity.begin_sign_in(sha256('t'::bytea), '{}')",
+        "SELECT * FROM identity.login(sha256('c'::bytea), 1, '{}', '{}', sha256('s'::bytea), null)",
+        "SELECT identity.begin_login(sha256('t'::bytea), '{}')",
         "SELECT identity.begin_addition(sha256('t'::bytea), sha256('s'::bytea), 1, '{}')",
         "SELECT * FROM identity.add_passkey(
              sha256('t'::bytea), sha256('s'::bytea), 1, sha256('c'::bytea), '{}', ''
@@ -672,8 +672,8 @@ async fn spent_sessions_and_links_are_removed_but_not_counted() {
     let (database, operators, kurt) = with_kurt().await;
     let spent = "SELECT identity.start_session(sha256('a'::bytea), 'operator', 1);
                  UPDATE identity.sessions SET last_seen_at = last_seen_at - interval '16 minutes';
-                 SELECT identity.issue_enrollment(sha256('b'::bytea), 1);
-                 UPDATE identity.enrollments SET ends_at = now() - interval '1 second'";
+                 SELECT identity.issue_invite(sha256('b'::bytea), 1);
+                 UPDATE identity.invites SET ends_at = now() - interval '1 second'";
     as_admin(&database, spent).await;
     assert_eq!(operators.end_sessions(kurt, &actor()).await, Ok(0));
     assert_eq!(
@@ -690,7 +690,7 @@ async fn spent_sessions_and_links_are_removed_but_not_counted() {
     assert_eq!(
         number(
             &database,
-            "SELECT (SELECT count(*) FROM identity.sessions) + (SELECT count(*) FROM identity.enrollments)"
+            "SELECT (SELECT count(*) FROM identity.sessions) + (SELECT count(*) FROM identity.invites)"
         )
         .await,
         0
@@ -707,10 +707,10 @@ async fn spent_sessions_and_links_are_removed_but_not_counted() {
     );
 }
 
-/// A sign-in that waits while the operator's passkeys are removed finds its passkey gone: it starts no session,
-/// and answers that the passkey is unknown, not that another sign-in changed it.
+/// A login that waits while the operator's passkeys are removed finds its passkey gone: it starts no session,
+/// and answers that the passkey is unknown, not that another login changed it.
 #[tokio::test]
-async fn a_sign_in_waiting_on_a_removal_finds_its_passkey_unknown() {
+async fn a_login_waiting_on_a_removal_finds_its_passkey_unknown() {
     let (database, pool) = kurt_and_pool().await;
     as_admin(&database, &passkey_for(1)).await;
     let mut admin = connect(&database).await.expect("connects");
@@ -726,7 +726,7 @@ async fn a_sign_in_waiting_on_a_removal_finds_its_passkey_unknown() {
             .expect("begins");
         let answer: Option<String> = transaction
             .query_one(
-                "SELECT signed FROM identity.sign_in(
+                "SELECT outcome FROM identity.login(
                      sha256(int8send(1)), 1,
                      '{\"cred\": {\"counter\": 0, \"backup_eligible\": false, \"backup_state\": false}}',
                      '{\"cred\": {\"counter\": 0, \"backup_eligible\": false, \"backup_state\": false}}',
@@ -750,9 +750,9 @@ async fn a_sign_in_waiting_on_a_removal_finds_its_passkey_unknown() {
     );
 }
 
-/// A sign-in that names no operator signs no one in: it answers that the passkey is unknown.
+/// A login that names no operator logs no one in: it answers that the passkey is unknown.
 #[tokio::test]
-async fn a_sign_in_for_no_operator_signs_no_one_in() {
+async fn a_login_for_no_operator_signs_no_one_in() {
     let (database, pool) = kurt_and_pool().await;
     let passkey = r#"{"cred": {"counter": 0, "backup_eligible": false, "backup_state": false}}"#;
     as_admin(
@@ -769,7 +769,7 @@ async fn a_sign_in_for_no_operator_signs_no_one_in() {
         .expect("begins");
     let answer: Option<String> = transaction
         .query_one(
-            "SELECT signed FROM identity.sign_in(
+            "SELECT outcome FROM identity.login(
                  sha256(int8send(1)), null, $1::text::jsonb, $1::text::jsonb, sha256('s'::bytea), null
              )",
             &[&passkey],
@@ -839,7 +839,7 @@ async fn a_session_starts_after_the_wait_that_held_it_up() {
         )
         .await
         .expect("locks");
-    // Only a sign-in starts a session, so the administrator stands in for one.
+    // Only a login starts a session, so the administrator stands in for one.
     let mut client = connect(&database).await.expect("connects");
     let starting = tokio::spawn(async move {
         let writing = client.transaction().await.expect("begins");
@@ -983,10 +983,10 @@ async fn a_disable_waits_for_an_enable_being_written() {
     );
 }
 
-/// An operator who holds a passkey is issued no link: another passkey is added only after signing in
+/// An operator who holds a passkey is issued no link: another passkey is added only after logging in
 /// (`v5.0.0-6.4.1`). Each refusal records why.
 #[tokio::test]
-async fn an_enrolled_or_disabled_operator_is_issued_no_link() {
+async fn a_joined_or_disabled_operator_is_issued_no_link() {
     let (database, operators, kurt) = with_kurt().await;
     let lee = operators
         .create(&name("Lee Park"), &actor())
@@ -995,30 +995,27 @@ async fn an_enrolled_or_disabled_operator_is_issued_no_link() {
     as_admin(&database, &passkey_for(kurt.get())).await;
     operators.disable(lee, &actor()).await.expect("disables");
     assert_eq!(
-        operators.enroll(kurt, &actor()).await.map(drop),
+        operators.invite(kurt, &actor()).await.map(drop),
         Err(Error::Invalid(
-            "operator 1 has a passkey already, and adds another after signing in".into()
+            "operator 1 has a passkey already, and adds another after logging in".into()
         ))
     );
     assert_eq!(
-        operators.enroll(lee, &actor()).await.map(drop),
+        operators.invite(lee, &actor()).await.map(drop),
         Err(Error::Invalid("no enabled operator 2".into()))
     );
     let reasons: Vec<Value> = events(&database)
         .await
         .into_iter()
-        .filter(|(kind, _)| kind == "identity.enrollment_issued")
+        .filter(|(kind, _)| kind == "identity.invite_issued")
         .map(|(_, payload)| json!([payload["outcome"], payload["reason"]]))
         .collect();
     assert_eq!(
         reasons,
-        [
-            json!(["refused", "enrolled"]),
-            json!(["refused", "disabled"])
-        ]
+        [json!(["refused", "joined"]), json!(["refused", "disabled"])]
     );
     assert_eq!(
-        number(&database, "SELECT count(*) FROM identity.enrollments").await,
+        number(&database, "SELECT count(*) FROM identity.invites").await,
         0
     );
 }
@@ -1036,12 +1033,12 @@ async fn the_list_shows_passkeys_and_open_links() {
         .create(&name("Ana Ortiz"), &actor())
         .await
         .expect("creates");
-    operators.enroll(kurt, &actor()).await.expect("issues");
-    operators.enroll(ana, &actor()).await.expect("issues");
+    operators.invite(kurt, &actor()).await.expect("issues");
+    operators.invite(ana, &actor()).await.expect("issues");
     as_admin(
         &database,
         &format!(
-            "{} UPDATE identity.enrollments SET ends_at = now() - interval '1 second' WHERE operator_id = {};",
+            "{} UPDATE identity.invites SET ends_at = now() - interval '1 second' WHERE operator_id = {};",
             passkey_for(lee.get()),
             ana.get()
         ),
@@ -1070,11 +1067,11 @@ async fn a_disable_or_second_begin_waits_for_a_begin_being_written() {
             .await
             .expect("creates");
         let link = operators
-            .enroll(kurt, &actor())
+            .invite(kurt, &actor())
             .await
             .expect("issues")
             .to_text();
-        let begin = "SELECT identity.begin_enrollment(
+        let begin = "SELECT identity.begin_join(
              sha256(convert_to($1, 'UTF8')), 1, sha256(decode($2, 'hex')), '{}')";
         let mut client = pool.get().await.expect("a connection");
         let writing = ModuleTransaction::begin(&mut client, "identity")
@@ -1120,7 +1117,7 @@ async fn a_begin_waits_for_a_new_link_being_written() {
         .await
         .expect("creates");
     let old = operators
-        .enroll(kurt, &actor())
+        .invite(kurt, &actor())
         .await
         .expect("issues")
         .to_text();
@@ -1129,10 +1126,7 @@ async fn a_begin_waits_for_a_new_link_being_written() {
         .await
         .expect("begins");
     issuing
-        .execute(
-            "SELECT identity.issue_enrollment(sha256('new'::bytea), 1)",
-            &[],
-        )
+        .execute("SELECT identity.issue_invite(sha256('new'::bytea), 1)", &[])
         .await
         .expect("issues");
     let other = pool.clone();
@@ -1143,7 +1137,7 @@ async fn a_begin_waits_for_a_new_link_being_written() {
             .expect("begins");
         let begun: bool = racing
             .query_one(
-                "SELECT identity.begin_enrollment(sha256('t'::bytea), 1, sha256(decode($1, 'hex')), '{}')",
+                "SELECT identity.begin_join(sha256('t'::bytea), 1, sha256(decode($1, 'hex')), '{}')",
                 &[&old],
             )
             .await
@@ -1162,14 +1156,14 @@ async fn a_begin_waits_for_a_new_link_being_written() {
     );
 }
 
-/// Removing an operator's passkeys lets them be issued a link and enroll again, as when their only one is lost. It
+/// Removing an operator's passkeys lets them be issued a link and join again, as when their only one is lost. It
 /// ends their sessions and any ceremony with it, says what it removed, and records each attempt: changed, unchanged
 /// when there was nothing to remove, and refused for an operator who does not exist.
 #[tokio::test]
-async fn removing_passkeys_lets_an_operator_enroll_again() {
+async fn removing_passkeys_lets_an_operator_join_again() {
     let (database, operators, kurt) = with_kurt().await;
     as_admin(&database, &passkey_for(kurt.get())).await;
-    signed_in(&database, kurt).await;
+    logged_in(&database, kurt).await;
     let removed = [
         operators.remove_passkeys(kurt, &actor()).await,
         operators.remove_passkeys(kurt, &actor()).await,
@@ -1187,7 +1181,7 @@ async fn removing_passkeys_lets_an_operator_enroll_again() {
             .await,
         Err(Error::Invalid("no operator 99".into()))
     );
-    assert!(operators.enroll(kurt, &actor()).await.is_ok());
+    assert!(operators.invite(kurt, &actor()).await.is_ok());
     let recorded: Vec<Value> = events(&database)
         .await
         .into_iter()

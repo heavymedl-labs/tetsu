@@ -156,7 +156,7 @@ pub fn listen(var: impl Fn(&str) -> Result<String, VarError>) -> Result<SocketAd
     }
 }
 
-/// The site's own origin, from `TETSU_ORIGIN`, such as `https://tetsu-demo.onrender.com`: enrollment links point
+/// The site's own origin, from `TETSU_ORIGIN`, such as `https://tetsu-demo.onrender.com`: invite links point
 /// there, and only it may send a state-changing request (ADR-0048). It is written as a browser sends an origin,
 /// `https`, or `http` for this machine alone, with no path, so a typo fails here rather than in a link.
 pub fn origin(var: impl Fn(&str) -> Result<String, VarError>) -> Result<String, String> {

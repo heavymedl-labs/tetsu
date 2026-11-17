@@ -1,5 +1,5 @@
-//! Enrolling an operator's first passkey, end to end, with passkey-rs's authenticator in place of a person's
-//! (ADR-0058), against Postgres signed in as the application role. They live in this one build because llvm-cov
+//! Joining an operator's first passkey, end to end, with passkey-rs's authenticator in place of a person's
+//! (ADR-0058), against Postgres logged in as the application role. They live in this one build because llvm-cov
 //! scores each build of a generic use case on its own, and only here can a test make the random source fail.
 
 use std::future::Future;
@@ -71,7 +71,7 @@ pub(crate) async fn register(options: &str, origin: &str, verifies: bool) -> Str
     register_keeping(options, origin, verifies).await.0
 }
 
-/// What [`register`] sends back, as JSON, and the passkey the device keeps, so it can sign in with it later.
+/// What [`register`] sends back, as JSON, and the passkey the device keeps, so it can log in with it later.
 pub(crate) async fn register_keeping(
     options: &str,
     origin: &str,
@@ -98,7 +98,7 @@ pub(crate) async fn register_keeping(
     (serde_json::to_string(&created).expect("JSON"), kept)
 }
 
-/// What a browser at `origin` sends back after the device holding `passkey` signs in for the options given, as
+/// What a browser at `origin` sends back after the device holding `passkey` logs in for the options given, as
 /// JSON.
 pub(crate) async fn authenticate(
     options: &str,
@@ -118,7 +118,7 @@ pub(crate) async fn authenticate(
     let asserted = client
         .authenticate(&origin, options, DefaultClientData)
         .await
-        .expect("signs in");
+        .expect("logs in");
     serde_json::to_string(&asserted).expect("JSON")
 }
 
@@ -142,7 +142,7 @@ pub(crate) async fn with_link() -> (
         )
         .await
         .expect("creates");
-    let link = operators.enroll(kurt, &actor()).await.expect("issues");
+    let link = operators.invite(kurt, &actor()).await.expect("issues");
     (operators, database, kurt, link.to_text())
 }
 
@@ -167,9 +167,9 @@ pub(crate) fn failure(result: Result<(), Error>) -> String {
         .unwrap_or_default()
 }
 
-fn not_enrolling() -> Result<OperatorId, Error> {
+fn not_joining() -> Result<OperatorId, Error> {
     Err(Error::Invalid(
-        "this enrollment link has ended or is not valid".to_string(),
+        "this invite link has ended or is not valid".to_string(),
     ))
 }
 
@@ -215,18 +215,17 @@ pub(crate) async fn recorded(database: &TestDatabase, kind: &str) -> Vec<Value> 
         .collect()
 }
 
-/// What each enrollment recorded, oldest first: its outcome and reason.
+/// What each join recorded, oldest first: its outcome and reason.
 async fn redemptions(database: &TestDatabase) -> Vec<Value> {
-    recorded(database, "identity.enrollment_redeemed").await
+    recorded(database, "identity.invite_redeemed").await
 }
 
 /// How many passkeys, links, ceremonies, and sessions are stored, in that order.
 pub(crate) async fn held(database: &TestDatabase) -> [i64; 4] {
     let mut counts = [0; 4];
-    for (count, table) in
-        counts
-            .iter_mut()
-            .zip(["passkeys", "enrollments", "ceremonies", "sessions"])
+    for (count, table) in counts
+        .iter_mut()
+        .zip(["passkeys", "invites", "ceremonies", "sessions"])
     {
         *count = number(database, &format!("SELECT count(*) FROM identity.{table}")).await;
     }
@@ -249,15 +248,12 @@ fn asked_for(options: &str) -> [Value; 5] {
 }
 
 /// The link opens a ceremony without being used up; finishing stores the passkey, uses up the link and the
-/// ceremony, records it, and signs no one in. The options ask for a discoverable passkey that verifies the user.
+/// ceremony, records it, and logs no one in. The options ask for a discoverable passkey that verifies the user.
 #[tokio::test]
-async fn an_operator_enrolls_their_first_passkey_once() {
+async fn an_operator_joins_their_first_passkey_once() {
     let (operators, database, kurt, link) = with_link().await;
     let party = party();
-    let ceremony = operators
-        .begin_enrollment(&party, &link)
-        .await
-        .expect("begins");
+    let ceremony = operators.begin_join(&party, &link).await.expect("begins");
     assert_eq!(
         asked_for(&ceremony.options),
         [
@@ -269,7 +265,7 @@ async fn an_operator_enrolls_their_first_passkey_once() {
         ]
     );
     assert_eq!(
-        number(&database, "SELECT count(*) FROM identity.enrollments").await,
+        number(&database, "SELECT count(*) FROM identity.invites").await,
         1,
         "beginning uses nothing up"
     );
@@ -277,21 +273,21 @@ async fn an_operator_enrolls_their_first_passkey_once() {
     let token = ceremony.token.to_text();
     assert_eq!(
         operators
-            .finish_enrollment(&party, &token, &response, &actor())
+            .finish_join(&party, &token, &response, &actor())
             .await,
         Ok(kurt)
     );
     assert_eq!(held(&database).await, [1, 0, 0, 0]);
     assert_eq!(
         operators
-            .finish_enrollment(&party, &token, &response, &actor())
+            .finish_join(&party, &token, &response, &actor())
             .await,
-        not_enrolling(),
+        not_joining(),
         "a ceremony finishes once"
     );
     assert_eq!(
-        operators.begin_enrollment(&party, &link).await.map(drop),
-        not_enrolling().map(drop),
+        operators.begin_join(&party, &link).await.map(drop),
+        not_joining().map(drop),
         "a link is good once"
     );
     assert_eq!(redemptions(&database).await, [json!(["changed", null])]);
@@ -308,7 +304,7 @@ fn without_verification(options: &str) -> String {
 /// realm's origin. Each refusal leaves the link open, so the operator can try again, and is recorded with its
 /// reason. These are honest clients set up wrong: with no attestation, the flags and origin a registration reports
 /// are the client's word, which a hostile client could forge, so the guarantees that bind a person to a passkey
-/// come at sign-in, where the authenticator signs.
+/// come at login, where the authenticator signs.
 #[tokio::test]
 async fn hostile_clients_are_refused_and_the_link_stays_open() {
     let (operators, database, _, link) = with_link().await;
@@ -318,10 +314,7 @@ async fn hostile_clients_are_refused_and_the_link_stays_open() {
         ("https://ops.example.com:8443", true, false),
         ("https://evil.ops.example.com", true, false),
     ] {
-        let ceremony = operators
-            .begin_enrollment(&party, &link)
-            .await
-            .expect("begins");
+        let ceremony = operators.begin_join(&party, &link).await.expect("begins");
         let options = if rewrite {
             without_verification(&ceremony.options)
         } else {
@@ -330,9 +323,9 @@ async fn hostile_clients_are_refused_and_the_link_stays_open() {
         let response = register(&options, origin, verifies).await;
         assert_eq!(
             operators
-                .finish_enrollment(&party, &ceremony.token.to_text(), &response, &actor())
+                .finish_join(&party, &ceremony.token.to_text(), &response, &actor())
                 .await,
-            not_enrolling(),
+            not_joining(),
             "{origin}, verifies: {verifies}"
         );
     }
@@ -345,7 +338,7 @@ async fn hostile_clients_are_refused_and_the_link_stays_open() {
         0
     );
     assert_eq!(
-        number(&database, "SELECT count(*) FROM identity.enrollments").await,
+        number(&database, "SELECT count(*) FROM identity.invites").await,
         1
     );
 }
@@ -357,15 +350,12 @@ async fn a_malformed_registration_is_refused_and_recorded() {
     let (operators, database, _, link) = with_link().await;
     let party = party();
     for response in ["not a registration", "{}"] {
-        let ceremony = operators
-            .begin_enrollment(&party, &link)
-            .await
-            .expect("begins");
+        let ceremony = operators.begin_join(&party, &link).await.expect("begins");
         assert_eq!(
             operators
-                .finish_enrollment(&party, &ceremony.token.to_text(), response, &actor())
+                .finish_join(&party, &ceremony.token.to_text(), response, &actor())
                 .await,
-            not_enrolling()
+            not_joining()
         );
     }
     assert_eq!(
@@ -373,7 +363,7 @@ async fn a_malformed_registration_is_refused_and_recorded() {
         vec![json!(["refused", "malformed"]); 2]
     );
     assert_eq!(
-        number(&database, "SELECT count(*) FROM identity.enrollments").await,
+        number(&database, "SELECT count(*) FROM identity.invites").await,
         1
     );
 }
@@ -388,25 +378,22 @@ async fn a_registration_finishes_only_its_own_ceremony() {
         .create(&OperatorName::parse("Lee Park").expect("a name"), &actor())
         .await
         .expect("creates");
-    let lee_link = operators.enroll(lee, &actor()).await.expect("issues");
-    let kurts = operators
-        .begin_enrollment(&party, &link)
-        .await
-        .expect("begins");
+    let lee_link = operators.invite(lee, &actor()).await.expect("issues");
+    let kurts = operators.begin_join(&party, &link).await.expect("begins");
     let lees = operators
-        .begin_enrollment(&party, &lee_link.to_text())
+        .begin_join(&party, &lee_link.to_text())
         .await
         .expect("begins");
     let response = register(&kurts.options, ORIGIN, true).await;
     let finished = [
         operators
-            .finish_enrollment(&party, &lees.token.to_text(), &response, &actor())
+            .finish_join(&party, &lees.token.to_text(), &response, &actor())
             .await,
         operators
-            .finish_enrollment(&party, &kurts.token.to_text(), &response, &actor())
+            .finish_join(&party, &kurts.token.to_text(), &response, &actor())
             .await,
     ];
-    assert_eq!(finished, [not_enrolling(), Ok(kurt)]);
+    assert_eq!(finished, [not_joining(), Ok(kurt)]);
 }
 
 /// A link holds one ceremony at a time: beginning again, as a second tab would, replaces the first, which can then
@@ -415,14 +402,8 @@ async fn a_registration_finishes_only_its_own_ceremony() {
 async fn a_newer_ceremony_replaces_an_older_one() {
     let (operators, database, kurt, link) = with_link().await;
     let party = party();
-    let older = operators
-        .begin_enrollment(&party, &link)
-        .await
-        .expect("begins");
-    let newer = operators
-        .begin_enrollment(&party, &link)
-        .await
-        .expect("begins");
+    let older = operators.begin_join(&party, &link).await.expect("begins");
+    let newer = operators.begin_join(&party, &link).await.expect("begins");
     assert_eq!(
         number(&database, "SELECT count(*) FROM identity.ceremonies").await,
         1
@@ -432,11 +413,11 @@ async fn a_newer_ceremony_replaces_an_older_one() {
         let response = register(&tab.options, ORIGIN, true).await;
         finished.push(
             operators
-                .finish_enrollment(&party, &tab.token.to_text(), &response, &actor())
+                .finish_join(&party, &tab.token.to_text(), &response, &actor())
                 .await,
         );
     }
-    assert_eq!(finished, [not_enrolling(), Ok(kurt)]);
+    assert_eq!(finished, [not_joining(), Ok(kurt)]);
 }
 
 /// A ceremony lasts ten minutes, twice what a browser gives its authenticator, but never past its link.
@@ -444,42 +425,33 @@ async fn a_newer_ceremony_replaces_an_older_one() {
 async fn a_ceremony_outlives_the_browsers_wait_but_not_its_link() {
     let (operators, database, _, link) = with_link().await;
     let party = party();
-    operators
-        .begin_enrollment(&party, &link)
-        .await
-        .expect("begins");
+    operators.begin_join(&party, &link).await.expect("begins");
     let lasts = "SELECT extract(EPOCH FROM c.ends_at - e.issued_at)::bigint / 60
-                 FROM identity.ceremonies AS c JOIN identity.enrollments AS e ON e.token_hash = c.link_hash";
+                 FROM identity.ceremonies AS c JOIN identity.invites AS e ON e.token_hash = c.link_hash";
     assert_eq!(number(&database, lasts).await, 10);
     as_admin(
         &database,
-        "UPDATE identity.enrollments SET ends_at = issued_at + interval '3 minutes'",
+        "UPDATE identity.invites SET ends_at = issued_at + interval '3 minutes'",
     )
     .await;
-    operators
-        .begin_enrollment(&party, &link)
-        .await
-        .expect("begins");
+    operators.begin_join(&party, &link).await.expect("begins");
     assert_eq!(number(&database, lasts).await, 3);
 }
 
 /// What changes between a ceremony's two halves still counts: a disable or a new link ends the ceremony, and so does
 /// time, so the passkey is refused with nothing left to redeem; and a passkey stored for the operator meanwhile
-/// refuses it as enrolled, recorded.
+/// refuses it as joined, recorded.
 #[tokio::test]
-async fn a_change_while_enrolling_refuses_the_passkey() {
-    for change in ["disable", "new link", "ended", "enrolled elsewhere"] {
+async fn a_change_while_joining_refuses_the_passkey() {
+    for change in ["disable", "new link", "ended", "joined elsewhere"] {
         let (operators, database, kurt, link) = with_link().await;
         let party = party();
-        let ceremony = operators
-            .begin_enrollment(&party, &link)
-            .await
-            .expect("begins");
+        let ceremony = operators.begin_join(&party, &link).await.expect("begins");
         let response = register(&ceremony.options, ORIGIN, true).await;
         match change {
             "disable" => drop(operators.disable(kurt, &actor()).await.expect("disables")),
-            "new link" => drop(operators.enroll(kurt, &actor()).await.expect("issues")),
-            "enrolled elsewhere" => {
+            "new link" => drop(operators.invite(kurt, &actor()).await.expect("issues")),
+            "joined elsewhere" => {
                 as_admin(
                     &database,
                     "INSERT INTO identity.passkeys (credential_id, operator_id, passkey, created_at)
@@ -497,18 +469,18 @@ async fn a_change_while_enrolling_refuses_the_passkey() {
         }
         assert_eq!(
             operators
-                .finish_enrollment(&party, &ceremony.token.to_text(), &response, &actor())
+                .finish_join(&party, &ceremony.token.to_text(), &response, &actor())
                 .await,
-            not_enrolling(),
+            not_joining(),
             "{change}"
         );
-        let elsewhere = change == "enrolled elsewhere";
+        let elsewhere = change == "joined elsewhere";
         assert_eq!(
             number(&database, "SELECT count(*) FROM identity.passkeys").await,
             i64::from(elsewhere),
             "{change}"
         );
-        let recorded: Vec<Value> = [json!(["refused", "enrolled"])]
+        let recorded: Vec<Value> = [json!(["refused", "joined"])]
             .into_iter()
             .filter(|_| elsewhere)
             .collect();
@@ -516,7 +488,7 @@ async fn a_change_while_enrolling_refuses_the_passkey() {
     }
 }
 
-/// Begins an enrollment from `link`, registers, and finishes with the response rewritten: `value` replaces the
+/// Begins a join from `link`, registers, and finishes with the response rewritten: `value` replaces the
 /// response's transports, or stands in for its extension results under the name `field`.
 async fn finish_rewritten(
     operators: &Operators<PostgresOperators>,
@@ -525,10 +497,7 @@ async fn finish_rewritten(
     field: &str,
     value: Value,
 ) -> Result<OperatorId, Error> {
-    let ceremony = operators
-        .begin_enrollment(party, link)
-        .await
-        .expect("begins");
+    let ceremony = operators.begin_join(party, link).await.expect("begins");
     let mut response: Value =
         serde_json::from_str(&register(&ceremony.options, ORIGIN, true).await).expect("JSON");
     if field == "transports" {
@@ -540,7 +509,7 @@ async fn finish_rewritten(
         response[field] = value;
     }
     operators
-        .finish_enrollment(
+        .finish_join(
             party,
             &ceremony.token.to_text(),
             &response.to_string(),
@@ -550,7 +519,7 @@ async fn finish_rewritten(
 }
 
 /// A registration whose client says the passkey is not discoverable is refused, under either name webauthn-rs reads
-/// it by, since signing in could never find it, and the link stays open for another try. Transports are taken as
+/// it by, since logging in could never find it, and the link stays open for another try. Transports are taken as
 /// listed, as `WebAuthn` asks, even ones it does not name or names twice, and the ones `webauthn-rs` names are
 /// kept once each, sorted, as a hint for the browser.
 #[tokio::test]
@@ -568,7 +537,7 @@ async fn an_undiscoverable_registration_is_refused() {
     ] {
         finished.push(finish_rewritten(&operators, &party, &link, field, value).await);
     }
-    let refused = not_enrolling();
+    let refused = not_joining();
     assert_eq!(finished, [refused.clone(), refused, Ok(OperatorId::new(1))]);
     let kept = "SELECT count(*) FROM identity.passkeys WHERE transports = 'usb'";
     assert_eq!(number(&database, kept).await, 1);
@@ -589,31 +558,28 @@ async fn an_undiscoverable_registration_is_refused() {
 /// Storing a passkey ends every other ceremony of the operator's, such as one begun after this one was taken, which
 /// could only be refused now.
 #[tokio::test]
-async fn an_enrollment_ends_the_operators_other_ceremonies() {
+async fn a_join_ends_the_operators_other_ceremonies() {
     let (operators, database, _, link) = with_link().await;
     let party = party();
     let store = PostgresOperators {
         pool: app_pool(&database),
     };
-    let first = operators
-        .begin_enrollment(&party, &link)
-        .await
-        .expect("begins");
+    let first = operators.begin_join(&party, &link).await.expect("begins");
     let response = register(&first.options, ORIGIN, true).await;
     let taken = store
-        .take_enrollment(&first.token.hash())
+        .take_join(&first.token.hash())
         .await
         .expect("takes")
         .expect("a ceremony");
     operators
-        .begin_enrollment(&party, &link)
+        .begin_join(&party, &link)
         .await
         .expect("begins again");
     let passkey = party
         .finish_registration(&response, &taken.state)
         .expect("verifies");
     assert_eq!(
-        store.redeem_enrollment(&taken, &passkey, &actor()).await,
+        store.redeem_invite(&taken, &passkey, &actor()).await,
         Ok(Some(Redemption::Redeemed))
     );
     assert_eq!(held(&database).await, [1, 0, 0, 0]);
@@ -623,11 +589,8 @@ async fn an_enrollment_ends_the_operators_other_ceremonies() {
 #[tokio::test]
 async fn a_new_link_ends_the_old_links_ceremony() {
     let (operators, database, kurt, link) = with_link().await;
-    operators
-        .begin_enrollment(&party(), &link)
-        .await
-        .expect("begins");
-    operators.enroll(kurt, &actor()).await.expect("issues");
+    operators.begin_join(&party(), &link).await.expect("begins");
+    operators.invite(kurt, &actor()).await.expect("issues");
     assert_eq!(
         number(&database, "SELECT count(*) FROM identity.ceremonies").await,
         0
@@ -640,17 +603,17 @@ async fn beginning_checks_the_link_again_as_it_stores() {
     let (operators, database, _, link) = with_link().await;
     as_admin(
         &database,
-        "UPDATE identity.enrollments SET ends_at = now() - interval '1 second';
-         DROP FUNCTION identity.enrollee(bytea);
-         CREATE FUNCTION identity.enrollee(bytea)
+        "UPDATE identity.invites SET ends_at = now() - interval '1 second';
+         DROP FUNCTION identity.invitee(bytea);
+         CREATE FUNCTION identity.invitee(bytea)
          RETURNS TABLE (operator_id bigint, user_handle bytea, name text)
          LANGUAGE sql AS $$ SELECT 1::bigint, uuid_send(gen_random_uuid()), 'Kurt Medley'::text $$;
-         GRANT EXECUTE ON FUNCTION identity.enrollee(bytea) TO tetsu_identity",
+         GRANT EXECUTE ON FUNCTION identity.invitee(bytea) TO tetsu_identity",
     )
     .await;
     assert_eq!(
-        operators.begin_enrollment(&party(), &link).await.map(drop),
-        not_enrolling().map(drop)
+        operators.begin_join(&party(), &link).await.map(drop),
+        not_joining().map(drop)
     );
     assert_eq!(
         number(&database, "SELECT count(*) FROM identity.ceremonies").await,
@@ -666,15 +629,13 @@ async fn unknown_tokens_are_refused_alike() {
     let unknown = "ab".repeat(32);
     for link in ["not a token", unknown.as_str()] {
         assert_eq!(
-            operators.begin_enrollment(&party, link).await.map(drop),
-            not_enrolling().map(drop),
+            operators.begin_join(&party, link).await.map(drop),
+            not_joining().map(drop),
             "{link}"
         );
         assert_eq!(
-            operators
-                .finish_enrollment(&party, link, "{}", &actor())
-                .await,
-            not_enrolling(),
+            operators.finish_join(&party, link, "{}", &actor()).await,
+            not_joining(),
             "{link}"
         );
     }
@@ -693,23 +654,20 @@ async fn failures_of_the_server_are_told_apart() {
         |_| Err(getrandom::Error::UNSUPPORTED),
     );
     assert_eq!(
-        failure(failing.begin_enrollment(&party, &link).await.map(drop)),
+        failure(failing.begin_join(&party, &link).await.map(drop)),
         format!(
             "temporarily unavailable: no secure random source: {}",
             getrandom::Error::UNSUPPORTED
         )
     );
-    let ceremony = operators
-        .begin_enrollment(&party, &link)
-        .await
-        .expect("begins");
+    let ceremony = operators.begin_join(&party, &link).await.expect("begins");
     as_admin(
         &database,
         "UPDATE identity.ceremonies SET state = '{\"x\": 1}'",
     )
     .await;
     let finished = operators
-        .finish_enrollment(&party, &ceremony.token.to_text(), "{}", &actor())
+        .finish_join(&party, &ceremony.token.to_text(), "{}", &actor())
         .await;
     assert!(
         failure(finished.map(drop))
@@ -721,7 +679,7 @@ async fn failures_of_the_server_are_told_apart() {
          UPDATE identity.operators SET name = ''",
     )
     .await;
-    let begun = operators.begin_enrollment(&party, &link).await.map(drop);
+    let begun = operators.begin_join(&party, &link).await.map(drop);
     assert!(failure(begun).starts_with("storage failed: no ceremony could start"));
 }
 
@@ -740,7 +698,7 @@ async fn redeeming() -> (
         .await
         .expect("creates");
     let link_hash = operators
-        .enroll(lee, &actor())
+        .invite(lee, &actor())
         .await
         .expect("issues")
         .hash();
@@ -773,12 +731,12 @@ async fn redeeming() -> (
 async fn a_taken_credential_or_missing_operator_stores_nothing() {
     let (_operators, database, store, passkey, [lees, _, nobodys]) = redeeming().await;
     let answers = [
-        store.redeem_enrollment(&lees, &passkey, &actor()).await,
-        store.redeem_enrollment(&nobodys, &passkey, &actor()).await,
+        store.redeem_invite(&lees, &passkey, &actor()).await,
+        store.redeem_invite(&nobodys, &passkey, &actor()).await,
     ];
     assert_eq!(answers, [Ok(Some(Redemption::Taken)), Ok(None)]);
     assert_eq!(
-        number(&database, "SELECT count(*) FROM identity.enrollments").await,
+        number(&database, "SELECT count(*) FROM identity.invites").await,
         2
     );
     assert_eq!(
@@ -807,13 +765,13 @@ async fn an_ended_link_or_oversized_passkey_stores_nothing() {
     assert!(spaced.len() <= 8192);
     let mut answers = vec![
         store
-            .redeem_enrollment(&unknown_link, &fresh(vec![1; 16], "{}"), &actor())
+            .redeem_invite(&unknown_link, &fresh(vec![1; 16], "{}"), &actor())
             .await,
     ];
     for (id, passkey) in [(1024, "{}"), (15, "{}"), (16, spaced.as_str())] {
         answers.push(
             store
-                .redeem_enrollment(&lees, &fresh(vec![1; id], passkey), &actor())
+                .redeem_invite(&lees, &fresh(vec![1; id], passkey), &actor())
                 .await,
         );
     }
@@ -840,27 +798,21 @@ async fn an_ended_link_or_oversized_passkey_stores_nothing() {
 
 /// Storing a passkey refuses an operator who holds one already, and one disabled, and records why.
 #[tokio::test]
-async fn an_enrolled_or_disabled_operator_stores_nothing() {
+async fn a_joined_or_disabled_operator_stores_nothing() {
     let (operators, database, store, passkey, [lees, kurts, _]) = redeeming().await;
-    let enrolled = store.redeem_enrollment(&kurts, &passkey, &actor()).await;
+    let joined = store.redeem_invite(&kurts, &passkey, &actor()).await;
     operators
         .disable(lees.operator, &actor())
         .await
         .expect("disables");
-    let disabled = store.redeem_enrollment(&lees, &passkey, &actor()).await;
+    let disabled = store.redeem_invite(&lees, &passkey, &actor()).await;
     assert_eq!(
-        [enrolled, disabled],
-        [
-            Ok(Some(Redemption::Enrolled)),
-            Ok(Some(Redemption::Disabled))
-        ]
+        [joined, disabled],
+        [Ok(Some(Redemption::Joined)), Ok(Some(Redemption::Disabled))]
     );
     assert_eq!(
         redemptions(&database).await,
-        [
-            json!(["refused", "enrolled"]),
-            json!(["refused", "disabled"])
-        ]
+        [json!(["refused", "joined"]), json!(["refused", "disabled"])]
     );
 }
 
@@ -891,34 +843,28 @@ fn a_relying_party_needs_an_origin_with_a_domain() {
     assert!(RelyingParty::new("http://localhost:8080").is_ok());
 }
 
-/// Each step of an enrollment fails as storage when the database refuses its function, never as the browser's
+/// Each step of a join fails as storage when the database refuses its function, never as the browser's
 /// mistake.
 #[tokio::test]
-async fn each_enrollment_step_fails_as_storage_when_refused() {
+async fn each_join_step_fails_as_storage_when_refused() {
     let party = party();
     for (function, early) in [
-        ("enrollee(bytea)", true),
-        ("begin_enrollment(bytea, bigint, bytea, jsonb)", true),
+        ("invitee(bytea)", true),
+        ("begin_join(bytea, bigint, bytea, jsonb)", true),
         ("take_ceremony(bytea, text)", false),
-        (
-            "redeem_enrollment(bytea, bigint, bytea, jsonb, text)",
-            false,
-        ),
+        ("redeem_invite(bytea, bigint, bytea, jsonb, text)", false),
     ] {
         let (operators, database, _, link) = with_link().await;
         let revoke = format!("REVOKE EXECUTE ON FUNCTION identity.{function} FROM tetsu_identity");
         let outcome = if early {
             as_admin(&database, &revoke).await;
-            operators.begin_enrollment(&party, &link).await.map(drop)
+            operators.begin_join(&party, &link).await.map(drop)
         } else {
-            let ceremony = operators
-                .begin_enrollment(&party, &link)
-                .await
-                .expect("begins");
+            let ceremony = operators.begin_join(&party, &link).await.expect("begins");
             let response = register(&ceremony.options, ORIGIN, true).await;
             as_admin(&database, &revoke).await;
             operators
-                .finish_enrollment(&party, &ceremony.token.to_text(), &response, &actor())
+                .finish_join(&party, &ceremony.token.to_text(), &response, &actor())
                 .await
                 .map(drop)
         };
@@ -948,7 +894,7 @@ pub(crate) async fn replace(database: &TestDatabase, function: &str, returns: &s
 
 /// An unreadable answer when beginning, a column of the wrong type, is a storage failure.
 #[tokio::test]
-async fn unreadable_enrollees_are_storage_failures() {
+async fn unreadable_invitees_are_storage_failures() {
     let party = party();
     for (columns, values) in [
         (
@@ -967,29 +913,29 @@ async fn unreadable_enrollees_are_storage_failures() {
         let (operators, database, _, link) = with_link().await;
         replace(
             &database,
-            "enrollee(bytea)",
+            "invitee(bytea)",
             &format!("TABLE ({columns})"),
             &format!("SELECT {values}"),
         )
         .await;
-        let begun = failure(operators.begin_enrollment(&party, &link).await.map(drop));
+        let begun = failure(operators.begin_join(&party, &link).await.map(drop));
         assert!(begun.starts_with("storage failed: "));
     }
     let (operators, database, _, link) = with_link().await;
     replace(
         &database,
-        "enrollee(bytea)",
+        "invitee(bytea)",
         "TABLE (operator_id bigint, user_handle bytea, name text)",
         "SELECT 1::bigint, '\\x00'::bytea, 'Kurt'",
     )
     .await;
     assert_eq!(
-        failure(operators.begin_enrollment(&party, &link).await.map(drop)),
+        failure(operators.begin_join(&party, &link).await.map(drop)),
         "storage failed: a user handle is not 16 bytes"
     );
 }
 
-/// An unreadable ceremony, a column of the wrong type or an enrollment with no link, is a storage failure.
+/// An unreadable ceremony, a column of the wrong type or a join with no link, is a storage failure.
 #[tokio::test]
 async fn unreadable_ceremonies_are_storage_failures() {
     let party = party();
@@ -1013,14 +959,11 @@ async fn unreadable_ceremonies_are_storage_failures() {
         (
             "operator_id bigint, link_hash bytea, state text",
             "1::bigint, null::bytea, '{}'".to_string(),
-            "storage failed: an enrollment ceremony has no link",
+            "storage failed: a join ceremony has no link",
         ),
     ] {
         let (operators, database, _, link) = with_link().await;
-        let ceremony = operators
-            .begin_enrollment(&party, &link)
-            .await
-            .expect("begins");
+        let ceremony = operators.begin_join(&party, &link).await.expect("begins");
         replace(
             &database,
             "take_ceremony(bytea, text)",
@@ -1030,7 +973,7 @@ async fn unreadable_ceremonies_are_storage_failures() {
         .await;
         let finished = failure(
             operators
-                .finish_enrollment(&party, &ceremony.token.to_text(), "{}", &actor())
+                .finish_join(&party, &ceremony.token.to_text(), "{}", &actor())
                 .await
                 .map(drop),
         );
@@ -1051,21 +994,18 @@ async fn unreadable_redemptions_are_storage_failures() {
         ("integer", "1", "storage failed: "),
     ] {
         let (operators, database, _, link) = with_link().await;
-        let ceremony = operators
-            .begin_enrollment(&party, &link)
-            .await
-            .expect("begins");
+        let ceremony = operators.begin_join(&party, &link).await.expect("begins");
         let response = register(&ceremony.options, ORIGIN, true).await;
         replace(
             &database,
-            "redeem_enrollment(bytea, bigint, bytea, jsonb, text)",
+            "redeem_invite(bytea, bigint, bytea, jsonb, text)",
             returns,
             &format!("SELECT {value}"),
         )
         .await;
         let finished = failure(
             operators
-                .finish_enrollment(&party, &ceremony.token.to_text(), &response, &actor())
+                .finish_join(&party, &ceremony.token.to_text(), &response, &actor())
                 .await
                 .map(drop),
         );

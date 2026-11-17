@@ -1,4 +1,4 @@
--- Disables an operator, ending their sessions and enrollment link.
+-- Disables an operator, ending their sessions and invite link.
 SELECT
     d.done,
     d.sessions_ended,

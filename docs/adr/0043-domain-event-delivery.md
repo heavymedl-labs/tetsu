@@ -8,7 +8,7 @@
 Modules react to each other through domain events ([ADR-0003](0003-architecture.md)), and outside systems will
 receive them as webhooks. The reference businesses set the bar. A late cancel at Anvil Row must promote the
 waitlist, charge a fee, and notify customers, each exactly once. A failed renewal must not send its messages again
-after a crash. A sign-in writes an audit entry, the first event Tetsu delivers
+after a crash. A login writes an audit entry, the first event Tetsu delivers
 ([#20](https://github.com/heavymedl-labs/tetsu/issues/20)), and account recovery's notices must never be lost
 ([ADR-0041](0041-account-recovery.md)).
 
@@ -27,9 +27,9 @@ event once. No broker is added.
   that rolled back.
 - **A module has two outboxes.** `outbox` is tenant-owned under ADR-0042, keyed `(tenant_id, id)` with a UUIDv7
   `id`, for events that belong to one business. `outbox_global` is a global table for events with no business, such
-  as an operator's sign-in or a staff member's before they choose a business. A row holds the event's type and
+  as an operator's login or a staff member's before they choose a business. A row holds the event's type and
   version, when it occurred, and a JSON payload.
-- **An event names a fact in the past tense,** such as `identity.signed_in` or `booking.cancelled_late`. Its type
+- **An event names a fact in the past tense,** such as `identity.logged_in` or `booking.cancelled_late`. Its type
   carries a version, and a change to a payload's meaning adds a new version rather than altering the old one.
 - **Payloads carry IDs and facts, not personal details,** such as an account's ID rather than its email. Consumers
   look up what they need, so erasing a person does not mean rewriting history.
@@ -91,7 +91,7 @@ event once. No broker is added.
 - Modules gain an `outbox` and an `inbox` table in their own schemas, plus a shared library in the Postgres crate
   for recording, dispatching, and the inbox check. `outbox` and `inbox` are declared tenant-owned, and
   `outbox_global` and its inbox global.
-- The first event is sign-in's `identity.signed_in`, consumed by an audit record
+- The first event is login's `identity.logged_in`, consumed by an audit record
   ([#20](https://github.com/heavymedl-labs/tetsu/issues/20)).
 - Consumers must tolerate a repeat and must not rely on order. Tests deliver each event twice and in shuffled
   order.

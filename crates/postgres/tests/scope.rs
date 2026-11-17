@@ -1,4 +1,4 @@
-//! Tenant isolation through the scoped transactions, signed in as the application role (ADR-0042).
+//! Tenant isolation through the scoped transactions, logged in as the application role (ADR-0042).
 
 use tetsu_kernel::{Migration, Module, Storage};
 use tetsu_postgres::test_support::{TestDatabase, fresh_database};
@@ -33,7 +33,7 @@ const LEE: &str = "lee.park@example.com";
 mod support {
     use super::{People, Pool, TenantTransaction, TestDatabase, fresh_database, migrate, pool};
 
-    /// A migrated database and a pool signed in as the application role. Keep both until the test ends.
+    /// A migrated database and a pool logged in as the application role. Keep both until the test ends.
     pub async fn app_pool() -> (Pool, TestDatabase) {
         let database = fresh_database().await.expect("a test database");
         migrate(&database, &[&People]).await.expect("migrates");

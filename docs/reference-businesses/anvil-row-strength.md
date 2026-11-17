@@ -127,6 +127,6 @@ What Anvil Row needs before it switches. Going live with it is
 - Staff roles, data export and deletion, support access, and a Tetsu bill
   Rowan understands.
 
-**Can wait:** stock counts, native apps, self-serve sign-up (we provision
+**Can wait:** stock counts, native apps, self-serve signup (we provision
 Anvil Row ourselves), partner API access, payroll integration, marketing
 tools, and analytics beyond the reports above.

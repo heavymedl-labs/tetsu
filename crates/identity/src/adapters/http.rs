@@ -1,6 +1,6 @@
 //! Identity's inbound HTTP adapter: the operator pages at `/ops`, and the JSON endpoints their passkey script calls
-//! (ADR-0048). Every state-changing request is checked through [`Origins::admit`], and once signed in through
-//! [`Operators::session_for_change`], so no other site can act through a signed-in browser.
+//! (ADR-0048). Every state-changing request is checked through [`Origins::admit`], and once logged in through
+//! [`Operators::session_for_change`], so no other site can act through a logged-in browser.
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -14,35 +14,35 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{MethodRouter, get, post};
 use serde_json::{Value, json};
 
-use crate::browser::{Change, ForChange, Origins, SignOut};
+use crate::browser::{Change, ForChange, Logout, Origins};
 use crate::domain::{Actor, Answer, Ceremony, Device, Error, HeldPasskey, Realm, SessionToken};
 use crate::passkeys::{RelyingParty, base64url};
 use crate::ports::OperatorStore;
 use crate::use_cases::Operators;
 
 const ACCOUNT: &str = "/ops";
-const SIGN_IN: &str = "/ops/sign-in";
-const SIGN_IN_BEGIN: &str = "/ops/sign-in/begin";
-const SIGN_IN_FINISH: &str = "/ops/sign-in/finish";
-const ENROLL: &str = "/ops/enroll";
-const ENROLL_BEGIN: &str = "/ops/enroll/begin";
-const ENROLL_FINISH: &str = "/ops/enroll/finish";
+const LOGIN: &str = "/ops/login";
+const LOGIN_BEGIN: &str = "/ops/login/begin";
+const LOGIN_FINISH: &str = "/ops/login/finish";
+const JOIN: &str = "/ops/join";
+const JOIN_BEGIN: &str = "/ops/join/begin";
+const JOIN_FINISH: &str = "/ops/join/finish";
 const ADD_BEGIN: &str = "/ops/passkeys/begin";
 const ADD_FINISH: &str = "/ops/passkeys/finish";
-const SIGN_OUT: &str = "/ops/sign-out";
+const LOGOUT: &str = "/ops/logout";
 
 /// Every path Identity serves, which the composition root checks each start with a name no tenant may hold.
 pub const PATHS: [&str; 10] = [
     ACCOUNT,
-    SIGN_IN,
-    SIGN_IN_BEGIN,
-    SIGN_IN_FINISH,
-    ENROLL,
-    ENROLL_BEGIN,
-    ENROLL_FINISH,
+    LOGIN,
+    LOGIN_BEGIN,
+    LOGIN_FINISH,
+    JOIN,
+    JOIN_BEGIN,
+    JOIN_FINISH,
     ADD_BEGIN,
     ADD_FINISH,
-    SIGN_OUT,
+    LOGOUT,
 ];
 
 /// The operator pages' policy: the site's, with Tetsu's own script, its calls back to this origin, and forms
@@ -52,17 +52,17 @@ const POLICY: &str = "default-src 'none'; object-src 'none'; script-src 'self'; 
                       frame-ancestors 'none'";
 
 /// The operator pages' referrer policy. Under the site's `no-referrer`, a browser sends `Origin: null` with a
-/// posted form, such as signing out, which the origin check must refuse; `same-origin` sends the real origin, and a
+/// posted form, such as logging out, which the origin check must refuse; `same-origin` sends the real origin, and a
 /// referrer, to Tetsu alone and nothing to any other site (Fetch, "append a request `Origin` header").
 const REFERRER: &str = "same-origin";
 
-/// The largest body any endpoint reads. A passkey's answer is a few kilobytes; enrolling stores none over 8 KiB.
+/// The largest body any endpoint reads. A passkey's answer is a few kilobytes; joining stores none over 8 KiB.
 const LARGEST_BODY: usize = 64 * 1024;
 
 /// What a refused request is told when nothing more may be said.
 const REFUSED: &str = "this request was refused";
-const SIGNED_OUT: &str = "you are signed out; sign in again";
-const UNAVAILABLE: &str = "signing in is unavailable just now; try again in a minute";
+const LOGGED_OUT: &str = "you are logged out; log in again";
+const UNAVAILABLE: &str = "logging in is unavailable just now; try again in a minute";
 
 /// What the pages need from the composition root: the relying party and the origins state-changing requests
 /// must come from, whether this is the demo, the shared stylesheet's and the passkey script's URLs, and where a
@@ -77,16 +77,16 @@ pub struct Web {
 }
 
 #[derive(Template)]
-#[template(path = "sign_in.html")]
-struct SignInPage {
+#[template(path = "login.html")]
+struct LoginPage {
     demo: bool,
     stylesheet: &'static str,
     script: &'static str,
 }
 
 #[derive(Template)]
-#[template(path = "enroll.html")]
-struct EnrollPage {
+#[template(path = "join.html")]
+struct JoinPage {
     demo: bool,
     stylesheet: &'static str,
     script: &'static str,
@@ -135,15 +135,15 @@ where
 {
     Router::new()
         .route(ACCOUNT, get(account::<S>))
-        .route(SIGN_IN, get(sign_in_page::<S>))
-        .route(SIGN_IN_BEGIN, before_route::<S>(Before::BeginSignIn))
-        .route(SIGN_IN_FINISH, before_route::<S>(Before::FinishSignIn))
-        .route(ENROLL, get(enroll_page::<S>))
-        .route(ENROLL_BEGIN, before_route::<S>(Before::BeginEnrollment))
-        .route(ENROLL_FINISH, before_route::<S>(Before::FinishEnrollment))
-        .route(ADD_BEGIN, signed_route::<S>(Signed::BeginAdding))
-        .route(ADD_FINISH, signed_route::<S>(Signed::FinishAdding))
-        .route(SIGN_OUT, post(sign_out::<S>))
+        .route(LOGIN, get(login_page::<S>))
+        .route(LOGIN_BEGIN, before_route::<S>(Before::BeginLogin))
+        .route(LOGIN_FINISH, before_route::<S>(Before::FinishLogin))
+        .route(JOIN, get(join_page::<S>))
+        .route(JOIN_BEGIN, before_route::<S>(Before::BeginJoin))
+        .route(JOIN_FINISH, before_route::<S>(Before::FinishJoin))
+        .route(ADD_BEGIN, logged_in_route::<S>(LoggedIn::BeginAdding))
+        .route(ADD_FINISH, logged_in_route::<S>(LoggedIn::FinishAdding))
+        .route(LOGOUT, post(logout::<S>))
         .layer(DefaultBodyLimit::max(LARGEST_BODY))
         .with_state(Arc::new(Served { operators, web }))
 }
@@ -158,49 +158,49 @@ fn before_route<S: OperatorStore + Send + Sync + 'static>(
     )
 }
 
-fn signed_route<S: OperatorStore + Send + Sync + 'static>(
-    step: Signed,
+fn logged_in_route<S: OperatorStore + Send + Sync + 'static>(
+    step: LoggedIn,
 ) -> MethodRouter<Arc<Served<S>>> {
     post(
         move |State(served): Shared<S>, headers: HeaderMap, body: Bytes| {
-            signed(served, headers, body, step)
+            logged_in(served, headers, body, step)
         },
     )
 }
 
-async fn sign_in_page<S>(State(served): Shared<S>) -> Response {
+async fn login_page<S>(State(served): Shared<S>) -> Response {
     let web = &served.web;
-    page(&SignInPage {
+    page(&LoginPage {
         demo: web.demo,
         stylesheet: web.stylesheet,
         script: web.script,
     })
 }
 
-/// The enrollment page. Its link's token travels in the address's fragment, which no browser sends, so it never
+/// The join page. Its link's token travels in the address's fragment, which no browser sends, so it never
 /// reaches a log; the script reads it, then clears it from the address bar.
-async fn enroll_page<S>(State(served): Shared<S>) -> Response {
+async fn join_page<S>(State(served): Shared<S>) -> Response {
     let web = &served.web;
-    page(&EnrollPage {
+    page(&JoinPage {
         demo: web.demo,
         stylesheet: web.stylesheet,
         script: web.script,
     })
 }
 
-/// The signed-in operator's page: their name, their passkeys, and a form token for what they may do next. A
-/// browser with no live session is sent to sign in.
+/// The logged-in operator's page: their name, their passkeys, and a form token for what they may do next. A
+/// browser with no live session is sent to log in.
 async fn account<S: OperatorStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
     let cookies = cookies(&headers);
     let Some(token) = Realm::Operator
         .token_in(cookies.iter().copied())
         .and_then(SessionToken::parse)
     else {
-        return see_other(SIGN_IN);
+        return see_other(LOGIN);
     };
     match shown(&served, &cookies, &token).await {
         Ok(Some(page)) => page,
-        Ok(None) => see_other(SIGN_IN),
+        Ok(None) => see_other(LOGIN),
         Err(error) => unavailable_page(&served.web, "could not show an operator's page", &error),
     }
 }
@@ -239,7 +239,7 @@ async fn shown<S: OperatorStore>(
     })
 }
 
-/// How long after signing in an operator may add a passkey, which the database decides (ADR-0048, `v5.0.0-7.5.1`).
+/// How long after logging in an operator may add a passkey, which the database decides (ADR-0048, `v5.0.0-7.5.1`).
 /// The page uses it only to offer the button, or say why it does not.
 const FRESH: Duration = Duration::from_mins(10);
 
@@ -259,23 +259,23 @@ fn described(passkey: &HeldPasskey) -> &'static str {
     }
 }
 
-/// A step of a ceremony before sign-in, which has no session to check.
+/// A step of a ceremony before login, which has no session to check.
 #[derive(Clone, Copy)]
 enum Before {
-    BeginSignIn,
-    FinishSignIn,
-    BeginEnrollment,
-    FinishEnrollment,
+    BeginLogin,
+    FinishLogin,
+    BeginJoin,
+    FinishJoin,
 }
 
-/// A step of a ceremony a signed-in operator takes.
+/// A step of a ceremony a logged-in operator takes.
 #[derive(Clone, Copy)]
-enum Signed {
+enum LoggedIn {
     BeginAdding,
     FinishAdding,
 }
 
-/// Runs a step before sign-in, once the request is admitted: begins or finishes signing in or enrolling.
+/// Runs a step before login, once the request is admitted: begins or finishes logging in or joining.
 async fn before<S: OperatorStore>(
     served: Arc<Served<S>>,
     headers: HeaderMap,
@@ -291,46 +291,46 @@ async fn before<S: OperatorStore>(
     };
     let actor = browser(&headers, None);
     let answered_with = match step {
-        Before::BeginSignIn => operators
-            .begin_sign_in(&web.party)
+        Before::BeginLogin => operators
+            .begin_login(&web.party)
             .await
             .map(|begun| begun_json(&begun)),
-        Before::FinishSignIn => operators
-            .finish_sign_in(&web.party, answer, &cookies(&headers), &actor)
+        Before::FinishLogin => operators
+            .finish_login(&web.party, answer, &cookies(&headers), &actor)
             .await
             .map(|token| {
                 let cookie = Realm::Operator.session_cookie(&token);
                 ([(header::SET_COOKIE, cookie)], next(ACCOUNT)).into_response()
             }),
-        Before::BeginEnrollment => operators
-            .begin_enrollment(&web.party, sent["link"].as_str().unwrap_or_default())
+        Before::BeginJoin => operators
+            .begin_join(&web.party, sent["link"].as_str().unwrap_or_default())
             .await
             .map(|begun| begun_json(&begun)),
-        Before::FinishEnrollment => operators
-            .finish_enrollment(&web.party, ceremony, &response, &actor)
+        Before::FinishJoin => operators
+            .finish_join(&web.party, ceremony, &response, &actor)
             .await
-            .map(|_| next(SIGN_IN)),
+            .map(|_| next(LOGIN)),
     };
     Ok(answered(web, answered_with))
 }
 
-/// Runs a signed-in operator's step, once the request has passed the checks for a change: begins or finishes
+/// Runs a logged-in operator's step, once the request has passed the checks for a change: begins or finishes
 /// adding a passkey.
-async fn signed<S: OperatorStore>(
+async fn logged_in<S: OperatorStore>(
     served: Arc<Served<S>>,
     headers: HeaderMap,
     body: Bytes,
-    step: Signed,
+    step: LoggedIn,
 ) -> Result<Response, Refused> {
     let sent = json_in(&headers, &body)?;
     let checked = acting(&served, &headers, &sent).await?;
     let (web, operators) = (&served.web, &served.operators);
     let answered_with = match step {
-        Signed::BeginAdding => operators
+        LoggedIn::BeginAdding => operators
             .begin_adding_passkey(&web.party, &checked)
             .await
             .map(|begun| begun_json(&begun)),
-        Signed::FinishAdding => {
+        LoggedIn::FinishAdding => {
             let (ceremony, response) = answer_in(&sent);
             let answer = Answer {
                 ceremony,
@@ -346,10 +346,10 @@ async fn signed<S: OperatorStore>(
     Ok(answered(web, answered_with))
 }
 
-/// Signs out from the operator's page's form, with its form token, and sends the browser to sign in with its
-/// cookie cleared, whether or not the session was still live. A form posts and shows pages, so a sign-out refused
+/// Logs out from the operator's page's form, with its form token, and sends the browser to log in with its
+/// cookie cleared, whether or not the session was still live. A form posts and shows pages, so a logout refused
 /// or failed gets a page saying so, never a bare status or JSON.
-async fn sign_out<S: OperatorStore>(
+async fn logout<S: OperatorStore>(
     State(served): Shared<S>,
     headers: HeaderMap,
     body: Bytes,
@@ -364,7 +364,7 @@ async fn sign_out<S: OperatorStore>(
         .end_session(&served.web.origins, &change)
         .await
     {
-        Ok(SignOut::Refused) => {
+        Ok(Logout::Refused) => {
             let web = &served.web;
             let refused = RefusedPage {
                 demo: web.demo,
@@ -372,16 +372,16 @@ async fn sign_out<S: OperatorStore>(
             };
             (StatusCode::FORBIDDEN, page(&refused)).into_response()
         }
-        Ok(SignOut::Ended | SignOut::NothingToEnd) => (
+        Ok(Logout::Ended | Logout::NothingToEnd) => (
             [(header::SET_COOKIE, Realm::Operator.cleared_cookie())],
-            see_other(SIGN_IN),
+            see_other(LOGIN),
         )
             .into_response(),
-        Err(error) => unavailable_page(&served.web, "could not sign an operator out", &error),
+        Err(error) => unavailable_page(&served.web, "could not log an operator out", &error),
     }
 }
 
-/// A page that says signing in is unavailable just now, for a request a person made by following a link or posting
+/// A page that says logging in is unavailable just now, for a request a person made by following a link or posting
 /// a form, with the detail reported to the operator, never shown.
 fn unavailable_page(web: &Web, what: &str, error: &Error) -> Response {
     (web.report)(&format!("identity: {what}: {error}"));
@@ -392,7 +392,7 @@ fn unavailable_page(web: &Web, what: &str, error: &Error) -> Response {
     (StatusCode::SERVICE_UNAVAILABLE, page(&unavailable)).into_response()
 }
 
-/// The live session a signed-in request acts for, or the answer it gets instead: forbidden when it comes from
+/// The live session a logged-in request acts for, or the answer it gets instead: forbidden when it comes from
 /// elsewhere or without its session's form token, and unauthorized when its session has ended.
 async fn acting<S: OperatorStore>(
     served: &Served<S>,
@@ -407,14 +407,14 @@ async fn acting<S: OperatorStore>(
     {
         Ok(ForChange::Acting(checked)) => Ok(checked),
         Ok(ForChange::NoSession) => {
-            Err(Refused::with(refusal(StatusCode::UNAUTHORIZED, SIGNED_OUT)))
+            Err(Refused::with(refusal(StatusCode::UNAUTHORIZED, LOGGED_OUT)))
         }
         Ok(ForChange::Refused) => Err(Refused::with(refusal(StatusCode::FORBIDDEN, REFUSED))),
         Err(error) => Err(Refused::with(unavailable(&served.web, &error))),
     }
 }
 
-/// A request before sign-in, which has no session to check: its JSON, if it comes from one of the realm's
+/// A request before login, which has no session to check: its JSON, if it comes from one of the realm's
 /// origins and says so in both ways a browser can (ADR-0059), or the answer it gets instead.
 fn admitted(web: &Web, headers: &HeaderMap, body: &Bytes) -> Result<Value, Refused> {
     let origin = text(headers, &header::ORIGIN);

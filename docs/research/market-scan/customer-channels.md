@@ -83,7 +83,7 @@ A leading option for [#14](https://github.com/heavymedl-labs/tetsu/issues/14), i
 1. **A hosted booking site per business,** on a Tetsu subdomain or the business's own domain,
    working well in a phone browser.
 2. **Direct links and an embed for a business's own site.** Both real studios keep booking on their
-   own pages, so this should follow soon after the hosted site, if embedded sign-in passes testing.
+   own pages, so this should follow soon after the hosted site, if embedded login passes testing.
 3. **Integrations for discovery:** Reserve with Google and ClassPass.
 4. **Branded native apps later,** as a paid option. Even the two single-location studios have one,
    though Mariana Tek includes it, so this may arrive sooner than the reference businesses suggest.

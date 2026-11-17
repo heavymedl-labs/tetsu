@@ -1,6 +1,6 @@
 // The passkey islands (ADR-0031): light-DOM Web Components that add behavior to markup the server renders.
 //
-// - <tetsu-passkey action="sign-in|enroll|add" form-token="…"> wraps a button and a status line, and runs one
+// - <tetsu-passkey action="login|join|add" form-token="…"> wraps a button and a status line, and runs one
 //   passkey ceremony when the button is pressed. Its state is an attribute, data-state, of ready, waiting, done, or
 //   failed, for styles to read (ADR-0032).
 // - <tetsu-passkeys user="…" credentials="…"> wraps the list of an operator's passkeys, and tells their devices every
@@ -16,12 +16,12 @@ export interface Browser {
   passkeys: typeof PublicKeyCredential | undefined;
 }
 
-const ACTIONS: readonly Action[] = ["sign-in", "enroll", "add"];
+const ACTIONS: readonly Action[] = ["login", "join", "add"];
 
 /** What the page says once an action is done, in the moment before the browser goes where the server says. An
- * enrollment is not done until the sign-in it chains to is (ADR-0067). */
-const DONE: Record<Exclude<Action, "enroll">, string> = {
-  "sign-in": "Signed in.",
+ * join is not done until the login it chains to is (ADR-0067). */
+const DONE: Record<Exclude<Action, "join">, string> = {
+  login: "Logged in.",
   add: "Passkey added.",
 };
 
@@ -47,10 +47,10 @@ export function said(error: unknown): string {
   return failed;
 }
 
-/** What both halves of a ceremony send: an enrollment's link, which leaves the address bar at once, or the
+/** What both halves of a ceremony send: a join's link, which leaves the address bar at once, or the
  * operator's form token. */
 function sentFor(action: Action, host: HTMLElement, browser: Browser): Record<string, string> {
-  if (action === "enroll") {
+  if (action === "join") {
     const link = browser.location.hash.slice(1);
     browser.history.replaceState(null, "", `${browser.location.pathname}${browser.location.search}`);
     return { link };
@@ -78,7 +78,7 @@ function partsOf(host: HTMLElement): Parts | undefined {
 }
 
 /** Readies a `<tetsu-passkey>`, once: its button runs its action, if it has its parts and the browser can use
- * passkeys. An enrollment's link then leaves the address bar at once. */
+ * passkeys. A join's link then leaves the address bar at once. */
 export function ready(host: HTMLElement, browser: Browser): void {
   // Connected again, as when moved, an island already readied keeps its one listener.
   if (host.dataset.state !== undefined) {
@@ -90,9 +90,9 @@ export function ready(host: HTMLElement, browser: Browser): void {
   }
   const device = browser.credentials;
   if (browser.passkeys === undefined || device === undefined) {
-    // An enrollment's link stays in the address bar, so the person can open it in a browser that can.
+    // A join's link stays in the address bar, so the person can open it in a browser that can.
     parts.status.textContent =
-      parts.action === "enroll"
+      parts.action === "join"
         ? "This browser cannot use passkeys. Open this link in one that can."
         : "This browser cannot use passkeys.";
     host.dataset.state = "failed";
@@ -153,7 +153,7 @@ class Presses {
         this.lastSent.add(controller.signal);
         this.finishing();
       });
-      if (this.action === "enroll") {
+      if (this.action === "join") {
         await this.chain(controller);
       } else {
         this.arrive(this.action, next);
@@ -165,11 +165,11 @@ class Presses {
         return;
       }
       this.stopClock();
-      // An enrollment whose last request went out but whose answer was lost may have kept the passkey and spent
-      // the link, so its link is no use again; signing in is. A refusal means the server kept nothing.
-      if (this.action === "enroll" && this.lastSent.has(controller.signal) && !(error instanceof Refused)) {
-        this.toSignIn();
-        this.say("Your passkey may have been created. Continue with passkey to sign in.", "ready");
+      // A join whose last request went out but whose answer was lost may have kept the passkey and spent
+      // the link, so its link is no use again; logging in is. A refusal means the server kept nothing.
+      if (this.action === "join" && this.lastSent.has(controller.signal) && !(error instanceof Refused)) {
+        this.toLogin();
+        this.say("Your passkey may have been created. Continue with passkey to log in.", "ready");
         return;
       }
       this.say(
@@ -188,7 +188,7 @@ class Presses {
     const hint = setTimeout(
       () =>
         this.say(
-          "Still waiting. If your device can't find or make a passkey for Tetsu, cancel and use the one you set up, or ask an operator for a new link.",
+          "Still waiting. If your device can't find or make a passkey for Tetsu, cancel and use the one you set up, or ask an operator for a new invite.",
           "waiting",
         ),
       HINT_AFTER,
@@ -200,33 +200,30 @@ class Presses {
     };
   }
 
-  /** Turns the island to signing in, for good: an enrollment's link is spent once its passkey is kept. */
-  private toSignIn(): void {
-    this.action = "sign-in";
+  /** Turns the island to logging in, for good: a join's link is spent once its passkey is kept. */
+  private toLogin(): void {
+    this.action = "login";
     this.sent = {};
     this.island.parts.label.textContent = "Continue with passkey";
   }
 
-  // An operator's session comes from a passkey sign-in, never from the link that enrolled them, so a new passkey
-  // signs in at once, on this page (ADR-0067). A browser may refuse a prompt the person did not start by pressing
-  // something; the button then signs in instead. A refusal from the server is said as any other.
+  // An operator's session comes from a passkey login, never from the link that joined them, so a new passkey
+  // logs in at once, on this page (ADR-0067). A browser may refuse a prompt the person did not start by pressing
+  // something; the button then logs in instead. A refusal from the server is said as any other.
   private async chain(controller: AbortController): Promise<void> {
     const signal = controller.signal;
-    this.toSignIn();
-    this.say("Passkey created. Confirm once more to sign in.", "waiting");
+    this.toLogin();
+    this.say("Passkey created. Confirm once more to log in.", "waiting");
     this.startClock(controller);
     try {
-      this.arrive(
-        "sign-in",
-        await ceremony("sign-in", this.sent, this.island.device, signal, this.finishing),
-      );
+      this.arrive("login", await ceremony("login", this.sent, this.island.device, signal, this.finishing));
     } catch (error) {
-      // A chained sign-in that timed out leaves a passkey made, so the button signs in, rather than failing.
+      // A chained login that timed out leaves a passkey made, so the button logs in, rather than failing.
       if (error instanceof Refused || (signal.aborted && signal.reason !== TIMED_OUT)) {
         throw error;
       }
       this.stopClock();
-      this.say("Passkey created. Continue with passkey to sign in.", "ready");
+      this.say("Passkey created. Continue with passkey to log in.", "ready");
     }
   }
 
@@ -237,7 +234,7 @@ class Presses {
     this.island.parts.button.disabled = true;
   };
 
-  private arrive(done: Exclude<Action, "enroll">, next: string): void {
+  private arrive(done: Exclude<Action, "join">, next: string): void {
     this.stopClock();
     this.say(DONE[done], "done");
     this.island.browser.location.assign(next);

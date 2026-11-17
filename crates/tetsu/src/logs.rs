@@ -300,8 +300,8 @@ mod tests {
     fn a_request_is_labelled_with_its_realm() {
         let realms = [
             "/ops",
-            "/ops/sign-in",
-            "/ops/sign-out",
+            "/ops/login",
+            "/ops/logout",
             "/",
             "/sample-studio",
             "/ops-studio",

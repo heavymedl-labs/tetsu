@@ -7,7 +7,7 @@
 
 The demo's logs and alerts live in Grafana Cloud ([ADR-0049](0049-log-export.md)). Checking them, as after a deploy
 or when an alert fires, meant driving Grafana's web UI through a browser: slow, fragile, and a browser session with
-the maintainer's sign-in. Grafana publishes an MCP server that queries Loki and reads alert rules directly
+the maintainer's login. Grafana publishes an MCP server that queries Loki and reads alert rules directly
 ([#127](https://github.com/heavymedl-labs/tetsu/issues/127)).
 
 Criteria, before looking at options: a session can query the demo's logs and see each alert's state; it cannot
@@ -18,7 +18,7 @@ session; and nothing in the product depends on it.
 
 - **Use [`mcp-grafana`](https://github.com/grafana/mcp-grafana), Grafana's MCP server,** in Claude Code, run with
   `uvx` at an exact version, `mcp-grafana@2.2.0`, so an update arrives only when someone changes the pin.
-- **Read-only twice over:** it runs with `--disable-write`, and signs in as service account `claude-mcp` with the
+- **Read-only twice over:** it runs with `--disable-write`, and logs in as service account `claude-mcp` with the
   **Viewer** role, so a write fails even if the flag is dropped.
 - **The maintainer sets it up,** creating the service account's token and registering the server with
   `claude mcp add`, so the token goes from Grafana straight to Claude Code's local settings and never through a

@@ -23,7 +23,7 @@ features are built, as long as splitting later stays easy.
   Realm paths are reserved names, so no business can take one ([#90](https://github.com/heavymedl-labs/tetsu/issues/90)).
 - **The realms share the service's passkey domain** until Tetsu has domains
   ([#102](https://github.com/heavymedl-labs/tetsu/issues/102)). A browser may offer an operator's passkey on another
-  realm's sign-in; the server refuses any passkey whose account is not in the realm signing in, as it refuses one
+  realm's login; the server refuses any passkey whose account is not in the realm logging in, as it refuses one
   from another business. Demo passkeys are thrown away when the domains arrive in any case (ADR-0057).
 - **Two database logins:** the owner, which runs migrations, and the application. Operators' pages and the
   dispatcher use the application login. Module roles, row security, and the catalog check stay as ADR-0042 sets
@@ -46,13 +46,13 @@ features are built, as long as splitting later stays easy.
 - **Keep three services and four logins now** (ADR-0042, ADR-0060's draft). Keeps the separation, at the cost of
   more setup in every environment and free hours shared three ways, for a demo holding fictional data.
 - **Operators by command only, with no operator pages.** Simpler still, but it changes the order ADR-0048 sets for
-  the slices, and operator sign-in is how sign-in gets tested first.
+  the slices, and operator login is how login gets tested first.
 
 ## Consequences
 
 - A script injected into one realm's page runs on the same origin as the others' pages. It cannot read another
   realm's `HttpOnly` cookie, but it can load that realm's pages, read their form token, and act for whoever is signed
-  in there in the same browser. Only someone signed in to two realms in one browser is exposed, which on the demo is
+  in there in the same browser. Only someone logged in to two realms in one browser is exposed, which on the demo is
   the maintainer. The content security policy (#110) is the guard until the split before the Level 2 review.
 - #110 builds operator pages under `/ops` on `tetsu-demo`, and no `tetsu-demo-ops` service is created.
 

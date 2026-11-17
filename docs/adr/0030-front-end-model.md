@@ -45,7 +45,7 @@ for everything else.
   components alike.
 - **Embedding is opt-in per business.** Pages refuse framing by default (`frame-ancestors 'none'`). A business
   names the sites that may embed its pages.
-- **Sign-in never relies on cookies across sites.** A component on a business's own site signs a customer in on a
+- **Login never relies on cookies across sites.** A component on a business's own site signs a customer in on a
   Tetsu page opened at the top level or in a popup, which passes a token back.
   [#9](https://github.com/heavymedl-labs/tetsu/issues/9) decides the details.
 - **Card fields stay in the payment processor's own frame,** inside a component as on Tetsu's pages
@@ -74,7 +74,7 @@ for everything else.
 - The design system brings a second language, TypeScript, which needs its own row in
   [CONSTRAINTS.md](../../CONSTRAINTS.md) and its own checks before any code
   ([ADR-0014](0014-checks-and-duties.md)), and likely a repository of its own.
-- Components that book or show live data wait on the API (#12), and sign-in in an embed waits on #9.
+- Components that book or show live data wait on the API (#12), and login in an embed waits on #9.
 - The default site and embeds share one implementation of each interactive widget, and shared tokens and base
   CSS carry the look. What must stay alike is then only the static HTML around them.
 - The order keeps the milestone first: shared styles and the default site come with the walking skeleton, and
@@ -82,7 +82,7 @@ for everything else.
 
 **Weakest evidence.** No measurement yet of how often businesses embed rather than link, or of how much work
 keeping Web Components and server-rendered pages consistent takes for one maintainer. Support for partitioned
-cookies across browsers is contested, which is why sign-in avoids them.
+cookies across browsers is contested, which is why login avoids them.
 
 **Revisit** if most businesses embed rather than use the default site, if Web Components prove unworkable
 inside a framework a business relies on, if keeping the default site and components consistent costs more than
@@ -92,10 +92,10 @@ a backend per front end ([Sam Newman: BFF](https://samnewman.io/patterns/archite
 ## Sources
 
 - [Front-end model research](../research/front-end-model.md), 2026-11-09: prior art such as Shopify's themes and
-  Web Component design systems, framework support, design tokens, islands, payments, and sign-in in embeds.
+  Web Component design systems, framework support, design tokens, islands, payments, and login in embeds.
 - [Customer channels research](../research/market-scan/customer-channels.md), 2026-11-04: how 14 competitors let
   customers book, and the two studios' embedded booking.
 - [MDN: Web Components](https://developer.mozilla.org/en-US/docs/Web/API/Web_components): custom elements and
   shadow DOM, standard in every current browser.
-- [WebKit: Storage Access API](https://webkit.org/blog/8124/introducing-storage-access-api/): why sign-in in an
+- [WebKit: Storage Access API](https://webkit.org/blog/8124/introducing-storage-access-api/): why login in an
   embed cannot rely on third-party cookies.

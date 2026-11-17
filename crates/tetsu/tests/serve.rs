@@ -319,14 +319,14 @@ use support::{
 };
 use tetsu_postgres::test_support::fresh_database;
 
-/// The operator's sign-in page is served, under a policy that lets it run Tetsu's own script, and the script it
+/// The operator's login page is served, under a policy that lets it run Tetsu's own script, and the script it
 /// names is served as JavaScript.
 #[tokio::test]
-async fn the_sign_in_page_loads_its_script() {
+async fn the_login_page_loads_its_script() {
     let database = fresh_database().await.expect("a test database");
     ready(&database);
     let server = start(&database);
-    let page = get(&server, "/ops/sign-in");
+    let page = get(&server, "/ops/login");
     assert!(page.starts_with("HTTP/1.1 200"), "{page}");
     assert!(page.contains("script-src 'self'"), "{page}");
     let (_, after) = page

@@ -522,7 +522,7 @@ async fn every_query_file_prepares() {
     assert_eq!(prepared, 6);
 }
 
-/// Signed in as the application role, as `tetsu serve` is, so row-level security applies (ADR-0042).
+/// Logged in as the application role, as `tetsu serve` is, so row-level security applies (ADR-0042).
 #[cfg(test)]
 async fn app_store_and_settings() -> (Tenants<impl TenantStore>, TestDatabase) {
     let settings = fresh_database().await.expect("a test database");

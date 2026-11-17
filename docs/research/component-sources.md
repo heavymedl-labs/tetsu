@@ -12,7 +12,7 @@ and adapted, so no library is installed at run time, apart from a font.
 | C2 | Plain HTML with Tailwind 4 classes | Askama templates; no React or framework runtime |
 | C3 | Light and dark versions of each section | The maintainer wants both, following the system setting |
 | C4 | No JavaScript needed for the static parts | The policy runs no scripts until islands exist ([#88](https://github.com/heavymedl-labs/tetsu/issues/88)) |
-| C5 | Enough marketing and application sections for Tetsu's pages, business pages, and sign-in | Fewer pieces written from scratch |
+| C5 | Enough marketing and application sections for Tetsu's pages, business pages, and login | Fewer pieces written from scratch |
 
 ## Options
 

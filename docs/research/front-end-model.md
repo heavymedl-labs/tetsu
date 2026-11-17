@@ -20,7 +20,7 @@ Written before looking at sources.
 ## Findings
 
 **A server-rendered default, with Web Components for interactive parts and an API for the rest, is an
-established model.** The main risks are sign-in inside an embed and keeping two kinds of front end alike.
+established model.** The main risks are login inside an embed and keeping two kinds of front end alike.
 
 ### Prior art
 
@@ -72,13 +72,13 @@ Stripe Elements serves card fields from an iframe on Stripe's domain that the ho
 card data off the merchant's page ([Stripe Web Elements](https://docs.stripe.com/stripe.js/switching)). A
 component can hold such a frame, which meets M4.
 
-### Sign-in inside an embed
+### Login inside an embed
 
 When third-party cookies are blocked, Google lists partitioned cookies (CHIPS), the Storage Access API, and Related
 Website Sets as the only ways for a cross-site frame to keep cookies. It lists CHIPS in Chrome 114, Edge 114,
 Firefox 141, and Safari 26.2 ([Google: CHIPS](https://privacysandbox.google.com/cookies/chips)). A trade site
 claims Chrome retired it in 2025 ([ppc.land](https://ppc.land/ships/)), and a WebKit bug filed 2026-01-24 reports
-Safari dropping partitioned cookies after cross-site redirects. Strength: contested. Signing in on a Tetsu page at
+Safari dropping partitioned cookies after cross-site redirects. Strength: contested. Logging in on a Tetsu page at
 the top level, or in a popup, and passing a token back avoids depending on any of them.
 
 ### One API or several
@@ -109,8 +109,8 @@ source.
 - **#14 had already set the rule** that an embed is the same content without the site's outer layout, which a
   frame of Tetsu's own page meets.
 
-A review of the first ADR-0031 draft added that sign-in or payment inside a frame is still exposed to the host
-page: it can overlay a signed-in frame (UI redress) or swap it for a look-alike, and `v5.0.0-3.4.6` (L2) allows
+A review of the first ADR-0031 draft added that login or payment inside a frame is still exposed to the host
+page: it can overlay a logged-in frame (UI redress) or swap it for a look-alike, and `v5.0.0-3.4.6` (L2) allows
 framing only where necessary. It also found that one host for every tenant rules out per-tenant session cookies
 under `v5.0.0-3.3.3` (L2, `__Host-` cookies) and `v5.0.0-3.5.4` (L2, separate hostnames).
 
@@ -125,13 +125,13 @@ Read 2026-11-09. Mostly vendor documentation and support pages; strength noted p
   Shopify's Buy Button opened checkout in a new window, and now offers the same tab
   ([Shopify changelog](https://changelog.shopify.com/posts/buy-button-now-supports-checkout-in-same-tab)); its
   Checkout Kit opens a new tab or popup ([Checkout Kit](https://shopify-dev.shopifycloud.com/docs/storefronts/mobile/checkout-kit/web)).
-- **Sign-in in a frame fails where third-party cookies are blocked.** Auth0 documents Safari blocking its cookies
+- **Login in a frame fails where third-party cookies are blocked.** Auth0 documents Safari blocking its cookies
   in frames ([Auth0](https://support.auth0.com/center/s/article/Safari-blocks-Auth0-auth-cookies-in-iframe)).
   Booking vendors advise linking rather than embedding ([WriteUpp](https://help.writeupp.com/en/article/can-i-embed-online-booking-in-my-website-using-an-iframe-tsm32j/),
   [Reservio](https://help.reservio.com/en/articles/10656312-how-to-fix-reservation-button-issues-in-iframe-on-safari-iphone-ipad)).
   A top-level tab cannot read a session cookie set in a frame
   ([Google](https://developers.google.com/classroom/add-ons/developer-guides/third-party-cookies)). Mindbody's
-  widgets let customers sign in inside the embed ([Mindbody](https://www.mindbodyonline.com/business/education/blog/how-to-turn-website-visits-into-bookings)),
+  widgets let customers log in inside the embed ([Mindbody](https://www.mindbodyonline.com/business/education/blog/how-to-turn-website-visits-into-bookings)),
   the counterexample.
 - **A subdomain of the business's own domain is first-party.** Serving the app from a subdomain the business
   points at it lets Safari treat it as first-party
@@ -139,7 +139,7 @@ Read 2026-11-09. Mostly vendor documentation and support pages; strength noted p
   one team's report).
 - **Per-tenant subdomains isolate sessions.** Path-based tenancy complicates cookie isolation
   ([pattern note](https://commons-os.github.io/patterns/subdomain-based-tenant-routing/)); scoping each session
-  cookie to its tenant's subdomain fixed one framework's cross-tenant sign-in
+  cookie to its tenant's subdomain fixed one framework's cross-tenant login
   ([ABP](https://abp.io/support/questions/9488/Blazor-WebApp-login-issues-authenticate-in-one-tenant-is-logged-in-all)).
   A shared parent domain belongs on the Public Suffix List, as `myshopify.com` and `github.io` are, so no cookie
   can span tenants ([PSL note](https://kestra.io/blueprints/mozilla-public-suffix-cookie-isolation)).
@@ -154,9 +154,9 @@ business controls its DNS. Tenancy's router also resolves the tenant from the pa
 Tetsu would serve every tenant. It also corrected the industry check: Stripe's card fields and embedded Checkout
 do run framed on merchants' pages, and Stripe requires registering every domain that shows a wallet when using
 them, framed or not ([Stripe](https://docs.stripe.com/payments/payment-methods/pmd-registration)). The booking
-vendors advise linking for Safari's cookie rules, not specifically for sign-in.
+vendors advise linking for Safari's cookie rules, not specifically for login.
 
-A third review found the Mindbody counterexample unsupported: its blog does not say sign-in happens inside the
+A third review found the Mindbody counterexample unsupported: its blog does not say login happens inside the
 embed. It could not load the Visa page, whose address suggests it documents running Secure Acceptance in a frame,
 so the claim that Visa's hosted page refuses framing is unconfirmed. It also found that #8, not #9, already owns
 tenant addresses and how a business proves it owns a domain.

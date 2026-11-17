@@ -41,7 +41,7 @@ confused with adapters, which sit at the edge of every module.
 **Control plane.** The platform modules that run Tetsu itself, such as
 tenancy, identity and access, and audit.
 
-**Customer account.** An account a tenant owns, for one of its customers to sign in. Email is unique within the
+**Customer account.** An account a tenant owns, for one of its customers to log in. Email is unique within the
 tenant, so one person at two tenants has two accounts ([ADR-0040](adr/0040-identity-and-sign-in.md)).
 
 **Demo business.** A fictional tenant, kept as a data file in the `tetsu-demos`
@@ -60,10 +60,7 @@ outbox ([ADR-0043](adr/0043-domain-event-delivery.md)).
 simplifying a change. Listed in [AGENTS.md](../AGENTS.md#duties).
 
 **Embed.** A frame of a Tetsu page placed in a business's own website by the `<tetsu-embed>` element, for
-browsing only: nothing signed in is ever framed ([ADR-0031](adr/0031-front-end-model-revised.md)).
-
-**Enrollment link.** A single-use link, good for an hour, through which an operator enrolls their first passkey.
-The operator command issues it and prints it only to the terminal that ran it ([ADR-0040](adr/0040-identity-and-sign-in.md)).
+browsing only: nothing logged in is ever framed ([ADR-0031](adr/0031-front-end-model-revised.md)).
 
 **Fresh review.** A review by an agent that did not write the change, seeing only
 the issue and the diff. See [docs/review.md](review.md).
@@ -74,11 +71,20 @@ sessions. Each says why it is global ([ADR-0042](adr/0042-tenant-isolation.md)).
 **Guest.** A person who books with a tenant without an account, with a client profile of their own. A guest's
 link can view or cancel that one booking ([ADR-0040](adr/0040-identity-and-sign-in.md)).
 
+**Invite link.** A single-use link, good for an hour, through which an operator joins Tetsu with their first passkey.
+The operator command issues it and prints it only to the terminal that ran it ([ADR-0040](adr/0040-identity-and-sign-in.md)).
+
 **Island.** A small Web Component that adds behavior to server-rendered HTML on a Tetsu page, without
 rendering markup of its own ([ADR-0031](adr/0031-front-end-model-revised.md)).
 
+**Join.** What an invited operator does: open their invite link, create their first passkey, and log in with it
+([ADR-0067](adr/0067-sign-in-after-a-first-passkey.md)). People who make their own account sign up instead.
+
 **Kernel.** The small core that defines the module contract: traits and types,
 with no domain knowledge and no runtime plug-in loading.
+
+**Log in.** Starting a session with a passkey; the noun is login, and ending one is logging out. Tetsu never
+says sign in, which reads too close to sign up.
 
 **Minimum sellable product.** The least a reference business needs before it
 switches to Tetsu. Each reference business's page defines its own, and going
@@ -90,7 +96,7 @@ Postgres schema. Platform capabilities and verticals are both modules.
 **Notification address.** An extra email a person confirms, besides their account's own, for notices such as a
 recovery ([ADR-0041](adr/0041-account-recovery.md)).
 
-**Operator.** A person who works for Tetsu itself, not for a tenant, and signs in to Tetsu's own tools ([ADR-0040](adr/0040-identity-and-sign-in.md)).
+**Operator.** A person who works for Tetsu itself, not for a tenant, and logs in to Tetsu's own tools ([ADR-0040](adr/0040-identity-and-sign-in.md)).
 
 **Outbox.** A module's table of domain events, written in the same transaction as the change each describes, from
 which a dispatcher delivers them at least once ([ADR-0043](adr/0043-domain-event-delivery.md)).
@@ -127,6 +133,8 @@ set by [ADR-0005](adr/0005-testing-and-performance.md).
 **Shared capability.** Industry-neutral behavior the platform builds up front
 for more than one vertical, such as scheduling, booking, or the ledger.
 
+**Sign up.** Making an account for yourself, as a customer will. Operators join from an invite instead.
+
 **Staff member.** A person who works for one or more tenants, with one identity and a staff role at each ([ADR-0040](adr/0040-identity-and-sign-in.md)).
 
 **Staff role.** A staff member's role at one tenant: owner, manager, front desk, or instructor
@@ -152,6 +160,6 @@ call it; together with domain events, use cases are how modules talk.
 that industry and builds on the platform. Boutique fitness is the first;
 salons and spas are the second industry every capability is designed against.
 
-**Walking skeleton.** The first thin slice through every layer, from sign-in
+**Walking skeleton.** The first thin slice through every layer, from login
 to production, built to prove the architecture before feature work. It is the
 first milestone.

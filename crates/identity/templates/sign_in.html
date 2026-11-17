@@ -1,8 +1,0 @@
-{% extends "ops_page.html" %}
-{% import "button.html" as ui %}
-{% block title %}Sign in · Tetsu{% endblock %}
-{% block card %}
-<h1 class="mt-6 text-lg font-medium text-ink">Sign in to Tetsu</h1>
-{% call ui::passkey("sign-in") %}Continue with passkey{% endcall %}
-<p class="mt-3 text-[13px] text-pretty text-muted">No passkey yet? An operator sends you a link to set one up.</p>
-{% endblock %}

@@ -19,7 +19,7 @@ Tetsu's demo root page grew to 272 KB of HTML, most of it inline SVG artwork, an
 - **The root page has a budget:** at most 40 KB of HTML, and the stylesheet at most 20 KB, each as sent to a
   browser that accepts brotli and gzip. A test requests both that way and fails above the budget. A page whose
   content grows past it needs a decision, not a quiet raise.
-- **A response that will hold a secret, such as a sign-in token, turns compression off or masks the secret,**
+- **A response that will hold a secret, such as a login token, turns compression off or masks the secret,**
   since compressing a secret beside text an attacker controls can leak it (BREACH). No page holds one today.
 
 ## Alternatives considered

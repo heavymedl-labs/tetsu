@@ -49,7 +49,7 @@ ADR-0007's query checking decision; the rest of that ADR stands.
 The skeleton has fewer moving parts and runs at the speed of the driver. We give
 up build-time checks: preparing a query does not compare its columns or
 parameters with our Rust types, so those mistakes surface only in tests. This
-matters most for sign-in and tenant code, the first queries written and among
+matters most for login and tenant code, the first queries written and among
 the highest rigor. Adopting Cornucopia later costs more with each query, so the
 revisit point stays fixed. Plain SQL files limit that cost.
 

@@ -24,7 +24,7 @@ An RP ID is a bare domain with no scheme or port. It must equal the caller's eff
 - `onrender.com` is a public suffix, so `tetsu-demo.onrender.com` is itself a registrable domain (eTLD+1). Its only valid RP ID is `tetsu-demo.onrender.com`. `onrender.com` would be rejected as an RP ID, just as `com` is.
 - Paths play no part. Every business at `/<slug>` on one host shares one RP ID, and the spec has no per-path scoping.
 - On Tetsu's own domain, say `tetsu.example`, the RP ID `tetsu.example` would cover `tetsu.example`, `app.tetsu.example`, `<slug>.tetsu.example`, and any port. Subdomain-per-tenant hosting keeps one shared passkey per user across tenants, provided the RP ID is set to the apex.
-- A custom business domain, such as `book.acmesalon.com`, cannot use `tetsu.example` as an RP ID through the suffix rule. It needs Related Origin Requests, and the label cap rules that out at multi-tenant scale. Otherwise sign-in must happen on a Tetsu origin, through a redirect, a popup, or an iframe.
+- A custom business domain, such as `book.acmesalon.com`, cannot use `tetsu.example` as an RP ID through the suffix rule. It needs Related Origin Requests, and the label cap rules that out at multi-tenant scale. Otherwise login must happen on a Tetsu origin, through a redirect, a popup, or an iframe.
 - Passkeys made on `tetsu-demo.onrender.com` are tied to that RP ID for good. Moving to Tetsu's own domain needs re-enrolment, unless the new domain's pages call WebAuthn with `rpId: "tetsu-demo.onrender.com"` through Related Origin Requests. That requires serving `/.well-known/webauthn` on `tetsu-demo.onrender.com` for as long as those passkeys are in use.
 
 ### Gaps
@@ -87,7 +87,7 @@ WebAuthn is off by default in cross-origin iframes. The embedder delegates it wi
 **Inferences:**
 
 - A Tetsu iframe on `acmesalon.com` runs WebAuthn as Tetsu's origin with Tetsu's RP ID. Passkeys made in the iframe are the same passkeys used on Tetsu's site, so frames do not fragment credentials. Tetsu cannot set the `allow` attribute, though. Each business must paste embed code that includes it, and in Chrome the business's page must not send a `Permissions-Policy` header that blocks the feature.
-- Even when the passkey ceremony succeeds, the session cookie in the frame is partitioned per embedding site, or blocked in Safari without the Storage Access API. Embedded sign-in therefore gives a per-business session, not a Tetsu-wide one. The robust pattern is to open sign-in in a top-level popup or redirect to the Tetsu origin, which is also what the spec's clickjacking guidance suggests.
+- Even when the passkey ceremony succeeds, the session cookie in the frame is partitioned per embedding site, or blocked in Safari without the Storage Access API. Embedded login therefore gives a per-business session, not a Tetsu-wide one. The robust pattern is to open login in a top-level popup or redirect to the Tetsu origin, which is also what the spec's clickjacking guidance suggests.
 - Registration in an iframe is the least portable path: it needs a user gesture, cannot be conditional, and is unclear in Safari. Plan to create passkeys first-party, on Tetsu's own origin.
 
 **Gaps:**
@@ -118,7 +118,7 @@ Conditional get works on the page's own origin and RP ID. It filters to discover
 ## Domain changes and migration (Related Origin Requests bridge, re-registration, Signal API)
 
 **Takeaway:**
-No WebAuthn mechanism moves a passkey to a new RP ID. A credential's rpId is fixed at creation, and the Signal API only deletes, hides, or renames credentials *within the same RP ID*. The options are: keep the old RP ID and reach it from new origins through Related Origin Requests, which needs a host you control at the old RP ID and works only where supported; or have users sign in with the old passkey, enrol a new one under the new RP ID, and then use `signalAllAcceptedCredentials` or `signalUnknownCredential` to retire the old ones. The Signal API is in Chrome and Edge 132 and Safari 26, and not in Firefox.
+No WebAuthn mechanism moves a passkey to a new RP ID. A credential's rpId is fixed at creation, and the Signal API only deletes, hides, or renames credentials *within the same RP ID*. The options are: keep the old RP ID and reach it from new origins through Related Origin Requests, which needs a host you control at the old RP ID and works only where supported; or have users log in with the old passkey, enrol a new one under the new RP ID, and then use `signalAllAcceptedCredentials` or `signalUnknownCredential` to retire the old ones. The Signal API is in Chrome and Edge 132 and Safari 26, and not in Firefox.
 
 **Cited Findings:**
 
@@ -133,7 +133,7 @@ No WebAuthn mechanism moves a passkey to a new RP ID. A credential's rpId is fix
 **Inferences:**
 
 - The Signal API cannot rename an RP ID or carry a passkey across. It is a cleanup tool for after re-enrolment, not a migration tool.
-- A practical domain move: (1) Keep the old host serving and accepting sign-in. (2) After a user signs in on the old RP ID, prompt them to create a passkey on the new domain. Conditional create (Chrome 136+, Safari 18+) can do this as an automatic upgrade on the new origin, provided the user has another signed-in session there. (3) On the old origin, call `signalAllAcceptedCredentials` with an empty or reduced list for migrated users. That must run on the old origin, or the new origin needs Related Origin Requests pointing at the old RP ID. (4) Fall back to email or another recovery path for users who never come back.
+- A practical domain move: (1) Keep the old host serving and accepting login. (2) After a user logs in on the old RP ID, prompt them to create a passkey on the new domain. Conditional create (Chrome 136+, Safari 18+) can do this as an automatic upgrade on the new origin, provided the user has another logged-in session there. (3) On the old origin, call `signalAllAcceptedCredentials` with an empty or reduced list for migrated users. That must run on the old origin, or the new origin needs Related Origin Requests pointing at the old RP ID. (4) Fall back to email or another recovery path for users who never come back.
 - For Tetsu, the cheapest course is to choose the final RP ID, Tetsu's own apex domain, before any real user enrols. Treat any passkeys on `tetsu-demo.onrender.com` as throwaway demo credentials.
 
 **Gaps:**

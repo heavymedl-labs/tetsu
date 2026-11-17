@@ -1,4 +1,4 @@
-//! What a browser carries for sign-in: each realm's session cookie, and the origin a state-changing request comes
+//! What a browser carries for login: each realm's session cookie, and the origin a state-changing request comes
 //! from (ADR-0048). Plain text in and out, so no HTTP framework's types reach Identity (ADR-0007); the adapter
 //! that serves pages sets and reads the headers.
 
@@ -27,7 +27,7 @@ impl Realm {
         )
     }
 
-    /// The `Set-Cookie` value that removes the session cookie, as signing out does.
+    /// The `Set-Cookie` value that removes the session cookie, as logging out does.
     #[must_use]
     pub fn cleared_cookie(self) -> String {
         format!("{}=; {ATTRIBUTES}; Max-Age=0", self.cookie_name())
@@ -53,7 +53,7 @@ impl Realm {
 
 const ATTRIBUTES: &str = "Path=/; Secure; HttpOnly; SameSite=Lax";
 
-/// What a state-changing request brings for sign-in's checks: every `Cookie` header it carries, its `Origin` and
+/// What a state-changing request brings for login's checks: every `Cookie` header it carries, its `Origin` and
 /// `Sec-Fetch-Site` headers, and the form token it submitted, as the page adapter reads them. Its parts are private, so the session token is
 /// always read through [`Realm::token_in`], and a cookie sent twice is never taken for one. It has no `Debug`, so it
 /// is never printed with a token inside.
@@ -121,9 +121,9 @@ pub enum ForChange {
     Refused,
 }
 
-/// What signing out did.
+/// What logging out did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SignOut {
+pub enum Logout {
     /// A live session ended.
     Ended,
     /// The request passed the checks, but its session had already ended or never was.
@@ -133,7 +133,7 @@ pub enum SignOut {
 }
 
 /// The origins a realm's pages are served from, such as `https://tetsu-demo-ops.onrender.com`. A state-changing
-/// request is accepted only from one of them, so another site's form or script can never act for a signed-in
+/// request is accepted only from one of them, so another site's form or script can never act for a logged-in
 /// person (ADR-0048, `v5.0.0-3.5.1`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Origins(Vec<String>);
@@ -166,7 +166,7 @@ impl Origins {
 
     /// Whether a state-changing request may go on, with or without a session: its `Origin` must name one of these
     /// exactly, and its `Sec-Fetch-Site`, when the browser sends one, must say it came from the same origin. Two
-    /// independent signals, so a single browser bug opens no gap (ADR-0059). A request before sign-in has nothing
+    /// independent signals, so a single browser bug opens no gap (ADR-0059). A request before login has nothing
     /// else to check, so its page adapter calls this directly.
     #[must_use]
     pub fn admit(&self, origin: Option<&str>, fetch_site: Option<&str>) -> bool {

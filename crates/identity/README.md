@@ -1,11 +1,11 @@
 # Identity
 
-Who signs in to Tetsu, their passkeys, and their sessions ([ADR-0040](../../docs/adr/0040-identity-and-sign-in.md),
+Who logs in to Tetsu, their passkeys, and their sessions ([ADR-0040](../../docs/adr/0040-identity-and-sign-in.md),
 [ADR-0048](../../docs/adr/0048-sign-in-design.md)). Tier 1, since it is identity and access. Operators come first,
 in slice 5 ([#110](https://github.com/heavymedl-labs/tetsu/issues/110)); staff and customers follow.
 
-So far, `Operators` creates, lists, disables, and enables operators, issues their enrollment links, begins and
-finishes enrolling their first passkey, signs them in with it, adds their second, removes their passkeys, and
+So far, `Operators` creates, lists, disables, and enables operators, issues their invite links, begins and
+finishes joining with their first passkey, logs them in with it, adds their second, removes their passkeys, and
 starts, finds, and ends their sessions. `postgres_store(pool)` returns it over Postgres.
 
 - **Session tokens are 256 random bits** from the operating system's source, written as 64 lowercase hexadecimal
@@ -18,14 +18,14 @@ starts, finds, and ends their sessions. `postgres_store(pool)` returns it over P
 - **Checking a session and recording the request are one step,** in `use_session`: an update that waits for any
   request holding the row and checks it again as that request left it, then a removal only if the session is spent.
   Requests at the same moment never end a live session or revive a spent one, and the last request never moves back.
-- **Signing out removes the session** on the server. It changes state, so it passes the origin and form-token
+- **Logging out removes the session** on the server. It changes state, so it passes the origin and form-token
   checks first.
 - **A state-changing request gets one of three answers:** it acts for its live session, its session has ended, or
   it is refused. A refusal is told apart, so the page adapter can answer it as forbidden and record it
-  (`ForChange`, `SignOut`).
+  (`ForChange`, `Logout`).
 - **Session tokens compare in constant time,** as form tokens do.
 - **Every table is global** ([ADR-0042](../../docs/adr/0042-tenant-isolation.md)): `identity.operators`, which
-  Identity's role adds to and reads, and `identity.sessions`, `enrollments`, `passkeys`, and `ceremonies`, which
+  Identity's role adds to and reads, and `identity.sessions`, `invites`, `passkeys`, and `ceremonies`, which
   it reaches only through lookup functions that take one hash a call, so nothing can list sessions or links, and
   no realm uses or ends another's.
 - **Each operator has a random WebAuthn user handle,** which says nothing about them, and each session a random
@@ -35,8 +35,8 @@ starts, finds, and ends their sessions. `postgres_store(pool)` returns it over P
   (`Realm::token_in`) takes every `Cookie` header, as HTTP/2 may split them, refuses a request that carries it
   twice, and trims only ASCII whitespace, so a name led by Unicode whitespace is never taken for it.
 - **Every state-changing request for a session** must come from one of the realm's `Origins`, exactly, and carry
-  the session's form token (`Operators::session_for_change`). Signing in and enrolling have no session yet, so
-  their requests pass `Origins::admit` alone, the only guard against signing someone in to an attacker's account:
+  the session's form token (`Operators::session_for_change`). Logging in and joining have no session yet, so
+  their requests pass `Origins::admit` alone, the only guard against logging someone in to an attacker's account:
   an exact `Origin`, and a `Sec-Fetch-Site` of `same-origin` when the browser sends one (ADR-0059). A `Change`
   checks both too, and is built from every `Cookie` header, so the session token is always read through
   `Realm::token_in`. A form token is derived from the session token with SHA-256, so
@@ -46,7 +46,7 @@ starts, finds, and ends their sessions. `postgres_store(pool)` returns it over P
 
 ## Hot paths
 
-- **Finding a session** runs on every signed-in request: one call to `use_session`, an update by primary key that
+- **Finding a session** runs on every logged-in request: one call to `use_session`, an update by primary key that
   returns the row. ADR-0040 asks for a benchmark of it, which comes with the session middleware.
 
 ## The operator command
@@ -54,17 +54,17 @@ starts, finds, and ends their sessions. `postgres_store(pool)` returns it over P
 `tetsu operator` ([ADR-0040](../../docs/adr/0040-identity-and-sign-in.md),
 [ADR-0059](../../docs/adr/0059-session-controls-and-request-checks.md)) works through these use cases:
 
-- **An enrollment link** carries 256 random bits, stored only as their hash, good once and for an hour, by one
+- **An invite link** carries 256 random bits, stored only as their hash, good once and for an hour, by one
   reading of the clock. Each operator has one open link at most; a new one replaces the last. An operator who
-  holds a passkey is issued none, since another passkey is added only after signing in (`v5.0.0-6.4.1`). The
+  holds a passkey is issued none, since another passkey is added only after logging in (`v5.0.0-6.4.1`). The
   command prints
   it only to a terminal, a guard against it landing in a log by accident; the trust boundary is access to the
   database. The token sits in the link's fragment, which a browser never sends to a server, though its history
-  keeps it. The page a link opens, `/ops/enroll`, reads the token from the fragment and clears it from the address
+  keeps it. The page a link opens, `/ops/join`, reads the token from the fragment and clears it from the address
   bar at once.
 - **Names are unique.** A create retried after its output was lost is refused, naming the operator who holds the
   name, rather than making a second.
-- **Enrolling a first passkey** takes two requests (`v5.0.0-6.4.1`). Beginning reads the link, which must be open
+- **Joining with a first passkey** takes two requests (`v5.0.0-6.4.1`). Beginning reads the link, which must be open
   and name an enabled operator with no passkey, and keeps a ceremony under a token only the browser holds, for ten
   minutes but never past the link. Beginning takes the operator's row, so a disable at the same moment ends what
   it stores, and a new link waits for it and then ends it. A link holds one ceremony, by a unique index; a newer
@@ -72,52 +72,52 @@ starts, finds, and ends their sessions. `postgres_store(pool)` returns it over P
   nothing.
   Finishing takes the ceremony once, verifies the registration through `webauthn-rs` against the realm's origin,
   its scheme, host, and port alike, with user verification, and then, in one transaction holding the operator's
-  row, stores the passkey and uses up the link. It refuses an operator disabled, given a new link, or enrolled by
+  row, stores the passkey and uses up the link. It refuses an operator disabled, given a new link, or joined by
   another tab meanwhile; a credential another passkey has; and one larger than the table keeps, measured as the
-  table measures it. Each of those is recorded as `identity.enrollment_redeemed` with the outcome, the reason,
+  table measures it. Each of those is recorded as `identity.invite_redeemed` with the outcome, the reason,
   and the credential ID. Before that, it refuses a registration that is malformed, does not verify, or whose
   browser says the passkey is not discoverable, and records it the same way, with that reason. Transports are
   taken as listed, as `WebAuthn` asks, and the ones `webauthn-rs` names are kept, once each and sorted, as a hint
   for later ceremonies. Every refusal reads the same to the browser, whichever part of Identity
-  refuses it. Enrolling starts no session: the operator's session comes from
-  a passkey sign-in, which the enrollment page begins at once on the same page, so it rests on the passkey, never
+  refuses it. Joining starts no session: the operator's session comes from
+  a passkey login, which the join page begins at once on the same page, so it rests on the passkey, never
   on the link ([ADR-0067](../../docs/adr/0067-sign-in-after-a-first-passkey.md)). Passkeys are discoverable, so
-  signing in needs no name, and the account picker shows each as "Tetsu operator · Name", the label first, where
+  logging in needs no name, and the account picker shows each as "Tetsu operator · Name", the label first, where
   an authenticator's 64-byte cut never reaches it.
   The AAGUID, which names a passkey's provider but is unverified without attestation, is not kept: `webauthn-rs`
   does not expose it, and reading it needs a CBOR decoder, a new dependency.
-- **Signing in with a passkey** takes two requests. Beginning names no passkey, so the browser offers the person's
-  own, and asks for the prompt a button opens; it keeps a ceremony for ten minutes, like enrollment's. Anyone may
+- **Logging in with a passkey** takes two requests. Beginning names no passkey, so the browser offers the person's
+  own, and asks for the prompt a button opens; it keeps a ceremony for ten minutes, like joining's. Anyone may
   begin one, so until step 5's rate limits each begin sweeps up to a hundred ended ceremonies without waiting on
-  any, and past ten thousand open sign-ins ends the oldest rather than refusing a begin (`v5.0.0-6.3.1`). A flood of
+  any, and past ten thousand open logins ends the oldest rather than refusing a begin (`v5.0.0-6.3.1`). A flood of
   begins can still end a real ceremony before its person answers, until those rate limits. Finishing takes the
   ceremony once, finds the passkey the answer names, refuses a credential ID past `WebAuthn`'s 1023 bytes, refuses
   it unless its enabled operator's user handle is the one the answer gives (`WebAuthn` L3 §7.2), and verifies it
   through `webauthn-rs`, user verification included, which refuses a counter that does not move forward or a backup
   eligibility that changed. A synced passkey's counter stays at 0, so nothing can tell a copy of one from the
   original. Then, in one transaction holding the operator's row, it stores the passkey's new state only if no other
-  sign-in changed it meanwhile, and starts the session. Every answer to an open ceremony is recorded as
-  `identity.signed_in`, naming the operator where known; one that reaches storage carries the passkey's flags and,
+  login changed it meanwhile, and starts the session. Every answer to an open ceremony is recorded as
+  `identity.logged_in`, naming the operator where known; one that reaches storage carries the passkey's flags and,
   once one starts, the session's public ID. A refusal names its reason (`malformed`, `unknown_credential`,
   `handle_mismatch`, `counter_regressed`, `not_verified`, `disabled`, `raced`, or `unknown`), and every refusal
   reads the same to the browser. `webauthn-rs` checks user verification and backup eligibility before the signature,
   so anyone could claim either: they are recorded as `not_verified`. A token that finds no open ceremony, and a
-  storage or randomness failure, record nothing. The [sign-in
+  storage or randomness failure, record nothing. The [login
   review](../../docs/research/identity/passkey-sign-in-review.md) lists what later steps add.
-- **Adding a second passkey** (ADR-0057) needs a fresh sign-in: a session begun with a passkey within ten minutes,
+- **Adding a second passkey** (ADR-0057) needs a fresh login: a session begun with a passkey within ten minutes,
   by Postgres's clock (ADR-0048, `v5.0.0-7.5.1`), on a request that passed the origin and form-token checks, which
   only `session_for_change` makes. The device is told which passkey the operator holds, so it makes no second where
   it has one. Beginning stores an addition for ten minutes, one per operator, re-checking the session, that the
   operator is enabled, and that they hold fewer than two, under their row; it ends with the session that began it.
-  Finishing takes the addition for that session alone, once, and verifies the registration as enrollment does.
+  Finishing takes the addition for that session alone, once, and verifies the registration as joining does.
   Storing the passkey uses the addition up, under the operator's row, while the session is still live, refusing a
   third, a taken credential, or one too large, so the database itself ties the passkey to an addition a fresh
-  session began. It can finish up to twenty minutes after the sign-in: ten to begin, and the addition's ten. Storing
+  session began. It can finish up to twenty minutes after the login: ten to begin, and the addition's ten. Storing
   it ends the operator's other sessions and keeps this one (ADR-0059, `v5.0.0-7.4.3`). Each attempt that reaches
   storing the passkey is recorded as `identity.passkey_added`, with the sessions it ended, the adding session's
   public ID, and the passkey's flags; one refused before, such as a registration that does not verify, records
   nothing yet. Operators have no email yet, so the audit record is the notice ADR-0040 asks for.
-- **Removing an operator's passkeys** lets them be issued a link and enroll again, as when their only passkey is
+- **Removing an operator's passkeys** lets them be invited and join again, as when their only passkey is
   lost or unusable. It ends their sessions and any ceremony too, since a session begun with a removed passkey must
   not outlive it (`v5.0.0-7.4.3`), takes their row for update as a disable does, and records
   `identity.passkeys_removed` with the counts. The operator keeps their account and its audit record, where
@@ -125,10 +125,10 @@ starts, finds, and ends their sessions. `postgres_store(pool)` returns it over P
 - **What one database login allows.** Identity's role, which the web app shares with the operator command
   (ADR-0061), can do what an operator can, for any operator: the database cannot check a passkey's signature.
   Code that runs SQL as that role can replace an operator's passkeys outright, by removing them, issuing a link,
-  and enrolling one of its own; or, for one who holds a passkey, read its credential ID from the audit outbox,
-  start a session through the sign-in function, and add a passkey of its own. What the database refuses is
+  and joining with one of its own; or, for one who holds a passkey, read its credential ID from the audit outbox,
+  start a session through the login function, and add a passkey of its own. What the database refuses is
   narrower, and keeps stored data sound rather than keeping that role out: calling `start_session` directly, a
-  sign-in that changes a stored passkey beyond its counter and backup flags, and a passkey added outside an
+  login that changes a stored passkey beyond its counter and backup flags, and a passkey added outside an
   addition its session took. Database access is the trust boundary, as for every operator command.
 - **A device can keep a passkey Tetsu does not.** Every attempt registers under the operator's one user handle,
   and an authenticator replaces a discoverable passkey with a newer one for the same handle. If two tabs begin,
@@ -139,14 +139,14 @@ starts, finds, and ends their sessions. `postgres_store(pool)` returns it over P
   cleanly if the operating system's cannot be read; and serialising a passkey can panic inside the library on a
   malformed attestation certificate. A stored ceremony that reads but holds the wrong state fails as the browser's
   registration would, since only Identity writes it. Without attestation, a registration's flags and origin are
-  the client's word: the guarantees that bind a person to a passkey come at sign-in, where the authenticator signs.
+  the client's word: the guarantees that bind a person to a passkey come at login, where the authenticator signs.
 - **Read committed** is required, not assumed, by every function that waits on an operator's row and then checks
-  what changed: issuing a link, beginning and finishing an enrollment, signing in, beginning and storing an
+  what changed: issuing a link, beginning and finishing a join, logging in, beginning and storing an
   addition, enabling, disabling, removing passkeys, and ending sessions refuse any other level (TD002), and so does
-  beginning a sign-in, whose sweep would fail there when begins overlap. Such a refusal is a fault of the calling
+  beginning a login, whose sweep would fail there when begins overlap. Such a refusal is a fault of the calling
   code, so it surfaces as a storage error.
 - **Disabling an operator** ends every session and the open link they hold (`v5.0.0-7.4.2`), in separate statements
-  after the update, so they see a sign-in or link committed while the update waited on the operator's row. That
+  after the update, so they see a login or link committed while the update waited on the operator's row. That
   holds only under read committed, which every scoped transaction asks for, and which disabling and ending
   sessions refuse to run without. A disabled operator starts no session, uses none, and is issued no link.
   Enabling them again leaves their sessions ended.
@@ -154,7 +154,7 @@ starts, finds, and ends their sessions. `postgres_store(pool)` returns it over P
   would mean holding the operator's row through every request, ASVS level 3's "applied immediately" (8.3.2),
   beyond the level 2 Tetsu targets.
 - **Ending sessions,** one operator's or every operator's, is the administrator's control (`v5.0.0-7.4.5`). It
-  takes the operators' rows first, so a sign-in that holds one finishes and is ended too. A sign-in still waiting
+  takes the operators' rows first, so a login that holds one finishes and is ended too. A login still waiting
   for a row, or one that starts after, goes through, since ending sessions changes nothing about the operator.
   For an operator who must stay out, disable them. An operator added during `--all` is outside it.
 - **Counts** are of live sessions and links. Spent ones go too, but ending them changes nothing, so ending only
@@ -162,12 +162,12 @@ starts, finds, and ends their sessions. `postgres_store(pool)` returns it over P
 - **An operator who does not exist** is refused by every command, never treated as one with nothing to do.
 - **Each change records one audit event** in Identity's outbox, in the same transaction, with IDs and counts, never
   names or tokens, plus who ran it and its outcome, `changed`, `unchanged`, or `refused` (`v5.0.0-16.2.1`,
-  `v5.0.0-16.3.3`): `identity.operator_created`, `identity.enrollment_issued`, `identity.operator_disabled` (with
+  `v5.0.0-16.3.3`): `identity.operator_created`, `identity.invite_issued`, `identity.operator_disabled` (with
   the sessions and links it ended), `identity.operator_enabled`, `identity.sessions_ended`, and
-  `identity.passkeys_removed`; enrolling, signing in, and adding a passkey record `identity.enrollment_redeemed`,
-  `identity.signed_in`, and `identity.passkey_added`, as described above. Listing changes nothing and records
+  `identity.passkeys_removed`; joining, logging in, and adding a passkey record `identity.invite_redeemed`,
+  `identity.logged_in`, and `identity.passkey_added`, as described above. Listing changes nothing and records
   nothing. A command refused before it reaches the database, such as one printing a link to a pipe, records no
-  event. Signing out records nothing yet.
+  event. Logging out records nothing yet.
 - **Who ran a command** is `user@host`: the first of `SUDO_USER`, `USER`, and `LOGNAME` that is set, and the
   first real line of `/etc/hostname`, with `unknown` for a part that is missing, not UTF-8, or would not show
   safely. It is asserted, not proven: every command
@@ -179,15 +179,15 @@ starts, finds, and ends their sessions. `postgres_store(pool)` returns it over P
 
 ## The operator pages
 
-`adapters/http.rs` serves `/ops/sign-in`, `/ops/enroll`, and `/ops`, the signed-in operator's page, with the JSON
+`adapters/http.rs` serves `/ops/login`, `/ops/join`, and `/ops`, the logged-in operator's page, with the JSON
 endpoints the passkey islands in `web/src/passkey/` call: `<tetsu-passkey>` runs a page's one passkey action, and
 `<tetsu-passkeys>` wraps the operator's list of passkeys. Pages take Linear's look, as ADR-0035 gives Tetsu's own
 pages, in a layout of Tetsu's own, load only Tetsu's own script, under a policy of their own, and are never cached.
-Signing in is by passkey alone, as ADR-0040 sets for operators. Endpoints read only a JSON object sent as
+Logging in is by passkey alone, as ADR-0040 sets for operators. Endpoints read only a JSON object sent as
 `application/json`, answer `no-store`, and give each ceremony's one refusal; a failure of the server is `503` to
-the browser and reported to the operator. Signing in ends the session the browser presented, in the transaction
-that starts the new one. Signing out is a plain form that clears the cookie. The operator's page offers a second
-passkey only within ten minutes of signing in, as the database allows, and its `<tetsu-passkeys>` tells the
+the browser and reported to the operator. Logging in ends the session the browser presented, in the transaction
+that starts the new one. Logging out is a plain form that clears the cookie. The operator's page offers a second
+passkey only within ten minutes of logging in, as the database allows, and its `<tetsu-passkeys>` tells the
 operator's devices every passkey Tetsu holds, through the Signal API.
 
 ## Not yet

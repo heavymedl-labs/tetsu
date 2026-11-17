@@ -19,7 +19,7 @@ one as current intent. The [ADR index](docs/adr/README.md) says when to read eac
 
 ## Current phase
 
-The walking skeleton is in progress. The demo is deployed, and sign-in
+The walking skeleton is in progress. The demo is deployed, and login
 ([#20](https://github.com/heavymedl-labs/tetsu/issues/20)) is decided in ADR-0040 to ADR-0048 and built in the slices
 [ADR-0048](docs/adr/0048-sign-in-design.md) orders, starting with tenant isolation
 ([#106](https://github.com/heavymedl-labs/tetsu/issues/106)). The [README](README.md)

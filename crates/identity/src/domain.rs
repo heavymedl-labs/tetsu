@@ -13,7 +13,7 @@ const HEX: &[u8; 16] = b"0123456789abcdef";
 /// Sets a form token apart from every other value made from a session token.
 const FORM_TOKEN: &[u8] = b"tetsu form token\0";
 
-/// Which kind of person signs in. Each realm has its own host, passkeys, cookie, and session limits (ADR-0040,
+/// Which kind of person logs in. Each realm has its own host, passkeys, cookie, and session limits (ADR-0040,
 /// ADR-0048); operators come first, in slice 5.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Realm {
@@ -117,7 +117,7 @@ impl OperatorName {
 }
 
 /// What a session's cookie holds: 256 random bits, written as 64 lowercase hexadecimal digits. Only its hash is
-/// stored (ADR-0047), and it is never printed, so neither a log line nor a stored row can sign anyone in.
+/// stored (ADR-0047), and it is never printed, so neither a log line nor a stored row can log anyone in.
 #[derive(Clone)]
 pub struct SessionToken([u8; TOKEN_BYTES]);
 
@@ -277,8 +277,8 @@ macro_rules! secret_token {
 
 // The doc text is a literal, not attributes the macro repeats, which lizard reads as one long function.
 secret_token!(
-    EnrollmentToken,
-    "What an enrollment link carries, good once and for an hour. The operator command prints it only to the \
+    InviteToken,
+    "What an invite link carries, good once and for an hour. The operator command prints it only to the \
      terminal that ran it (ADR-0040)."
 );
 
@@ -296,9 +296,9 @@ pub struct Ceremony {
     pub options: String,
 }
 
-/// An operator whose open enrollment link a browser presented: enabled, and holding no passkey yet.
+/// An operator whose open invite link a browser presented: enabled, and holding no passkey yet.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Enrollee {
+pub struct Invitee {
     pub operator: OperatorId,
     /// The user handle `WebAuthn` names them by: random, so it says nothing about the operator (ADR-0040).
     pub user_handle: [u8; 16],
@@ -341,8 +341,8 @@ pub struct HeldPasskey {
     pub backup_state: bool,
 }
 
-/// A passkey found by the credential ID a sign-in names, with its operator, their user handle, the passkey as
-/// `webauthn-rs` keeps it, and whether the operator is disabled, so a refused sign-in names whose it was.
+/// A passkey found by the credential ID a login names, with its operator, their user handle, the passkey as
+/// `webauthn-rs` keeps it, and whether the operator is disabled, so a refused login names whose it was.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Signer {
     pub credential: Vec<u8>,
@@ -352,7 +352,7 @@ pub struct Signer {
     pub disabled: bool,
 }
 
-/// The session a sign-in starts, under its token's hash, and the one the browser presented, if any, which it ends.
+/// The session a login starts, under its token's hash, and the one the browser presented, if any, which it ends.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct SessionStart {
     pub hash: [u8; 32],
@@ -368,21 +368,21 @@ impl std::fmt::Debug for SessionStart {
     }
 }
 
-/// What signing in came to for a passkey that exists.
+/// What logging in came to for a passkey that exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SignIn {
+pub enum Login {
     SignedIn,
     /// The operator was disabled after the passkey was read.
     Disabled,
-    /// Another sign-in changed the passkey meanwhile, so this one's counter must not be stored.
+    /// Another login changed the passkey meanwhile, so this one's counter must not be stored.
     Raced,
 }
 
-impl SignIn {
+impl Login {
     /// The answer as Identity's database writes it, or none for one it never writes.
     pub(crate) fn parse(text: &str) -> Option<Self> {
         match text {
-            "signed_in" => Some(Self::SignedIn),
+            "logged_in" => Some(Self::SignedIn),
             "disabled" => Some(Self::Disabled),
             "raced" => Some(Self::Raced),
             _ => None,
@@ -456,7 +456,7 @@ impl Addition {
         match text {
             "added" => Some(Self::Added),
             "disabled" => Some(Self::Disabled),
-            "signed_out" => Some(Self::SignedOut),
+            "logged_out" => Some(Self::SignedOut),
             "ended" => Some(Self::Ended),
             "full" => Some(Self::Full),
             "oversized" => Some(Self::Oversized),
@@ -470,7 +470,7 @@ impl Addition {
         match self {
             Self::Added => None,
             Self::Disabled => Some("disabled"),
-            Self::SignedOut => Some("signed_out"),
+            Self::SignedOut => Some("logged_out"),
             Self::Ended => Some("ended"),
             Self::Full => Some("full"),
             Self::Oversized => Some("oversized"),
@@ -479,14 +479,14 @@ impl Addition {
     }
 }
 
-/// What redeeming an enrollment link came to for an operator who exists.
+/// What redeeming an invite link came to for an operator who exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Redemption {
     /// The passkey is stored and the link used up.
     Redeemed,
     Disabled,
     /// The operator holds a passkey already, as when two tabs finish the same link.
-    Enrolled,
+    Joined,
     /// The link ended, or was replaced, before the ceremony finished.
     Expired,
     /// Another operator's passkey has this credential ID.
@@ -501,7 +501,7 @@ impl Redemption {
         match text {
             "redeemed" => Some(Self::Redeemed),
             "disabled" => Some(Self::Disabled),
-            "enrolled" => Some(Self::Enrolled),
+            "joined" => Some(Self::Joined),
             "expired" => Some(Self::Expired),
             "taken" => Some(Self::Taken),
             "oversized" => Some(Self::Oversized),
@@ -514,7 +514,7 @@ impl Redemption {
         match self {
             Self::Redeemed => None,
             Self::Disabled => Some("disabled"),
-            Self::Enrolled => Some("enrolled"),
+            Self::Joined => Some("joined"),
             Self::Expired => Some("expired"),
             Self::Taken => Some("taken"),
             Self::Oversized => Some("oversized"),
@@ -576,8 +576,8 @@ impl std::fmt::Display for Device {
 /// The kind of ceremony a refusal ends, which names the event that records it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CeremonyKind {
-    Enrollment,
-    SignIn,
+    Join,
+    Login,
     Addition,
 }
 
@@ -592,7 +592,7 @@ pub struct Refusal<'a> {
 }
 
 /// Who ran an operator command, as the audit record names them, such as `kurt@workstation`. It is asserted by the
-/// command, not proven: every command signs in as one database login (ADR-0061), so database access is the trust
+/// command, not proven: every command logs in as one database login (ADR-0061), so database access is the trust
 /// boundary, and this says which person used it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Actor(String);
@@ -687,7 +687,7 @@ impl Actor {
         Self(format!("{}@{}", part(user), part(host)))
     }
 
-    /// Who acted from a browser, as the audit record names them: `operator-<id>@<device>` once signed in, or
+    /// Who acted from a browser, as the audit record names them: `operator-<id>@<device>` once logged in, or
     /// `browser@<device>` before, where a device the request did not name reads `unknown`, as for a command.
     #[must_use]
     pub fn browser(operator: Option<OperatorId>, device: Option<Device>) -> Self {
@@ -706,7 +706,7 @@ impl Actor {
 }
 
 /// What disabling an operator did: whether it acted, since an operator already disabled is left as is, and how
-/// many sessions and enrollment links it ended.
+/// many sessions and invite links it ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Disabling {
     pub done: bool,
@@ -731,18 +731,18 @@ pub struct OperatorSummary {
     pub disabled_at: Option<SystemTime>,
     /// How many passkeys they hold.
     pub passkeys: u64,
-    /// The whole minutes, rounded up, their open enrollment link has left, if one is open.
+    /// The whole minutes, rounded up, their open invite link has left, if one is open.
     pub link_minutes: Option<u64>,
 }
 
-/// What issuing an enrollment link came to for an operator who exists.
+/// What issuing an invite link came to for an operator who exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Issue {
     Issued,
     /// The operator is disabled, and is issued no link.
     Disabled,
-    /// The operator holds a passkey already, and adds another only after signing in (`v5.0.0-6.4.1`).
-    Enrolled,
+    /// The operator holds a passkey already, and adds another only after logging in (`v5.0.0-6.4.1`).
+    Joined,
 }
 
 impl Issue {
@@ -751,7 +751,7 @@ impl Issue {
         match text {
             "issued" => Some(Self::Issued),
             "disabled" => Some(Self::Disabled),
-            "enrolled" => Some(Self::Enrolled),
+            "joined" => Some(Self::Joined),
             _ => None,
         }
     }
@@ -773,7 +773,7 @@ fn no_randomness(error: getrandom::Error) -> Error {
     Error::Unavailable(format!("no secure random source: {error}"))
 }
 
-/// A signed-in operator's session, as stored. Printing it leaves out the hash of its token, which finds it.
+/// A logged-in operator's session, as stored. Printing it leaves out the hash of its token, which finds it.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Session {
     /// The hash of the token that found it, so a change made in its name can be checked against it again.
@@ -928,7 +928,7 @@ mod tests {
         );
     }
 
-    /// A browser's actor names the operator once signed in, or a browser before, at its device, and a device the
+    /// A browser's actor names the operator once logged in, or a browser before, at its device, and a device the
     /// request did not name reads `unknown`.
     #[test]
     fn a_browsers_actor_names_the_operator_and_device() {
@@ -1084,11 +1084,11 @@ mod tests {
         );
     }
 
-    /// An enrollment token never prints, so no log line or debug output can enroll anyone.
+    /// An invite token never prints, so no log line or debug output can join anyone.
     #[test]
-    fn an_enrollment_token_is_hidden_when_printed() {
-        let token = EnrollmentToken::generate(getrandom::fill).expect("a token");
-        assert_eq!(format!("{token:?}"), "EnrollmentToken(hidden)");
+    fn an_invite_token_is_hidden_when_printed() {
+        let token = InviteToken::generate(getrandom::fill).expect("a token");
+        assert_eq!(format!("{token:?}"), "InviteToken(hidden)");
         assert_eq!(token.to_text().len(), 64);
         assert_ne!(token.hash(), [0; 32]);
     }

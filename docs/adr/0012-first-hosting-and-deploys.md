@@ -26,7 +26,7 @@ customers could not. The evidence is in [Hosting research](../research/hosting.m
 - **Database: Neon's free plan,** on Postgres 18 in `aws-us-east-2`. The app uses the direct
   endpoint with TLS and no pooler, because a transaction pooler breaks the connection
   timeouts [ADR-0011](0011-server-stack-guardrails.md) requires.
-- **Files: none yet.** Neither the marketing site nor sign-in stores files. When something
+- **Files: none yet.** Neither the marketing site nor login stores files. When something
   does, Cloudflare R2 is the leading option, through the S3 API.
 - **Environments: one,** holding fictional tenants, including both reference businesses for
   walkthroughs. Staging comes with the move to paid.

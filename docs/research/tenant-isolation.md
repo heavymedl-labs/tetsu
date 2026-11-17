@@ -251,7 +251,7 @@ identities fit Nile's published shape: a global users table with no `tenant_id`,
 `(tenant_id, user_id)` ([Nile](https://thenile.dev/docs/auth/concepts/builtintables.md), vendor). The staff role
 table sits under tenant RLS. The app checks the role for the requested business before it sets `app.tenant_id`. A
 "my businesses" list crosses tenants on purpose, so it goes through a definer function keyed on an `app.account_id`
-setting that only trusted code sets after sign-in. Supabase uses the same device to stop policies that read each
+setting that only trusted code sets after login. Supabase uses the same device to stop policies that read each
 other from looping, error 42P17 ([Supabase RLS](https://supabase.com/docs/guides/database/postgres/row-level-security),
 vendor). Policies that read other tables can race under `READ COMMITTED`, so a removed role may still pass in a
 transaction already running ([PG 18 row security](https://www.postgresql.org/docs/18/ddl-rowsecurity.html)); short

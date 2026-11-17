@@ -12,7 +12,7 @@ checked against the ASVS chapters ([research](../research/security-checks.md#rev
 gaps:
 
 - **Level 2 requires multi-factor authentication** (`v5.0.0-6.3.3`), and ADR-0026 never said so. How
-  people sign in, and whether any relaxation is justified, is open decision
+  people log in, and whether any relaxation is justified, is open decision
   [#9](https://github.com/heavymedl-labs/tetsu/issues/9). A passkey that verifies the user may meet
   6.3.3 on its own, which #9 can weigh.
 - **Its rules could not be checked.** "Level 2" did not say it includes Level 1. Any fixed list of
@@ -47,7 +47,7 @@ holds their child's waiver, for example. Card data stays with the processor
 - **No real person's data enters any environment before the Level 2 review passes**
   ([#83](https://github.com/heavymedl-labs/tetsu/issues/83)):
   - **A real person's data** is personal data about anyone but the maintainer, in any form. That includes
-    an import or rehearsal, an owner's export, a sign-up or an invite, and notes from an owner interview
+    an import or rehearsal, an owner's export, a signup or an invite, and notes from an owner interview
     that name their customers.
   - **An environment** is anywhere Tetsu's work keeps data. That includes production, previews, Neon
     branches and backups, logs, CI, issues, and the maintainer's or an agent's machine.
@@ -88,10 +88,10 @@ holds their child's waiver, for example. Card data stays with the processor
 
 ## Consequences
 
-- Sign-in ([#20](https://github.com/heavymedl-labs/tetsu/issues/20)) waits on #9 choosing a multi-factor
+- Login ([#20](https://github.com/heavymedl-labs/tetsu/issues/20)) waits on #9 choosing a multi-factor
   method. Breached-password checks (`v5.0.0-6.2.12`) need a service or data set, which needs an ADR under
   [ADR-0010](0010-evaluating-technology.md).
-- Milestone 1's sign-in is used only by the maintainer until the review passes.
+- Milestone 1's login is used only by the maintainer until the review passes.
 - Each Tier 1 issue lists its ASVS chapters and requirements, and `docs/review.md` gains an ASVS step when
   this is accepted.
 - The review cannot pass until #22 and #27 are decided.

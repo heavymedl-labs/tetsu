@@ -1,10 +1,10 @@
 //! Use cases, reached only through [`Operators`] (ADR-0021).
 
-use crate::browser::{Change, CheckedSession, ForChange, Origins, SignOut};
+use crate::browser::{Change, CheckedSession, ForChange, Logout, Origins};
 use crate::domain::{
-    Account, Actor, Addition, Answer, Ceremony, CeremonyKind, CeremonyToken, Disabling,
-    EnrollmentToken, Error, Fill, Issue, NewPasskey, OperatorId, OperatorName, OperatorSummary,
-    Realm, Redemption, Refusal, Removal, Session, SessionStart, SessionToken, SignIn, Signer,
+    Account, Actor, Addition, Answer, Ceremony, CeremonyKind, CeremonyToken, Disabling, Error,
+    Fill, InviteToken, Issue, Login, NewPasskey, OperatorId, OperatorName, OperatorSummary, Realm,
+    Redemption, Refusal, Removal, Session, SessionStart, SessionToken, Signer,
 };
 use crate::passkeys::RelyingParty;
 use crate::ports::OperatorStore;
@@ -31,7 +31,7 @@ impl<S: OperatorStore> Operators<S> {
         Self { store, fill }
     }
 
-    /// Creates an operator with no passkey, for ADR-0040's enrollment command, and records it for the audit record.
+    /// Creates an operator with no passkey, for ADR-0040's join command, and records it for the audit record.
     ///
     /// # Errors
     /// Fails if storage fails.
@@ -39,34 +39,30 @@ impl<S: OperatorStore> Operators<S> {
         self.store.insert_operator(name, actor).await
     }
 
-    /// Issues an operator's enrollment link token, good once and for an hour, replacing any earlier link, and
+    /// Issues an operator's invite link token, good once and for an hour, replacing any earlier link, and
     /// records whether one was issued, never the token (ADR-0040). The command prints it only to its own terminal.
     ///
     /// # Errors
     /// Fails with [`Error::Invalid`] for an operator who is disabled, holds a passkey already, or does not exist,
     /// each named as such, if no secure random source can be read, or if storage fails.
-    pub async fn enroll(
-        &self,
-        operator: OperatorId,
-        actor: &Actor,
-    ) -> Result<EnrollmentToken, Error> {
-        let token = EnrollmentToken::generate(self.fill)?;
+    pub async fn invite(&self, operator: OperatorId, actor: &Actor) -> Result<InviteToken, Error> {
+        let token = InviteToken::generate(self.fill)?;
         match self
             .store
-            .issue_enrollment(&token.hash(), operator, actor)
+            .issue_invite(&token.hash(), operator, actor)
             .await?
         {
             Some(Issue::Issued) => Ok(token),
             Some(Issue::Disabled) => Err(no_enabled(operator)),
-            Some(Issue::Enrolled) => Err(Error::Invalid(format!(
-                "operator {} has a passkey already, and adds another after signing in",
+            Some(Issue::Joined) => Err(Error::Invalid(format!(
+                "operator {} has a passkey already, and adds another after logging in",
                 operator.get()
             ))),
             None => Err(no_operator(operator)),
         }
     }
 
-    /// Begins enrolling an operator's first passkey from the token their enrollment link carries. The link stays
+    /// Begins joining an operator's first passkey from the token their invite link carries. The link stays
     /// open: only finishing uses it up, so a scanner that opens the page, or a ceremony the operator abandons, costs
     /// nothing. The ceremony lasts ten minutes, never past the link, replaces any earlier one of the same link, and its
     /// state never leaves the store.
@@ -75,76 +71,71 @@ impl<S: OperatorStore> Operators<S> {
     /// Fails with [`Error::Invalid`], the same for every cause, for a link that is malformed, unknown, ended, or
     /// names an operator who is disabled or holds a passkey; if no secure random source can be read; or if storage
     /// fails.
-    pub async fn begin_enrollment(
-        &self,
-        party: &RelyingParty,
-        link: &str,
-    ) -> Result<Ceremony, Error> {
-        let link = EnrollmentToken::parse(link).ok_or_else(not_enrolling)?;
-        let enrollee = self
+    pub async fn begin_join(&self, party: &RelyingParty, link: &str) -> Result<Ceremony, Error> {
+        let link = InviteToken::parse(link).ok_or_else(not_joining)?;
+        let invitee = self
             .store
-            .enrollee(&link.hash())
+            .invitee(&link.hash())
             .await
-            .map_err(|error| refusing(error, not_enrolling))?
-            .ok_or_else(not_enrolling)?;
-        let (options, state) =
-            party.begin_registration(enrollee.user_handle, &enrollee.name, &[])?;
+            .map_err(|error| refusing(error, not_joining))?
+            .ok_or_else(not_joining)?;
+        let (options, state) = party.begin_registration(invitee.user_handle, &invitee.name, &[])?;
         let token = CeremonyToken::generate(self.fill)?;
         let begun = self
             .store
-            .begin_enrollment(&token.hash(), enrollee.operator, &link.hash(), &state)
+            .begin_join(&token.hash(), invitee.operator, &link.hash(), &state)
             .await
-            .map_err(|error| refusing(error, not_enrolling))?;
+            .map_err(|error| refusing(error, not_joining))?;
         if begun {
             Ok(Ceremony { token, options })
         } else {
-            Err(not_enrolling())
+            Err(not_joining())
         }
     }
 
-    /// Finishes enrolling: verifies the browser's registration against its ceremony, then stores the passkey and
+    /// Finishes joining: verifies the browser's registration against its ceremony, then stores the passkey and
     /// uses up the link in one transaction, and records it. The ceremony is used up whatever happens. The operator
-    /// is not signed in: they sign in with the new passkey, which proves it works.
+    /// is not logged in: they log in with the new passkey, which proves it works.
     ///
     /// # Errors
     /// Fails with [`Error::Invalid`], the same for every cause, for a ceremony that is malformed, unknown, or ended,
     /// a registration that does not verify, or a link or operator that no longer allows it; or if storage fails.
-    pub async fn finish_enrollment(
+    pub async fn finish_join(
         &self,
         party: &RelyingParty,
         ceremony: &str,
         response: &str,
         actor: &Actor,
     ) -> Result<OperatorId, Error> {
-        let held = CeremonyToken::parse(ceremony).ok_or_else(not_enrolling)?;
+        let held = CeremonyToken::parse(ceremony).ok_or_else(not_joining)?;
         let taken = self
             .store
-            .take_enrollment(&held.hash())
+            .take_join(&held.hash())
             .await
-            .map_err(|error| refusing(error, not_enrolling))?
-            .ok_or_else(not_enrolling)?;
+            .map_err(|error| refusing(error, not_joining))?
+            .ok_or_else(not_joining)?;
         let pending = Pending {
-            kind: CeremonyKind::Enrollment,
+            kind: CeremonyKind::Join,
             operator: taken.operator,
             state: &taken.state,
         };
         let passkey = self
             .registered(party, response, &pending, actor)
             .await
-            .map_err(|error| refusing(error, not_enrolling))?;
+            .map_err(|error| refusing(error, not_joining))?;
         match self
             .store
-            .redeem_enrollment(&taken, &passkey, actor)
+            .redeem_invite(&taken, &passkey, actor)
             .await
-            .map_err(|error| refusing(error, not_enrolling))?
+            .map_err(|error| refusing(error, not_joining))?
         {
             Some(Redemption::Redeemed) => Ok(taken.operator),
-            _ => Err(not_enrolling()),
+            _ => Err(not_joining()),
         }
     }
 
-    /// Disables an operator, and then ends every session and enrollment link they hold, so a disabled operator is
-    /// signed out at once and signs in again nowhere (`v5.0.0-7.4.2`). Says what it did; an operator already
+    /// Disables an operator, and then ends every session and invite link they hold, so a disabled operator is
+    /// logged out at once and logs in again nowhere (`v5.0.0-7.4.2`). Says what it did; an operator already
     /// disabled is left as is.
     ///
     /// # Errors
@@ -156,44 +147,44 @@ impl<S: OperatorStore> Operators<S> {
             .ok_or_else(|| no_operator(operator))
     }
 
-    /// Begins a passkey sign-in: a ceremony token for the browser to keep, and options that let it offer any of the
+    /// Begins a passkey login: a ceremony token for the browser to keep, and options that let it offer any of the
     /// person's passkeys. The ceremony lasts ten minutes, and its state never leaves the store.
     ///
     /// # Errors
-    /// Never refuses for the number of sign-ins open: past a bound, the oldest end, so a flood of begins can end a
+    /// Never refuses for the number of logins open: past a bound, the oldest end, so a flood of begins can end a
     /// real one before its person answers until step 5's rate limits. Fails with [`Error::Unavailable`] if no
     /// secure random source can be read, and with [`Error::Storage`] if storage fails.
-    pub async fn begin_sign_in(&self, party: &RelyingParty) -> Result<Ceremony, Error> {
-        // Starting a discoverable sign-in cannot fail in webauthn-rs; were it to, it would be a storage failure.
+    pub async fn begin_login(&self, party: &RelyingParty) -> Result<Ceremony, Error> {
+        // Starting a discoverable login cannot fail in webauthn-rs; were it to, it would be a storage failure.
         let (token, (options, state)) = CeremonyToken::generate(self.fill)
             .and_then(|token| party.begin_authentication().map(|begun| (token, begun)))?;
-        self.store.begin_sign_in(&token.hash(), &state).await?;
+        self.store.begin_login(&token.hash(), &state).await?;
         Ok(Ceremony { token, options })
     }
 
-    /// Finishes a passkey sign-in and starts the operator's session, returning its token, and ends the operator
+    /// Finishes a passkey login and starts the operator's session, returning its token, and ends the operator
     /// session the browser presented among its `cookies`, whoever's it was, in the same transaction (ADR-0059,
     /// `v5.0.0-7.2.4`). The ceremony is used up whatever happens. The passkey must belong to an enabled operator whose user handle the answer names
     /// (`WebAuthn` L3 §7.2), and must verify, user verification included; its new counter is stored only if no other
-    /// sign-in changed it meanwhile, in the transaction that starts the session, which is recorded.
+    /// login changed it meanwhile, in the transaction that starts the session, which is recorded.
     ///
     /// # Errors
     /// Fails with [`Error::Invalid`], the same for every cause, for a ceremony that is malformed, unknown, or ended,
-    /// an answer that names no enabled operator's passkey or does not verify, or a sign-in that lost a race; with
+    /// an answer that names no enabled operator's passkey or does not verify, or a login that lost a race; with
     /// [`Error::Unavailable`] if no secure random source can be read; or if storage fails.
-    pub async fn finish_sign_in(
+    pub async fn finish_login(
         &self,
         party: &RelyingParty,
         answer: Answer<'_>,
         cookies: &[&str],
         actor: &Actor,
     ) -> Result<SessionToken, Error> {
-        let held = CeremonyToken::parse(answer.ceremony).ok_or_else(not_signing_in)?;
+        let held = CeremonyToken::parse(answer.ceremony).ok_or_else(not_logging_in)?;
         let state = self
             .store
-            .take_sign_in(&held.hash())
+            .take_login(&held.hash())
             .await?
-            .ok_or_else(not_signing_in)?;
+            .ok_or_else(not_logging_in)?;
         let (signer, passkey) = self.verified(party, answer.response, &state, actor).await?;
         let token = SessionToken::generate(self.fill)?;
         let session = SessionStart {
@@ -203,17 +194,14 @@ impl<S: OperatorStore> Operators<S> {
                 .and_then(SessionToken::parse)
                 .map(|presented| presented.hash()),
         };
-        let outcome = self
-            .store
-            .sign_in(&signer, &passkey, &session, actor)
-            .await?;
+        let outcome = self.store.login(&signer, &passkey, &session, actor).await?;
         outcome
-            .filter(|answer| *answer == SignIn::SignedIn)
+            .filter(|answer| *answer == Login::SignedIn)
             .map(|_| token)
-            .ok_or_else(not_signing_in)
+            .ok_or_else(not_logging_in)
     }
 
-    /// The passkey a sign-in's answer names and verifies, with its state as it should now be stored. Each way it
+    /// The passkey a login's answer names and verifies, with its state as it should now be stored. Each way it
     /// can be refused once its ceremony is taken is recorded with its reason, and with the operator and credential
     /// where known, before the one answer is given: an answer that is not one, a credential no enabled operator
     /// holds, a user handle that is not the credential's operator's (`WebAuthn` L3 §7.2), or what `webauthn-rs`
@@ -244,13 +232,13 @@ impl<S: OperatorStore> Operators<S> {
             },
         };
         let refusal = Refusal {
-            kind: CeremonyKind::SignIn,
+            kind: CeremonyKind::Login,
             operator,
             credential: credential.as_deref(),
             reason: &reason,
         };
         self.store.refuse(&refusal, actor).await?;
-        Err(not_signing_in())
+        Err(not_logging_in())
     }
 
     /// The passkey a registration answers with, verified against its ceremony's state. A refusal is recorded with
@@ -286,7 +274,7 @@ impl<S: OperatorStore> Operators<S> {
         self.store.account(&session.hash).await
     }
 
-    /// Begins adding an operator's second passkey (ADR-0057), from a session that began with a passkey sign-in
+    /// Begins adding an operator's second passkey (ADR-0057), from a session that began with a passkey login
     /// within ten minutes, by Postgres's clock (ADR-0048, `v5.0.0-7.5.1`). The options list the passkeys they hold,
     /// so a device that has one makes no second, and the ceremony lasts ten minutes. With no email for operators
     /// yet, the audit record is the notice ADR-0040 asks for.
@@ -357,7 +345,7 @@ impl<S: OperatorStore> Operators<S> {
             .ok_or_else(not_adding)
     }
 
-    /// Removes every passkey an operator holds, so they can be issued a link and enroll again, as when their only
+    /// Removes every passkey an operator holds, so they can be issued a link and join again, as when their only
     /// passkey is lost or unusable (ADR-0057). Their sessions and any ceremony end too, since a session begun with a
     /// removed passkey must not outlive it (`v5.0.0-7.4.3`). Says how many passkeys it removed and sessions it
     /// ended.
@@ -376,7 +364,7 @@ impl<S: OperatorStore> Operators<S> {
     }
 
     /// Enables a disabled operator again, and says whether they were disabled. Their sessions stay ended, so they
-    /// sign in afresh.
+    /// log in afresh.
     ///
     /// # Errors
     /// Fails with [`Error::Invalid`] for an operator who does not exist, or if storage fails.
@@ -437,7 +425,7 @@ impl<S: OperatorStore> Operators<S> {
 
     /// What a state-changing request may do: act for its live operator session only when it comes from one of the
     /// realm's origins and carries that session's own form token, so no other site's form or script can act for a
-    /// signed-in operator (ADR-0048, `v5.0.0-3.5.1`). A refused request leaves the session as it was.
+    /// logged-in operator (ADR-0048, `v5.0.0-3.5.1`). A refused request leaves the session as it was.
     ///
     /// # Errors
     /// Fails if storage fails.
@@ -455,7 +443,7 @@ impl<S: OperatorStore> Operators<S> {
         })
     }
 
-    /// Signs out: ends the session on the server, so its token signs no one in again (`v5.0.0-7.4.1`). Signing out
+    /// Logs out: ends the session on the server, so its token logs no one in again (`v5.0.0-7.4.1`). Logging out
     /// changes state, so it passes the same checks as [`Self::session_for_change`], and a refused request ends
     /// nothing. A session that had already ended is removed too, and reported as nothing to end.
     ///
@@ -465,18 +453,18 @@ impl<S: OperatorStore> Operators<S> {
         &self,
         origins: &Origins,
         change: &Change<'_>,
-    ) -> Result<SignOut, Error> {
+    ) -> Result<Logout, Error> {
         let Some(token) = change.verified(Realm::Operator, origins) else {
-            return Ok(SignOut::Refused);
+            return Ok(Logout::Refused);
         };
         let ended = self
             .store
             .delete_session(&token.hash(), Realm::Operator)
             .await?;
         Ok(if ended {
-            SignOut::Ended
+            Logout::Ended
         } else {
-            SignOut::NothingToEnd
+            Logout::NothingToEnd
         })
     }
 
@@ -485,16 +473,16 @@ impl<S: OperatorStore> Operators<S> {
     }
 }
 
-/// One answer for every way an enrollment can fail, so a browser learns nothing about which links or operators
+/// One answer for every way a join can fail, so a browser learns nothing about which links or operators
 /// exist.
-fn not_enrolling() -> Error {
-    Error::Invalid("this enrollment link has ended or is not valid".to_string())
+fn not_joining() -> Error {
+    Error::Invalid("this invite link has ended or is not valid".to_string())
 }
 
-/// One answer for every way a sign-in can fail, so a browser learns nothing about which passkeys or operators
+/// One answer for every way a login can fail, so a browser learns nothing about which passkeys or operators
 /// exist (`v5.0.0-6.3.8`).
-fn not_signing_in() -> Error {
-    Error::Invalid("this sign-in could not be completed".to_string())
+fn not_logging_in() -> Error {
+    Error::Invalid("this login could not be completed".to_string())
 }
 
 /// A registration whose ceremony was taken: what kind it is, whose, and the state it began with.
@@ -509,7 +497,7 @@ fn not_adding() -> Error {
     Error::Invalid("this passkey could not be added".to_string())
 }
 
-/// Why a sign-in was refused before its passkey was verified: no operator holds the credential, theirs is
+/// Why a login was refused before its passkey was verified: no operator holds the credential, theirs is
 /// disabled, or the answer gives another user handle.
 fn refused_before_verifying(found: Option<&Signer>) -> (Option<OperatorId>, &'static str) {
     match found {

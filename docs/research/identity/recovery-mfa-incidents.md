@@ -43,7 +43,7 @@ Adjacent L2 requirements that shape recovery and MFA:
 ### Inferences
 
 - 6.3.3's "combination of single-factor authentication mechanisms" wording leaves room for passkey-only accounts (a passkey is itself multi-factor: device possession plus user verification) and for password + email-link combinations at L2; 6.3.6's ban on email as an authentication factor is only L3. An L2 design can therefore use email for reset and as a second single-factor mechanism, but this is a weaker posture and would not survive an L3 upgrade.
-- 6.4.3 + 6.4.4 together mean: an emailed reset link may restore the *password* but must still demand the enrolled second factor; losing the second factor needs a separate path whose evidence matches enrollment. For a booking SaaS that does no identity proofing at sign-up, "same level as enrollment" plausibly means "what was proven at enrollment": control of the verified email plus something else bound at enrollment (a recovery code, a second passkey, or for staff, a tenant owner's attestation). This is interpretation; ASVS does not define it for unproofed accounts.
+- 6.4.3 + 6.4.4 together mean: an emailed reset link may restore the *password* but must still demand the enrolled second factor; losing the second factor needs a separate path whose evidence matches enrollment. For a booking SaaS that does no identity proofing at signup, "same level as enrollment" plausibly means "what was proven at enrollment": control of the verified email plus something else bound at enrollment (a recovery code, a second passkey, or for staff, a tenant owner's attestation). This is interpretation; ASVS does not define it for unproofed accounts.
 - 6.3.4 is the guardrail against support-desk bypasses: a human-assisted recovery path is an "authentication pathway" and must be documented and enforce equivalent strength.
 - L3 items (6.3.7 notifications, 6.3.8 enumeration, 6.4.6 admin-initiated reset) are cheap and are exactly what the incidents below punish; worth adopting even at L2.
 
@@ -84,7 +84,7 @@ OWASP Forgot Password Cheat Sheet — [OWASP](https://cheatsheetseries.owasp.org
 Delayed / social recovery at consumer scale:
 
 - Google Recovery Contacts (Oct 2025): up to 10 contacts; a person can be contact for up to 25 accounts; invite valid 7 days; intended for forgotten password, lost passkey device, or compromised account; not for child accounts — [Google blog](https://blog.google/innovation-and-ai/technology/safety-security/recovery-contacts-verify-google-account/); [9to5Google](https://9to5google.com/2025/10/15/google-account-recovery-contacts/).
-- Apple Account Recovery: up to five recovery contacts; the waiting period is unpublished ("several days or longer"); a recovery request is cancelled automatically if the account is in use on a signed-in device; enabling a Recovery Key disables standard recovery and can cause permanent lockout — [The Register](https://www.theregister.com/2025/10/16/google_gmail_trusted_contacts/) and [Techlicious](https://www.techlicious.com/blog/google-recovery-contact-can-save-your-account/) (secondary; verify on Apple support pages).
+- Apple Account Recovery: up to five recovery contacts; the waiting period is unpublished ("several days or longer"); a recovery request is cancelled automatically if the account is in use on a logged-in device; enabling a Recovery Key disables standard recovery and can cause permanent lockout — [The Register](https://www.theregister.com/2025/10/16/google_gmail_trusted_contacts/) and [Techlicious](https://www.techlicious.com/blog/google-recovery-contact-can-save-your-account/) (secondary; verify on Apple support pages).
 
 Recovery at a developer platform scale (GitHub):
 
@@ -98,7 +98,7 @@ Support-assisted recovery risk (details in the incidents section):
 **Inferences:**
 
 - For staff (tenant members), the natural "recovery contact" is the tenant owner: an owner can *initiate* a staff MFA reset (ASVS 6.4.6 pattern: admin starts the process but never chooses the secret), with the staff member then enrolling a new factor via a fresh, short-lived link to their verified email, plus notification to all addresses. The owner should never see or set the credential. Owner-of-last-resort recovery remains the hard case and needs a separate, slow, notified process.
-- For consumers who lose their only device: the safest low-friction path is (1) encourage synced passkeys (platform sync means "losing the device" rarely loses the credential), (2) offer saved recovery codes at enrollment, and (3) for those with neither, a delayed recovery: email-issued code + waiting period (e.g. days) + notification to all addresses + automatic cancellation if the account signs in normally (Apple's model). This approximates NIST AAL2's "two codes via different methods" only if a second channel exists; with email only, it is single-channel and should be documented as a compensating control under 6.3.3's "documented rationale" clause.
+- For consumers who lose their only device: the safest low-friction path is (1) encourage synced passkeys (platform sync means "losing the device" rarely loses the credential), (2) offer saved recovery codes at enrollment, and (3) for those with neither, a delayed recovery: email-issued code + waiting period (e.g. days) + notification to all addresses + automatic cancellation if the account logs in normally (Apple's model). This approximates NIST AAL2's "two codes via different methods" only if a second channel exists; with email only, it is single-channel and should be documented as a compensating control under 6.3.3's "documented rationale" clause.
 - Booking consumers have low-value accounts compared with staff; risk-tiering (staff: strict, owner-mediated; consumers: delayed self-service) is defensible, but ASVS 6.3.3 still requires MFA-equivalent access for both at L2.
 - Support staff should have no tool that removes or rebinds a factor without the account holder's own action; Coinbase shows insiders and outsourced agents are a threat, and Okta and Mailchimp (below) show support tools are high-value targets.
 
@@ -108,7 +108,7 @@ Support-assisted recovery risk (details in the incidents section):
 - No published data found on recovery-code retention rates (how many users still have codes when needed). GitHub's 28-day checkup (below) is the closest proxy.
 - Did not verify whether Google publishes its own account-recovery waiting period for passkey-only accounts.
 
-## MFA enrollment UX (enforce at sign-up vs grace periods, passkey nudges, GitHub and Google rollout data)
+## MFA enrollment UX (enforce at signup vs grace periods, passkey nudges, GitHub and Google rollout data)
 
 **Takeaway:**
 
@@ -126,16 +126,16 @@ The best published data (GitHub) shows a staged mandatory rollout with good UX h
 
 **Inferences:**
 
-- For a new product (no legacy users), enforcing MFA at sign-up avoids a later migration; GitHub's numbers suggest the cost is acceptable if enrollment is well designed and support tooling for recovery exists first.
+- For a new product (no legacy users), enforcing MFA at signup avoids a later migration; GitHub's numbers suggest the cost is acceptable if enrollment is well designed and support tooling for recovery exists first.
 - Prompting a second factor (a second passkey or recovery codes) immediately and again at a checkup (GitHub: 28 days) directly reduces future recovery load.
-- A passkey-first sign-up (passkey satisfies 6.3.3 on its own) sidesteps the "password + separate second factor" enrollment friction for consumers; nudging passkeys after password sign-in is the migration path for anyone who started with a password.
+- A passkey-first signup (passkey satisfies 6.3.3 on its own) sidesteps the "password + separate second factor" enrollment friction for consumers; nudging passkeys after password login is the migration path for anyone who started with a password.
 
 **Gaps:**
 
-- No public data found on conversion or drop-off effects of mandatory MFA at consumer sign-up for booking/e-commerce. GitHub's audience is developers, which may not generalize to consumers booking appointments.
+- No public data found on conversion or drop-off effects of mandatory MFA at consumer signup for booking/e-commerce. GitHub's audience is developers, which may not generalize to consumers booking appointments.
 - GitHub's grace-period length (reported elsewhere as 45 days) was not confirmed from the primary post; treat as unverified.
 
-## Credential stuffing defenses (rate limiting, bot detection without JavaScript, breached-password checks, sign-in notifications, session revocation, passwordless)
+## Credential stuffing defenses (rate limiting, bot detection without JavaScript, breached-password checks, login notifications, session revocation, passwordless)
 
 **Takeaway:**
 
@@ -191,7 +191,7 @@ Nearly every incident maps to one of: no MFA on some account (Snowflake, Microso
 - **Okta support system (Oct 2023)**: attacker used a service account stored in the support case system, whose credentials an employee had saved to a personal Google profile on a managed laptop; accessed files for 134 customers (Sep 28–Oct 17), some HAR files containing session tokens, used to hijack five customer sessions — [Okta root cause](https://sec.okta.com/articles/2023/11/unauthorized-access-oktas-support-case-management-system-root-cause/); [BleepingComputer](https://www.bleepingcomputer.com/news/security/okta-breach-134-customers-exposed-in-october-support-system-hack/). Lessons: support tooling is in scope for authentication rigor (service accounts with MFA or no passwords); never ask customers for artifacts containing live session tokens; bind sessions so replayed tokens fail.
 - **MGM Resorts / Caesars (Sep 2023)**: a ~10-minute vishing call to the help desk, impersonating an employee, reportedly led to a password/MFA reset on a highly privileged (Okta super admin) account; MGM's disruption cost ~$100M; Caesars reportedly paid ~$15M — [Kolide](https://www.kolide.com/blog/what-everyone-got-wrong-about-the-mgm-hack); [Built In](https://builtin.com/articles/lessons-from-mgm-caesars-cyberattacks). Exact request made to the help desk is not public. Lesson: human-assisted MFA reset is the weakest link; resets for privileged accounts need out-of-band verification through an already-bound channel or a second approver.
 - **Scattered Spider generally (CISA AA23-320A, updated July 2025)**: SIM swaps, help-desk impersonation over multiple calls, MFA transfer to attacker devices — [TechTarget](https://www.techtarget.com/cybersecurity/news/366559974/CISA-FBI-issue-alert-for-ongoing-Scattered-Spider-activity); [SC World](https://www.scworld.com/news/scattered-spiders-latest-ttps-added-to-updated-cisa-joint-advisory). Lesson: don't let a phone number or a support call substitute for a bound factor.
-- **Twilio / Authy (Jul 2024)**: an unauthenticated API endpoint let attackers check lists of phone numbers and get Authy account data; ~33.4M rows leaked (account ID, phone number, status, device count); Twilio then required auth on the endpoint — [Malwarebytes](https://www.malwarebytes.com/blog/news/2024/07/authy-phone-numbers-accessed-by-cybercriminals-warns-twilio); [heise](https://heise.de/en/news/MFA-app-Authy-Countless-phone-numbers-tapped-via-unsecured-API-9789971.html). Lesson: enumeration endpoints (sign-up, "is this number/email registered?", reset) leak identity data at scale; apply ASVS 6.3.8 and rate limits even at L2.
+- **Twilio / Authy (Jul 2024)**: an unauthenticated API endpoint let attackers check lists of phone numbers and get Authy account data; ~33.4M rows leaked (account ID, phone number, status, device count); Twilio then required auth on the endpoint — [Malwarebytes](https://www.malwarebytes.com/blog/news/2024/07/authy-phone-numbers-accessed-by-cybercriminals-warns-twilio); [heise](https://heise.de/en/news/MFA-app-Authy-Countless-phone-numbers-tapped-via-unsecured-API-9789971.html). Lesson: enumeration endpoints (signup, "is this number/email registered?", reset) leak identity data at scale; apply ASVS 6.3.8 and rate limits even at L2.
 - **Mailchimp (Jan 2023)**: phished employee/contractor credentials gave access to an internal support and account-administration tool; 133 customer accounts accessed; detected 2023-01-11; affected accounts suspended and contacts notified within 24 hours. Also prior incidents in Apr 2022 (~300–319 accounts) and Aug 2022 (~214–216, 0ktapus) — [The Record](https://therecord.media/more-than-100-mailchimp-accounts-accessed-via-social-engineering-cyberattack/); [The Hacker News](https://thehackernews.com/2023/01/mailchimp-suffers-another-security.html). Lesson: admin/support consoles that can act on any tenant must use phishing-resistant MFA and least privilege; they are a cross-tenant breach path.
 - **Uber (Sep 2022)**: contractor password likely from infostealer malware; attacker spammed MFA push prompts and messaged on WhatsApp posing as Uber IT, saying accepting would stop them; once in, found PowerShell scripts with admin credentials — [InfoQ](https://www.infoq.com/news/2022/09/Uber-breach-mfa-fatigue); [KPMG](https://assets.kpmg.com/content/dam/kpmg/in/pdf/2022/09/27-september-2022-lessons-to-learn-from-the-uber-security-breach.pdf). Lesson: push MFA without number matching or rate limits is fatigable (ASVS 6.6.4); phishing-resistant passkeys avoid it.
 - **Microsoft / Midnight Blizzard (Nov 2023–Jan 2024)**: low-volume password spray compromised a legacy non-production test tenant account without MFA, then a legacy test OAuth app with elevated access to corporate tenant, reaching senior leadership email — [BleepingComputer](https://www.bleepingcomputer.com/news/security/microsoft-reveals-how-hackers-breached-its-exchange-online-accounts/amp/); [The Register](https://www.theregister.com/2024/01/27/microsoft_cozy_bear_mfa). Lesson: MFA must cover every account, including test, demo, seed, and service accounts (ASVS 6.3.2, 6.3.4); demo tenants must not hold privileges in production.
@@ -200,7 +200,7 @@ Nearly every incident maps to one of: no MFA on some account (Snowflake, Microso
 **Inferences:**
 
 - For a multi-tenant booking SaaS, the highest-risk accounts are platform operator/support accounts (Mailchimp, Okta) and tenant owners (MGM pattern); consumer accounts are the stuffing target (23andMe, Roku).
-- The demo deployment should hold no accounts with real privileges and must also require MFA if it has sign-in (Microsoft lesson).
+- The demo deployment should hold no accounts with real privileges and must also require MFA if it has login (Microsoft lesson).
 
 **Gaps:**
 

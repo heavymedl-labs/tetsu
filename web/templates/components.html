@@ -21,7 +21,7 @@
 {% endmacro %}
 
 {#- A button's look, for a link or a button element: solid, or outlined when `secondary`; tighter when `small`, or
-    a full-width row 44px tall when `full`, as a column of sign-in choices stacks them. It sets no margin or display
+    a full-width row 44px tall when `full`, as a column of login choices stacks them. It sets no margin or display
     beyond what `full` needs, so the caller places it. -#}
 {% macro button_style(secondary = false, small = false, full = false) -%}
 rounded-full font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent {% if secondary %}border border-line text-ink transition-colors hover:bg-surface{% else %}bg-ink text-canvas transition-opacity hover:opacity-85{% endif %} {% if full %}flex h-11 w-full items-center justify-center text-[13px]{% else if small %}px-3.5 py-1.5 whitespace-nowrap{% else %}px-5 py-2.5 text-sm{% endif %}
