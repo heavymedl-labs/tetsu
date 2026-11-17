@@ -117,7 +117,7 @@ describe("a session island's countdown", () => {
     // without pause.
     expect([page.location.assign.mock.calls.length, asked.mock.calls.length]).toEqual([0, 1]);
     await elapse(1);
-    expect(page.location.assign).toHaveBeenCalledWith("/ops/login?ended=1&next=/ops");
+    expect(page.location.assign).toHaveBeenCalledWith("/ops/login?ended=1");
     expect(page.channel.postMessage).toHaveBeenCalledWith("ended");
   });
 
@@ -301,7 +301,7 @@ describe("a session island alone", () => {
     expect([dialog(host).open, asked.mock.calls.length]).toEqual([false, 2]);
     asked.mockRejectedValueOnce(new Refused("you are logged out; log in again", 401));
     await elapse(900 - WARN);
-    expect(page.location.assign).toHaveBeenCalledWith("/ops/login?ended=1&next=/ops");
+    expect(page.location.assign).toHaveBeenCalledWith("/ops/login?ended=1");
   });
 });
 
@@ -436,7 +436,7 @@ describe("a session island's doubts", () => {
     // The machine sleeps for an hour; its timers did not run, but its clock moved on.
     vi.setSystemTime(Date.now() + 3_600_000);
     await elapse(1);
-    expect(page.location.assign).toHaveBeenCalledWith("/ops/login?ended=1&next=/ops");
+    expect(page.location.assign).toHaveBeenCalledWith("/ops/login?ended=1");
   });
 
   it("asks again when the browser is back online", async () => {
@@ -522,7 +522,7 @@ describe("a session island's second doubts", () => {
     await elapse(SETTLE - 1);
     expect(asked).toHaveBeenCalledTimes(1);
     await elapse(1);
-    expect(page.location.assign).toHaveBeenCalledWith("/ops/login?ended=1&next=/ops");
+    expect(page.location.assign).toHaveBeenCalledWith("/ops/login?ended=1");
     expect(page.channel.postMessage).not.toHaveBeenCalled();
   });
 });

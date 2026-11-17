@@ -129,7 +129,7 @@ describe("a passkey island and what it sends", () => {
     page.location.pathname = "/ops";
     ready(host, page);
     await press(host);
-    expect(page.location.assign).toHaveBeenCalledWith("/ops/login?ended=1&next=/ops");
+    expect(page.location.assign).toHaveBeenCalledWith("/ops/login?ended=1");
     expect([status(host), host.dataset.state]).toEqual(["You are logged out; log in again.", "failed"]);
   });
 

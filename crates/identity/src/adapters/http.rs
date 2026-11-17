@@ -674,9 +674,12 @@ fn see_other(path: &str) -> Response {
         .into_response()
 }
 
-/// The login page, asked to return to `path` when that is a page a login may return to.
+/// The login page, asked to return to `path` when that is a page a login may return to other than the operator's
+/// own, where a login goes anyway.
 fn return_to(path: &str) -> String {
-    return_path(path).map_or_else(|| LOGIN.to_string(), |path| format!("{LOGIN}?next={path}"))
+    return_path(path)
+        .filter(|path| *path != ACCOUNT)
+        .map_or_else(|| LOGIN.to_string(), |path| format!("{LOGIN}?next={path}"))
 }
 
 /// A value the address's query gives `name`, as written. Only values the pages check before use are read, and a

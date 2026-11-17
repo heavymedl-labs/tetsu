@@ -221,6 +221,7 @@ async fn logging_out_may_return_to_a_checked_page_after_the_next_login() {
             "/ops/login?next=/ops/passkeys",
         ),
         ("/ops/logout?next=//evil.example", "/ops/login"),
+        ("/ops/logout?next=/ops", "/ops/login"),
         ("/ops/logout", "/ops/login"),
     ] {
         let (address, _database, cookie, form) = logged_in().await;
