@@ -3,8 +3,10 @@
     `script`, the passkey islands' hashed URL, and `icon`, Tetsu's mark, to what the shared page needs. -#}
 {% extends "../../../web/templates/page.html" %}
 {% block head %}<script type="module" src="{{ script }}"></script>{% endblock %}
-{% block demo %}<strong>Demo.</strong> Operators run Tetsu from here. A passkey made on the demo works only on the
-demo.{% endblock %}
+{#- An operator page shows no demo business, so it has no demo banner, and no "Runs on Tetsu" footer, as Linear's
+    sign-in has neither. #}
+{% block banner %}{% endblock %}
+{% block footer %}{% endblock %}
 {% block body %}
 <main class="flex flex-1 justify-center px-6 pt-[18vh] pb-16 sm:pt-[22vh]">
 <div class="w-full max-w-72 text-center">

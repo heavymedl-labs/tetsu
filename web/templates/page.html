@@ -13,12 +13,13 @@
 {% block head %}{% endblock %}
 </head>
 <body class="flex min-h-full flex-col bg-canvas font-sans text-ink antialiased">
-{#- After HyperUI's announcement 1 (MIT). #}
-{% if demo %}<div class="border-b border-line bg-surface px-6 py-2">
+{#- After HyperUI's announcement 1 (MIT). A page that shows no demo business, such as an operator's, leaves the
+    banner out by emptying this block; `noindex` above still keeps it out of search. #}
+{% block banner %}{% if demo %}<div class="border-b border-line bg-surface px-6 py-2">
 <p role="note" class="text-center text-xs/6 text-muted [&_strong]:font-medium [&_strong]:text-ink">{% block demo %}<strong>Demo.</strong>
 The businesses on this site are fictional, made up to show what Tetsu does.{% endblock %}</p>
 </div>
-{% endif %}{% block body %}{% endblock %}
+{% endif %}{% endblock %}{% block body %}{% endblock %}
 {% block footer %}<footer class="border-t border-line">
 <div class="mx-auto flex max-w-6xl items-center justify-center gap-2 px-6 py-8 text-xs text-muted">
 <span aria-hidden="true" class="size-1.5 rounded-full bg-accent"></span>

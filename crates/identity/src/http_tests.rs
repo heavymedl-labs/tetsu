@@ -353,6 +353,10 @@ async fn the_pages_run_only_tetsus_own_script() {
                 .contains(&format!("<script type=\"module\" src=\"{SCRIPT}\">")),
             "{path}"
         );
+        // An operator page shows no demo business, so no demo banner and no "Runs on Tetsu" footer.
+        for absent in ["role=\"note\"", "Runs on"] {
+            assert!(!page.body.contains(absent), "{absent} in {}", page.body);
+        }
         // Each page's one action is a passkey island, under Tetsu's mark.
         for shown in [
             format!("<tetsu-passkey action=\"{action}\""),
