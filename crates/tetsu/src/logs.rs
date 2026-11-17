@@ -29,8 +29,17 @@ use tracing_subscriber::layer::SubscriberExt;
 
 use crate::settings::Export;
 
-/// The realm this server serves. Only the customer realm's public pages exist until operators sign in, when the
-/// realm becomes a setting (ADR-0048, slice 5).
+/// The realm a request is for: the operators' at a path Identity's operator pages serve, and the customers' at any
+/// other (ADR-0048). Only the path, never its text, decides, so the label names no person.
+fn realm_of(path: &str) -> &'static str {
+    if tetsu_identity::PATHS.contains(&path) {
+        "operator"
+    } else {
+        "customer"
+    }
+}
+
+#[cfg(test)]
 const REALM: &str = "customer";
 
 /// The span fields an exported line carries. Any other span field stays on this host until a reviewer checks it
@@ -179,7 +188,7 @@ pub async fn request(request: Request, next: Next) -> Response {
     let span = tracing::info_span!(
         "request",
         request_id = request_id(),
-        realm = REALM,
+        realm = realm_of(request.uri().path()),
         http.request.method = method_name(request.method()),
         http.route = Empty,
         tenant_id = Empty,
@@ -284,6 +293,27 @@ mod tests {
             .attributes_iter()
             .map(|(key, _)| key.as_str().to_string())
             .collect()
+    }
+
+    /// A request to an operator page is the operators' realm; any other is the customers'.
+    #[test]
+    fn a_request_is_labelled_with_its_realm() {
+        let realms = [
+            "/ops",
+            "/ops/sign-in",
+            "/ops/sign-out",
+            "/",
+            "/sample-studio",
+            "/ops-studio",
+            "/ops/nothing",
+        ]
+        .map(realm_of);
+        assert_eq!(
+            realms,
+            [
+                "operator", "operator", "operator", "customer", "customer", "customer", "customer"
+            ]
+        );
     }
 
     /// Only allowlisted span fields leave the host, each once, and a nested span's own fields stay here (ADR-0049).
