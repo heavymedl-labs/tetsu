@@ -217,3 +217,23 @@ A chore runs instead of a deploy, in the deploy workflow's chore job, the only w
 (ADR-0027). It runs from the image live on the demo, as `tetsu_app`, whose URL it reads from the Render
 service through `RENDER_API_KEY` and masks in the log. It runs only from `main`, never alongside a deploy, and
 refuses inputs that are not the shape the chore takes.
+
+## Operators on the demo
+
+An operator is made from your own terminal, since an invite link prints only to one, with the demo's settings in
+`.env.demo` at the repository's root ([ADR-0073](../adr/0073-settings-files-per-environment.md)). Git ignores it.
+Make it once, readable only by you (`chmod 600 .env.demo`), with these lines:
+
+```text
+DATABASE_URL=<the Render service's DATABASE_URL, which is tetsu_app's>
+TETSU_ORIGIN=https://tetsu-demo.onrender.com
+```
+
+Then, from the commit the demo runs:
+
+```bash
+cargo tetsu --env demo operator create "Your Name"   # prints the invite link, good once and for an hour
+cargo tetsu --env demo operator list
+```
+
+Open the link to join with a passkey; it logs you in at `/ops`. Every other `operator` command works the same way.

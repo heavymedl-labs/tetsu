@@ -152,3 +152,33 @@ async fn a_stray_env_file_cannot_turn_off_tls_for_a_named_database() {
         "{refused:?}"
     );
 }
+
+/// `--env demo` reads the demo's settings from `.env.demo` in place of `.env`, so a hosted environment's operators
+/// are reached with nothing typed (ADR-0073).
+#[tokio::test]
+async fn an_environment_s_file_names_the_database_it_reaches() {
+    let database = with_kurt().await;
+    let folder = Scratch::folder("operator-named-env").expect("a folder");
+    let url = database.as_app().url().to_string();
+    std::fs::write(
+        folder.join(".env.demo"),
+        format!("DATABASE_URL={url}\nDATABASE_TLS=disable\n"),
+    )
+    .expect("writes");
+    std::fs::write(
+        folder.join(".env"),
+        "DATABASE_URL=postgres://unused@127.0.0.1:1/unused\n",
+    )
+    .expect("writes");
+    let output = Command::new(env!("CARGO_BIN_EXE_tetsu"))
+        .args(["--env", "demo", "operator", "list"])
+        .current_dir(&folder)
+        .env_remove("DATABASE_URL")
+        .env_remove("DATABASE_TLS")
+        .env_remove("DATABASE_CA_FILE")
+        .env_remove("TETSU_ORIGIN")
+        .output()
+        .expect("the binary runs");
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(out(&output), "1  Kurt Medley  enabled  0 passkeys\n");
+}

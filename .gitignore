@@ -5,3 +5,5 @@ __pycache__/
 /node_modules
 /crates/tetsu/assets/build
 /.env
+/.env.*
+!/.env.example

@@ -25,7 +25,7 @@ use tetsu_tenancy::Tenancy;
 
 /// Every module the binary runs, in the order their migrations apply.
 const MODULES: &[&dyn Module] = &[&Tenancy, &Identity, &Audit];
-const USAGE: &str = "usage: tetsu [setup | migrate | seed [--check] <file or folder> | serve | check | reset <schema>... \
+const USAGE: &str = "usage: tetsu [--env <name>] [setup | migrate | seed [--check] <file or folder> | serve | check | reset <schema>... \
                      | replay <schema> <event id> | rename <address> <new slug> \
                      | operator <create <name> | invite <id> | list | disable <id> | enable <id> \
                      | remove-passkeys <id> | end-sessions <id | --all>>]";
@@ -94,15 +94,18 @@ async fn main() -> ExitCode {
         .map(std::ffi::OsString::into_string)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| "arguments must be UTF-8".to_string())
-        .and_then(|args| parse(&args));
-    let command = match command {
-        Ok(command) => command,
+        .and_then(|args| {
+            let (source, rest) = settings::Source::chosen(&args)?;
+            parse(rest).map(|command| (source, command))
+        });
+    let (source, command) = match command {
+        Ok(chosen) => chosen,
         Err(why) => {
             complain(&format!("{why}\n{USAGE}"));
             return ExitCode::from(2);
         }
     };
-    match run(command).await {
+    match run(command, &source).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(why) => {
             complain(&why);
@@ -111,33 +114,37 @@ async fn main() -> ExitCode {
     }
 }
 
-async fn run(command: Command) -> Result<(), String> {
+/// Runs a command with the settings `source` names.
+async fn run(command: Command, source: &settings::Source) -> Result<(), String> {
     match command {
         Command::Summary => say(&summary(MODULES)),
-        Command::Setup => run_setup().await,
-        Command::Migrate => run_migrate().await,
-        Command::Seed { path, check_only } => run_seed(&path, check_only).await,
-        Command::Serve => run_serve().await,
-        Command::Chore(chore) => run_chore(chore).await,
-        Command::Operator(command) => run_operator(command).await,
+        Command::Setup => run_setup(source).await,
+        Command::Migrate => run_migrate(source).await,
+        Command::Seed { path, check_only } => run_seed(&path, check_only, source).await,
+        Command::Serve => run_serve(source).await,
+        Command::Chore(chore) => run_chore(chore, source).await,
+        Command::Operator(command) => run_operator(command, source).await,
     }
 }
 
 /// Runs an operator command with the local settings, telling it whether its output reaches a terminal.
-async fn run_operator(command: operator::Operator) -> Result<(), String> {
+async fn run_operator(
+    command: operator::Operator,
+    source: &settings::Source,
+) -> Result<(), String> {
     let terminal = std::io::IsTerminal::is_terminal(&std::io::stdout());
-    say_all(&operator::run(command, local, terminal).await?)
+    say_all(&operator::run(command, || local(source), terminal).await?)
 }
 
 /// Runs a hosted chore with the local settings, and prints what it reports.
-async fn run_chore(chore: ops::Chore) -> Result<(), String> {
-    say_all(&ops::run(chore, &local()?, MODULES).await?)
+async fn run_chore(chore: ops::Chore, source: &settings::Source) -> Result<(), String> {
+    say_all(&ops::run(chore, &local(source)?, MODULES).await?)
 }
 
 /// Creates the database the settings name if the server has none, then migrates: a developer's one step to a
 /// database the server can run on, safe to repeat, since it never drops or changes one that exists.
-async fn run_setup() -> Result<(), String> {
-    let local = local()?;
+async fn run_setup(source: &settings::Source) -> Result<(), String> {
+    let local = local(source)?;
     let settings = settings::database(|name| local.var(name))?;
     let created = tetsu_postgres::create_database(&settings)
         .await
@@ -147,12 +154,12 @@ async fn run_setup() -> Result<(), String> {
     } else {
         "the database exists"
     })?;
-    run_migrate().await
+    run_migrate(source).await
 }
 
 /// Runs each module's new migrations.
-async fn run_migrate() -> Result<(), String> {
-    let local = local()?;
+async fn run_migrate(source: &settings::Source) -> Result<(), String> {
+    let local = local(source)?;
     let settings = settings::database(|name| local.var(name))?;
     tetsu_postgres::migrate(&settings, MODULES)
         .await
@@ -182,9 +189,9 @@ async fn refuse_reserved_addresses<S: tetsu_tenancy::TenantStore>(
 /// so a bad setting fails at start rather than on the first request. A failure or panic while starting is logged
 /// as an alert, and the logs flushed, before the process exits. The alert's line says only that serving could not
 /// start, since the reason can name a tenant's address or quote the database; the reason goes to stderr.
-async fn run_serve() -> Result<(), String> {
+async fn run_serve(source: &settings::Source) -> Result<(), String> {
     let stop = serve::stop_signal();
-    let local = local()?;
+    let local = local(source)?;
     let terminal = std::io::IsTerminal::is_terminal(&std::io::stdout());
     let format = settings::log_format(|name| local.var(name), terminal)?;
     let logs = logs::start(settings::export(|name| local.var(name)), format)?;
@@ -253,7 +260,11 @@ fn report(line: &str) {
 }
 
 /// Checks every file before anything is written, and writes only through Tenancy's use cases (ADR-0018).
-async fn run_seed(path: &std::path::Path, check_only: bool) -> Result<(), String> {
+async fn run_seed(
+    path: &std::path::Path,
+    check_only: bool,
+    source: &settings::Source,
+) -> Result<(), String> {
     let seeds = seed::read(path)?;
     if check_only {
         for checked in &seeds {
@@ -265,13 +276,14 @@ async fn run_seed(path: &std::path::Path, check_only: bool) -> Result<(), String
         }
         return Ok(());
     }
-    let pool = connect(&local()?).await?;
+    let pool = connect(&local(source)?).await?;
     seed::apply(&tetsu_tenancy::postgres_store(pool), &seeds, say).await
 }
 
-/// The settings in `.env` where the command runs, for any the environment leaves unset (ADR-0050).
-fn local() -> Result<settings::Local, String> {
-    settings::Local::load(std::path::Path::new("."))
+/// The settings in the file `source` names where the command runs, for any the environment leaves unset (ADR-0050,
+/// ADR-0073).
+fn local(source: &settings::Source) -> Result<settings::Local, String> {
+    settings::Local::load(std::path::Path::new("."), source)
 }
 
 /// Reads the database settings, checks the server is new enough and stores text as UTF-8, and opens a pool to it.

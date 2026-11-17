@@ -9,3 +9,4 @@ docs
 node_modules
 crates/tetsu/assets/build
 .env
+.env.*

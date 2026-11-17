@@ -77,3 +77,15 @@ fn a_seed_path_may_not_look_like_an_option_even_after_check() {
     assert_eq!(output.status.code(), Some(2));
     assert!(stderr(&output).contains("usage: tetsu"));
 }
+
+/// An environment's name is checked before anything runs, and its file must exist (ADR-0073).
+#[test]
+fn an_environment_must_be_named_and_its_file_must_exist() {
+    let output = tetsu(&["--env", "../prod", "migrate"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("--env takes an environment's name"));
+    assert!(stderr(&output).contains("usage: tetsu [--env <name>]"));
+    let output = tetsu(&["--env", "nowhere-in-tests", "migrate"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(stderr(&output).contains(".env.nowhere-in-tests could not be read"));
+}

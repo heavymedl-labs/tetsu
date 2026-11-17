@@ -28,6 +28,10 @@ names no business that uses Tetsu. Its root page names fictional customers only 
 
 The deploy workflow runs `check`, `reset`, `replay`, and `rename` against the demo ([runbook](../../docs/operations/demo-environment.md)).
 
+`tetsu --env <name> <command>` runs any command with the settings in `.env.<name>` in place of `.env`, such as
+`cargo tetsu --env demo operator create "Ada Lovelace"` against the demo. The file must exist, and the environment
+still wins over it ([ADR-0073](../../docs/adr/0073-settings-files-per-environment.md)).
+
 A folder means its `.toml` files at the top level, in name order, leaving out hidden files. One that is not a
 regular file fails the run. Seeding
 checks every file before it writes anything, and writes only through public use cases. A database failure partway leaves earlier tenants in place,

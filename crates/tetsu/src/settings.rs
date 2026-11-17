@@ -1,4 +1,5 @@
-//! Settings from the environment, or from a local `.env` file for any the environment leaves unset (ADR-0050).
+//! Settings from the environment, or from a local `.env` file for any the environment leaves unset (ADR-0050), or
+//! from `.env.<name>` when the command line chooses one (ADR-0073).
 
 use std::collections::HashMap;
 use std::env::VarError;
@@ -7,39 +8,90 @@ use std::path::Path;
 
 use tetsu_postgres::{Settings, Tls};
 
-/// Settings a local `.env` file holds (ADR-0050). The environment always wins over them. The default holds no
-/// settings and never reads the environment, so a test given one cannot reach whatever database its shell exports.
+/// The settings file a command reads: `.env`, or `.env.<name>` when `--env <name>` comes first on its command line
+/// (ADR-0073).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Source {
+    Local,
+    Named(String),
+}
+
+impl Source {
+    /// Splits a leading `--env <name>` off `args`, or chooses `.env` when there is none. A name is lowercase letters,
+    /// digits, and hyphens, starting with a letter, so it cannot name a path or look like an option.
+    ///
+    /// # Errors
+    /// Fails when `--env` has no name after it, or one that is not a name.
+    pub fn chosen(args: &[String]) -> Result<(Self, &[String]), String> {
+        let Some((flag, rest)) = args.split_first().filter(|(flag, _)| *flag == "--env") else {
+            return Ok((Self::Local, args));
+        };
+        match rest.split_first() {
+            Some((name, rest)) if is_environment(name) => Ok((Self::Named(name.clone()), rest)),
+            _ => Err(format!(
+                "{flag} takes an environment's name: lowercase letters, digits, and hyphens, starting with a letter"
+            )),
+        }
+    }
+
+    /// The file's name.
+    fn file(&self) -> String {
+        match self {
+            Self::Local => ".env".into(),
+            Self::Named(name) => format!(".env.{name}"),
+        }
+    }
+}
+
+/// An environment's name, as [`Source::chosen`] says.
+fn is_environment(name: &str) -> bool {
+    name.starts_with(|c: char| c.is_ascii_lowercase())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+/// Settings a local `.env` file holds (ADR-0050), or an environment's `.env.<name>` (ADR-0073). The environment always
+/// wins over them. The default holds no settings and never reads the environment, so a test given one cannot reach
+/// whatever database its shell exports.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Local {
     file: HashMap<String, String>,
     environment: bool,
+    name: String,
 }
 
 impl Local {
-    /// Reads `.env` in `folder`, or nothing when there is none.
+    /// Reads the file `source` names in `folder`. A missing `.env` holds nothing; a missing `.env.<name>` is an
+    /// error, since it was asked for.
     ///
     /// # Errors
     /// Fails when the file cannot be read, or a line is not a setting.
-    pub fn load(folder: &Path) -> Result<Self, String> {
-        match std::fs::read_to_string(folder.join(".env")) {
-            Ok(text) => parse(&text).map(|file| Self {
-                file,
-                environment: true,
-            }),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self {
-                file: HashMap::new(),
-                environment: true,
-            }),
-            Err(error) => Err(format!(".env could not be read: {error}")),
-        }
+    pub fn load(folder: &Path, source: &Source) -> Result<Self, String> {
+        let name = source.file();
+        let text = match std::fs::read_to_string(folder.join(&name)) {
+            Ok(text) => text,
+            Err(error)
+                if error.kind() == std::io::ErrorKind::NotFound && *source == Source::Local =>
+            {
+                String::new()
+            }
+            Err(error) => return Err(format!("{name} could not be read: {error}")),
+        };
+        parse(&text, &name).map(|file| Self {
+            file,
+            environment: true,
+            name,
+        })
     }
 
-    /// Settings from a file's text alone, never the environment, for a test.
+    /// Settings from a `.env`'s text alone, never the environment, for a test.
     #[cfg(test)]
     pub(crate) fn file_only(text: &str) -> Self {
         Self {
-            file: parse(text).expect("settings"),
+            file: parse(text, ".env").expect("settings"),
             environment: false,
+            name: ".env".into(),
         }
     }
 
@@ -65,8 +117,9 @@ impl Local {
         }
         match settings.iter().find(|name| self.in_file(name)) {
             Some(name) => Err(format!(
-                "{name} comes from .env but {lead} does not; set {name} in the environment too, or remove it from \
-                 .env, so a stray .env cannot change how that database is reached"
+                "{name} comes from {file} but {lead} does not; set {name} in the environment too, or remove it from \
+                 {file}, so a stray {file} cannot change how that database is reached",
+                file = self.name
             )),
             None => Ok(()),
         }
@@ -89,8 +142,8 @@ impl Local {
 }
 
 /// `NAME=value` lines, `#` comments, and blank lines. Values are taken as written, trimmed, with no quotes or
-/// expansion. An error names the line and never its text, since a value may be a password.
-fn parse(text: &str) -> Result<HashMap<String, String>, String> {
+/// expansion. An error names the file and line, and never its text, since a value may be a password.
+fn parse(text: &str, file: &str) -> Result<HashMap<String, String>, String> {
     let mut settings = HashMap::new();
     for (index, line) in text.lines().enumerate() {
         let line = line.trim();
@@ -104,7 +157,7 @@ fn parse(text: &str) -> Result<HashMap<String, String>, String> {
             Some((name, value)) if is_name(name) => {
                 settings.insert(name.to_string(), value.to_string());
             }
-            _ => return Err(format!(".env line {} is not NAME=value", index + 1)),
+            _ => return Err(format!("{file} line {} is not NAME=value", index + 1)),
         }
     }
     Ok(settings)
@@ -953,9 +1006,11 @@ mod tests {
         let local = Local {
             file: parse(
                 "# Local defaults\n\nDATABASE_URL = postgres://localhost/tetsu_local\nTETSU_DEMO=true\nEMPTY=\nA_1=x=y\n",
+                ".env",
             )
             .unwrap(),
             environment: true,
+            name: ".env".into(),
         };
         let missing = || Err(VarError::NotPresent);
         assert_eq!(
@@ -972,8 +1027,9 @@ mod tests {
     #[test]
     fn the_environment_wins_over_the_file() {
         let local = Local {
-            file: parse("PORT=9000").unwrap(),
+            file: parse("PORT=9000", ".env").unwrap(),
             environment: true,
+            name: ".env".into(),
         };
         assert_eq!(local.or(Ok("8080".into()), "PORT"), Ok("8080".into()));
         assert_eq!(
@@ -993,8 +1049,8 @@ mod tests {
             ("A B=x", 1),
         ] {
             assert_eq!(
-                parse(text),
-                Err(format!(".env line {line} is not NAME=value")),
+                parse(text, ".env.demo"),
+                Err(format!(".env.demo line {line} is not NAME=value")),
                 "{text}"
             );
         }
@@ -1005,15 +1061,16 @@ mod tests {
         let folder = tetsu_postgres::test_support::Scratch::folder("no-env").unwrap();
         // No file's settings, yet still the environment's, unlike a default, which reads neither.
         assert_eq!(
-            Local::load(&folder),
+            Local::load(&folder, &Source::Local),
             Ok(Local {
                 file: HashMap::new(),
                 environment: true,
+                name: ".env".into(),
             })
         );
         std::fs::write(folder.join(".env"), "TETSU_DEMO=false\n").unwrap();
         assert_eq!(
-            Local::load(&folder)
+            Local::load(&folder, &Source::Local)
                 .unwrap()
                 .or(Err(VarError::NotPresent), "TETSU_DEMO"),
             Ok("false".into())
@@ -1024,7 +1081,73 @@ mod tests {
     fn a_file_that_cannot_be_read_is_an_error() {
         let folder = tetsu_postgres::test_support::Scratch::folder("bad-env").unwrap();
         std::fs::create_dir_all(folder.join(".env")).unwrap();
-        let error = Local::load(&folder).unwrap_err();
+        let error = Local::load(&folder, &Source::Local).unwrap_err();
         assert!(error.starts_with(".env could not be read: "), "{error}");
+    }
+
+    fn words(words: &[&str]) -> Vec<String> {
+        words.iter().map(ToString::to_string).collect()
+    }
+
+    /// `--env <name>` first chooses `.env.<name>`, and the command follows it; anything else leaves `.env` chosen.
+    #[test]
+    fn a_leading_env_chooses_an_environment_s_file() {
+        let args = words(&["--env", "demo-2", "operator", "list"]);
+        let (source, rest) = Source::chosen(&args).unwrap();
+        assert_eq!(source, Source::Named("demo-2".into()));
+        assert_eq!(source.file(), ".env.demo-2");
+        assert_eq!(rest, &args[2..]);
+        for args in [words(&[]), words(&["operator", "--env", "demo"])] {
+            let (source, rest) = Source::chosen(&args).unwrap();
+            assert_eq!((source.file(), rest), (".env".into(), &args[..]));
+        }
+    }
+
+    /// A name cannot reach outside the folder, look like an option, or be missing.
+    #[test]
+    fn an_environment_s_name_is_lowercase_letters_digits_and_hyphens() {
+        for bad in [
+            &["--env"][..],
+            &["--env", ""],
+            &["--env", "../prod"],
+            &["--env", "Demo"],
+            &["--env", "demo.x"],
+            &["--env", "2demo"],
+            &["--env", "-x"],
+            &["--env", "demo_x"],
+        ] {
+            let refused = Source::chosen(&words(bad)).unwrap_err();
+            assert!(
+                refused.starts_with("--env takes an environment's name"),
+                "{bad:?}"
+            );
+        }
+    }
+
+    /// An environment's file must exist, and holds settings as `.env` does; a stray-setting error names it.
+    #[test]
+    fn an_environment_s_file_must_exist() {
+        let folder = tetsu_postgres::test_support::Scratch::folder("named-env").unwrap();
+        let demo = Source::Named("demo".into());
+        let missing = Local::load(&folder, &demo).unwrap_err();
+        assert!(
+            missing.starts_with(".env.demo could not be read: "),
+            "{missing}"
+        );
+        std::fs::write(folder.join(".env.demo"), "TETSU_TEST_FOLLOWER=x\n").unwrap();
+        let local = Local::load(&folder, &demo).unwrap();
+        assert_eq!(
+            local.or(Err(VarError::NotPresent), "TETSU_TEST_FOLLOWER"),
+            Ok("x".into())
+        );
+        let refused = local
+            .beside("TETSU_TEST_LEAD", &["TETSU_TEST_FOLLOWER"])
+            .unwrap_err();
+        assert!(refused.contains("comes from .env.demo but"), "{refused}");
+        std::fs::write(folder.join(".env.demo"), "not a setting\n").unwrap();
+        assert_eq!(
+            Local::load(&folder, &demo),
+            Err(".env.demo line 1 is not NAME=value".into())
+        );
     }
 }
