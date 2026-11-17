@@ -1023,7 +1023,10 @@ mod tests {
         let (property, value) = declaration.split_once(':').unwrap_or_default();
         match property.trim() {
             "animation" | "animation-name" => {
-                value.split(',').any(|one| !one.contains("tetsu-play"))
+                // Only tetsu-play by its whole name; a name that merely contains it moves things.
+                value
+                    .split(',')
+                    .any(|one| !one.split_whitespace().any(|word| word == "tetsu-play"))
             }
             "transition" | "transition-property" => {
                 ["all", "transform", "translate", "scale", "rotate"]
@@ -1082,16 +1085,20 @@ mod tests {
                 "{one} loops"
             );
         }
-        let pending = &css[css.find("@keyframes tetsu-pending{").unwrap()..];
-        assert_eq!(
-            &pending[..pending.find("}}").unwrap()],
-            "@keyframes tetsu-pending{0%,to{opacity:.25}40%{opacity:1"
-        );
-        let play = &css[css.find("@keyframes tetsu-play{").unwrap()..];
-        assert_eq!(
-            &play[..play.find('}').unwrap()],
-            "@keyframes tetsu-play{to{--tetsu-play:1"
-        );
+        // Every block of each name, whole, since a later block of the same name would win.
+        for (name, whole) in [
+            (
+                "tetsu-pending",
+                "@keyframes tetsu-pending{0%,to{opacity:.25}40%{opacity:1}}",
+            ),
+            ("tetsu-play", "@keyframes tetsu-play{to{--tetsu-play:1}}"),
+        ] {
+            let blocks: Vec<&str> = css
+                .match_indices(&format!("@keyframes {name}{{"))
+                .map(|(at, _)| &css[at..at + css[at..].find("}}").unwrap() + 2])
+                .collect();
+            assert_eq!(blocks, [whole], "{name}");
+        }
         let found = movements(css);
         let unguarded: Vec<_> = found.iter().filter(|(_, guarded)| !guarded).collect();
         assert!(found.len() > 5, "only {} movements were read", found.len());
