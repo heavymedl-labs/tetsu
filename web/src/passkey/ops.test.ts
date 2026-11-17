@@ -12,7 +12,7 @@ it("registers the passkey islands with the browser's own parts", async () => {
   vi.stubGlobal("navigator", { credentials: {} });
   await import("./ops");
   document.body.innerHTML =
-    '<tetsu-passkey action="sign-in"><button disabled></button><p role="status"></p></tetsu-passkey>' +
+    '<tetsu-passkey action="sign-in"><button disabled><span data-label>Go</span></button><p role="status"></p></tetsu-passkey>' +
     '<tetsu-passkeys user="U1" credentials="A1"></tetsu-passkeys>';
   const island = document.querySelector("tetsu-passkey") as HTMLElement;
   expect([island.dataset.state, island.querySelector("button")?.disabled]).toEqual(["ready", false]);

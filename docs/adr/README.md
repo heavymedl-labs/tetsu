@@ -72,7 +72,7 @@ number, and add a row below. Never renumber.
 | [0064](0064-ci-skips-unchanged-work.md) | CI skips work whose inputs are unchanged | Changing which checks a CI run skips | Accepted |
 | [0065](0065-arm-runner-for-checks.md) | An Arm runner for the checks job | Changing which runners CI uses | Accepted |
 | [0066](0066-public-repository.md) | A public repository | Changing who can see or run the repository, or licensing it | Accepted |
-| [0067](0067-sign-in-after-a-first-passkey.md) | Signing in after a first passkey | Building enrollment, invites, or sign-up for any realm | Proposed |
+| [0067](0067-sign-in-after-a-first-passkey.md) | Signing in after a first passkey | Building enrollment, invites, or sign-up for any realm | Accepted |
 
 ## Open decisions
 

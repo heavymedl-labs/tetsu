@@ -18,10 +18,10 @@ export interface Browser {
 
 const ACTIONS: readonly Action[] = ["sign-in", "enroll", "add"];
 
-/** What the page says once an action is done, in the moment before the browser goes where the server says. */
-const DONE: Record<Action, string> = {
+/** What the page says once an action is done, in the moment before the browser goes where the server says. An
+ * enrollment is not done until the sign-in it chains to is (ADR-0067). */
+const DONE: Record<Exclude<Action, "enroll">, string> = {
   "sign-in": "Signed in.",
-  enroll: "Passkey created. Sign in with it next.",
   add: "Passkey added.",
 };
 
@@ -54,39 +54,84 @@ function sentFor(action: Action, host: HTMLElement, browser: Browser): Record<st
   return action === "add" ? { form: host.getAttribute("form-token") ?? "" } : {};
 }
 
-/** Readies a `<tetsu-passkey>`, once: its button runs its action, if it names one and the browser can use
+/** The parts of a `<tetsu-passkey>` it works through, if it has them all and names an action it knows. */
+interface Parts {
+  button: HTMLButtonElement;
+  status: Element;
+  label: Element;
+  action: Action;
+}
+
+function partsOf(host: HTMLElement): Parts | undefined {
+  const button = host.querySelector("button");
+  const status = host.querySelector("[role=status]");
+  const label = host.querySelector("[data-label]");
+  const action = ACTIONS.find((known) => host.getAttribute("action") === known);
+  if (button === null || status === null || label === null || action === undefined) {
+    return undefined;
+  }
+  return { button, status, label, action };
+}
+
+/** Readies a `<tetsu-passkey>`, once: its button runs its action, if it has its parts and the browser can use
  * passkeys. */
 export function ready(host: HTMLElement, browser: Browser): void {
   // Connected again, as when moved, an island already readied keeps its one listener.
   if (host.dataset.state !== undefined) {
     return;
   }
-  const button = host.querySelector("button");
-  const status = host.querySelector("[role=status]");
-  const action = ACTIONS.find((known) => host.getAttribute("action") === known);
-  if (button === null || status === null || action === undefined) {
+  const parts = partsOf(host);
+  if (parts === undefined) {
     return;
   }
   const device = browser.credentials;
   if (browser.passkeys === undefined || device === undefined) {
-    status.textContent = "This browser cannot use passkeys.";
+    parts.status.textContent = "This browser cannot use passkeys.";
     host.dataset.state = "failed";
     return;
   }
-  const sent = sentFor(action, host, browser);
-  button.disabled = false;
+  wire(host, parts, browser, device);
+}
+
+/** Runs the island's action each time its button is pressed, saying how it goes. */
+function wire(host: HTMLElement, parts: Parts, browser: Browser, device: CredentialsContainer): void {
+  let action = parts.action;
+  let sent = sentFor(action, host, browser);
+  const say = (words: string, state: string) => {
+    parts.status.textContent = words;
+    host.dataset.state = state;
+  };
+  const arrive = (done: Exclude<Action, "enroll">, next: string) => {
+    say(DONE[done], "done");
+    browser.location.assign(next);
+  };
+  // An operator's session comes from a passkey sign-in, never from the link that enrolled them, so a new passkey
+  // signs in at once, on this page (ADR-0067). A browser may refuse a prompt the person did not start by pressing
+  // something; the button then signs in instead.
+  const chain = async () => {
+    action = "sign-in";
+    sent = {};
+    parts.label.textContent = "Continue with passkey";
+    say("Passkey created. Confirm once more to sign in.", "waiting");
+    try {
+      arrive("sign-in", await ceremony("sign-in", sent, device));
+    } catch {
+      say("Passkey created. Continue with passkey to sign in.", "ready");
+    }
+  };
+  parts.button.disabled = false;
   host.dataset.state = "ready";
-  button.addEventListener("click", async () => {
-    status.textContent = "Waiting for your device…";
-    host.dataset.state = "waiting";
+  parts.button.addEventListener("click", async () => {
+    say("Waiting for your device…", "waiting");
     try {
       const next = await ceremony(action, sent, device);
-      status.textContent = DONE[action];
-      host.dataset.state = "done";
-      browser.location.assign(next);
+      if (action === "enroll") {
+        await chain();
+      } else {
+        arrive(action, next);
+      }
     } catch (error) {
-      status.textContent = said(error);
-      host.dataset.state = "failed";
+      say(said(error), "failed");
     }
   });
 }

@@ -79,8 +79,9 @@ starts, finds, and ends their sessions. `postgres_store(pool)` returns it over P
   browser says the passkey is not discoverable, and records it the same way, with that reason. Transports are
   taken as listed, as `WebAuthn` asks, and the ones `webauthn-rs` names are kept, once each and sorted, as a hint
   for later ceremonies. Every refusal reads the same to the browser, whichever part of Identity
-  refuses it. The operator is not signed in: signing in with the
-  new passkey proves it works. Passkeys are discoverable, so signing in needs no name, and the account picker
+  refuses it. Enrolling starts no session: the operator's session comes from
+  a passkey sign-in, which the enrollment page begins at once on the same page, so it rests on the passkey, never
+  on the link ([ADR-0067](../../docs/adr/0067-sign-in-after-a-first-passkey.md)). Passkeys are discoverable, so signing in needs no name, and the account picker
   shows each as "Tetsu operator · Name", the label first, where an authenticator's 64-byte cut never reaches it.
   The AAGUID, which names a passkey's provider but is unverified without attestation, is not kept: `webauthn-rs`
   does not expose it, and reading it needs a CBOR decoder, a new dependency.

@@ -30,7 +30,7 @@ function browser(passkeys: Partial<typeof PublicKeyCredential> = {}): Browser {
 /** A `<tetsu-passkey>` as the server renders it, with `attributes` and `inside` as its content. */
 function island(
   attributes: string,
-  inside = '<button type="button" disabled></button><p role="status"></p>',
+  inside = '<button type="button" disabled><span data-label>Go</span></button><p role="status"></p>',
 ): HTMLElement {
   const document = window.document.implementation.createHTMLDocument("test");
   document.body.innerHTML = `<tetsu-passkey ${attributes}>${inside}</tetsu-passkey>`;
@@ -64,16 +64,57 @@ describe("a passkey island", () => {
     expect(page.history.replaceState).not.toHaveBeenCalled();
     expect([status(host), host.dataset.state]).toEqual(["Signed in.", "done"]);
   });
+});
 
-  it("takes an enrollment link from the address, and clears it from the bar at once", async () => {
+describe("a passkey island that enrolls", () => {
+  it("takes an enrollment link from the address, and clears it from the bar at once", () => {
+    const page = browser();
+    ready(island('action="enroll"'), page);
+    expect(page.history.replaceState).toHaveBeenCalledWith(null, "", "/ops/enroll?from=mail");
+  });
+
+  it("signs in with a new passkey at once, on the same page (ADR-0067)", async () => {
     const host = island('action="enroll"');
     const page = browser();
     ready(host, page);
-    expect(page.history.replaceState).toHaveBeenCalledWith(null, "", "/ops/enroll?from=mail");
-    run.mockResolvedValue("/ops/sign-in");
+    let signedIn: (next: string) => void = () => undefined;
+    run
+      .mockResolvedValueOnce("/ops/sign-in")
+      .mockReturnValueOnce(new Promise((resolve) => (signedIn = resolve)));
+    button(host).click();
+    await vi.waitFor(() => expect(status(host)).toBe("Passkey created. Confirm once more to sign in."));
+    expect(host.dataset.state).toBe("waiting");
+    signedIn("/ops");
+    await vi.waitFor(() => expect(host.dataset.state).toBe("done"));
+    expect(run.mock.calls).toEqual([
+      ["enroll", { link: "L1" }, device],
+      ["sign-in", {}, device],
+    ]);
+    expect([status(host), host.querySelector("[data-label]")?.textContent]).toEqual([
+      "Signed in.",
+      "Continue with passkey",
+    ]);
+    expect(page.location.assign).toHaveBeenCalledWith("/ops");
+  });
+});
+
+describe("a passkey island whose chained sign-in is refused", () => {
+  it("leaves the button to sign in when the browser refuses the chained prompt", async () => {
+    const host = island('action="enroll"');
+    const page = browser();
+    ready(host, page);
+    run
+      .mockResolvedValueOnce("/ops/sign-in")
+      .mockRejectedValueOnce(new DOMException("no", "NotAllowedError"));
     await press(host);
-    expect(run).toHaveBeenCalledWith("enroll", { link: "L1" }, device);
-    expect(status(host)).toBe("Passkey created. Sign in with it next.");
+    await vi.waitFor(() => expect(host.dataset.state).toBe("ready"));
+    expect(status(host)).toBe("Passkey created. Continue with passkey to sign in.");
+    expect(page.location.assign).not.toHaveBeenCalled();
+    run.mockReset();
+    run.mockResolvedValue("/ops");
+    await press(host);
+    expect(run).toHaveBeenCalledWith("sign-in", {}, device);
+    expect(page.location.assign).toHaveBeenCalledWith("/ops");
   });
 
   it("sends the operator's form token when adding a passkey, or none the page lacks", async () => {
@@ -116,10 +157,12 @@ describe("a passkey island that cannot go on", () => {
     expect(page.location.assign).not.toHaveBeenCalled();
   });
 
-  it("is left as it is with no button, no status, or no action it knows", () => {
+  it("is left as it is with no button, label, status, or action it knows", () => {
     for (const host of [
-      island('action="sign-in"', '<p role="status"></p>'),
-      island('action="sign-in"', '<button type="button" disabled></button>'),
+      // Each missing alone: the button, the label, and the status line.
+      island('action="sign-in"', '<span data-label>Go</span><p role="status"></p>'),
+      island('action="sign-in"', '<button type="button" disabled></button><p role="status"></p>'),
+      island('action="sign-in"', '<button type="button" disabled><span data-label>Go</span></button>'),
       island('action="delete"'),
       island(""),
     ]) {
@@ -203,7 +246,7 @@ describe("define", () => {
     customElements.define("test-passkey", Passkey);
     customElements.define("test-passkeys", Passkeys);
     document.body.innerHTML =
-      '<test-passkey action="sign-in"><button disabled></button><p role="status"></p></test-passkey>' +
+      '<test-passkey action="sign-in"><button disabled><span data-label>Go</span></button><p role="status"></p></test-passkey>' +
       '<test-passkeys user="U1" credentials="A1"></test-passkeys>';
     expect((document.querySelector("test-passkey") as HTMLElement).dataset.state).toBe("ready");
     expect(told).toHaveBeenCalledWith({

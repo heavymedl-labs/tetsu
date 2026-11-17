@@ -1,6 +1,6 @@
 # 0067. Signing in after a first passkey
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-16
 
 ## Context
