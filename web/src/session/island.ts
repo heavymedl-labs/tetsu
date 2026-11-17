@@ -13,8 +13,12 @@ const SESSION = "/ops/session";
 /** How many seconds before a limit the dialog opens: HMRC's service timeout pattern warns with two minutes left. */
 export const WARN = 120;
 
-/** How many seconds to wait before asking again when the server could not say. */
+/** How many seconds apart a visible page asks the server, so an ending no limit foretold, as a disable, is seen
+ * within a minute, and how long it waits before asking again when the server could not say. */
 export const RETRY = 60;
+
+/** How many seconds a request may take before the island gives up on it, as on a connection a sleep left half open. */
+export const TIMEOUT = 10;
 
 /** How many seconds a tab told of an ending waits before asking: the logout that told it may still be on its way. */
 export const SETTLE = 2;
@@ -81,16 +85,29 @@ class Clock {
     private readonly browser: Browser,
   ) {}
 
-  /** Asks the server how long the session has left, which renews nothing, and sets the clock from its answer. */
-  readonly check = (): Promise<void> => this.ask(() => call(SESSION));
+  /** Asks the server how long the session has left, which renews nothing, and sets the clock from its answer. A
+   * hidden page does not ask, and lets its clock stop: it asks again once shown. */
+  readonly check = async (): Promise<void> => {
+    if (this.browser.page.visibilityState !== "hidden") {
+      await this.ask((signal) => call(SESSION, signal));
+    }
+  };
 
   /** Stays logged in: a request of the person's own, which renews the session, and tells the site's other tabs,
-   * even if a later request's answer is the one that sets this page's clock. */
+   * even if a later request's answer is the one that sets this page's clock. A form token from before a login in
+   * another tab is refused, so the page loads afresh for a new one. */
   readonly stay = (): Promise<void> =>
-    this.ask(async () => {
-      const left = await call(SESSION, undefined, { form: this.host.getAttribute("form-token") ?? "" });
-      this.browser.channel?.postMessage("renewed");
-      return left;
+    this.ask(async (signal) => {
+      try {
+        const left = await call(SESSION, signal, { form: this.host.getAttribute("form-token") ?? "" });
+        this.browser.channel?.postMessage("renewed");
+        return left;
+      } catch (error) {
+        if (error instanceof Refused && error.status === 403) {
+          this.browser.location.assign(this.browser.location.pathname);
+        }
+        throw error;
+      }
     });
 
   /** Another tab says something changed. One that ended the session may still be logging out, so an ending is asked
@@ -109,7 +126,12 @@ class Clock {
    * so the dialog stays open. */
   readonly cancelled = (event: Event): void => {
     if (Date.now() - this.opened < GRACE * 1000) {
-      event.preventDefault();
+      // A browser may not let the page refuse a dismissal; then the dialog opens again once it has closed.
+      if (event.cancelable) {
+        event.preventDefault();
+      } else {
+        this.parts.dialog.addEventListener("close", () => this.parts.dialog.showModal(), { once: true });
+      }
       return;
     }
     if (!this.parts.stay.hidden) {
@@ -117,13 +139,15 @@ class Clock {
     }
   };
 
-  /** Makes a request, with the clock still running should it never answer. */
-  private async ask(request: () => Promise<Record<string, unknown>>): Promise<void> {
+  /** Makes a request, given up after a while, with the clock still running should it never answer. */
+  private async ask(request: (signal: AbortSignal) => Promise<Record<string, unknown>>): Promise<void> {
     const asked = {};
     this.latest = asked;
     this.retry();
+    const giving = new AbortController();
+    const limit = setTimeout(() => giving.abort(), TIMEOUT * 1000);
     try {
-      const answer = await request();
+      const answer = await request(giving.signal);
       if (asked === this.latest) {
         this.set(answer);
       }
@@ -131,6 +155,8 @@ class Clock {
       if (asked === this.latest) {
         this.failed(error);
       }
+    } finally {
+      clearTimeout(limit);
     }
   }
 
@@ -145,24 +171,20 @@ class Clock {
     this.deadline = new Deadline(left);
     if (left > WARN) {
       this.parts.dialog.close();
-      this.timer.after(left - WARN, this.check);
+      this.timer.after(Math.min(left - WARN, RETRY), this.check);
     } else {
       this.warn(idle <= absolute ? "idle" : "absolute");
     }
   }
 
-  /** A session that ended goes to log in. A form token from before a login in another tab is refused, so the page
-   * loads afresh for a new one. Anything else leaves the retry set when it was asked. */
+  /** A session that ended goes to log in. Anything else leaves the retry set when it was asked. */
   private failed(error: unknown): void {
-    const status = error instanceof Refused ? error.status : 0;
-    if (status === 401) {
+    if (error instanceof Refused && error.status === 401) {
       this.timer.stop();
       if (!this.heard) {
         this.browser.channel?.postMessage("ended");
       }
       this.browser.location.assign(loggedOut(this.browser.location.pathname));
-    } else if (status === 403) {
-      this.browser.location.assign(this.browser.location.pathname);
     }
   }
 
@@ -232,11 +254,7 @@ export function ready(host: HTMLElement, browser: Browser): void {
       browser.channel?.postMessage("ended");
     }
   });
-  browser.page.addEventListener("visibilitychange", () => {
-    if (browser.page.visibilityState === "visible") {
-      void clock.check();
-    }
-  });
+  browser.page.addEventListener("visibilitychange", clock.check);
   browser.window.addEventListener("pageshow", (event) => {
     if ((event as PageTransitionEvent).persisted) {
       void clock.check();

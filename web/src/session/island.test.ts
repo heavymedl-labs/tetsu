@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { call, Refused } from "../shared/http";
-import { type Browser, channel, define, GRACE, RETRY, ready, SETTLE, spoken, WARN } from "./island";
+import { type Browser, channel, define, GRACE, RETRY, ready, SETTLE, spoken, TIMEOUT, WARN } from "./island";
 import { STEP } from "./timer";
 
 vi.mock("../shared/http", async (original) => ({
@@ -82,19 +82,18 @@ describe("spoken", () => {
 });
 
 describe("a session island's clock", () => {
-  it("reads the time left at once, which renews nothing, and asks again two minutes before the limit", async () => {
+  it("reads the time left at once, which renews nothing, again each minute, and warns two minutes before", async () => {
     const { page } = browser();
     const host = island();
-    answers([900, 28_800], [WARN, 28_000]);
+    answers([WARN + 180, 28_800], [WARN + 120, 28_740], [WARN + 60, 28_680], [WARN, 28_620]);
     ready(host, page);
     await elapse(0);
-    expect(asked).toHaveBeenCalledWith("/ops/session");
-    expect(dialog(host).open).toBe(false);
-    await elapse(900 - WARN - 1);
-    expect(asked).toHaveBeenCalledTimes(1);
+    expect(asked).toHaveBeenCalledWith("/ops/session", expect.any(AbortSignal));
+    await elapse(3 * RETRY - 1);
+    expect([asked.mock.calls.length, dialog(host).open]).toEqual([3, false]);
     await elapse(1);
     expect([asked.mock.calls.length, dialog(host).open, left(host), shown(host)]).toEqual([
-      2,
+      4,
       true,
       "2 minutes",
       2,
@@ -136,11 +135,11 @@ describe("a session island's countdown", () => {
 
   it("keeps one timer, so asking again early never asks twice later", async () => {
     const { page, listeners } = browser();
-    answers([900, 28_800], [900, 28_800], [900, 28_800]);
+    asked.mockResolvedValue({ idle: 900, absolute: 28_800 });
     ready(island(), page);
     await elapse(0);
     listeners.message?.(new MessageEvent("message", { data: "renewed" }));
-    await elapse(900 - WARN);
+    await elapse(RETRY);
     expect(asked).toHaveBeenCalledTimes(3);
   });
 });
@@ -170,7 +169,7 @@ describe("a session island's dialog", () => {
     await elapse(0);
     (host.querySelector("[data-stay]") as HTMLButtonElement).click();
     await elapse(0);
-    expect(asked).toHaveBeenLastCalledWith("/ops/session", undefined, { form: "F1" });
+    expect(asked).toHaveBeenLastCalledWith("/ops/session", expect.any(AbortSignal), { form: "F1" });
     expect([dialog(host).open, page.channel.postMessage.mock.calls]).toEqual([
       false,
       [["renewed"], ["renewed"]],
@@ -188,7 +187,7 @@ describe("a session island's dialog", () => {
     answers([900, 27_900]);
     (host.querySelector("[data-stay]") as HTMLButtonElement).click();
     await elapse(0);
-    expect(asked).toHaveBeenLastCalledWith("/ops/session", undefined, { form: "" });
+    expect(asked).toHaveBeenLastCalledWith("/ops/session", expect.any(AbortSignal), { form: "" });
     expect(page.channel.postMessage.mock.calls).toEqual([["renewed"]]);
     await elapse(RETRY);
     expect([asked.mock.calls.length, dialog(host).open]).toEqual([4, false]);
@@ -412,9 +411,9 @@ describe("a session island's doubts", () => {
     expect(page.channel.postMessage.mock.calls).toEqual([["renewed"]]);
   });
 
-  it("asks again in a minute when a success carries no times, as a captive portal's page may", async () => {
-    for (const answer of [{}, { idle: "900", absolute: 28_800 }, { idle: 900 }]) {
-      asked.mockReset();
+  it.each([{}, { idle: "50", absolute: 28_800 }, { idle: 900 }])(
+    "asks again in a minute when a success carries no times, as a captive portal's page may: %o",
+    async (answer) => {
       const { page } = browser();
       const host = island();
       asked.mockResolvedValueOnce(answer);
@@ -424,8 +423,8 @@ describe("a session island's doubts", () => {
       expect([dialog(host).open, asked.mock.calls.length]).toEqual([false, 1]);
       await elapse(1);
       expect(asked).toHaveBeenCalledTimes(2);
-    }
-  });
+    },
+  );
 
   it("sees time that passed while the tab slept, within a step of waking, without asking more often", async () => {
     const { page } = browser();
@@ -596,7 +595,7 @@ describe("a session island's countdown, at its edges", () => {
     await vi.advanceTimersByTimeAsync((GRACE * 1000) / 2);
     dialog(host).dispatchEvent(new Event("cancel", { cancelable: true }));
     await elapse(0);
-    expect(asked).toHaveBeenLastCalledWith("/ops/session", undefined, { form: "F1" });
+    expect(asked).toHaveBeenLastCalledWith("/ops/session", expect.any(AbortSignal), { form: "F1" });
   });
 
   it("keeps counting down when an ending another tab reports is asked about and never answered", async () => {
@@ -623,5 +622,74 @@ describe("a session island's countdown, at its edges", () => {
     const made = asked.mock.calls.length;
     await elapse(1);
     expect(asked).toHaveBeenCalledTimes(made);
+  });
+});
+
+describe("a session island's third doubts", () => {
+  it("does not ask while its page is hidden, and asks once it is shown", async () => {
+    const { page, listeners } = browser();
+    page.page.visibilityState = "hidden";
+    answers([900, 28_800]);
+    ready(island(), page);
+    await elapse(RETRY * 3);
+    expect(asked).not.toHaveBeenCalled();
+    page.page.visibilityState = "visible";
+    listeners.visibilitychange?.(new Event("visibilitychange"));
+    await elapse(0);
+    expect(asked).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives up on a request after its timeout, as on a connection a sleep left half open", async () => {
+    const { page } = browser();
+    let signal: AbortSignal | undefined;
+    asked.mockImplementationOnce((_path, given) => {
+      signal = given;
+      return new Promise(() => undefined);
+    });
+    ready(island(), page);
+    await elapse(TIMEOUT - 1);
+    expect(signal?.aborted).toBe(false);
+    await elapse(1);
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it("stops the timeout once the request answers", async () => {
+    const { page } = browser();
+    let signal: AbortSignal | undefined;
+    asked.mockImplementationOnce(async (_path, given) => {
+      signal = given;
+      return { idle: 900, absolute: 28_800 };
+    });
+    ready(island(), page);
+    await elapse(TIMEOUT);
+    expect(signal?.aborted).toBe(false);
+  });
+});
+
+describe("a session island's third doubts, refusals and dismissals", () => {
+  it("never loads the page afresh for a refused read, only for a refused stay", async () => {
+    const { page } = browser();
+    asked.mockRejectedValueOnce(new Refused("this request was refused", 403));
+    ready(island(), page);
+    await elapse(0);
+    expect(page.location.assign).not.toHaveBeenCalled();
+  });
+
+  it("opens the dialog again when a browser closes it on a dismissal it would not let the page refuse", async () => {
+    const { page } = browser();
+    const host = island();
+    answers([WARN, 28_000]);
+    ready(host, page);
+    await elapse(0);
+    dialog(host).dispatchEvent(new Event("cancel", { cancelable: false }));
+    dialog(host).close();
+    dialog(host).dispatchEvent(new Event("close"));
+    expect([dialog(host).open, asked.mock.calls.length]).toEqual([true, 1]);
+    // Only that once: a later close, as staying brings, stays closed.
+    answers([900, 27_900]);
+    (host.querySelector("[data-stay]") as HTMLButtonElement).click();
+    await elapse(0);
+    dialog(host).dispatchEvent(new Event("close"));
+    expect(dialog(host).open).toBe(false);
   });
 });

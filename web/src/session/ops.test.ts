@@ -31,5 +31,5 @@ it("registers the session island with the browser's own parts and a channel to t
   );
   const { host, fetch } = await loaded();
   expect([host.dataset.ready, opened.mock.calls]).toEqual(["", [["tetsu-session"]]]);
-  expect(fetch).toHaveBeenCalledWith("/ops/session", { signal: null });
+  expect(fetch).toHaveBeenCalledWith("/ops/session", { signal: expect.any(AbortSignal) });
 });

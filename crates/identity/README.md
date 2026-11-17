@@ -48,8 +48,8 @@ starts, finds, and ends their sessions. `postgres_store(pool)` returns it over P
 
 - **Finding a session** runs on every logged-in request: one call to `use_session`, an update by primary key that
   returns the row. ADR-0040 asks for a benchmark of it, which comes with the session middleware.
-- **Reading a session's time left** runs once per logged-in page and again near each limit: one call to
-  `session_left`, a read by primary key that writes nothing.
+- **Reading a session's time left** runs once a minute for each visible logged-in page, and not at all for a hidden
+  one: one call to `session_left`, a read by primary key that writes nothing.
 
 ## The operator command
 
@@ -197,7 +197,8 @@ A logged-in operator who opens the login page is sent on. A login returns to the
 `browser::return_path`, which accepts only `/ops` or a plain path under it, checked on the page and again when the
 login finishes. Every page a logged-in operator sees extends `logged_in.html`, which loads the session island in
 `web/src/session/`. `<tetsu-session>` reads `GET /ops/session`, the seconds to each limit by the database's clock,
-which renews nothing, and two minutes before a limit opens the page's dialog: before the idle limit to stay logged
+which renews nothing, each minute while its page is visible, so an ending no limit foretold is seen within a minute,
+and two minutes before a limit opens the page's dialog: before the idle limit to stay logged
 in, a `POST` with the form token that renews the session, and before the 8 hour limit to log in again, a logout that returns to the page after the next login. It keeps the
 site's tabs in step over a `BroadcastChannel`, asks again when the page is shown, and sends a page whose session has
 ended to `/ops/login?ended=1`, which says the operator was logged out for their security. The login page says up
