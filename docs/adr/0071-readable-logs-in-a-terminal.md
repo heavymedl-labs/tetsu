@@ -1,6 +1,6 @@
 # 0071. Readable logs in a terminal
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-17
 - Supersedes the log format rule in [ADR-0045](0045-operations-baseline.md)
 
