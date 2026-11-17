@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ceremony, Refused } from "./ceremony";
 import { type Browser, define, ready, said, signal } from "./island";
 
@@ -259,6 +259,153 @@ describe("a passkey island whose enrollment answer was lost", () => {
     await press(host);
     await vi.waitFor(() => expect(host.dataset.state).toBe("failed"));
     expect(host.querySelector("[data-label]")?.textContent).toBe("Go");
+  });
+});
+
+const HINT =
+  "Still waiting. If your device can't find or make a passkey for Tetsu, cancel and use the one you set up, or ask an operator for a new link.";
+
+/** Has the next ceremony hang until its signal ends it, as a device that finds no passkey does, and keeps that
+ * signal. */
+function hanging(): { signal?: AbortSignal } {
+  const kept: { signal?: AbortSignal } = {};
+  run.mockImplementationOnce(
+    (_action, _sent, _device, signal) =>
+      new Promise((_, refuse) => {
+        kept.signal = signal;
+        signal.addEventListener("abort", () => refuse(signal.reason));
+      }),
+  );
+  return kept;
+}
+
+describe("a passkey island's clock", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("says it is still waiting after 15 seconds, and closes the prompt after a minute", async () => {
+    const host = island('action="sign-in"');
+    ready(host, browser());
+    const kept = hanging();
+    button(host).click();
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(status(host)).toBe("Waiting for your device…");
+    await vi.advanceTimersByTimeAsync(1);
+    expect([status(host), host.dataset.state]).toEqual([HINT, "waiting"]);
+    await vi.advanceTimersByTimeAsync(45_000);
+    expect([kept.signal?.reason, host.dataset.state, button(host).disabled]).toEqual([
+      "timed out",
+      "failed",
+      false,
+    ]);
+    expect(status(host)).toBe(
+      "Your device did not answer within a minute, so the prompt was closed. Try again, or use the device you set up.",
+    );
+  });
+
+  it("never ends a ceremony whose last request went out", async () => {
+    const host = island('action="sign-in"');
+    ready(host, browser());
+    let signal: AbortSignal | undefined;
+    run.mockImplementationOnce((_action, _sent, _device, given, finishing) => {
+      signal = given;
+      finishing();
+      return new Promise(() => undefined);
+    });
+    button(host).click();
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect([signal?.aborted, status(host), button(host).disabled]).toEqual([
+      false,
+      "Waiting for your device…",
+      true,
+    ]);
+  });
+});
+
+describe("a passkey island's clock, across presses and states", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("starts the clock again for a later press", async () => {
+    const host = island('action="sign-in"');
+    ready(host, browser());
+    hanging();
+    hanging();
+    button(host).click();
+    await vi.advanceTimersByTimeAsync(10_000);
+    button(host).click();
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(status(host)).toBe("Waiting for your device…");
+    await vi.advanceTimersByTimeAsync(9_000);
+    expect(status(host)).toBe(HINT);
+  });
+
+  it("leaves the button to sign in when a chained sign-in times out", async () => {
+    const host = island('action="enroll"');
+    ready(host, browser());
+    // The enrollment's last request stops its clock, as a real one does, so only the chained sign-in's own runs.
+    run.mockImplementationOnce(async (_action, _sent, _device, _signal, finishing) => {
+      finishing();
+      return "/ops/sign-in";
+    });
+    hanging();
+    button(host).click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(status(host)).toBe("Passkey created. Confirm once more to sign in.");
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect([status(host), host.dataset.state]).toEqual([
+      "Passkey created. Continue with passkey to sign in.",
+      "ready",
+    ]);
+  });
+});
+
+describe("a passkey island's clock, once a ceremony ends", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("stops once a ceremony fails, so nothing is said over the failure", async () => {
+    const host = island('action="sign-in"');
+    ready(host, browser());
+    run.mockRejectedValueOnce(new Refused("this sign-in could not be completed"));
+    button(host).click();
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect([status(host), host.dataset.state]).toEqual(["This sign-in could not be completed.", "failed"]);
+  });
+
+  it("stops once a chained sign-in falls back to its button", async () => {
+    const host = island('action="enroll"');
+    ready(host, browser());
+    run
+      .mockResolvedValueOnce("/ops/sign-in")
+      .mockRejectedValueOnce(new DOMException("no", "NotAllowedError"));
+    button(host).click();
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(status(host)).toBe("Passkey created. Continue with passkey to sign in.");
+  });
+
+  it("stops once done, so nothing is said over it", async () => {
+    const host = island('action="sign-in"');
+    ready(host, browser());
+    run.mockResolvedValueOnce("/ops");
+    button(host).click();
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect([status(host), host.dataset.state]).toEqual(["Signed in.", "done"]);
   });
 });
 

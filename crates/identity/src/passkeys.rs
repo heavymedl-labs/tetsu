@@ -11,6 +11,10 @@ use webauthn_rs::prelude::{
 use crate::browser::Origins;
 use crate::domain::{Error, HeldPasskey, NewPasskey};
 
+/// How long a browser should hold a passkey prompt open. The page's island closes it then too, since a device that
+/// finds no passkey says nothing and browsers treat this only as a hint; it never stops a request already sent.
+const PROMPT_LIMIT: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// What an account picker shows before an operator's name. Authenticators may keep only the first 64 bytes of a
 /// name (`WebAuthn` L3 §6.4.1), so the label comes first, where a cut never reaches it.
 const LABEL: &str = "Tetsu operator · ";
@@ -38,7 +42,7 @@ impl RelyingParty {
             .filter(|_| written_as_browsers_send)
             .ok_or_else(not_an_origin)?;
         let webauthn = WebauthnBuilder::new(url.host_str().unwrap_or_default(), &url)
-            .and_then(|builder| builder.rp_name("Tetsu").build())
+            .and_then(|builder| builder.rp_name("Tetsu").timeout(PROMPT_LIMIT).build())
             .map_err(|_| not_an_origin())?;
         Ok(Self { webauthn })
     }

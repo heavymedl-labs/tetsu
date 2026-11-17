@@ -113,6 +113,15 @@ interface Island {
   device: CredentialsContainer;
 }
 
+/** How long a device may take: after the first, the page says it is still waiting; after the second, the island
+ * closes the prompt itself, since a device that finds no passkey says nothing, and browsers treat the server's own
+ * limit of the same length only as a hint. Neither runs once a ceremony's last request is on its way. */
+const HINT_AFTER = 15_000;
+const GIVE_UP_AFTER = 60_000;
+
+/** Why the island ended a ceremony itself, as against a later press ending it. */
+const TIMED_OUT = "timed out";
+
 /** The island's presses: each runs its action and says how it goes. A press ends any ceremony still under way,
  * and only the latest press speaks: an ended one never writes to the page or moves it. */
 class Presses {
@@ -122,6 +131,8 @@ class Presses {
   /** The presses, by their signals, whose last request went out, after which the server may have kept what it
    * was sent. */
   private readonly lastSent = new WeakSet<AbortSignal>();
+  /** Stops the clock on the ceremony under way. */
+  private stopClock: () => void = () => undefined;
 
   constructor(
     private readonly island: Island,
@@ -136,20 +147,24 @@ class Presses {
     const controller = new AbortController();
     this.pending = controller;
     this.say("Waiting for your device…", "waiting");
+    this.startClock(controller);
     try {
       const next = await ceremony(this.action, this.sent, this.island.device, controller.signal, () => {
         this.lastSent.add(controller.signal);
         this.finishing();
       });
       if (this.action === "enroll") {
-        await this.chain(controller.signal);
+        await this.chain(controller);
       } else {
         this.arrive(this.action, next);
       }
     } catch (error) {
-      if (controller.signal.aborted) {
+      const timedOut = controller.signal.reason === TIMED_OUT;
+      // Ended by a later press, which now owns the clock and the page.
+      if (controller.signal.aborted && !timedOut) {
         return;
       }
+      this.stopClock();
       // An enrollment whose last request went out but whose answer was lost may have kept the passkey and spent
       // the link, so its link is no use again; signing in is. A refusal means the server kept nothing.
       if (this.action === "enroll" && this.lastSent.has(controller.signal) && !(error instanceof Refused)) {
@@ -157,8 +172,32 @@ class Presses {
         this.say("Your passkey may have been created. Continue with passkey to sign in.", "ready");
         return;
       }
-      this.say(said(error), "failed");
+      this.say(
+        timedOut
+          ? "Your device did not answer within a minute, so the prompt was closed. Try again, or use the device you set up."
+          : said(error),
+        "failed",
+      );
     }
+  }
+
+  /** Starts the clock on a ceremony, stopping any before it: a hint once it is slow, and its end once it is too
+   * slow. */
+  private startClock(controller: AbortController): void {
+    this.stopClock();
+    const hint = setTimeout(
+      () =>
+        this.say(
+          "Still waiting. If your device can't find or make a passkey for Tetsu, cancel and use the one you set up, or ask an operator for a new link.",
+          "waiting",
+        ),
+      HINT_AFTER,
+    );
+    const end = setTimeout(() => controller.abort(TIMED_OUT), GIVE_UP_AFTER);
+    this.stopClock = () => {
+      clearTimeout(hint);
+      clearTimeout(end);
+    };
   }
 
   /** Turns the island to signing in, for good: an enrollment's link is spent once its passkey is kept. */
@@ -171,18 +210,22 @@ class Presses {
   // An operator's session comes from a passkey sign-in, never from the link that enrolled them, so a new passkey
   // signs in at once, on this page (ADR-0067). A browser may refuse a prompt the person did not start by pressing
   // something; the button then signs in instead. A refusal from the server is said as any other.
-  private async chain(signal: AbortSignal): Promise<void> {
+  private async chain(controller: AbortController): Promise<void> {
+    const signal = controller.signal;
     this.toSignIn();
     this.say("Passkey created. Confirm once more to sign in.", "waiting");
+    this.startClock(controller);
     try {
       this.arrive(
         "sign-in",
         await ceremony("sign-in", this.sent, this.island.device, signal, this.finishing),
       );
     } catch (error) {
-      if (error instanceof Refused || signal.aborted) {
+      // A chained sign-in that timed out leaves a passkey made, so the button signs in, rather than failing.
+      if (error instanceof Refused || (signal.aborted && signal.reason !== TIMED_OUT)) {
         throw error;
       }
+      this.stopClock();
       this.say("Passkey created. Continue with passkey to sign in.", "ready");
     }
   }
@@ -190,10 +233,12 @@ class Presses {
   // Once a ceremony's last request is on its way, the server may keep what it sent, as a passkey and a spent link,
   // so no press may end it: the button stays off until the next thing said.
   private readonly finishing = (): void => {
+    this.stopClock();
     this.island.parts.button.disabled = true;
   };
 
   private arrive(done: Exclude<Action, "enroll">, next: string): void {
+    this.stopClock();
     this.say(DONE[done], "done");
     this.island.browser.location.assign(next);
   }

@@ -25,7 +25,7 @@
           "alg": -257
         }
       ],
-      "timeout": 300000,
+      "timeout": 60000,
       "excludeCredentials": [
         {
           "type": "public-key",
@@ -50,7 +50,7 @@
   "request": {
     "publicKey": {
       "challenge": "oB2WkYJIkaHDqSRVkEb5PlvNUqe4NVR10Uj4laoBHQc",
-      "timeout": 300000,
+      "timeout": 60000,
       "rpId": "ops.example.com",
       "allowCredentials": [],
       "userVerification": "required",

@@ -445,9 +445,9 @@ async fn requests_before_sign_in_come_from_the_site_as_json() {
         (
             started.status,
             started.header("cache-control"),
-            started.json()["options"]["publicKey"].is_object()
+            started.json()["options"]["publicKey"]["timeout"].as_u64()
         ),
-        (200, Some("no-store"), true)
+        (200, Some("no-store"), Some(60_000))
     );
 }
 
