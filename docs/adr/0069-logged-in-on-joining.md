@@ -1,6 +1,6 @@
 # 0069. Logged in on joining
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-17
 - Supersedes the operator and staff rule in [ADR-0067](0067-sign-in-after-a-first-passkey.md)
 

@@ -73,7 +73,7 @@ number, and add a row below. Never renumber.
 | [0065](0065-arm-runner-for-checks.md) | An Arm runner for the checks job | Changing which runners CI uses | Accepted |
 | [0066](0066-public-repository.md) | A public repository | Changing who can see or run the repository, or licensing it | Accepted |
 | [0067](0067-sign-in-after-a-first-passkey.md) | Logging in after a first passkey | Building invites, joining, or signup for any realm | Accepted |
-| [0069](0069-logged-in-on-joining.md) | Logged in on joining | Building joining or freshness for operators and staff | Proposed |
+| [0069](0069-logged-in-on-joining.md) | Logged in on joining | Building joining or freshness for operators and staff | Accepted |
 | [0068](0068-no-demo-note.md) | No demo note | Changing what marks a demo page | Proposed |
 
 ## Open decisions
