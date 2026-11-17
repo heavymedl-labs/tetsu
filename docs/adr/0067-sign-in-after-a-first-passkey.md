@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-16
+- Operator and staff rule superseded by [ADR-0069](0069-logged-in-on-joining.md): joining logs them in
 
 ## Context
 

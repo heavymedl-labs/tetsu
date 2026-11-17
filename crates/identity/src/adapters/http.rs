@@ -321,7 +321,7 @@ async fn shown<S: OperatorStore>(
                 .collect::<Vec<_>>()
                 .join(" "),
             can_add: account.passkeys.len() < 2,
-            fresh: fresh(session.started_at(), SystemTime::now()),
+            fresh: fresh(session.proven_at(), SystemTime::now()),
             passkeys: account.passkeys.iter().map(described).collect(),
             form,
         })
@@ -353,10 +353,11 @@ fn left_json(left: Option<TimeLeft>) -> Response {
 /// The page uses it only to offer the button, or say why it does not.
 const FRESH: Duration = Duration::from_mins(10);
 
-/// Whether a session that began at `started` is recent enough at `now` to add a passkey: under ten minutes old. A
-/// start this server's clock puts in the future counts as fresh, and the database refuses it if the clocks disagree.
-pub(crate) fn fresh(started: SystemTime, now: SystemTime) -> bool {
-    now.duration_since(started).map_or(true, |age| age < FRESH)
+/// Whether a session a passkey last proved at `proven` is recent enough at `now` to add a passkey: under ten minutes
+/// since. A session never proven, as one joining began, never is (ADR-0069). A proof this server's clock puts in the
+/// future counts as fresh, and the database refuses it if the clocks disagree.
+pub(crate) fn fresh(proven: Option<SystemTime>, now: SystemTime) -> bool {
+    proven.is_some_and(|proven| now.duration_since(proven).map_or(true, |age| age < FRESH))
 }
 
 /// How the operator's page lists a passkey: whether it is synced to their other devices, as the authenticator
@@ -411,18 +412,18 @@ async fn before<S: OperatorStore>(
             .finish_login(&web.party, answer, &cookies(&headers), &actor)
             .await
             .map(|token| {
-                let cookie = Realm::Operator.session_cookie(&token);
                 let to = sent["next"].as_str().and_then(return_path);
-                ([(header::SET_COOKIE, cookie)], next(to.unwrap_or(ACCOUNT))).into_response()
+                logged_in_at(&token, to.unwrap_or(ACCOUNT))
             }),
         Before::BeginJoin => operators
             .begin_join(&web.party, sent["link"].as_str().unwrap_or_default())
             .await
             .map(|begun| begun_json(&begun)),
+        // Joining logs the operator in, with a session that rests on the link and is never fresh (ADR-0069).
         Before::FinishJoin => operators
-            .finish_join(&web.party, ceremony, &response, &actor)
+            .finish_join(&web.party, ceremony, &response, &cookies(&headers), &actor)
             .await
-            .map(|_| next(LOGIN)),
+            .map(|(_, token)| logged_in_at(&token, ACCOUNT)),
     };
     Ok(answered(web, answered_with))
 }
@@ -610,6 +611,12 @@ fn begun_json(ceremony: &Ceremony) -> Response {
         StatusCode::OK,
         &json!({"ceremony": ceremony.token.to_text(), "options": options}),
     )
+}
+
+/// A session's cookie for the browser, and where the script sends it next.
+fn logged_in_at(token: &SessionToken, path: &str) -> Response {
+    let cookie = Realm::Operator.session_cookie(token);
+    ([(header::SET_COOKIE, cookie)], next(path)).into_response()
 }
 
 /// Where the script sends the browser once a ceremony is done.

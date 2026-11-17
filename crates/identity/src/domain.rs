@@ -789,6 +789,9 @@ pub struct Session {
     pub(crate) realm: Realm,
     pub(crate) operator: OperatorId,
     pub(crate) started_at: SystemTime,
+    /// When a passkey last proved the person in it: at the start of a login, and never for a session joining began,
+    /// which rests on the invite link (ADR-0069).
+    pub(crate) proven_at: Option<SystemTime>,
     pub(crate) last_seen_at: SystemTime,
     pub(crate) ends_at: SystemTime,
 }
@@ -810,6 +813,11 @@ impl Session {
     }
 
     #[must_use]
+    pub fn proven_at(&self) -> Option<SystemTime> {
+        self.proven_at
+    }
+
+    #[must_use]
     pub fn last_seen_at(&self) -> SystemTime {
         self.last_seen_at
     }
@@ -826,6 +834,7 @@ impl std::fmt::Debug for Session {
             .field("realm", &self.realm)
             .field("operator", &self.operator)
             .field("started_at", &self.started_at)
+            .field("proven_at", &self.proven_at)
             .field("last_seen_at", &self.last_seen_at)
             .field("ends_at", &self.ends_at)
             .finish_non_exhaustive()
@@ -865,6 +874,7 @@ mod tests {
             realm: Realm::Operator,
             operator: OperatorId::new(1),
             started_at: SystemTime::UNIX_EPOCH,
+            proven_at: None,
             last_seen_at: SystemTime::UNIX_EPOCH,
             ends_at: SystemTime::UNIX_EPOCH,
         };

@@ -337,16 +337,20 @@ impl OperatorStore for PostgresOperators {
         &self,
         ceremony: &TakenCeremony,
         passkey: &NewPasskey,
+        session: &SessionStart,
         actor: &Actor,
     ) -> Result<Option<Redemption>, Error> {
         let id = ceremony.operator.get();
         let transports = passkey.transports.join(" ");
-        let parameters: [&(dyn ToSql + Sync); 5] = [
+        let replacing = session.replacing.as_ref().map(<[u8; 32]>::as_slice);
+        let parameters: [&(dyn ToSql + Sync); 7] = [
             &ceremony.link_hash.as_slice(),
             &id,
             &passkey.credential_id,
             &passkey.passkey,
             &transports,
+            &session.hash.as_slice(),
+            &replacing,
         ];
         self.decided(REDEEM_INVITE, &parameters, |rows| {
             redemption(rows, id, &passkey.credential_id, actor)
@@ -1021,6 +1025,7 @@ fn session_from(row: &Row, hash: &[u8; 32]) -> Result<Session, Error> {
         realm: known,
         operator: OperatorId::new(column(row, "operator_id")?),
         started_at: column(row, "started_at")?,
+        proven_at: column(row, "proven_at")?,
         last_seen_at: column(row, "last_seen_at")?,
         ends_at: column(row, "ends_at")?,
     })

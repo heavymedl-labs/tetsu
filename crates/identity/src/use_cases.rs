@@ -105,8 +105,9 @@ impl<S: OperatorStore> Operators<S> {
         party: &RelyingParty,
         ceremony: &str,
         response: &str,
+        cookies: &[&str],
         actor: &Actor,
-    ) -> Result<OperatorId, Error> {
+    ) -> Result<(OperatorId, SessionToken), Error> {
         let held = CeremonyToken::parse(ceremony).ok_or_else(not_joining)?;
         let taken = self
             .store
@@ -123,13 +124,14 @@ impl<S: OperatorStore> Operators<S> {
             .registered(party, response, &pending, actor)
             .await
             .map_err(|error| refusing(error, not_joining))?;
+        let (started, session) = self.session_start(cookies)?;
         match self
             .store
-            .redeem_invite(&taken, &passkey, actor)
+            .redeem_invite(&taken, &passkey, &session, actor)
             .await
             .map_err(|error| refusing(error, not_joining))?
         {
-            Some(Redemption::Redeemed) => Ok(taken.operator),
+            Some(Redemption::Redeemed) => Ok((taken.operator, started)),
             _ => Err(not_joining()),
         }
     }
@@ -186,14 +188,7 @@ impl<S: OperatorStore> Operators<S> {
             .await?
             .ok_or_else(not_logging_in)?;
         let (signer, passkey) = self.verified(party, answer.response, &state, actor).await?;
-        let token = SessionToken::generate(self.fill)?;
-        let session = SessionStart {
-            hash: token.hash(),
-            replacing: Realm::Operator
-                .token_in(cookies.iter().copied())
-                .and_then(SessionToken::parse)
-                .map(|presented| presented.hash()),
-        };
+        let (token, session) = self.session_start(cookies)?;
         let outcome = self.store.login(&signer, &passkey, &session, actor).await?;
         outcome
             .filter(|answer| *answer == Login::SignedIn)
@@ -483,6 +478,17 @@ impl<S: OperatorStore> Operators<S> {
         } else {
             Logout::NothingToEnd
         })
+    }
+
+    /// A new session's token, and what starting it under its hash needs: the session the browser presented, which
+    /// it ends, so no token a browser held before outlives it (ADR-0059).
+    fn session_start(&self, cookies: &[&str]) -> Result<(SessionToken, SessionStart), Error> {
+        let token = SessionToken::generate(self.fill)?;
+        let session = SessionStart {
+            hash: token.hash(),
+            replacing: operator_token(cookies.iter().copied()).map(|presented| presented.hash()),
+        };
+        Ok((token, session))
     }
 
     async fn live(&self, token: &SessionToken) -> Result<Option<Session>, Error> {

@@ -23,7 +23,8 @@ fn not_logging_in() -> String {
     "invalid: this login could not be completed".to_string()
 }
 
-/// Kurt Medley, operator 1, joined with a passkey, and the passkey his device keeps.
+/// Kurt Medley, operator 1, joined with a passkey, and the passkey his device keeps. Joining logs him in, but the
+/// tests that use this begin from a passkey login, so the session joining began is logged out.
 pub(crate) async fn joined() -> (
     Operators<PostgresOperators>,
     TestDatabase,
@@ -35,9 +36,10 @@ pub(crate) async fn joined() -> (
     let ceremony = operators.begin_join(&party, &link).await.expect("begins");
     let (response, kept) = register_keeping(&ceremony.options, ORIGIN, true).await;
     operators
-        .finish_join(&party, &ceremony.token.to_text(), &response, &actor())
+        .finish_join(&party, &ceremony.token.to_text(), &response, &[], &actor())
         .await
         .expect("joins");
+    as_admin(&database, "DELETE FROM identity.sessions").await;
     (operators, database, kurt, kept)
 }
 
@@ -228,7 +230,7 @@ async fn logging_in_ends_the_session_the_browser_presented() {
     as_admin(
         &database,
         &format!(
-            "SELECT identity.start_session(sha256(decode('{earlier}', 'hex')), 'operator', 1)"
+            "SELECT identity.start_session(sha256(decode('{earlier}', 'hex')), 'operator', 1, true)"
         ),
     )
     .await;

@@ -18,11 +18,20 @@ use webauthn_rs::prelude::Url;
 use sha2::{Digest, Sha256};
 
 use crate::adapters::postgres::PostgresOperators;
-use crate::domain::{NewPasskey, Redemption, TakenCeremony};
+use crate::domain::{NewPasskey, Redemption, SessionStart, SessionToken, TakenCeremony};
 use crate::ports::OperatorStore;
 use crate::{Actor, Error, Identity, OperatorId, OperatorName, Operators, RelyingParty};
 
 pub(crate) const ORIGIN: &str = "https://ops.example.com";
+
+/// A session for a redemption to start, under a new token's hash, with no browser session to end.
+fn starting() -> SessionStart {
+    let token = SessionToken::generate(getrandom::fill).expect("a token");
+    SessionStart {
+        hash: token.hash(),
+        replacing: None,
+    }
+}
 
 /// A person at their device, who confirms they are present, and verifies themselves unless told not to, as a
 /// hostile client might.
@@ -273,15 +282,18 @@ async fn an_operator_joins_their_first_passkey_once() {
     let token = ceremony.token.to_text();
     assert_eq!(
         operators
-            .finish_join(&party, &token, &response, &actor())
-            .await,
+            .finish_join(&party, &token, &response, &[], &actor())
+            .await
+            .map(|(operator, _)| operator),
         Ok(kurt)
     );
-    assert_eq!(held(&database).await, [1, 0, 0, 0]);
+    // The passkey, and the session joining began; the link and every ceremony are gone.
+    assert_eq!(held(&database).await, [1, 0, 0, 1]);
     assert_eq!(
         operators
-            .finish_join(&party, &token, &response, &actor())
-            .await,
+            .finish_join(&party, &token, &response, &[], &actor())
+            .await
+            .map(|(operator, _)| operator),
         not_joining(),
         "a ceremony finishes once"
     );
@@ -323,8 +335,9 @@ async fn hostile_clients_are_refused_and_the_link_stays_open() {
         let response = register(&options, origin, verifies).await;
         assert_eq!(
             operators
-                .finish_join(&party, &ceremony.token.to_text(), &response, &actor())
-                .await,
+                .finish_join(&party, &ceremony.token.to_text(), &response, &[], &actor())
+                .await
+                .map(|(operator, _)| operator),
             not_joining(),
             "{origin}, verifies: {verifies}"
         );
@@ -353,8 +366,9 @@ async fn a_malformed_registration_is_refused_and_recorded() {
         let ceremony = operators.begin_join(&party, &link).await.expect("begins");
         assert_eq!(
             operators
-                .finish_join(&party, &ceremony.token.to_text(), response, &actor())
-                .await,
+                .finish_join(&party, &ceremony.token.to_text(), response, &[], &actor())
+                .await
+                .map(|(operator, _)| operator),
             not_joining()
         );
     }
@@ -387,11 +401,13 @@ async fn a_registration_finishes_only_its_own_ceremony() {
     let response = register(&kurts.options, ORIGIN, true).await;
     let finished = [
         operators
-            .finish_join(&party, &lees.token.to_text(), &response, &actor())
-            .await,
+            .finish_join(&party, &lees.token.to_text(), &response, &[], &actor())
+            .await
+            .map(|(operator, _)| operator),
         operators
-            .finish_join(&party, &kurts.token.to_text(), &response, &actor())
-            .await,
+            .finish_join(&party, &kurts.token.to_text(), &response, &[], &actor())
+            .await
+            .map(|(operator, _)| operator),
     ];
     assert_eq!(finished, [not_joining(), Ok(kurt)]);
 }
@@ -413,8 +429,9 @@ async fn a_newer_ceremony_replaces_an_older_one() {
         let response = register(&tab.options, ORIGIN, true).await;
         finished.push(
             operators
-                .finish_join(&party, &tab.token.to_text(), &response, &actor())
-                .await,
+                .finish_join(&party, &tab.token.to_text(), &response, &[], &actor())
+                .await
+                .map(|(operator, _)| operator),
         );
     }
     assert_eq!(finished, [not_joining(), Ok(kurt)]);
@@ -469,8 +486,9 @@ async fn a_change_while_joining_refuses_the_passkey() {
         }
         assert_eq!(
             operators
-                .finish_join(&party, &ceremony.token.to_text(), &response, &actor())
-                .await,
+                .finish_join(&party, &ceremony.token.to_text(), &response, &[], &actor())
+                .await
+                .map(|(operator, _)| operator),
             not_joining(),
             "{change}"
         );
@@ -513,9 +531,11 @@ async fn finish_rewritten(
             party,
             &ceremony.token.to_text(),
             &response.to_string(),
+            &[],
             &actor(),
         )
         .await
+        .map(|(operator, _)| operator)
 }
 
 /// A registration whose client says the passkey is not discoverable is refused, under either name webauthn-rs reads
@@ -579,10 +599,13 @@ async fn a_join_ends_the_operators_other_ceremonies() {
         .finish_registration(&response, &taken.state)
         .expect("verifies");
     assert_eq!(
-        store.redeem_invite(&taken, &passkey, &actor()).await,
+        store
+            .redeem_invite(&taken, &passkey, &starting(), &actor())
+            .await,
         Ok(Some(Redemption::Redeemed))
     );
-    assert_eq!(held(&database).await, [1, 0, 0, 0]);
+    // The passkey, and the session joining began; the link and every ceremony are gone.
+    assert_eq!(held(&database).await, [1, 0, 0, 1]);
 }
 
 /// A new link ends any ceremony begun from the one it replaces.
@@ -634,7 +657,10 @@ async fn unknown_tokens_are_refused_alike() {
             "{link}"
         );
         assert_eq!(
-            operators.finish_join(&party, link, "{}", &actor()).await,
+            operators
+                .finish_join(&party, link, "{}", &[], &actor())
+                .await
+                .map(|(operator, _)| operator),
             not_joining(),
             "{link}"
         );
@@ -667,8 +693,9 @@ async fn failures_of_the_server_are_told_apart() {
     )
     .await;
     let finished = operators
-        .finish_join(&party, &ceremony.token.to_text(), "{}", &actor())
-        .await;
+        .finish_join(&party, &ceremony.token.to_text(), "{}", &[], &actor())
+        .await
+        .map(|(operator, _)| operator);
     assert!(
         failure(finished.map(drop))
             .starts_with("storage failed: a stored passkey ceremony could not be read")
@@ -731,8 +758,12 @@ async fn redeeming() -> (
 async fn a_taken_credential_or_missing_operator_stores_nothing() {
     let (_operators, database, store, passkey, [lees, _, nobodys]) = redeeming().await;
     let answers = [
-        store.redeem_invite(&lees, &passkey, &actor()).await,
-        store.redeem_invite(&nobodys, &passkey, &actor()).await,
+        store
+            .redeem_invite(&lees, &passkey, &starting(), &actor())
+            .await,
+        store
+            .redeem_invite(&nobodys, &passkey, &starting(), &actor())
+            .await,
     ];
     assert_eq!(answers, [Ok(Some(Redemption::Taken)), Ok(None)]);
     assert_eq!(
@@ -765,13 +796,18 @@ async fn an_ended_link_or_oversized_passkey_stores_nothing() {
     assert!(spaced.len() <= 8192);
     let mut answers = vec![
         store
-            .redeem_invite(&unknown_link, &fresh(vec![1; 16], "{}"), &actor())
+            .redeem_invite(
+                &unknown_link,
+                &fresh(vec![1; 16], "{}"),
+                &starting(),
+                &actor(),
+            )
             .await,
     ];
     for (id, passkey) in [(1024, "{}"), (15, "{}"), (16, spaced.as_str())] {
         answers.push(
             store
-                .redeem_invite(&lees, &fresh(vec![1; id], passkey), &actor())
+                .redeem_invite(&lees, &fresh(vec![1; id], passkey), &starting(), &actor())
                 .await,
         );
     }
@@ -800,12 +836,16 @@ async fn an_ended_link_or_oversized_passkey_stores_nothing() {
 #[tokio::test]
 async fn a_joined_or_disabled_operator_stores_nothing() {
     let (operators, database, store, passkey, [lees, kurts, _]) = redeeming().await;
-    let joined = store.redeem_invite(&kurts, &passkey, &actor()).await;
+    let joined = store
+        .redeem_invite(&kurts, &passkey, &starting(), &actor())
+        .await;
     operators
         .disable(lees.operator, &actor())
         .await
         .expect("disables");
-    let disabled = store.redeem_invite(&lees, &passkey, &actor()).await;
+    let disabled = store
+        .redeem_invite(&lees, &passkey, &starting(), &actor())
+        .await;
     assert_eq!(
         [joined, disabled],
         [Ok(Some(Redemption::Joined)), Ok(Some(Redemption::Disabled))]
@@ -852,7 +892,10 @@ async fn each_join_step_fails_as_storage_when_refused() {
         ("invitee(bytea)", true),
         ("begin_join(bytea, bigint, bytea, jsonb)", true),
         ("take_ceremony(bytea, text)", false),
-        ("redeem_invite(bytea, bigint, bytea, jsonb, text)", false),
+        (
+            "redeem_invite(bytea, bigint, bytea, jsonb, text, bytea, bytea)",
+            false,
+        ),
     ] {
         let (operators, database, _, link) = with_link().await;
         let revoke = format!("REVOKE EXECUTE ON FUNCTION identity.{function} FROM tetsu_identity");
@@ -864,8 +907,9 @@ async fn each_join_step_fails_as_storage_when_refused() {
             let response = register(&ceremony.options, ORIGIN, true).await;
             as_admin(&database, &revoke).await;
             operators
-                .finish_join(&party, &ceremony.token.to_text(), &response, &actor())
+                .finish_join(&party, &ceremony.token.to_text(), &response, &[], &actor())
                 .await
+                .map(|(operator, _)| operator)
                 .map(drop)
         };
         let name = function.split('(').next().unwrap_or_default();
@@ -973,8 +1017,9 @@ async fn unreadable_ceremonies_are_storage_failures() {
         .await;
         let finished = failure(
             operators
-                .finish_join(&party, &ceremony.token.to_text(), "{}", &actor())
+                .finish_join(&party, &ceremony.token.to_text(), "{}", &[], &actor())
                 .await
+                .map(|(operator, _)| operator)
                 .map(drop),
         );
         assert!(finished.starts_with(said));
@@ -998,17 +1043,62 @@ async fn unreadable_redemptions_are_storage_failures() {
         let response = register(&ceremony.options, ORIGIN, true).await;
         replace(
             &database,
-            "redeem_invite(bytea, bigint, bytea, jsonb, text)",
+            "redeem_invite(bytea, bigint, bytea, jsonb, text, bytea, bytea)",
             returns,
             &format!("SELECT {value}"),
         )
         .await;
         let finished = failure(
             operators
-                .finish_join(&party, &ceremony.token.to_text(), &response, &actor())
+                .finish_join(&party, &ceremony.token.to_text(), &response, &[], &actor())
                 .await
+                .map(|(operator, _)| operator)
                 .map(drop),
         );
         assert!(finished.starts_with(said));
     }
+}
+
+/// Joining ends the operator session the browser presented, whoever's it is, as logging in does (ADR-0059,
+/// ADR-0069), and starts its own; a refused join leaves the presented one as it was.
+#[tokio::test]
+async fn joining_ends_the_session_the_browser_presented() {
+    let (operators, database, _, link) = with_link().await;
+    let party = party();
+    let earlier = "aa".repeat(32);
+    as_admin(
+        &database,
+        &format!(
+            "SELECT identity.start_session(sha256(decode('{earlier}', 'hex')), 'operator', 1, true)"
+        ),
+    )
+    .await;
+    let cookie = format!("{}={earlier}", crate::Realm::Operator.cookie_name());
+    let held_earlier = format!(
+        "SELECT count(*) FROM identity.sessions WHERE token_hash = sha256(decode('{earlier}', 'hex'))"
+    );
+    let refused = operators
+        .finish_join(&party, "not a ceremony", "{}", &[cookie.as_str()], &actor())
+        .await;
+    assert!(refused.is_err());
+    assert_eq!(number(&database, &held_earlier).await, 1);
+    let ceremony = operators.begin_join(&party, &link).await.expect("begins");
+    let (response, _) = register_keeping(&ceremony.options, ORIGIN, true).await;
+    let (_, token) = operators
+        .finish_join(
+            &party,
+            &ceremony.token.to_text(),
+            &response,
+            &[cookie.as_str()],
+            &actor(),
+        )
+        .await
+        .expect("joins");
+    assert_eq!(number(&database, &held_earlier).await, 0);
+    let started = format!(
+        "SELECT count(*) FROM identity.sessions
+         WHERE token_hash = sha256(decode('{}', 'hex')) AND proven_at IS NULL",
+        token.to_text()
+    );
+    assert_eq!(number(&database, &started).await, 1);
 }

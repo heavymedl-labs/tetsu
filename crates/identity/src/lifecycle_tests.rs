@@ -69,8 +69,8 @@ async fn a_login_returns_where_the_page_asked_once_checked() {
         (None, "/ops"),
     ] {
         let (address, _database, link) = serving().await;
-        let passkey = join(address, &link).await;
-        let finished = login_sending(address, passkey, sent).await;
+        let (passkey, _) = join(address, &link).await;
+        let finished = login_sending(address, passkey, "", sent).await;
         assert_eq!(
             (finished.status, finished.json()),
             (200, json!({ "next": next })),
@@ -334,4 +334,34 @@ async fn a_login_after_the_session_ended_clears_the_cache() {
     assert_eq!(ended.header("clear-site-data"), Some("\"cache\""));
     let plain = get(address, "/ops/login", "").await;
     assert_eq!(plain.header("clear-site-data"), None);
+}
+
+/// Joining logs the operator in at once, with a session that rests on the invite link and so is never fresh: it shows
+/// their page, but adding a passkey waits for a passkey login (ADR-0069).
+#[tokio::test]
+async fn joining_logs_in_with_a_session_that_is_never_fresh() {
+    let (address, database, link) = serving().await;
+    let (_, cookie) = join(address, &link).await;
+    let page = get(address, "/ops", &cookie).await;
+    assert_eq!(page.status, 200);
+    assert!(
+        page.body
+            .contains("To add a second passkey, log out and log in"),
+        "{}",
+        page.body
+    );
+    assert!(!page.body.contains("Add a second passkey"), "{}", page.body);
+    let begun = post(
+        address,
+        "/ops/passkeys/begin",
+        &cookie,
+        &json!({ "form": form_on(&page.body) }),
+    )
+    .await;
+    assert_eq!(
+        (begun.status, begun.json()),
+        (400, json!({ "error": "this passkey could not be added" }))
+    );
+    let proven = "SELECT (proven_at IS NULL)::text FROM identity.sessions";
+    assert_eq!(text(&database, proven).await, "true");
 }

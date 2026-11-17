@@ -77,8 +77,9 @@ The operator command issues it and prints it only to the terminal that ran it ([
 **Island.** A small Web Component that adds behavior to server-rendered HTML on a Tetsu page, without
 rendering markup of its own ([ADR-0031](adr/0031-front-end-model-revised.md)).
 
-**Join.** What an invited operator does: open their invite link, create their first passkey, and log in with it
-([ADR-0067](adr/0067-sign-in-after-a-first-passkey.md)). People who make their own account sign up instead.
+**Join.** What an invited operator does: open their invite link and create their first passkey, which logs them in
+with a session that is never fresh ([ADR-0069](adr/0069-logged-in-on-joining.md)). People who make their own
+account sign up instead.
 
 **Kernel.** The small core that defines the module contract: traits and types,
 with no domain knowledge and no runtime plug-in loading.

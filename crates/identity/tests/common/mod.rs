@@ -54,7 +54,7 @@ pub async fn logged_in(database: &TestDatabase, operator: OperatorId) -> Session
         .await
         .expect("connects")
         .execute(
-            "SELECT identity.start_session(sha256(decode($1, 'hex')), 'operator', $2)",
+            "SELECT identity.start_session(sha256(decode($1, 'hex')), 'operator', $2, true)",
             &[&text, &operator.get()],
         )
         .await

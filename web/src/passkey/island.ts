@@ -20,10 +20,11 @@ export interface Browser {
 
 const ACTIONS: readonly Action[] = ["login", "join", "add"];
 
-/** What the page says once an action is done, in the moment before the browser goes where the server says. An
- * join is not done until the login it chains to is (ADR-0067). */
-const DONE: Record<Exclude<Action, "join">, string> = {
+/** What the page says once an action is done, in the moment before the browser goes where the server says. Joining
+ * logs the operator in too (ADR-0069). */
+const DONE: Record<Action, string> = {
   login: "Logged in.",
+  join: "Passkey created. Logging you in.",
   add: "Passkey added.",
 };
 
@@ -159,11 +160,7 @@ class Presses {
         this.lastSent.add(controller.signal);
         this.finishing();
       });
-      if (this.action === "join") {
-        await this.chain(controller);
-      } else {
-        this.arrive(this.action, next);
-      }
+      this.arrive(this.action, next);
     } catch (error) {
       // Ended by a later press, which now owns the clock and the page.
       if (controller.signal.aborted && controller.signal.reason !== TIMED_OUT) {
@@ -223,26 +220,6 @@ class Presses {
     this.island.parts.label.textContent = "Continue with passkey";
   }
 
-  // An operator's session comes from a passkey login, never from the link that joined them, so a new passkey
-  // logs in at once, on this page (ADR-0067). A browser may refuse a prompt the person did not start by pressing
-  // something; the button then logs in instead. A refusal from the server is said as any other.
-  private async chain(controller: AbortController): Promise<void> {
-    const signal = controller.signal;
-    this.toLogin();
-    this.say("Passkey created. Confirm once more to log in.", "waiting");
-    this.startClock(controller);
-    try {
-      this.arrive("login", await ceremony("login", this.sent, this.island.device, signal, this.finishing));
-    } catch (error) {
-      // A chained login that timed out leaves a passkey made, so the button logs in, rather than failing.
-      if (error instanceof Refused || (signal.aborted && signal.reason !== TIMED_OUT)) {
-        throw error;
-      }
-      this.stopClock();
-      this.say("Passkey created. Continue with passkey to log in.", "ready");
-    }
-  }
-
   // Once a ceremony's last request is on its way, the server may keep what it sent, as a passkey and a spent link,
   // so no press may end it: the button stays off until the next thing said.
   private readonly finishing = (): void => {
@@ -250,7 +227,7 @@ class Presses {
     this.island.parts.button.disabled = true;
   };
 
-  private arrive(done: Exclude<Action, "join">, next: string): void {
+  private arrive(done: Action, next: string): void {
     this.stopClock();
     this.say(DONE[done], "done");
     this.island.browser.location.assign(next);

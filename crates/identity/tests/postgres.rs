@@ -84,6 +84,7 @@ mod support {
             ("realm", "text", "'operator'"),
             ("operator_id", "bigint", "1::bigint"),
             ("started_at", "timestamptz", "now()"),
+            ("proven_at", "timestamptz", "now()"),
             ("last_seen_at", "timestamptz", "now()"),
             ("ends_at", "timestamptz", "now() + interval '1 hour'"),
         ];
@@ -389,7 +390,7 @@ async fn identitys_role_cannot_start_a_session() {
         .expect("begins");
     let refused = transaction
         .execute(
-            "SELECT identity.start_session(sha256('a'::bytea), 'operator', $1)",
+            "SELECT identity.start_session(sha256('a'::bytea), 'operator', $1, true)",
             &[&kurt.get()],
         )
         .await
@@ -457,8 +458,9 @@ async fn an_unknown_realm_is_an_error() {
     as_admin(
         &database,
         &replaced_use_session(
-            "realm text, operator_id bigint, started_at timestamptz, last_seen_at timestamptz, ends_at timestamptz",
-            "'staff', 1::bigint, now(), now(), now()",
+            "realm text, operator_id bigint, started_at timestamptz, proven_at timestamptz, last_seen_at timestamptz, \
+             ends_at timestamptz",
+            "'staff', 1::bigint, now(), now(), now(), now()",
         ),
     )
     .await;
@@ -475,6 +477,7 @@ async fn each_stored_column_of_the_wrong_type_is_an_error() {
         "realm",
         "operator_id",
         "started_at",
+        "proven_at",
         "last_seen_at",
         "ends_at",
     ];

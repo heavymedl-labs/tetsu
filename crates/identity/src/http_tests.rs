@@ -132,9 +132,9 @@ pub(crate) async fn get(address: SocketAddr, path: &str, cookie: &str) -> Reply 
     send(address, "GET", path, &[("Cookie", cookie)], "").await
 }
 
-/// Joins with the link through the pages' endpoints, as the script would, and returns the passkey the device
-/// keeps.
-pub(crate) async fn join(address: SocketAddr, link: &str) -> Passkey {
+/// Joins with the link through the pages' endpoints, as the script would, and returns the passkey the device keeps
+/// and the session cookie joining set.
+pub(crate) async fn join(address: SocketAddr, link: &str) -> (Passkey, String) {
     let begun = post(address, "/ops/join/begin", "", &json!({ "link": link }))
         .await
         .json();
@@ -147,11 +147,25 @@ pub(crate) async fn join(address: SocketAddr, link: &str) -> Passkey {
         &json!({"ceremony": begun["ceremony"], "response": response}),
     )
     .await;
+    // Joining logs the operator in, with a session that rests on the link (ADR-0069).
     assert_eq!(
         (finished.status, finished.json()),
-        (200, json!({"next": "/ops/login"}))
+        (200, json!({"next": "/ops"}))
     );
-    kept
+    assert!(
+        finished
+            .header("set-cookie")
+            .is_some_and(|set| set.starts_with("__Host-tetsu-operator=")),
+        "{}",
+        finished.head
+    );
+    (kept, cookie_in(&finished))
+}
+
+/// The session cookie a response set, as the browser would send it back.
+fn cookie_in(reply: &Reply) -> String {
+    let set = reply.header("set-cookie").expect("a cookie");
+    set.split(';').next().unwrap_or_default().to_string()
 }
 
 /// Logs in through the pages' endpoints, as the script would, sending `next` if given, and returns how finishing
@@ -159,6 +173,7 @@ pub(crate) async fn join(address: SocketAddr, link: &str) -> Passkey {
 pub(crate) async fn login_sending(
     address: SocketAddr,
     passkey: Passkey,
+    presented: &str,
     next: Option<&str>,
 ) -> Reply {
     let begun = post(address, "/ops/login/begin", "", &json!({}))
@@ -170,18 +185,7 @@ pub(crate) async fn login_sending(
     if let Some(next) = next {
         finish["next"] = json!(next);
     }
-    post(address, "/ops/login/finish", "", &finish).await
-}
-
-/// Logs in through the pages' endpoints, as the script would, and returns the session cookie set.
-pub(crate) async fn login(address: SocketAddr, passkey: Passkey) -> String {
-    let finished = login_sending(address, passkey, None).await;
-    assert_eq!(
-        (finished.status, finished.json()),
-        (200, json!({"next": "/ops"}))
-    );
-    let set = finished.header("set-cookie").expect("a cookie");
-    set.split(';').next().unwrap_or_default().to_string()
+    post(address, "/ops/login/finish", presented, &finish).await
 }
 
 /// The form token the operator's page carries.
@@ -196,8 +200,14 @@ pub(crate) fn form_on(page: &str) -> String {
 /// his page carries.
 pub(crate) async fn logged_in() -> (SocketAddr, TestDatabase, String, String) {
     let (address, database, link) = serving().await;
-    let passkey = join(address, &link).await;
-    let cookie = login(address, passkey).await;
+    // A browser that joined presents that session when it logs in, which ends it.
+    let (passkey, joined) = join(address, &link).await;
+    let finished = login_sending(address, passkey, &joined, None).await;
+    assert_eq!(
+        (finished.status, finished.json()),
+        (200, json!({"next": "/ops"}))
+    );
+    let cookie = cookie_in(&finished);
     let page = get(address, "/ops", &cookie).await;
     (address, database, cookie, form_on(&page.body))
 }
@@ -293,7 +303,7 @@ async fn a_stale_login_is_told_to_login_again_to_add_a_passkey() {
     let (address, database, cookie, _) = logged_in().await;
     as_admin(
         &database,
-        "UPDATE identity.sessions SET started_at = now() - interval '11 minutes'",
+        "UPDATE identity.sessions SET proven_at = now() - interval '11 minutes'",
     )
     .await;
     let page = get(address, "/ops", &cookie).await;
@@ -303,7 +313,7 @@ async fn a_stale_login_is_told_to_login_again_to_add_a_passkey() {
 
 /// A login counts as fresh for under ten minutes, and one that starts after now counts too.
 #[test]
-fn a_login_is_fresh_for_under_ten_minutes() {
+fn a_login_is_fresh_for_under_ten_minutes_and_a_session_never_proven_never_is() {
     use std::time::{Duration, SystemTime};
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
     let started = |seconds: i64| {
@@ -316,9 +326,10 @@ fn a_login_is_fresh_for_under_ten_minutes() {
     };
     assert_eq!(
         [0, -599, -600, -601, 60]
-            .map(|seconds| crate::adapters::http::fresh(started(seconds), now)),
+            .map(|seconds| crate::adapters::http::fresh(Some(started(seconds)), now)),
         [true, true, false, false, true]
     );
+    assert!(!crate::adapters::http::fresh(None, now));
 }
 
 /// Logging out clears the cookie and sends the browser to log in, and the operator's page then does the same.

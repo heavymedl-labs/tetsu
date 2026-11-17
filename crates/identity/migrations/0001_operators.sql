@@ -37,6 +37,10 @@ CREATE TABLE sessions (
     realm text NOT NULL CHECK (realm IN ('operator')),
     operator_id bigint NOT NULL REFERENCES operators (id),
     started_at timestamptz NOT NULL,
+    -- When a passkey last proved the person in this session: at its start for
+    -- one a login began, and never for one joining began, which rests on the
+    -- invite link alone (ADR-0069). Only a proof within ten minutes is fresh.
+    proven_at timestamptz,
     last_seen_at timestamptz NOT NULL,
     ends_at timestamptz NOT NULL
 )
@@ -149,9 +153,13 @@ REVOKE ALL ON SEQUENCE operators_id_seq FROM tetsu_identity;
 GRANT SELECT (id, name), INSERT (name) ON operators TO tetsu_identity;
 -- The public ID too, which audit records name a session by, never its hash.
 GRANT SELECT (
-    token_hash, id, realm, operator_id, started_at, last_seen_at, ends_at
+    token_hash, id, realm, operator_id, started_at, proven_at, last_seen_at,
+    ends_at
 ),
-INSERT (token_hash, realm, operator_id, started_at, last_seen_at, ends_at),
+INSERT (
+    token_hash, realm, operator_id, started_at, proven_at, last_seen_at,
+    ends_at
+),
 UPDATE (last_seen_at),
 DELETE ON sessions TO tetsu_identity_lookup;
 -- Replacing a link reads every column its upsert sets, issued_at included.
@@ -182,13 +190,15 @@ TO tetsu_identity_lookup;
 -- before what held it up.
 
 -- Starts a session now, only for an enabled operator, and removes the
--- operator's spent sessions in the realm, so they do not pile up. Only a
--- login calls it, holding an enabled operator's row, so one disabled or
--- unknown is a fault, raised as TD001, Identity's own code. It holds the
--- operator's row until it commits, so a disable waits for it and then ends the
--- session it started.
+-- operator's spent sessions in the realm, so they do not pile up. Only a login
+-- and a redemption call it, each holding an enabled operator's row, so one
+-- disabled or unknown is a fault, raised as TD001, Identity's own code. A
+-- session is proven only when a passkey login starts it (ADR-0069). It holds
+-- the operator's row until it commits, so a disable waits for it and then ends
+-- the session it started.
 CREATE FUNCTION start_session(
-    wanted_hash bytea, wanted_realm text, wanted_operator bigint
+    wanted_hash bytea, wanted_realm text, wanted_operator bigint,
+    wanted_proven boolean
 )
 RETURNS void
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
@@ -218,10 +228,14 @@ BEGIN
         s.operator_id = wanted_operator
         AND s.realm = wanted_realm
         AND (at >= s.ends_at OR at >= s.last_seen_at + idle);
-    INSERT INTO identity.sessions
-        (token_hash, realm, operator_id, started_at, last_seen_at, ends_at)
-    VALUES
-        (wanted_hash, wanted_realm, wanted_operator, at, at, at + absolute);
+    INSERT INTO identity.sessions (
+        token_hash, realm, operator_id, started_at, proven_at, last_seen_at,
+        ends_at
+    )
+    VALUES (
+        wanted_hash, wanted_realm, wanted_operator, at,
+        CASE WHEN wanted_proven THEN at END, at, at + absolute
+    );
 END
 $$;
 
@@ -241,6 +255,7 @@ RETURNS TABLE (
     realm text,
     operator_id bigint,
     started_at timestamptz,
+    proven_at timestamptz,
     last_seen_at timestamptz,
     ends_at timestamptz
 )
@@ -264,7 +279,9 @@ BEGIN
         AND at < s.last_seen_at + idle
         AND o.id = s.operator_id
         AND o.disabled_at IS NULL
-    RETURNING s.realm, s.operator_id, s.started_at, s.last_seen_at, s.ends_at;
+    RETURNING
+        s.realm, s.operator_id, s.started_at, s.proven_at, s.last_seen_at,
+        s.ends_at;
     IF NOT FOUND THEN
         DELETE FROM identity.sessions AS s
         USING identity.operators AS o
@@ -700,7 +717,7 @@ BEGIN
     -- browser held before logging in outlives it (ADR-0059, v5.0.0-7.2.4).
     DELETE FROM identity.sessions AS s
     WHERE s.token_hash = wanted_presented AND s.realm = 'operator';
-    PERFORM identity.start_session(wanted_session, 'operator', who);
+    PERFORM identity.start_session(wanted_session, 'operator', who, true);
     outcome := 'logged_in';
     SELECT s.id::text INTO session_id
     FROM identity.sessions AS s
@@ -748,8 +765,9 @@ AS $$
     ORDER BY p.credential_id
 $$;
 
--- The account a session names, as account finds it, if the session began
--- within ten minutes, which makes it a fresh login (ADR-0048, v5.0.0-7.5.1),
+-- The account a session names, as account finds it, if a passkey proved the
+-- person in it within ten minutes, which makes it a fresh login (ADR-0048,
+-- ADR-0069, v5.0.0-7.5.1),
 -- and the operator holds fewer than two passkeys (ADR-0057): what adding a
 -- passkey needs, with the passkeys they hold, so a device that has one makes
 -- no second. Reading it changes nothing.
@@ -770,7 +788,7 @@ AS $$
     FROM identity.account(wanted_session) AS a
     INNER JOIN identity.sessions AS s ON s.token_hash = wanted_session
     WHERE
-        s.started_at > statement_timestamp() - interval '10 minutes'
+        s.proven_at > statement_timestamp() - interval '10 minutes'
         AND (
             SELECT count(*) FROM identity.passkeys AS p
             WHERE p.operator_id = a.operator_id
@@ -819,7 +837,7 @@ BEGIN
             AND s.realm = 'operator'
             AND at < s.ends_at
             AND at < s.last_seen_at + interval '15 minutes'
-            AND s.started_at > at - interval '10 minutes'
+            AND s.proven_at > at - interval '10 minutes'
             AND (
                 SELECT count(*) FROM identity.passkeys AS p
                 WHERE p.operator_id = wanted_operator
@@ -1007,13 +1025,17 @@ $$;
 -- for an operator who does not exist. It takes the operator's row first, so a
 -- link being issued, a disable, or another tab's passkey waits, and what it
 -- checks stays true until it commits, under read committed only, so it
--- refuses any other level with TD002.
+-- refuses any other level with TD002. Redeemed, it ends the session the
+-- browser presented and starts the operator's, unproven: it rests on the link,
+-- so it is never fresh until a passkey login proves them (ADR-0069).
 CREATE FUNCTION redeem_invite(
     wanted_link bytea,
     wanted_operator bigint,
     wanted_credential bytea,
     wanted_passkey jsonb,
-    wanted_transports text
+    wanted_transports text,
+    wanted_session bytea,
+    wanted_presented bytea
 )
 RETURNS text
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
@@ -1056,6 +1078,11 @@ BEGIN
     END;
     -- Any other ceremony of theirs could only be refused now; it goes too.
     DELETE FROM identity.ceremonies AS c WHERE c.operator_id = wanted_operator;
+    DELETE FROM identity.sessions AS s
+    WHERE s.token_hash = wanted_presented AND s.realm = 'operator';
+    PERFORM identity.start_session(
+        wanted_session, 'operator', wanted_operator, false
+    );
     RETURN 'redeemed';
 END
 $$;
@@ -1238,12 +1265,12 @@ $$;
 
 -- No routine here is anyone's by default; Identity's role may run exactly the
 -- lookups it calls, so a helper added later is no one's until granted. It may
--- not call start_session; only login does. The database cannot check a
--- passkey's signature, though, so a caller with this role can do what an
--- operator can, for any operator: start a session through login and add a
+-- not call start_session; only login and redeem_invite do. The database cannot
+-- check a passkey's signature, though, so a caller with this role can do what
+-- an operator can, for any operator: start a session through login and add a
 -- passkey through an addition that session took, or remove an operator's
--- passkeys and join its own through a new link. Database access stays the
--- trust boundary (ADR-0061).
+-- passkeys and join, and log in, with its own through a new link. Database
+-- access stays the trust boundary (ADR-0061).
 REVOKE EXECUTE ON ALL ROUTINES IN SCHEMA identity FROM public;
 GRANT EXECUTE ON FUNCTION use_session(bytea, text), end_session(bytea, text),
 issue_invite(bytea, bigint), list_operators(), invitee(bytea),
@@ -1252,7 +1279,7 @@ begin_login(bytea, jsonb), signer(bytea), account(bytea),
 login(bytea, bigint, jsonb, jsonb, bytea, bytea), adder(bytea),
 begin_addition(bytea, bytea, bigint, jsonb), take_addition(bytea, bytea),
 add_passkey(bytea, bytea, bigint, bytea, jsonb, text),
-redeem_invite(bytea, bigint, bytea, jsonb, text),
+redeem_invite(bytea, bigint, bytea, jsonb, text, bytea, bytea),
 disable_operator(bigint), enable_operator(bigint), remove_passkeys(bigint),
 end_sessions(text, bigint)
 TO tetsu_identity;
@@ -1260,7 +1287,7 @@ TO tetsu_identity;
 -- A new owner needs CREATE on the schema at the moment it takes a function,
 -- and no longer after.
 GRANT CREATE ON SCHEMA identity TO tetsu_identity_lookup;
-ALTER FUNCTION start_session(bytea, text, bigint)
+ALTER FUNCTION start_session(bytea, text, bigint, boolean)
 OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION use_session(bytea, text) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION end_session(bytea, text) OWNER TO tetsu_identity_lookup;
@@ -1286,7 +1313,7 @@ OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION signer(bytea) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION login(bytea, bigint, jsonb, jsonb, bytea, bytea)
 OWNER TO tetsu_identity_lookup;
-ALTER FUNCTION redeem_invite(bytea, bigint, bytea, jsonb, text)
+ALTER FUNCTION redeem_invite(bytea, bigint, bytea, jsonb, text, bytea, bytea)
 OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION disable_operator(bigint) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION enable_operator(bigint) OWNER TO tetsu_identity_lookup;

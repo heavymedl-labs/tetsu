@@ -88,45 +88,36 @@ describe("a passkey island that joins", () => {
     expect(page.history.replaceState).toHaveBeenCalledWith(null, "", "/ops/join?from=mail");
   });
 
-  it("logs in with a new passkey at once, on the same page (ADR-0067)", async () => {
+  it("logs in on joining, with one ceremony and no second prompt (ADR-0069)", async () => {
     const host = island('action="join"');
     const page = browser();
     ready(host, page);
-    let signedIn: (next: string) => void = () => undefined;
-    run
-      .mockResolvedValueOnce("/ops/login")
-      .mockReturnValueOnce(new Promise((resolve) => (signedIn = resolve)));
-    button(host).click();
-    await vi.waitFor(() => expect(status(host)).toBe("Passkey created. Confirm once more to log in."));
-    expect(host.dataset.state).toBe("waiting");
-    signedIn("/ops");
-    await vi.waitFor(() => expect(host.dataset.state).toBe("done"));
+    answering("/ops");
+    await press(host);
     expect(run.mock.calls).toEqual([
       ["join", { link: "L1" }, device, expect.any(AbortSignal), expect.any(Function)],
-      ["login", {}, device, expect.any(AbortSignal), expect.any(Function)],
     ]);
-    expect([status(host), host.querySelector("[data-label]")?.textContent]).toEqual([
-      "Logged in.",
-      "Continue with passkey",
+    expect([status(host), host.dataset.state, host.querySelector("[data-label]")?.textContent]).toEqual([
+      "Passkey created. Logging you in.",
+      "done",
+      "Go",
     ]);
     expect(page.location.assign).toHaveBeenCalledWith("/ops");
   });
 });
 
-describe("a passkey island whose chained login is refused", () => {
-  it("leaves the button to log in when the browser refuses the chained prompt", async () => {
+describe("a passkey island whose join is refused", () => {
+  it("says the browser's refusal, keeps the invite's button, and starts nothing more", async () => {
     const host = island('action="join"');
     const page = browser();
     ready(host, page);
-    run.mockResolvedValueOnce("/ops/login").mockRejectedValueOnce(new DOMException("no", "NotAllowedError"));
+    run.mockRejectedValueOnce(new DOMException("no", "NotAllowedError"));
     await press(host);
-    await vi.waitFor(() => expect(host.dataset.state).toBe("ready"));
-    expect(status(host)).toBe("Passkey created. Continue with passkey to log in.");
+    await vi.waitFor(() => expect(host.dataset.state).toBe("failed"));
+    expect(status(host)).toBe("The passkey prompt closed without a passkey. Try again when you are ready.");
     expect(page.location.assign).not.toHaveBeenCalled();
-    answering("/ops");
-    await press(host);
-    expect(run).toHaveBeenCalledWith("login", {}, device, expect.any(AbortSignal), expect.any(Function));
-    expect(page.location.assign).toHaveBeenCalledWith("/ops");
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(host.querySelector("[data-label]")?.textContent).toBe("Go");
   });
 });
 
@@ -222,34 +213,40 @@ describe("a passkey island pressed again", () => {
   });
 });
 
-describe("a passkey island whose chained login is refused or ended", () => {
-  it("keeps the chained login's refusal from the server, rather than offering to log in", async () => {
+describe("a passkey island whose join the server refuses or a later press ends", () => {
+  it("says the server's refusal of a join in its words", async () => {
     const host = island('action="join"');
     ready(host, browser());
-    run
-      .mockResolvedValueOnce("/ops/login")
-      .mockRejectedValueOnce(new Refused("this login could not be completed"));
+    run.mockRejectedValueOnce(
+      new Refused(
+        "this invite has ended; if you have already joined, log in, or ask an operator for a new one",
+      ),
+    );
     await press(host);
     await vi.waitFor(() => expect(host.dataset.state).toBe("failed"));
-    expect(status(host)).toBe("This login could not be completed.");
+    expect(status(host)).toBe(
+      "This invite has ended; if you have already joined, log in, or ask an operator for a new one.",
+    );
+    expect(run).toHaveBeenCalledTimes(1);
   });
 
-  it("says nothing of a chained login another press ended", async () => {
+  it("says nothing of a join another press ended", async () => {
     const host = island('action="join"');
     ready(host, browser());
-    let chained: AbortSignal | undefined;
-    run.mockResolvedValueOnce("/ops/login").mockImplementationOnce((_action, _sent, _device, signal) => {
-      chained = signal;
+    let first: AbortSignal | undefined;
+    run.mockImplementationOnce((_action, _sent, _device, signal) => {
+      first = signal;
       return new Promise((_, refuse) =>
         signal.addEventListener("abort", () => refuse(new DOMException("ended", "AbortError"))),
       );
     });
     run.mockImplementationOnce(() => new Promise(() => undefined));
     button(host).click();
-    await vi.waitFor(() => expect(chained).toBeDefined());
+    await vi.waitFor(() => expect(first).toBeDefined());
     button(host).click();
     await new Promise((settled) => setTimeout(settled));
     expect([status(host), host.dataset.state]).toEqual(["Waiting for your device…", "waiting"]);
+    expect(run.mock.calls.map(([action]) => action)).toEqual(["join", "join"]);
   });
 });
 
@@ -376,23 +373,17 @@ describe("a passkey island's clock, across presses and states", () => {
     expect(status(host)).toBe(HINT);
   });
 
-  it("leaves the button to log in when a chained login times out", async () => {
+  it("says a join timed out, and offers it again, since no passkey was kept", async () => {
     const host = island('action="join"');
     ready(host, browser());
-    // The join's last request stops its clock, as a real one does, so only the chained login's own runs.
-    run.mockImplementationOnce(async (_action, _sent, _device, _signal, finishing) => {
-      finishing();
-      return "/ops/login";
-    });
     hanging();
     button(host).click();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(status(host)).toBe("Passkey created. Confirm once more to log in.");
     await vi.advanceTimersByTimeAsync(60_000);
-    expect([status(host), host.dataset.state]).toEqual([
-      "Passkey created. Continue with passkey to log in.",
-      "ready",
-    ]);
+    expect([host.dataset.state, button(host).disabled]).toEqual(["failed", false]);
+    expect(status(host)).toBe(
+      "Your device did not answer within a minute, so the prompt was closed. Try again, or use the device you set up.",
+    );
+    expect(run).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -414,13 +405,14 @@ describe("a passkey island's clock, once a ceremony ends", () => {
     expect([status(host), host.dataset.state]).toEqual(["This login could not be completed.", "failed"]);
   });
 
-  it("stops once a chained login falls back to its button", async () => {
+  it("stops once a join is done, so nothing is said over it", async () => {
     const host = island('action="join"');
     ready(host, browser());
-    run.mockResolvedValueOnce("/ops/login").mockRejectedValueOnce(new DOMException("no", "NotAllowedError"));
+    run.mockResolvedValueOnce("/ops");
     button(host).click();
     await vi.advanceTimersByTimeAsync(61_000);
-    expect(status(host)).toBe("Passkey created. Continue with passkey to log in.");
+    expect(status(host)).toBe("Passkey created. Logging you in.");
+    expect([host.dataset.state, run.mock.calls.length]).toEqual(["done", 1]);
   });
 
   it("stops once done, so nothing is said over it", async () => {

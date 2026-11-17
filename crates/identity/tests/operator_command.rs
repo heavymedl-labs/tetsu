@@ -310,7 +310,7 @@ async fn a_disable_waits_for_a_login_or_link_being_written_then_ends_it() {
     for (table, writes) in [
         (
             "sessions",
-            "SELECT identity.start_session(sha256('a'::bytea), 'operator', $1)",
+            "SELECT identity.start_session(sha256('a'::bytea), 'operator', $1, true)",
         ),
         (
             "invites",
@@ -365,7 +365,7 @@ async fn ending_sessions_waits_for_a_login_being_written() {
         let writing = admin.transaction().await.expect("begins");
         writing
             .execute(
-                "SELECT identity.start_session(sha256('a'::bytea), 'operator', $1)",
+                "SELECT identity.start_session(sha256('a'::bytea), 'operator', $1, true)",
                 &[&kurt.get()],
             )
             .await
@@ -635,7 +635,7 @@ async fn changes_that_wait_on_an_operator_need_read_committed() {
         "SELECT identity.end_sessions('operator', 1)",
         "SELECT identity.end_sessions('operator', null)",
         "SELECT identity.issue_invite(sha256('a'::bytea), 1)",
-        "SELECT identity.redeem_invite(sha256('a'::bytea), 1, sha256('c'::bytea), '{}', '')",
+        "SELECT identity.redeem_invite(sha256('a'::bytea), 1, sha256('c'::bytea), '{}', '', sha256('s'::bytea), null)",
         "SELECT identity.begin_join(sha256('t'::bytea), 1, sha256('a'::bytea), '{}')",
         "SELECT identity.enable_operator(1)",
         "SELECT * FROM identity.remove_passkeys(1)",
@@ -670,7 +670,7 @@ async fn changes_that_wait_on_an_operator_need_read_committed() {
 #[tokio::test]
 async fn spent_sessions_and_links_are_removed_but_not_counted() {
     let (database, operators, kurt) = with_kurt().await;
-    let spent = "SELECT identity.start_session(sha256('a'::bytea), 'operator', 1);
+    let spent = "SELECT identity.start_session(sha256('a'::bytea), 'operator', 1, true);
                  UPDATE identity.sessions SET last_seen_at = last_seen_at - interval '16 minutes';
                  SELECT identity.issue_invite(sha256('b'::bytea), 1);
                  UPDATE identity.invites SET ends_at = now() - interval '1 second'";
@@ -788,7 +788,7 @@ async fn an_addition_begun_as_its_session_ends_is_refused() {
     let (database, pool) = kurt_and_pool().await;
     as_admin(
         &database,
-        "SELECT identity.start_session(sha256('s'::bytea), 'operator', 1)",
+        "SELECT identity.start_session(sha256('s'::bytea), 'operator', 1, true)",
     )
     .await;
     let mut admin = connect(&database).await.expect("connects");
@@ -845,7 +845,7 @@ async fn a_session_starts_after_the_wait_that_held_it_up() {
         let writing = client.transaction().await.expect("begins");
         writing
             .execute(
-                "SELECT identity.start_session(sha256('a'::bytea), 'operator', 1)",
+                "SELECT identity.start_session(sha256('a'::bytea), 'operator', 1, true)",
                 &[],
             )
             .await

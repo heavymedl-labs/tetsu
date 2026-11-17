@@ -361,7 +361,7 @@ async fn adding_a_passkey_ends_the_operators_other_sessions() {
     let (operators, database, _, session) = logged_in().await;
     as_admin(
         &database,
-        "SELECT identity.start_session(sha256('other'::bytea), 'operator', 1)",
+        "SELECT identity.start_session(sha256('other'::bytea), 'operator', 1, true)",
     )
     .await;
     let (added, _) = add(&operators, &session, |response| response).await;
@@ -438,7 +438,7 @@ async fn a_session_that_is_not_fresh_adds_no_passkey() {
     let (operators, database, _, session) = logged_in().await;
     as_admin(
         &database,
-        "UPDATE identity.sessions SET started_at = now() - interval '11 minutes'",
+        "UPDATE identity.sessions SET proven_at = now() - interval '11 minutes'",
     )
     .await;
     assert_eq!(

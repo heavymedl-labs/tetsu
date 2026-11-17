@@ -81,9 +81,9 @@ starts, finds, and ends their sessions. `postgres_store(pool)` returns it over P
   browser says the passkey is not discoverable, and records it the same way, with that reason. Transports are
   taken as listed, as `WebAuthn` asks, and the ones `webauthn-rs` names are kept, once each and sorted, as a hint
   for later ceremonies. Every refusal reads the same to the browser, whichever part of Identity
-  refuses it. Joining starts no session: the operator's session comes from
-  a passkey login, which the join page begins at once on the same page, so it rests on the passkey, never
-  on the link ([ADR-0067](../../docs/adr/0067-sign-in-after-a-first-passkey.md)). Passkeys are discoverable, so
+  refuses it. Joining logs the operator in, in the same transaction, ending any session the browser presented; that
+  session rests on the link, so it is never fresh, and anything that needs a fresh login waits for a passkey login
+  ([ADR-0069](../../docs/adr/0069-logged-in-on-joining.md)). Passkeys are discoverable, so
   logging in needs no name, and the account picker shows each as "Tetsu operator · Name", the label first, where
   an authenticator's 64-byte cut never reaches it.
   The AAGUID, which names a passkey's provider but is unverified without attestation, is not kept: `webauthn-rs`

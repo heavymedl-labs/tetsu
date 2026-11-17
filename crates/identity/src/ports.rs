@@ -81,11 +81,13 @@ pub trait OperatorStore {
     ) -> impl Future<Output = Result<Option<TakenCeremony>, Error>> + Send;
 
     /// Stores an operator's first passkey and uses up the ceremony's link, in one transaction, and says what came of
-    /// it, or none for an operator who does not exist.
+    /// it, or none for an operator who does not exist. Redeemed, it ends the session the browser presented and starts
+    /// `session`, unproven, since it rests on the link (ADR-0069).
     fn redeem_invite(
         &self,
         ceremony: &TakenCeremony,
         passkey: &NewPasskey,
+        session: &SessionStart,
         actor: &Actor,
     ) -> impl Future<Output = Result<Option<Redemption>, Error>> + Send;
 
