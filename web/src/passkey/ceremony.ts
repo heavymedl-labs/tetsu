@@ -1,6 +1,7 @@
 // One passkey ceremony with Tetsu's server: begin, ask the device, finish. Logging in, joining, and adding a
 // passkey differ only in their endpoints and in which call they make on the device.
 
+import { call } from "../shared/http";
 import { assertion, type CreationJSON, creation, type RequestJSON, registration, request } from "./convert";
 
 export type Action = "login" | "join" | "add";
@@ -10,24 +11,6 @@ const ENDPOINTS: Record<Action, string> = {
   join: "/ops/join",
   add: "/ops/passkeys",
 };
-
-/** A refusal the server gave, in words a page may show. */
-export class Refused extends Error {}
-
-async function call(path: string, body: object, signal: AbortSignal): Promise<Record<string, unknown>> {
-  const response = await fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    signal,
-  });
-  // A proxy's or rate limiter's answer may not be JSON; a refusal is still the server's.
-  const json = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!response.ok) {
-    throw new Refused(typeof json.error === "string" ? json.error : "this request was refused");
-  }
-  return json;
-}
 
 /** Runs one ceremony on `device`, sending `sent` with both halves: the invite link, or the operator's form
  * token. `signal` ends it, its requests and the device's prompt alike, as when the person presses again, until
@@ -41,7 +24,7 @@ export async function ceremony(
   finishing: () => void,
 ): Promise<string> {
   const endpoint = ENDPOINTS[action];
-  const begun = await call(`${endpoint}/begin`, sent, signal);
+  const begun = await call(`${endpoint}/begin`, signal, sent);
   const signing = action === "login";
   const credential = signing
     ? await device.get(request(begun.options as RequestJSON, signal))
@@ -55,7 +38,7 @@ export async function ceremony(
   // A prompt can answer just as a later press ends this ceremony; an ended one sends nothing more.
   signal.throwIfAborted();
   finishing();
-  const finished = await call(`${endpoint}/finish`, { ...sent, ceremony: begun.ceremony, response }, signal);
+  const finished = await call(`${endpoint}/finish`, signal, { ...sent, ceremony: begun.ceremony, response });
   if (typeof finished.next !== "string") {
     // The server answered, so it kept what it was sent; this is no refusal, only an answer the page cannot follow.
     throw new Error("the server said nowhere to go next");

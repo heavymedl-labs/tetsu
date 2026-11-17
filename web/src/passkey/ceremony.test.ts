@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ceremony, Refused } from "./ceremony";
+import { Refused } from "../shared/http";
+import { ceremony } from "./ceremony";
 import fixture from "./fixtures/options.json";
 
 /** The server's answers, in order, as `fetch` gives them. */
@@ -122,7 +123,7 @@ describe("a ceremony that does not finish", () => {
   it("throws a plain refusal when the server gives no words, and when finishing is refused", async () => {
     serve([403, { error: 1 }]);
     await expect(ceremony("login", {}, device(signed), live(), vi.fn())).rejects.toThrow(
-      new Refused("this request was refused"),
+      new Refused("this request was refused", 403),
     );
     serve([200, { ceremony: "c", options: fixture.request }], [400, { error: "no" }]);
     await expect(ceremony("login", {}, device(signed), live(), vi.fn())).rejects.toThrow(new Refused("no"));
@@ -149,7 +150,7 @@ describe("a ceremony refused by the device or a proxy", () => {
     const fetch = vi.fn().mockResolvedValue(new Response("<h1>Bad gateway</h1>", { status: 502 }));
     vi.stubGlobal("fetch", fetch);
     await expect(ceremony("login", {}, device(signed), live(), vi.fn())).rejects.toThrow(
-      new Refused("this request was refused"),
+      new Refused("this request was refused", 502),
     );
   });
 

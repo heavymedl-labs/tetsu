@@ -6,7 +6,9 @@
 // - <tetsu-passkeys user="…" credentials="…"> wraps the list of an operator's passkeys, and tells their devices every
 //   passkey Tetsu holds, so a device can hide one Tetsu removed.
 
-import { type Action, ceremony, Refused } from "./ceremony";
+import { Refused } from "../shared/http";
+import { loggedOut } from "../shared/login";
+import { type Action, ceremony } from "./ceremony";
 
 /** The parts of the browser the islands use, passed to `define` so tests can stand in for them. */
 export interface Browser {
@@ -169,6 +171,12 @@ class Presses {
         return;
       }
       this.stopClock();
+      // A session that ended goes to log in, which says so and returns here after.
+      if (error instanceof Refused && error.status === 401) {
+        this.say(said(error), "failed");
+        this.island.browser.location.assign(loggedOut(this.island.browser.location.pathname));
+        return;
+      }
       // A join whose last request went out but whose answer was lost may have kept the passkey and spent
       // the link, so its link is no use again; logging in is. A refusal means the server kept nothing.
       if (this.action === "join" && this.lastSent.has(controller.signal) && !(error instanceof Refused)) {

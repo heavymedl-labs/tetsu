@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ceremony, Refused } from "./ceremony";
+import { Refused } from "../shared/http";
+import { ceremony } from "./ceremony";
 import { type Browser, define, ready, said, signal } from "./island";
 
 // The ceremony is ceremony.test.ts's; here it only answers, so each island's handling of it shows.
@@ -126,6 +127,17 @@ describe("a passkey island whose chained login is refused", () => {
     await press(host);
     expect(run).toHaveBeenCalledWith("login", {}, device, expect.any(AbortSignal), expect.any(Function));
     expect(page.location.assign).toHaveBeenCalledWith("/ops");
+  });
+
+  it("sends a person whose session ended to log in, to return here after", async () => {
+    run.mockRejectedValueOnce(new Refused("you are logged out; log in again", 401));
+    const host = island('action="add" form-token="F1"');
+    const page = browser();
+    page.location.pathname = "/ops";
+    ready(host, page);
+    await press(host);
+    expect(page.location.assign).toHaveBeenCalledWith("/ops/login?ended=1&next=/ops");
+    expect([status(host), host.dataset.state]).toEqual(["You are logged out; log in again.", "failed"]);
   });
 
   it("sends the page a login returns to, which the server checks again, or nothing the page lacks", async () => {
