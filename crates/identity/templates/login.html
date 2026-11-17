@@ -3,6 +3,7 @@
 {% block title %}Log in – Tetsu{% endblock %}
 {% block card %}
 <h1 class="mt-6 text-lg font-medium text-ink">Log in to Tetsu</h1>
-{% call ui::passkey("login") %}Continue with passkey{% endcall %}
+{% if ended %}<p class="mt-2 text-[13px] text-pretty text-muted">For your security, we logged you out.</p>{% endif %}
+{% call ui::passkey("login", next = next) %}Continue with passkey{% endcall %}
 <p class="mt-3 text-[13px] text-pretty text-muted">No passkey yet? Ask an operator for an invite.</p>
 {% endblock %}

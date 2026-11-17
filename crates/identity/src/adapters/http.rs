@@ -9,12 +9,12 @@ use askama::Template;
 use axum::Router;
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, State};
-use axum::http::{HeaderMap, HeaderName, StatusCode, header};
+use axum::http::{HeaderMap, HeaderName, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{MethodRouter, get, post};
 use serde_json::{Value, json};
 
-use crate::browser::{Change, ForChange, Logout, Origins};
+use crate::browser::{Change, ForChange, Logout, Origins, return_path};
 use crate::domain::{Actor, Answer, Ceremony, Device, Error, HeldPasskey, Realm, SessionToken};
 use crate::passkeys::{RelyingParty, base64url};
 use crate::ports::OperatorStore;
@@ -81,10 +81,14 @@ pub struct Web {
 
 #[derive(Template)]
 #[template(path = "login.html")]
-struct LoginPage {
+struct LoginPage<'a> {
     demo: bool,
     stylesheet: &'static str,
     script: &'static str,
+    /// The checked page a login returns to, or empty for the operator's own.
+    next: &'a str,
+    /// Whether the session ended on its own, which the page says.
+    ended: bool,
 }
 
 #[derive(Template)]
@@ -180,13 +184,26 @@ fn logged_in_route<S: OperatorStore + Send + Sync + 'static>(
     )
 }
 
-async fn login_page<S>(State(served): Shared<S>) -> Response {
+/// The login page. An operator already logged in is sent on, to the checked page it would return to or their own,
+/// since logging in again would only replace their session.
+async fn login_page<S: OperatorStore>(
+    State(served): Shared<S>,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
     let web = &served.web;
-    page(&LoginPage {
-        demo: web.demo,
-        stylesheet: web.stylesheet,
-        script: web.script,
-    })
+    let next = query(&uri, "next").and_then(return_path);
+    match served.operators.session(cookies(&headers)).await {
+        Ok(Some(_)) => see_other(next.unwrap_or(ACCOUNT)),
+        Ok(None) => page(&LoginPage {
+            demo: web.demo,
+            stylesheet: web.stylesheet,
+            script: web.script,
+            next: next.unwrap_or_default(),
+            ended: query(&uri, "ended") == Some("1"),
+        }),
+        Err(error) => unavailable_page(web, "could not show the login page", &error),
+    }
 }
 
 /// The join page. Its link's token travels in the address's fragment, which no browser sends, so it never
@@ -219,7 +236,11 @@ async fn account<S: OperatorStore>(State(served): Shared<S>, headers: HeaderMap)
 
 /// A path under `/ops` that Identity does not serve. Anyone without a live session is sent to log in, as at `/ops`,
 /// so the operator pages cannot be mapped from outside; an operator is told it is not found.
-async fn elsewhere<S: OperatorStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
+async fn elsewhere<S: OperatorStore>(
+    State(served): Shared<S>,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
     let web = &served.web;
     match served.operators.session(cookies(&headers)).await {
         Ok(Some(_)) => (
@@ -231,7 +252,7 @@ async fn elsewhere<S: OperatorStore>(State(served): Shared<S>, headers: HeaderMa
             }),
         )
             .into_response(),
-        Ok(None) => see_other(LOGIN),
+        Ok(None) => see_other(&return_to(uri.path())),
         Err(error) => unavailable_page(web, "could not answer an unknown operator path", &error),
     }
 }
@@ -331,7 +352,8 @@ async fn before<S: OperatorStore>(
             .await
             .map(|token| {
                 let cookie = Realm::Operator.session_cookie(&token);
-                ([(header::SET_COOKIE, cookie)], next(ACCOUNT)).into_response()
+                let to = sent["next"].as_str().and_then(return_path);
+                ([(header::SET_COOKIE, cookie)], next(to.unwrap_or(ACCOUNT))).into_response()
             }),
         Before::BeginJoin => operators
             .begin_join(&web.party, sent["link"].as_str().unwrap_or_default())
@@ -403,8 +425,13 @@ async fn logout<S: OperatorStore>(
             };
             (StatusCode::FORBIDDEN, page(&refused)).into_response()
         }
+        // The browser also drops what it cached of the pages, so Back shows none of them. Only the cache: clearing
+        // cookies would end its sessions in every realm on the host.
         Ok(Logout::Ended | Logout::NothingToEnd) => (
-            [(header::SET_COOKIE, Realm::Operator.cleared_cookie())],
+            [
+                (header::SET_COOKIE, Realm::Operator.cleared_cookie()),
+                (CLEAR_SITE_DATA, "\"cache\"".to_string()),
+            ],
             see_other(LOGIN),
         )
             .into_response(),
@@ -474,6 +501,7 @@ impl IntoResponse for Refused {
 }
 
 const SEC_FETCH_SITE: HeaderName = HeaderName::from_static("sec-fetch-site");
+const CLEAR_SITE_DATA: HeaderName = HeaderName::from_static("clear-site-data");
 
 /// The request's `Sec-Fetch-Site`, if sent. One sent but not readable as text counts as an empty value, which no
 /// check admits, never as one not sent, so a mangled header cannot stand in for an older browser's silence.
@@ -568,8 +596,26 @@ fn page(page: &impl Template) -> Response {
     (headers, body).into_response()
 }
 
-fn see_other(path: &'static str) -> Response {
-    (StatusCode::SEE_OTHER, [(header::LOCATION, path)]).into_response()
+fn see_other(path: &str) -> Response {
+    (
+        StatusCode::SEE_OTHER,
+        [(header::LOCATION, path.to_string())],
+    )
+        .into_response()
+}
+
+/// The login page, asked to return to `path` when that is a page a login may return to.
+fn return_to(path: &str) -> String {
+    return_path(path).map_or_else(|| LOGIN.to_string(), |path| format!("{LOGIN}?next={path}"))
+}
+
+/// A value the address's query gives `name`, as written. Only values the pages check before use are read, and a
+/// checked one needs no decoding.
+fn query<'a>(uri: &'a Uri, name: &str) -> Option<&'a str> {
+    uri.query()?.split('&').find_map(|pair| {
+        pair.strip_prefix(name)
+            .and_then(|rest| rest.strip_prefix('='))
+    })
 }
 
 /// A state-changing request, as Identity's checks read it.

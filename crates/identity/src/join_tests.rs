@@ -169,7 +169,7 @@ pub(crate) fn failure(result: Result<(), Error>) -> String {
 
 fn not_joining() -> Result<OperatorId, Error> {
     Err(Error::Invalid(
-        "this invite link has ended or is not valid".to_string(),
+        "this invite has ended; ask an operator for a new one".to_string(),
     ))
 }
 

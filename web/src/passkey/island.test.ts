@@ -128,6 +128,20 @@ describe("a passkey island whose chained login is refused", () => {
     expect(page.location.assign).toHaveBeenCalledWith("/ops");
   });
 
+  it("sends the page a login returns to, which the server checks again, or nothing the page lacks", async () => {
+    for (const [attributes, sent] of [
+      ['action="login" next="/ops/passkeys"', { next: "/ops/passkeys" }],
+      ['action="login"', {}],
+    ] as const) {
+      run.mockReset();
+      run.mockResolvedValue("/ops/passkeys");
+      const host = island(attributes);
+      ready(host, browser());
+      await press(host);
+      expect(run).toHaveBeenCalledWith("login", sent, device, expect.any(AbortSignal), expect.any(Function));
+    }
+  });
+
   it("sends the operator's form token when adding a passkey, or none the page lacks", async () => {
     for (const [attributes, form] of [
       ['action="add" form-token="F1"', "F1"],
@@ -418,7 +432,7 @@ describe("a passkey island finishing", () => {
     await vi.waitFor(() => expect(button(host).disabled).toBe(true));
     button(host).click();
     expect(run).toHaveBeenCalledTimes(1);
-    answer(new Refused("this invite link has ended or is not valid"));
+    answer(new Refused("this invite has ended; ask an operator for a new one"));
     await vi.waitFor(() => expect(host.dataset.state).toBe("failed"));
     expect(button(host).disabled).toBe(false);
   });

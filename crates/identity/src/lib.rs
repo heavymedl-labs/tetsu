@@ -19,6 +19,8 @@ mod http_tests;
 #[cfg(test)]
 mod join_tests;
 #[cfg(test)]
+mod lifecycle_tests;
+#[cfg(test)]
 mod login_tests;
 
 pub use adapters::http::{PATHS, Web, router};

@@ -1,6 +1,6 @@
 // The passkey islands (ADR-0031): light-DOM Web Components that add behavior to markup the server renders.
 //
-// - <tetsu-passkey action="login|join|add" form-token="…"> wraps a button and a status line, and runs one
+// - <tetsu-passkey action="login|join|add" form-token="…" next="…"> wraps a button and a status line, and runs one
 //   passkey ceremony when the button is pressed. Its state is an attribute, data-state, of ready, waiting, done, or
 //   failed, for styles to read (ADR-0032).
 // - <tetsu-passkeys user="…" credentials="…"> wraps the list of an operator's passkeys, and tells their devices every
@@ -47,15 +47,19 @@ export function said(error: unknown): string {
   return failed;
 }
 
-/** What both halves of a ceremony send: a join's link, which leaves the address bar at once, or the
- * operator's form token. */
+/** What both halves of a ceremony send: a join's link, which leaves the address bar at once, the operator's form
+ * token, or the page a login returns to, which the server checks again. */
 function sentFor(action: Action, host: HTMLElement, browser: Browser): Record<string, string> {
   if (action === "join") {
     const link = browser.location.hash.slice(1);
     browser.history.replaceState(null, "", `${browser.location.pathname}${browser.location.search}`);
     return { link };
   }
-  return action === "add" ? { form: host.getAttribute("form-token") ?? "" } : {};
+  if (action === "add") {
+    return { form: host.getAttribute("form-token") ?? "" };
+  }
+  const next = host.getAttribute("next");
+  return next === null ? {} : { next };
 }
 
 /** The parts of a `<tetsu-passkey>` it works through, if it has them all and names an action it knows. */

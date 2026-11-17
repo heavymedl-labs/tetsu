@@ -38,27 +38,27 @@ fn reported(about: &str) -> bool {
 }
 
 /// A response, read whole.
-struct Reply {
-    status: u16,
+pub(crate) struct Reply {
+    pub(crate) status: u16,
     head: String,
-    body: String,
+    pub(crate) body: String,
 }
 
 impl Reply {
-    fn header(&self, name: &str) -> Option<&str> {
+    pub(crate) fn header(&self, name: &str) -> Option<&str> {
         self.head.lines().find_map(|line| {
             let (found, value) = line.split_once(": ")?;
             found.eq_ignore_ascii_case(name).then_some(value)
         })
     }
 
-    fn json(&self) -> Value {
+    pub(crate) fn json(&self) -> Value {
         serde_json::from_str(&self.body).expect("JSON")
     }
 }
 
 /// Serves Identity's routes on a port of their own, over a fresh database with Kurt Medley's link issued.
-async fn serving() -> (SocketAddr, TestDatabase, String) {
+pub(crate) async fn serving() -> (SocketAddr, TestDatabase, String) {
     let (operators, database, _, link) = with_link().await;
     (serve(operators).await, database, link)
 }
@@ -112,7 +112,7 @@ async fn send(
 }
 
 /// What the passkey script sends: JSON, from the site itself, with the browser's cookie if it has one.
-async fn post(address: SocketAddr, path: &str, cookie: &str, body: &Value) -> Reply {
+pub(crate) async fn post(address: SocketAddr, path: &str, cookie: &str, body: &Value) -> Reply {
     let headers = [
         ("Origin", ORIGIN),
         ("Sec-Fetch-Site", "same-origin"),
@@ -126,13 +126,13 @@ async fn post(address: SocketAddr, path: &str, cookie: &str, body: &Value) -> Re
     send(address, "POST", path, &headers, &body.to_string()).await
 }
 
-async fn get(address: SocketAddr, path: &str, cookie: &str) -> Reply {
+pub(crate) async fn get(address: SocketAddr, path: &str, cookie: &str) -> Reply {
     send(address, "GET", path, &[("Cookie", cookie)], "").await
 }
 
 /// Joins with the link through the pages' endpoints, as the script would, and returns the passkey the device
 /// keeps.
-async fn join(address: SocketAddr, link: &str) -> Passkey {
+pub(crate) async fn join(address: SocketAddr, link: &str) -> Passkey {
     let begun = post(address, "/ops/join/begin", "", &json!({ "link": link }))
         .await
         .json();
@@ -152,20 +152,28 @@ async fn join(address: SocketAddr, link: &str) -> Passkey {
     kept
 }
 
-/// Logs in through the pages' endpoints, as the script would, and returns the session cookie set.
-async fn login(address: SocketAddr, passkey: Passkey) -> String {
+/// Logs in through the pages' endpoints, as the script would, sending `next` if given, and returns how finishing
+/// answered.
+pub(crate) async fn login_sending(
+    address: SocketAddr,
+    passkey: Passkey,
+    next: Option<&str>,
+) -> Reply {
     let begun = post(address, "/ops/login/begin", "", &json!({}))
         .await
         .json();
     let response = authenticate(&begun["options"].to_string(), ORIGIN, passkey, true).await;
     let response: Value = serde_json::from_str(&response).expect("JSON");
-    let finished = post(
-        address,
-        "/ops/login/finish",
-        "",
-        &json!({"ceremony": begun["ceremony"], "response": response}),
-    )
-    .await;
+    let mut finish = json!({"ceremony": begun["ceremony"], "response": response});
+    if let Some(next) = next {
+        finish["next"] = json!(next);
+    }
+    post(address, "/ops/login/finish", "", &finish).await
+}
+
+/// Logs in through the pages' endpoints, as the script would, and returns the session cookie set.
+pub(crate) async fn login(address: SocketAddr, passkey: Passkey) -> String {
+    let finished = login_sending(address, passkey, None).await;
     assert_eq!(
         (finished.status, finished.json()),
         (200, json!({"next": "/ops"}))
@@ -175,7 +183,7 @@ async fn login(address: SocketAddr, passkey: Passkey) -> String {
 }
 
 /// The form token the operator's page carries.
-fn form_on(page: &str) -> String {
+pub(crate) fn form_on(page: &str) -> String {
     let (_, after) = page
         .split_once("name=\"form\" value=\"")
         .expect("a form token");
@@ -184,7 +192,7 @@ fn form_on(page: &str) -> String {
 
 /// Kurt Medley, joined and logged in through the pages: the server, the database, his cookie, and the form token
 /// his page carries.
-async fn logged_in() -> (SocketAddr, TestDatabase, String, String) {
+pub(crate) async fn logged_in() -> (SocketAddr, TestDatabase, String, String) {
     let (address, database, link) = serving().await;
     let passkey = join(address, &link).await;
     let cookie = login(address, passkey).await;
@@ -227,7 +235,7 @@ async fn add_passkey(address: SocketAddr, cookie: &str, form: &str) -> Reply {
 }
 
 /// Posts the operator page's logout form from `origin`.
-async fn logout(address: SocketAddr, origin: &str, cookie: &str, form: &str) -> Reply {
+pub(crate) async fn logout(address: SocketAddr, origin: &str, cookie: &str, form: &str) -> Reply {
     let headers = [("Origin", origin), ("Cookie", cookie)];
     send(
         address,
@@ -394,9 +402,10 @@ async fn an_unknown_operator_path_is_a_login_or_not_found() {
     for path in ["/ops/nowhere", "/ops/a/b"] {
         for logged_out in ["", unknown.as_str()] {
             let page = get(address, path, logged_out).await;
+            let back = format!("/ops/login?next={path}");
             assert_eq!(
                 (page.status, page.header("location")),
-                (303, Some("/ops/login")),
+                (303, Some(back.as_str())),
                 "{path} {logged_out}"
             );
         }
@@ -495,12 +504,12 @@ async fn refused_ceremonies_get_their_one_refusal() {
         (
             "/ops/join/begin",
             json!({"link": "not a link"}),
-            "this invite link has ended or is not valid",
+            "this invite has ended; ask an operator for a new one",
         ),
         (
             "/ops/join/finish",
             json!({}),
-            "this invite link has ended or is not valid",
+            "this invite has ended; ask an operator for a new one",
         ),
     ];
     for (path, body, refusal) in said {

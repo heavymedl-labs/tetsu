@@ -1,10 +1,10 @@
 {#- The passkey island around the one passkey action a page offers. `<tetsu-passkey>` enables its button once it can
     run the action, and keeps its state in `data-state`, which styles read through the group: while it waits, three
     slots of the brand's grid book in beside the label; what it came to, failed or done, takes its color and
-    settles in. -#}
+    settles in. A login's `next` is the checked page it returns to. -#}
 {% import "../../../web/templates/components.html" as shared %}
-{% macro passkey(action, form = "", secondary = false) %}
-<tetsu-passkey action="{{ action }}"{% if !form.is_empty() %} form-token="{{ form }}"{% endif %} class="group/passkey mt-8 block">
+{% macro passkey(action, form = "", secondary = false, next = "") %}
+<tetsu-passkey action="{{ action }}"{% if !form.is_empty() %} form-token="{{ form }}"{% endif %}{% if !next.is_empty() %} next="{{ next }}"{% endif %} class="group/passkey mt-8 block">
 <button type="button" disabled class="gap-2 disabled:cursor-not-allowed disabled:opacity-50 {% call shared::button_style(secondary, false, true) %}{% endcall %}">
 <span aria-hidden="true" class="hidden gap-[3px] group-data-[state=waiting]/passkey:inline-flex">
 <span class="size-[5px] rounded-[1px] bg-current motion-safe:animate-[tetsu-pending_900ms_ease-in-out_infinite]"></span>

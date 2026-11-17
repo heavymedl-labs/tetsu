@@ -219,10 +219,79 @@ fn port_fits(scheme: &str, port: &str) -> bool {
         .is_ok_and(|number| number != 0 && number != default && number.to_string() == port)
 }
 
+/// The longest return path a login keeps; an operator page's address is far shorter.
+const LONGEST_RETURN: usize = 120;
+
+/// Where a login may send the browser next, if `raw` is one of the operator pages: `/ops`, or a path under it
+/// written only in ASCII letters, digits, `-`, `_`, and `.`, with no empty, `.`, or `..` segment. So it can name no
+/// other site, scheme, or realm, and needs no decoding, which leaves nothing for a browser to read differently
+/// (OWASP, "Unvalidated Redirects and Forwards").
+#[must_use]
+pub fn return_path(raw: &str) -> Option<&str> {
+    let rest = raw.strip_prefix("/ops")?;
+    let plain = |segment: &str| {
+        !matches!(segment, "" | "." | "..")
+            && segment
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+    };
+    let fits = raw.len() <= LONGEST_RETURN
+        && (rest.is_empty()
+            || rest
+                .strip_prefix('/')
+                .is_some_and(|rest| rest.split('/').all(plain)));
+    fits.then_some(raw)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use proptest::prelude::*;
+
+    #[test]
+    fn a_return_path_is_an_operator_page_written_plainly() {
+        for path in ["/ops", "/ops/passkeys", "/ops/a-b/c_d/e.f", "/ops/2026"] {
+            assert_eq!(return_path(path), Some(path), "{path}");
+        }
+    }
+
+    #[test]
+    fn a_return_path_names_no_other_site_scheme_or_page() {
+        let long = format!("/ops/{}", "a".repeat(200));
+        for path in [
+            "",
+            "/",
+            "/opsx",
+            "/ops/",
+            "//evil.example/ops",
+            "/ops//evil.example",
+            "/ops/../login",
+            "/ops/./a",
+            "/ops/a/..",
+            "/ops\\evil.example",
+            "/ops/%2e%2e",
+            "/ops/a?b",
+            "/ops/a#b",
+            "/ops/a b",
+            "/ops/é",
+            "https://evil.example/ops",
+            "javascript:alert(1)",
+            "ops/a",
+            long.as_str(),
+        ] {
+            assert_eq!(return_path(path), None, "{path}");
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn a_return_path_is_either_refused_or_a_plain_operator_page(raw in "\\PC{0,40}") {
+            if let Some(path) = return_path(&raw) {
+                prop_assert!(path == "/ops" || path.starts_with("/ops/"));
+                prop_assert!(!path.contains("//") && !path.split('/').any(|part| part == ".."));
+            }
+        }
+    }
 
     fn token() -> SessionToken {
         SessionToken::parse(&"ab".repeat(32)).expect("a token")
