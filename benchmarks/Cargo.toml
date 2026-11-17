@@ -39,3 +39,7 @@ tower-http = { version = "0.7", features = ["trace", "timeout", "request-id"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 compio = { version = "0.19", features = ["macros", "runtime", "net", "io-uring"] }
 monoio = { version = "0.2", features = ["iouring", "sync"] }
+
+# Not product code, so it keeps rustc's and clippy's defaults rather than the workspace's lints: it measures with
+# libc's getrusage, which needs unsafe, and unwraps freely.
+[lints]

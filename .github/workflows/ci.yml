@@ -99,6 +99,9 @@ jobs:
         if: steps.base.outputs.same != 'true'
         with:
           version: "0.13.7"
+          # uv only installs the Python tools, which the tools cache already keeps by exact key; a cache of its own,
+          # keyed on no file, would never be invalidated.
+          enable-cache: false
       - run: scripts/install-tools.sh
         if: steps.base.outputs.same != 'true'
       # After a force push the old head is on no branch, so fetch it by its SHA.
