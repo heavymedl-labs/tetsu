@@ -222,14 +222,48 @@ def scan_line(path, text, previous):
         yield "test-made-easier", path, text
 
 
-def scan_tests(removed, deleted):
+def renamed_tests(merge_base):
+    """Each test file git sees renamed since the base to another test file, old path to new. Only these
+    count as moved, not deleted; a test renamed out of the test folders is still deleted."""
+    fields = git("diff", "--find-renames", "--name-status", "-z", "--no-color", merge_base, "--").split("\0")
+    moved, at = {}, 0
+    while at < len(fields) - 1:
+        status = fields[at]
+        if status.startswith("R"):
+            old, new = fields[at + 1], fields[at + 2]
+            if TEST_PATH.search(old) and TEST_PATH.search(new):
+                moved[old] = new
+            at += 3
+        else:
+            at += 2
+    return moved
+
+
+def is_assertion(path, text):
+    in_test_file = TEST_PATH.search(path) and ASSERTION.search(text)
+    return in_test_file or (path.endswith(".rs") and RUST_TEST.search(text))
+
+
+def scan_tests(removed, added, deleted, moved):
+    """Flags a deleted test file, and the removed assertions of any file left with fewer than it had.
+    Assertions are counted, not matched, so one reworded, or reflowed across lines, is not lost; a renamed
+    test file's are counted against its new path."""
     for path in deleted:
-        if TEST_PATH.search(path):
+        if TEST_PATH.search(path) and path not in moved:
             yield "test-deleted", path, "file deleted"
+    lost = {}
     for path, text in removed:
-        in_test_file = TEST_PATH.search(path) and path not in deleted and ASSERTION.search(text)
-        if in_test_file or (path.endswith(".rs") and RUST_TEST.search(text)):
-            yield "assertion-removed", path, text
+        whole_test_deleted = TEST_PATH.search(path) and path in deleted and path not in moved
+        if not whole_test_deleted and is_assertion(path, text):
+            lost.setdefault(moved.get(path, path), []).append((path, text))
+    kept = {}
+    for path, text in added:
+        if is_assertion(path, text):
+            kept[path] = kept.get(path, 0) + 1
+    for key, lines in lost.items():
+        if len(lines) > kept.get(key, 0):
+            for path, text in lines:
+                yield "assertion-removed", path, text
 
 
 def scan_protected(added, removed, created):
@@ -362,7 +396,7 @@ def main():
         added, removed, deleted, created = parse_diff(diff)
         findings = [
             *scan_code(added),
-            *scan_tests(removed, deleted),
+            *scan_tests(removed, added, deleted, renamed_tests(merge_base)),
             *scan_protected(added, removed, created),
             *scan_secret_guards(added, removed),
             *scan_secret_files(created, diff),

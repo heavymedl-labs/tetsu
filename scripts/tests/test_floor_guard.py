@@ -227,6 +227,39 @@ class Tests(GuardCase):
         write(self.repo / "tests" / "test_a.py", "def test_a():\n    pass\n")
         self.assertFlags("assertion-removed")
 
+    def test_rewording_an_assertion_passes(self):
+        write(self.repo / "tests" / "test_a.py", "def test_a():\n    assert 1 + 0 == 1\n")
+        self.assertEqual(self.guard().returncode, 0)
+
+    def test_reflowing_a_rust_assertion_across_lines_passes(self):
+        write(self.repo / "src" / "lib.rs", "#[test]\nfn a() { assert_eq!(1, 1); }\n")
+        self.commit("add inline test")
+        self.git("tag", "-f", "base")
+        reflowed = "#[test]\nfn a() {\n    assert_eq!(\n        1,\n        1\n    );\n}\n"
+        write(self.repo / "src" / "lib.rs", reflowed)
+        self.assertEqual(self.guard().returncode, 0)
+
+    def test_flags_fewer_assertions_than_before(self):
+        write(self.repo / "tests" / "test_a.py", "def test_a():\n    assert 1 == 1\n    assert 2 == 2\n")
+        self.commit("two assertions")
+        self.git("tag", "-f", "base")
+        write(self.repo / "tests" / "test_a.py", "def test_a():\n    assert 1 + 0 == 1\n")
+        self.assertFlags("assertion-removed")
+
+    def test_renaming_a_test_file_passes(self):
+        self.git("mv", "tests/test_a.py", "tests/test_b.py")
+        self.commit("rename")
+        self.assertEqual(self.guard().returncode, 0)
+
+    def test_flags_a_renamed_test_file_with_fewer_assertions(self):
+        write(self.repo / "tests" / "test_a.py", "def test_a():\n    assert 1 == 1\n    assert 2 == 2\n")
+        self.commit("two assertions")
+        self.git("tag", "-f", "base")
+        self.git("mv", "tests/test_a.py", "tests/test_b.py")
+        write(self.repo / "tests" / "test_b.py", "def test_a():\n    assert 1 == 1\n")
+        self.commit("rename and drop one")
+        self.assertFlags("assertion-removed")
+
     def test_flags_a_test_moved_out_of_the_test_folder(self):
         self.git("mv", "tests/test_a.py", "src/a.py")
         self.assertFlags("test-deleted")
