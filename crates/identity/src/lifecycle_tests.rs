@@ -366,3 +366,41 @@ async fn joining_logs_in_with_a_session_that_is_never_fresh() {
     let proven = "SELECT (proven_at IS NULL)::text FROM identity.sessions";
     assert_eq!(text(&database, proven).await, "true");
 }
+
+/// Every operator page carries the color scheme control in its footer, with the visitor's kept scheme checked, and
+/// loads the script that keeps a new choice (ADR-0070).
+#[tokio::test]
+async fn operator_pages_arrive_in_the_kept_scheme() {
+    let (address, _database, cookie, _) = logged_in().await;
+    let script = "<script type=\"module\" src=\"/assets/scheme-test.js\">";
+    for (path, kept) in [
+        ("/ops/login", "theme=dark"),
+        ("/ops/join", "theme=dark"),
+        ("/ops", "theme=dark"),
+        ("/ops/nowhere", "theme=dark"),
+    ] {
+        let both = format!("{cookie}; {kept}");
+        let sent = if path.starts_with("/ops/log") || path == "/ops/join" {
+            kept
+        } else {
+            both.as_str()
+        };
+        let page = get(address, path, sent).await;
+        for shown in [
+            script,
+            "<tetsu-scheme",
+            "id=\"tetsu-scheme-dark\" class=\"sr-only\" checked",
+            "<meta name=\"color-scheme\" content=\"dark\">",
+        ] {
+            assert!(page.body.contains(shown), "{shown} on {path}");
+        }
+    }
+    let plain = get(address, "/ops/login", "").await;
+    assert!(
+        plain
+            .body
+            .contains("id=\"tetsu-scheme-system\" class=\"sr-only\" checked"),
+        "{}",
+        plain.body
+    );
+}

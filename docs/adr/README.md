@@ -74,6 +74,7 @@ number, and add a row below. Never renumber.
 | [0066](0066-public-repository.md) | A public repository | Changing who can see or run the repository, or licensing it | Accepted |
 | [0067](0067-sign-in-after-a-first-passkey.md) | Logging in after a first passkey | Building invites, joining, or signup for any realm | Accepted |
 | [0069](0069-logged-in-on-joining.md) | Logged in on joining | Building joining or freshness for operators and staff | Accepted |
+| [0070](0070-a-remembered-color-scheme.md) | A remembered color scheme, in the footer | Changing the color scheme control or what it remembers | Proposed |
 | [0068](0068-no-demo-note.md) | No demo note | Changing what marks a demo page | Proposed |
 
 ## Open decisions

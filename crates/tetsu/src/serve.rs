@@ -10,9 +10,10 @@ use axum::Router;
 use axum::body::Bytes;
 use axum::extract::rejection::PathRejection;
 use axum::extract::{Path, State};
-use axum::http::{HeaderName, HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{MethodRouter, get};
+use tetsu_kernel::Scheme;
 use tower_http::CompressionLevel;
 use tower_http::compression::CompressionLayer;
 use tower_http::compression::predicate::{DefaultPredicate, NotForContentType, Predicate};
@@ -23,6 +24,8 @@ use tower_http::compression::predicate::{DefaultPredicate, NotForContentType, Pr
 struct HomePage {
     demo: bool,
     stylesheet: &'static str,
+    /// The radio the footer's color scheme control checks (ADR-0070).
+    scheme: &'static str,
 }
 
 /// The site's page for a path nothing answers.
@@ -31,6 +34,7 @@ struct HomePage {
 struct NotFoundPage {
     demo: bool,
     stylesheet: &'static str,
+    scheme: &'static str,
 }
 
 /// How long requests in progress may take to finish once the server is asked to stop. A client that never
@@ -66,13 +70,15 @@ const DAILY: &str = "public, max-age=86400";
 /// answers, which is [`not_found`] outside tests. Modules set no fallback, since axum panics when two merged
 /// routers both have one (#90). In a demo environment every response also asks search engines not to index it
 /// (ADR-0018).
-pub fn app(modules: Router, demo: bool, not_found: fn(bool) -> Response) -> Router {
+pub fn app(modules: Router, demo: bool, not_found: fn(bool, Scheme) -> Response) -> Router {
     site_routes(demo)
         .into_iter()
         .fold(Router::new(), |site, (path, route)| site.route(path, route))
         .merge(modules)
         .route_layer(axum::middleware::from_fn(crate::logs::route))
-        .fallback(move || std::future::ready(not_found(demo)))
+        .fallback(move |headers: HeaderMap| {
+            std::future::ready(not_found(demo, scheme_of(&headers)))
+        })
         .layer(axum::middleware::map_response_with_state(demo, secure))
         .layer(compression())
         .layer(axum::middleware::from_fn(crate::logs::request))
@@ -87,15 +93,26 @@ fn compression() -> CompressionLayer<impl Predicate> {
         .compress_when(DefaultPredicate::new().and(NotForContentType::const_new("font/")))
 }
 
-/// The site's page for a path nothing answers. It is the site's own, since a module's page would speak for
-/// every other module's paths too.
-pub fn not_found(demo: bool) -> Response {
+/// The site's page for a path nothing answers, in the visitor's color scheme. It is the site's own, since a module's
+/// page would speak for every other module's paths too.
+pub fn not_found(demo: bool, scheme: Scheme) -> Response {
     html(
         StatusCode::NOT_FOUND,
         &NotFoundPage {
             demo,
             stylesheet: assets::STYLESHEET,
+            scheme: scheme.as_str(),
         },
+    )
+}
+
+/// The color scheme a request's cookies keep (ADR-0070).
+fn scheme_of(headers: &HeaderMap) -> Scheme {
+    Scheme::from_cookies(
+        headers
+            .get_all(header::COOKIE)
+            .iter()
+            .filter_map(|value| value.to_str().ok()),
     )
 }
 
@@ -112,7 +129,7 @@ fn favicon(demo: bool) -> Response {
 
 fn asset(file: &str, demo: bool) -> Response {
     let Some(found) = assets::find(&format!("/assets/{file}")) else {
-        return not_found(demo);
+        return not_found(demo, Scheme::System);
     };
     (
         [
@@ -131,36 +148,50 @@ fn html(status: StatusCode, page: &impl Template) -> Response {
     html_body(status, page.render().ok().map(Bytes::from))
 }
 
-/// A page already rendered, or `None` when it could not be, which answers that the site is unavailable.
+/// The site's pages' policy: the site's, with Tetsu's own script, which keeps the color scheme (ADR-0070), and still
+/// nothing inline.
+const PAGE_POLICY: &str = "default-src 'none'; object-src 'none'; script-src 'self'; style-src 'self'; \
+                           font-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; \
+                           frame-ancestors 'none'";
+
+/// A page already rendered, or `None` when it could not be, which answers that the site is unavailable. Pages differ
+/// by the visitor's color scheme cookie, so a cache keeps one for each.
 fn html_body(status: StatusCode, body: Option<Bytes>) -> Response {
     let Some(body) = body else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
-    let mut response = (status, body).into_response();
-    response.headers_mut().insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("text/html; charset=utf-8"),
-    );
-    response
+    let headers = [
+        (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+        (header::CONTENT_SECURITY_POLICY, PAGE_POLICY),
+        (header::VARY, "Cookie"),
+    ];
+    (status, headers, body).into_response()
 }
 
 /// Tetsu's own routes. Every route the site adds goes here, never straight into [`app`], and each starts with a
 /// name no tenant may hold, which a test checks, so none hides a tenant. Identity's routes are checked the same
 /// way.
 fn site_routes(demo: bool) -> Vec<(&'static str, MethodRouter)> {
-    // The root page depends only on `demo` and the stylesheet's name, which hold while the process runs, so it is
-    // rendered once here rather than on every request. Each response shares its bytes.
-    let home = HomePage {
-        demo,
-        stylesheet: assets::STYLESHEET,
-    }
-    .render()
-    .ok()
-    .map(Bytes::from);
+    // The root page depends only on `demo`, the stylesheet's name, which hold while the process runs, and the
+    // visitor's color scheme, so it is rendered once in each scheme here rather than on every request. Each response
+    // shares its bytes.
+    let homes = [Scheme::System, Scheme::Light, Scheme::Dark].map(|scheme| {
+        HomePage {
+            demo,
+            stylesheet: assets::STYLESHEET,
+            scheme: scheme.as_str(),
+        }
+        .render()
+        .ok()
+        .map(Bytes::from)
+    });
     vec![
         (
             "/",
-            get(move || std::future::ready(html_body(StatusCode::OK, home.clone()))),
+            get(move |headers: HeaderMap| {
+                let home = homes[scheme_of(&headers) as usize].clone();
+                std::future::ready(html_body(StatusCode::OK, home))
+            }),
         ),
         (
             "/favicon.ico",
@@ -170,9 +201,10 @@ fn site_routes(demo: bool) -> Vec<(&'static str, MethodRouter)> {
             "/assets/{file}",
             get(move |file: Result<Path<String>, PathRejection>| {
                 // A path that does not decode, such as one that is not UTF-8, names no built file.
-                std::future::ready(
-                    file.map_or_else(|_| not_found(demo), |Path(file)| asset(&file, demo)),
-                )
+                std::future::ready(file.map_or_else(
+                    |_| not_found(demo, Scheme::System),
+                    |Path(file)| asset(&file, demo),
+                ))
             }),
         ),
     ]
@@ -331,11 +363,11 @@ mod tests {
         }
     }
 
-    /// Stands in for the site's own not found page, so these tests can tell which page answered.
-    fn not_found(demo: bool) -> Response {
+    /// Stands in for the site's own not found page, so these tests can tell which page answered, and in which scheme.
+    fn not_found(demo: bool, scheme: Scheme) -> Response {
         (
             StatusCode::NOT_FOUND,
-            format!("demo {demo}: module not found"),
+            format!("demo {demo}, {}: module not found", scheme.as_str()),
         )
             .into_response()
     }
@@ -426,18 +458,28 @@ mod tests {
     async fn a_path_nothing_answers_gets_the_not_found_page_for_its_environment() {
         let deeper = get_path("/studio/deeper").await;
         assert!(deeper.starts_with("HTTP/1.1 404"), "{deeper}");
-        assert!(deeper.ends_with("demo true: module not found"), "{deeper}");
+        assert!(
+            deeper.ends_with("demo true, system: module not found"),
+            "{deeper}"
+        );
         let outside = send_to(false, &get_request("/elsewhere")).await;
         assert!(
-            outside.ends_with("demo false: module not found"),
+            outside.ends_with("demo false, system: module not found"),
             "{outside}"
+        );
+        // The page is in the visitor's kept scheme (ADR-0070).
+        let request = "GET /elsewhere HTTP/1.1\r\nHost: test\r\nCookie: theme=light\r\nConnection: close\r\n\r\n";
+        assert!(
+            send_to(true, request)
+                .await
+                .ends_with("demo true, light: module not found")
         );
     }
 
     #[tokio::test]
     async fn the_sites_not_found_page_is_html_marked_for_its_environment() {
         for demo in [true, false] {
-            let response = super::not_found(demo);
+            let response = super::not_found(demo, Scheme::System);
             assert_eq!(response.status(), StatusCode::NOT_FOUND);
             assert_eq!(
                 response.headers().get(header::CONTENT_TYPE).unwrap(),
@@ -525,13 +567,19 @@ mod tests {
 
     #[tokio::test]
     async fn every_response_carries_the_security_headers() {
-        for raw in [
-            get_path("/").await,
-            get_path("/studio").await,
-            get_path("/elsewhere").await,
-            send(POST).await,
+        // The site's own pages run its color scheme script, so their policy allows Tetsu's own script (ADR-0070).
+        for (raw, page) in [
+            (get_path("/").await, true),
+            (get_path("/studio").await, false),
+            (get_path("/elsewhere").await, false),
+            (send(POST).await, false),
         ] {
             for (name, value) in EXPECTED {
+                let value = if page && name == "content-security-policy" {
+                    PAGE_POLICY
+                } else {
+                    value
+                };
                 assert_eq!(header_of(&raw, name), Some(value), "{name} in {raw}");
             }
             assert_eq!(
@@ -645,6 +693,7 @@ mod tests {
         HomePage {
             demo,
             stylesheet: "",
+            scheme: "system",
         }
         .render()
         .unwrap()
@@ -652,17 +701,101 @@ mod tests {
 
     #[tokio::test]
     async fn the_root_page_served_is_the_page_as_it_renders() {
-        // The page is rendered once per process (site_routes), so what goes out must match a fresh render.
+        // The page is rendered once per process and scheme (site_routes), so what goes out must match a fresh render.
         for demo in [true, false] {
-            let raw = send_to(demo, &get_request("/")).await;
-            let fresh = HomePage {
-                demo,
-                stylesheet: assets::STYLESHEET,
+            for (cookie, scheme) in [
+                ("", Scheme::System),
+                ("theme=light", Scheme::Light),
+                ("a=1; theme=dark", Scheme::Dark),
+            ] {
+                let request = format!(
+                    "GET / HTTP/1.1\r\nHost: test\r\nCookie: {cookie}\r\nConnection: close\r\n\r\n"
+                );
+                let raw = send_to(demo, &request).await;
+                let fresh = HomePage {
+                    demo,
+                    stylesheet: assets::STYLESHEET,
+                    scheme: scheme.as_str(),
+                }
+                .render()
+                .unwrap();
+                assert_eq!(
+                    raw.split_once("\r\n\r\n").unwrap().1,
+                    fresh,
+                    "demo {demo}, {cookie}"
+                );
+                assert_eq!(header_of(&raw, "vary"), Some("Cookie"), "{cookie}");
             }
-            .render()
-            .unwrap();
-            assert_eq!(raw.split_once("\r\n\r\n").unwrap().1, fresh, "demo {demo}");
         }
+    }
+
+    /// The page tells the browser its scheme before any stylesheet arrives, so a page kept light never flashes dark
+    /// in a dark system, and the browser bar takes the kept scheme's color; with none kept, both follow the system.
+    #[tokio::test]
+    async fn the_root_page_names_its_kept_scheme_before_the_stylesheet() {
+        let both = [
+            "<meta name=\"theme-color\" media=\"(prefers-color-scheme: light)\" content=\"#f3f1f1\">",
+            "<meta name=\"theme-color\" media=\"(prefers-color-scheme: dark)\" content=\"#111110\">",
+        ];
+        for (cookie, meta, bars) in [
+            (
+                "theme=light",
+                "light",
+                &["<meta name=\"theme-color\" content=\"#f3f1f1\">"][..],
+            ),
+            (
+                "theme=dark",
+                "dark",
+                &["<meta name=\"theme-color\" content=\"#111110\">"][..],
+            ),
+            ("", "light dark", &both[..]),
+        ] {
+            let request = format!(
+                "GET / HTTP/1.1\r\nHost: test\r\nCookie: {cookie}\r\nConnection: close\r\n\r\n"
+            );
+            let raw = send_to(true, &request).await;
+            let color_scheme = format!("<meta name=\"color-scheme\" content=\"{meta}\">");
+            assert!(raw.contains(&color_scheme), "{color_scheme} for {cookie}");
+            // The first thing the browser reads names the kept scheme, before the footer's control exists.
+            let picked = match meta {
+                "light dark" => "system",
+                other => other,
+            };
+            let root = format!("<html lang=\"en\" class=\"h-full\" data-scheme=\"{picked}\">");
+            assert!(raw.contains(&root), "{root} for {cookie}");
+            for bar in bars {
+                assert!(raw.contains(bar), "{bar} for {cookie}");
+            }
+            assert_eq!(
+                raw.matches("name=\"theme-color\"").count(),
+                bars.len(),
+                "{cookie}"
+            );
+        }
+    }
+
+    /// The root page checks the radio of the visitor's kept scheme, and loads the script that keeps a new one, under
+    /// a policy that allows Tetsu's own script and nothing inline (ADR-0070).
+    #[tokio::test]
+    async fn the_root_page_arrives_in_the_kept_scheme_with_its_script() {
+        let request =
+            "GET / HTTP/1.1\r\nHost: test\r\nCookie: theme=dark\r\nConnection: close\r\n\r\n";
+        let raw = send_to(true, request).await;
+        assert!(
+            raw.contains("id=\"tetsu-scheme-dark\" class=\"sr-only\" checked"),
+            "{raw}"
+        );
+        assert!(
+            !raw.contains("id=\"tetsu-scheme-system\" class=\"sr-only\" checked"),
+            "{raw}"
+        );
+        let script = format!("<script type=\"module\" src=\"{}\">", assets::SCHEME_SCRIPT);
+        assert!(raw.contains(&script), "{raw}");
+        let policy = header_of(&raw, "content-security-policy").unwrap_or_default();
+        assert!(
+            policy.contains("script-src 'self'") && !policy.contains("unsafe-inline"),
+            "{policy}"
+        );
     }
 
     /// A heading's text as a search engine or a screen reader reads it: tags dropped, a line break adding nothing.
@@ -1114,9 +1247,10 @@ mod tests {
     }
 
     #[test]
-    fn the_dark_tokens_follow_the_system_unless_the_header_control_picks() {
-        // Tailwind's dark variant sets the dark tokens (tetsu.css): in a dark system scheme unless the control picks
-        // Light, and whenever it picks Dark. Each rule that sets one, with whatever wraps it.
+    fn the_dark_tokens_follow_the_system_unless_the_visitor_picks() {
+        // Tailwind's dark variant sets the dark tokens (tetsu.css): in a dark system scheme unless the visitor picks
+        // Light, and whenever they pick Dark. The pick is the footer control's radio, and before the browser has read
+        // the footer, the scheme the server wrote on <html> (ADR-0070). Each rule that sets one, with its wrapper.
         let css = std::str::from_utf8(assets::find(assets::STYLESHEET).unwrap().bytes).unwrap();
         let rules: Vec<(&str, &str)> = css
             .match_indices("--tetsu-color-canvas:#111110")
@@ -1141,13 +1275,17 @@ mod tests {
             "{system}"
         );
         assert!(
-            system.contains(":root:not(:has(#tetsu-scheme-light:checked))"),
+            system.contains(
+                ":root:not(:has(#tetsu-scheme-light:checked)):not([data-scheme=light]:not(:has(#tetsu-scheme-system)))"
+            ),
             "{system}"
         );
-        assert!(
-            rules[1].1.contains(":root:has(#tetsu-scheme-dark:checked)"),
-            "{rules:?}"
-        );
+        for picked in [
+            ":root:has(#tetsu-scheme-dark:checked)",
+            ":root[data-scheme=dark]:not(:has(#tetsu-scheme-system))",
+        ] {
+            assert!(rules[1].1.contains(picked), "{picked} in {rules:?}");
+        }
     }
 
     #[test]
@@ -1165,7 +1303,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_not_found_page_books_404_in_the_brands_slots() {
-        let response = super::not_found(true);
+        let response = super::not_found(true, Scheme::System);
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();

@@ -21,6 +21,7 @@ use crate::domain::{
 use crate::passkeys::{RelyingParty, base64url};
 use crate::ports::OperatorStore;
 use crate::use_cases::Operators;
+use tetsu_kernel::Scheme;
 
 const ACCOUNT: &str = "/ops";
 const LOGIN: &str = "/ops/login";
@@ -74,8 +75,8 @@ const UNAVAILABLE: &str = "logging in is unavailable just now; try again in a mi
 
 /// What the pages need from the composition root: the relying party and the origins state-changing requests
 /// must come from, whether this is the demo, the shared stylesheet's URL, the passkey script's, which every operator
-/// page loads, and the session script's, which a logged-in operator's pages load too, and where a failure the
-/// operator should see is reported (#27).
+/// page loads, the session script's, which a logged-in operator's pages load too, and the color scheme control's,
+/// and where a failure the operator should see is reported (#27).
 pub struct Web {
     pub party: RelyingParty,
     pub origins: Origins,
@@ -83,6 +84,8 @@ pub struct Web {
     pub stylesheet: &'static str,
     pub script: &'static str,
     pub session_script: &'static str,
+    /// The color scheme control's script, which every operator page loads (ADR-0070).
+    pub scheme_script: &'static str,
     pub report: fn(&str),
 }
 
@@ -92,6 +95,9 @@ struct LoginPage<'a> {
     demo: bool,
     stylesheet: &'static str,
     script: &'static str,
+    scheme_script: &'static str,
+    /// The radio the color scheme control checks, from the visitor's cookie (ADR-0070).
+    scheme: &'static str,
     /// The checked page a login returns to, or empty for the operator's own.
     next: &'a str,
     /// Whether the session ended on its own, which the page says.
@@ -104,6 +110,9 @@ struct JoinPage {
     demo: bool,
     stylesheet: &'static str,
     script: &'static str,
+    scheme_script: &'static str,
+    /// The radio the color scheme control checks, from the visitor's cookie (ADR-0070).
+    scheme: &'static str,
 }
 
 #[derive(Template)]
@@ -112,6 +121,9 @@ struct AccountPage {
     demo: bool,
     stylesheet: &'static str,
     script: &'static str,
+    scheme_script: &'static str,
+    /// The radio the color scheme control checks, from the visitor's cookie (ADR-0070).
+    scheme: &'static str,
     session_script: &'static str,
     name: String,
     user: String,
@@ -128,6 +140,9 @@ struct NotFoundPage {
     demo: bool,
     stylesheet: &'static str,
     script: &'static str,
+    scheme_script: &'static str,
+    /// The radio the color scheme control checks, from the visitor's cookie (ADR-0070).
+    scheme: &'static str,
     session_script: &'static str,
     form: String,
 }
@@ -215,6 +230,8 @@ async fn login_page<S: OperatorStore>(
                 demo: web.demo,
                 stylesheet: web.stylesheet,
                 script: web.script,
+                scheme_script: web.scheme_script,
+                scheme: scheme_of(&headers).as_str(),
                 next: next.unwrap_or_default(),
                 ended,
             });
@@ -233,12 +250,14 @@ async fn login_page<S: OperatorStore>(
 
 /// The join page. Its link's token travels in the address's fragment, which no browser sends, so it never
 /// reaches a log; the script reads it, then clears it from the address bar.
-async fn join_page<S>(State(served): Shared<S>) -> Response {
+async fn join_page<S>(State(served): Shared<S>, headers: HeaderMap) -> Response {
     let web = &served.web;
     page(&JoinPage {
         demo: web.demo,
         stylesheet: web.stylesheet,
         script: web.script,
+        scheme_script: web.scheme_script,
+        scheme: scheme_of(&headers).as_str(),
     })
 }
 
@@ -267,6 +286,8 @@ async fn elsewhere<S: OperatorStore>(
                 demo: web.demo,
                 stylesheet: web.stylesheet,
                 script: web.script,
+                scheme_script: web.scheme_script,
+                scheme: scheme_of(&headers).as_str(),
                 session_script: web.session_script,
                 form,
             }),
@@ -311,6 +332,8 @@ async fn shown<S: OperatorStore>(
             demo: web.demo,
             stylesheet: web.stylesheet,
             script: web.script,
+            scheme_script: web.scheme_script,
+            scheme: scheme_of(headers).as_str(),
             session_script: web.session_script,
             name: account.name,
             user: base64url(&account.user_handle),
@@ -689,6 +712,11 @@ fn query<'a>(uri: &'a Uri, name: &str) -> Option<&'a str> {
         pair.strip_prefix(name)
             .and_then(|rest| rest.strip_prefix('='))
     })
+}
+
+/// The color scheme a request's cookies keep, which the operator pages' footer shows (ADR-0070).
+fn scheme_of(headers: &HeaderMap) -> Scheme {
+    Scheme::from_cookies(cookies(headers))
 }
 
 /// A state-changing request, as Identity's checks read it.

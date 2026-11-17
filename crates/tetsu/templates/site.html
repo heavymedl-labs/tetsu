@@ -3,9 +3,12 @@
 {% extends "../../../web/templates/page.html" %}
 {% import "../../../web/templates/components.html" as ui %}
 {#- What browsers, search engines, and link previews read: the page's description, Tetsu's icons from docs/brand,
-    and the bar color for each scheme. A link preview's image waits for Tetsu's own domain, since it must be an
+    and the bar color for the kept scheme, or for each when none is kept (ADR-0070). A link preview's image waits for Tetsu's own domain, since it must be an
     absolute URL (#19). -#}
+{% block data_scheme %}{{ scheme }}{% endblock %}
+{% block color_scheme %}{% include "../../../web/templates/color_scheme.html" %}{% endblock %}
 {% block head %}
+<script type="module" src="{{ crate::assets::SCHEME_SCRIPT }}"></script>
 <meta name="description" content="{% block description %}Scheduling, memberships, rentals, and payments for studios, salons, courts, and campgrounds, on published prices, with the payment processor you choose.{% endblock %}">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Tetsu">
@@ -13,8 +16,14 @@
 <meta property="og:description" content="{% block og_description %}Scheduling, memberships, rentals, and payments for any business people book.{% endblock %}">
 <link rel="icon" href="{{ crate::assets::ICON }}" type="image/svg+xml">
 <link rel="apple-touch-icon" href="{{ crate::assets::TOUCH_ICON }}">
+{%- if scheme == "light" %}
+<meta name="theme-color" content="#f3f1f1">
+{%- else if scheme == "dark" %}
+<meta name="theme-color" content="#111110">
+{%- else %}
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f3f1f1">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#111110">
+{%- endif %}
 {% endblock %}
 {% block body %}
 {% include "../../../web/templates/site_header.html" %}

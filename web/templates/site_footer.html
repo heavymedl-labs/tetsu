@@ -1,4 +1,5 @@
-{#- Tetsu's own footer (ADR-0035), shared as the header is. It reads `demo`. -#}
+{#- Tetsu's own footer (ADR-0035), shared as the header is, with the color scheme control (ADR-0070). It reads
+    `demo` and `scheme`. -#}
 {% import "../../../web/templates/components.html" as ui %}
 <footer>
 <div class="mx-auto grid max-w-page grid-cols-2 gap-10 px-6 py-16 lg:px-10 text-sm sm:grid-cols-5">
@@ -13,9 +14,9 @@
 {%- endif %}
 </div>
 <div class="border-t border-line">
-<div class="mx-auto flex max-w-page justify-between px-6 py-6 lg:px-10 font-mono text-xs text-faint">
+<div class="mx-auto flex max-w-page items-center justify-between gap-6 px-6 py-6 lg:px-10 font-mono text-xs text-faint">
 <p>© 2026 Tetsu</p>
-<p>鉄 · iron</p>
+<div class="flex items-center gap-6"><p class="hidden sm:block">鉄 · iron</p>{% include "../../../web/templates/scheme.html" %}</div>
 </div>
 </div>
 </footer>

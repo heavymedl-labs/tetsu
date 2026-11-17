@@ -239,6 +239,7 @@ fn operator_pages(local: &settings::Local, demo: bool) -> Result<tetsu_identity:
         stylesheet: assets::STYLESHEET,
         script: assets::PASSKEY_SCRIPT,
         session_script: assets::SESSION_SCRIPT,
+        scheme_script: assets::SCHEME_SCRIPT,
         report,
     })
 }

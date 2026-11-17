@@ -1,0 +1,1 @@
+{#- The color-scheme meta content for a page with the color scheme control (ADR-0070): the kept scheme, so the browser paints the page in it before any stylesheet arrives, or both, following the system, when none is kept. It reads `scheme`. -#}{%- if scheme == "light" -%}light{%- else if scheme == "dark" -%}dark{%- else -%}light dark{%- endif -%}

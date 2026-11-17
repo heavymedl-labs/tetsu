@@ -7,13 +7,14 @@ use askama::Template;
 use axum::Router;
 use axum::extract::rejection::PathRejection;
 use axum::extract::{Path, State};
-use axum::http::{StatusCode, header};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 
 use crate::domain::{Error, Tenant};
 use crate::ports::TenantStore;
 use crate::use_cases::Tenants;
+use tetsu_kernel::Scheme;
 
 /// How long finding a tenant may take before the page gives up. The pool's wait and the statement timeout
 /// bound each step (ADR-0011); this bounds the request as a whole.
@@ -42,6 +43,8 @@ struct ThemeSheet<'a> {
 struct NotFoundPage {
     demo: bool,
     stylesheet: &'static str,
+    /// The radio the site footer's color scheme control checks, from the visitor's cookie (ADR-0070).
+    scheme: &'static str,
 }
 
 #[derive(Template)]
@@ -107,9 +110,10 @@ struct Served<S> {
 
 async fn page<S: TenantStore>(
     State(served): State<Arc<Served<S>>>,
+    headers: HeaderMap,
     segment: Result<Path<String>, PathRejection>,
 ) -> Response {
-    match lookup(&served, segment).await {
+    match lookup(&served, segment, scheme_of(&headers)).await {
         Ok(tenant) => show(&tenant, &served),
         Err(response) => *response,
     }
@@ -117,9 +121,10 @@ async fn page<S: TenantStore>(
 
 async fn theme<S: TenantStore>(
     State(served): State<Arc<Served<S>>>,
+    headers: HeaderMap,
     segment: Result<Path<String>, PathRejection>,
 ) -> Response {
-    let tenant = match lookup(&served, segment).await {
+    let tenant = match lookup(&served, segment, scheme_of(&headers)).await {
         Ok(tenant) => tenant,
         Err(response) => return *response,
     };
@@ -145,15 +150,16 @@ fn theme_sheet(tenant: &Tenant) -> Response {
     )
 }
 
-/// The tenant at a path segment, or the page to show instead: not found for an address no tenant holds, and
-/// unavailable when the lookup fails or takes too long.
+/// The tenant at a path segment, or the page to show instead: not found, in the visitor's color scheme, for an
+/// address no tenant holds, and unavailable when the lookup fails or takes too long.
 async fn lookup<S: TenantStore>(
     served: &Served<S>,
     segment: Result<Path<String>, PathRejection>,
+    scheme: Scheme,
 ) -> Result<Tenant, Box<Response>> {
     // A path that does not decode, such as one that is not UTF-8, is no tenant's address.
     let Ok(Path(segment)) = segment else {
-        return Err(Box::new(not_found(served)));
+        return Err(Box::new(not_found(served, scheme)));
     };
     let address = format!("/{segment}");
     let failure = match tokio::time::timeout(served.timeout, served.tenants.resolve(&address)).await
@@ -163,7 +169,7 @@ async fn lookup<S: TenantStore>(
             tracing::Span::current().record("tenant_id", tenant.id().get());
             return Ok(tenant);
         }
-        Ok(Err(Error::NotFound)) => return Err(Box::new(not_found(served))),
+        Ok(Err(Error::NotFound)) => return Err(Box::new(not_found(served, scheme))),
         Ok(Err(error)) => error.to_string(),
         Err(_) => format!("no answer within {} seconds", served.timeout.as_secs_f32()),
     };
@@ -200,13 +206,24 @@ fn show<S>(tenant: &Tenant, served: &Served<S>) -> Response {
     html(StatusCode::OK, &page)
 }
 
-fn not_found<S>(served: &Served<S>) -> Response {
+fn not_found<S>(served: &Served<S>, scheme: Scheme) -> Response {
     html(
         StatusCode::NOT_FOUND,
         &NotFoundPage {
             demo: served.demo,
             stylesheet: served.stylesheet,
+            scheme: scheme.as_str(),
         },
+    )
+}
+
+/// The color scheme a request's cookies keep, which the site footer on the not-found page shows (ADR-0070).
+fn scheme_of(headers: &HeaderMap) -> Scheme {
+    Scheme::from_cookies(
+        headers
+            .get_all(header::COOKIE)
+            .iter()
+            .filter_map(|value| value.to_str().ok()),
     )
 }
 
@@ -348,11 +365,18 @@ mod tests {
 
     /// Sends one request over a real socket, and returns the status, the raw head, and the body.
     async fn fetch(app: Router, path: &str) -> (StatusCode, String, String) {
+        fetch_with(app, path, "").await
+    }
+
+    /// As [`fetch`], with the browser's cookies.
+    async fn fetch_with(app: Router, path: &str, cookie: &str) -> (StatusCode, String, String) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let mut stream = TcpStream::connect(address).await.unwrap();
-        let request = format!("GET {path} HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n");
+        let request = format!(
+            "GET {path} HTTP/1.1\r\nHost: test\r\nCookie: {cookie}\r\nConnection: close\r\n\r\n"
+        );
         stream.write_all(request.as_bytes()).await.unwrap();
         let mut raw = String::new();
         stream.read_to_string(&mut raw).await.unwrap();
@@ -446,6 +470,20 @@ mod tests {
             body.contains(r#"<meta name="robots" content="noindex">"#),
             "{body}"
         );
+    }
+
+    #[tokio::test]
+    async fn an_address_no_business_holds_is_shown_in_the_kept_scheme() {
+        for (path, cookie, checked) in [
+            ("/nobody", "theme=light", "light"),
+            ("/nobody/theme.css", "a=1; theme=dark", "dark"),
+            ("/nobody", "", "system"),
+        ] {
+            let (status, _, body) = fetch_with(serving(None, &[]).await, path, cookie).await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
+            let radio = format!("id=\"tetsu-scheme-{checked}\" class=\"sr-only\" checked");
+            assert!(body.contains(&radio), "{radio} in {body}");
+        }
     }
 
     #[tokio::test]

@@ -2,11 +2,11 @@
     A page's struct gives `demo` and `stylesheet`, the shared sheet's hashed URL; a tenant's page adds its theme
     sheet in the `head` block, after the shared one, so its colors win. -#}
 <!doctype html>
-<html lang="en" class="h-full">
+<html lang="en" class="h-full" data-scheme="{% block data_scheme %}system{% endblock %}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="{% block color_scheme %}light dark{% endblock %}">
 <title>{% block title %}{% endblock %}</title>
 {% if demo %}<meta name="robots" content="noindex">{% endif %}
 <link rel="stylesheet" href="{{ stylesheet }}">

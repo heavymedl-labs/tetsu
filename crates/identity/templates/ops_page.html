@@ -2,11 +2,15 @@
     one narrow card in the middle of the page, Tetsu's wordmark above a small heading, full-width choices, and a
     muted line under them. The card settles
     into place as it fades in, and the wordmark's slots book in, so the page shows it is ready. A page's struct adds
-    `script`, the passkey islands' hashed URL, to what the shared page needs. -#}
+    `script`, the passkey islands' hashed URL, `scheme_script`, the color scheme control's, and `scheme`, the
+    visitor's choice, to what the shared page needs. -#}
 {% extends "../../../web/templates/page.html" %}
-{% block head %}<script type="module" src="{{ script }}"></script>{% endblock %}
-{#- An operator page is Tetsu's own, so it needs no "Runs on Tetsu" footer. #}
-{% block footer %}{% endblock %}
+{% block data_scheme %}{{ scheme }}{% endblock %}
+{% block color_scheme %}{% include "../../../web/templates/color_scheme.html" %}{% endblock %}
+{% block head %}<script type="module" src="{{ script }}"></script><script type="module" src="{{ scheme_script }}"></script>{% endblock %}
+{#- An operator page is Tetsu's own, so its footer holds only the color scheme control (ADR-0070), not "Runs on
+    Tetsu". #}
+{% block footer %}<footer class="flex justify-center px-6 pb-8">{% include "../../../web/templates/scheme.html" %}</footer>{% endblock %}
 {% block body %}
 <main class="flex flex-1 items-center justify-center px-6 py-16">
 <div class="tetsu-settle w-full max-w-72 text-center">

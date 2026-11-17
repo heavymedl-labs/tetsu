@@ -72,6 +72,7 @@ async fn serve(operators: Operators<PostgresOperators>) -> SocketAddr {
         stylesheet: "/assets/tetsu-test.css",
         script: SCRIPT,
         session_script: SESSION_SCRIPT,
+        scheme_script: "/assets/scheme-test.js",
         report,
     };
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("binds");

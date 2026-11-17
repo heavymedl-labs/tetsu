@@ -20,6 +20,7 @@ export default defineConfig({
         // Tier 1. A glob that matches nothing applies no limit and says nothing, so moving this code moves this line.
         "web/src/passkey/**": { lines: 100, branches: 100, functions: 100, statements: 100 },
         "web/src/session/**": { lines: 100, branches: 100, functions: 100, statements: 100 },
+        "web/src/scheme/**": { lines: 100, branches: 100, functions: 100, statements: 100 },
         // Shared code the operator islands rely on is Tier 1 with them.
         "web/src/shared/**": { lines: 100, branches: 100, functions: 100, statements: 100 },
       },
