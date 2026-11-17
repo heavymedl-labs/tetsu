@@ -191,6 +191,7 @@ fn report_panics() {
 /// server error alert when the status is 5xx. A module records the tenant on the span as `tenant_id` once it knows
 /// it, and [`route`] records the route that answered.
 pub async fn request(request: Request, next: Next) -> Response {
+    probe(request.uri().path(), request.headers());
     let span = tracing::info_span!(
         "request",
         request_id = request_id(),
@@ -207,6 +208,31 @@ pub async fn request(request: Request, next: Next) -> Response {
     }
     .instrument(span)
     .await
+}
+
+/// Temporary, for the rate limit research (docs/research/identity/rate-limits.md): logs the forwarding headers of a
+/// request to `/forwarding-probe`, which only the maintainer's measurement calls, to count the proxy hops a host
+/// adds. Removed once measured.
+fn probe(path: &str, headers: &axum::http::HeaderMap) {
+    if path == "/forwarding-probe" {
+        let seen = [
+            "x-forwarded-for",
+            "cf-connecting-ip",
+            "true-client-ip",
+            "x-real-ip",
+            "forwarded",
+        ]
+        .map(|name| {
+            let values: Vec<&str> = headers
+                .get_all(name)
+                .iter()
+                .filter_map(|value| value.to_str().ok())
+                .collect();
+            format!("{name}={values:?}")
+        })
+        .join(" ");
+        tracing::warn!(seen, "forwarding probe");
+    }
 }
 
 /// Logs a response's status and how long it took, marked for the server error alert when the status is 5xx.
@@ -305,6 +331,25 @@ mod tests {
         ] {
             assert!(line.contains(shown), "{shown} in {line}");
         }
+    }
+
+    /// The probe logs a probe request's forwarding headers, and nothing for any other path.
+    #[test]
+    fn the_forwarding_probe_logs_only_its_own_path() {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.append("x-forwarded-for", "203.0.113.7".parse().unwrap());
+        headers.append(
+            "x-forwarded-for",
+            "198.51.100.1, 192.0.2.1".parse().unwrap(),
+        );
+        assert_eq!(logged(LogFormat::Json, || probe("/ops", &headers)), "");
+        let text = logged(LogFormat::Json, || probe("/forwarding-probe", &headers));
+        assert_eq!(text.lines().count(), 1, "{text}");
+        assert!(
+            text.contains(r#"x-forwarded-for=[\"203.0.113.7\", \"198.51.100.1, 192.0.2.1\"]"#),
+            "{text}"
+        );
+        assert!(text.contains("cf-connecting-ip=[]"), "{text}");
     }
 
     /// What `subscriber` exports, captured in memory, after `run` logs through it.
