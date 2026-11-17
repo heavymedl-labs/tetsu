@@ -179,6 +179,13 @@ async fn logged_in_pages_carry_the_session_island() {
         for shown in [&script, &island] {
             assert!(page.body.contains(shown.as_str()), "{shown} on {path}");
         }
+        // The dialog opens on a timer, so it takes focus on its heading, never on a button.
+        assert!(
+            page.body
+                .contains("<h2 id=\"tetsu-session-title\" tabindex=\"-1\" autofocus"),
+            "{path}"
+        );
+        assert_eq!(page.body.matches("autofocus").count(), 1, "{path}");
     }
     let login = get(address, "/ops/login?next=/ops", "").await;
     assert!(!login.body.contains("tetsu-session"), "{}", login.body);

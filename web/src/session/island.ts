@@ -15,6 +15,10 @@ export const WARN = 120;
 /** How many seconds to wait before asking again when the server could not say. */
 export const RETRY = 60;
 
+/** The longest one timer runs: a long wait is taken in steps, each measured against the wall clock, so a tab that
+ * slept, whose timers may not have run, sees the time that passed within a step of waking. */
+export const STEP = 60;
+
 /** The parts of the browser the island uses, passed to `define` so tests can stand in for them. `channel` reaches
  * the site's other tabs, where the browser has one. */
 export interface Browser {
@@ -60,6 +64,9 @@ class Clock {
   private timer: ReturnType<typeof setTimeout> | undefined;
   /** When the nearer limit falls, by this browser's clock, from the server's last answer. */
   private endsAt = 0;
+  /** The latest request this page made, so only its answer sets the clock: an older answer may be stale, as a read
+   * that left before a stay answered after it. */
+  private latest: object = {};
 
   constructor(
     private readonly host: HTMLElement,
@@ -68,36 +75,48 @@ class Clock {
   ) {}
 
   /** Asks the server how long the session has left, which renews nothing, and sets the clock from its answer. */
-  readonly check = async (): Promise<void> => {
-    try {
-      this.set(await call(SESSION));
-    } catch (error) {
-      this.failed(error);
-    }
-  };
+  readonly check = (): Promise<void> => this.ask(() => call(SESSION));
 
-  /** Stays logged in: a request of the person's own, which renews the session, and tells the site's other tabs. */
-  readonly stay = async (): Promise<void> => {
-    try {
+  /** Stays logged in: a request of the person's own, which renews the session, and tells the site's other tabs,
+   * even if a later request's answer is the one that sets this page's clock. */
+  readonly stay = (): Promise<void> =>
+    this.ask(async () => {
       const left = await call(SESSION, undefined, { form: this.host.getAttribute("form-token") ?? "" });
       this.browser.channel?.postMessage("renewed");
-      this.set(left);
-    } catch (error) {
-      this.failed(error);
-    }
-  };
+      return left;
+    });
 
-  /** Escape closes the dialog; where it offered to stay, before the idle limit, that stays logged in, as HMRC's
-   * does. */
+  /** Closing the dialog, by Escape or a phone's back gesture, is the person dismissing it; where it offered to stay,
+   * before the idle limit, that stays logged in, as HMRC's does. */
   readonly cancelled = (): void => {
     if (!this.parts.stay.hidden) {
       void this.stay();
     }
   };
 
+  private async ask(request: () => Promise<Record<string, unknown>>): Promise<void> {
+    const asked = {};
+    this.latest = asked;
+    try {
+      const answer = await request();
+      if (asked === this.latest) {
+        this.set(answer);
+      }
+    } catch (error) {
+      if (asked === this.latest) {
+        this.failed(error);
+      }
+    }
+  }
+
+  /** Sets the clock from an answer, or asks again later when it is not one: a captive portal's or a waking host's
+   * page may answer 200 with no times at all. */
   private set(answer: Record<string, unknown>): void {
-    const idle = Number(answer.idle);
-    const absolute = Number(answer.absolute);
+    const { idle, absolute } = answer;
+    if (typeof idle !== "number" || typeof absolute !== "number") {
+      this.after(RETRY, this.check);
+      return;
+    }
     const left = Math.min(idle, absolute);
     this.endsAt = Date.now() + left * 1000;
     if (left > WARN) {
@@ -132,19 +151,31 @@ class Clock {
     this.tick();
   }
 
+  /** Counts down each second; at the limit it waits a second more and asks again, so a session the server still
+   * holds for under a second is not asked about without pause. */
   private readonly tick = (): void => {
     const left = Math.ceil((this.endsAt - Date.now()) / 1000);
     if (left <= 0) {
-      void this.check();
+      this.after(1, this.check);
       return;
     }
     this.parts.left.textContent = spoken(left);
     this.after(1, this.tick);
   };
 
+  /** Runs `then` once `seconds` have passed by the wall clock, through timers of at most a step each. */
   private after(seconds: number, then: () => void): void {
     clearTimeout(this.timer);
-    this.timer = setTimeout(then, seconds * 1000);
+    const due = Date.now() + seconds * 1000;
+    const step = (): void => {
+      const wait = due - Date.now();
+      if (wait <= 0) {
+        then();
+        return;
+      }
+      this.timer = setTimeout(step, Math.min(wait, STEP * 1000));
+    };
+    step();
   }
 }
 
@@ -155,7 +186,8 @@ export function channel(): Browser["channel"] {
 }
 
 /** Readies a `<tetsu-session>`, once, if it has its parts: it checks at once, again when another tab says something
- * changed, and when the page is shown again, from another tab or the back-forward cache. */
+ * changed, when the browser is back online, and when the page is shown again, from another tab or the back-forward
+ * cache. */
 export function ready(host: HTMLElement, browser: Browser): void {
   const parts = partsOf(host);
   if (host.dataset.ready !== undefined || parts === undefined) {
@@ -168,6 +200,7 @@ export function ready(host: HTMLElement, browser: Browser): void {
   parts.stay.addEventListener("click", clock.stay);
   parts.dialog.addEventListener("cancel", clock.cancelled);
   browser.channel?.addEventListener("message", clock.check);
+  browser.window.addEventListener("online", clock.check);
   // Logging out from any form on the page ends the session in every tab, so the others leave at once.
   browser.page.addEventListener("submit", (event) => {
     const form = event.target;
@@ -185,6 +218,8 @@ export function ready(host: HTMLElement, browser: Browser): void {
       void clock.check();
     }
   });
+  // This page's load renewed the session, so a warning in another tab may be out of date.
+  browser.channel?.postMessage("renewed");
   void clock.check();
 }
 

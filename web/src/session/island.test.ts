@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { call, Refused } from "../shared/http";
-import { type Browser, channel, define, RETRY, ready, spoken, WARN } from "./island";
+import { type Browser, channel, define, RETRY, ready, STEP, spoken, WARN } from "./island";
 
 vi.mock("../shared/http", async (original) => ({
   ...(await original<typeof import("../shared/http")>()),
@@ -112,7 +112,10 @@ describe("a session island's countdown", () => {
     expect(left(host)).toBe("59 seconds");
     await elapse(58);
     expect(left(host)).toBe("1 second");
-    expect(page.location.assign).not.toHaveBeenCalled();
+    await elapse(1);
+    // At the limit it waits a second more before asking, so a session held for under a second is not asked about
+    // without pause.
+    expect([page.location.assign.mock.calls.length, asked.mock.calls.length]).toEqual([0, 1]);
     await elapse(1);
     expect(page.location.assign).toHaveBeenCalledWith("/ops/login?ended=1&next=/ops");
     expect(page.channel.postMessage).toHaveBeenCalledWith("ended");
@@ -132,8 +135,8 @@ describe("a session island's countdown", () => {
 
   it("keeps one timer, so asking again early never asks twice later", async () => {
     const { page, listeners } = browser();
-    ready(island(), page);
     answers([900, 28_800], [900, 28_800], [900, 28_800]);
+    ready(island(), page);
     await elapse(0);
     listeners.message?.(new MessageEvent("message", { data: "renewed" }));
     await elapse(900 - WARN);
@@ -167,7 +170,10 @@ describe("a session island's dialog", () => {
     (host.querySelector("[data-stay]") as HTMLButtonElement).click();
     await elapse(0);
     expect(asked).toHaveBeenLastCalledWith("/ops/session", undefined, { form: "F1" });
-    expect([dialog(host).open, page.channel.postMessage.mock.calls]).toEqual([false, [["renewed"]]]);
+    expect([dialog(host).open, page.channel.postMessage.mock.calls]).toEqual([
+      false,
+      [["renewed"], ["renewed"]],
+    ]);
   });
 
   it("sends nothing for a form token the page lacks, and asks again in a minute when staying is refused", async () => {
@@ -182,7 +188,7 @@ describe("a session island's dialog", () => {
     (host.querySelector("[data-stay]") as HTMLButtonElement).click();
     await elapse(0);
     expect(asked).toHaveBeenLastCalledWith("/ops/session", undefined, { form: "" });
-    expect(page.channel.postMessage).not.toHaveBeenCalled();
+    expect(page.channel.postMessage.mock.calls).toEqual([["renewed"]]);
     await elapse(RETRY);
     expect([asked.mock.calls.length, dialog(host).open]).toEqual([4, false]);
   });
@@ -255,8 +261,8 @@ describe("a session island among tabs", () => {
 
   it("asks again when the page is shown, but not when it is hidden", async () => {
     const { page, listeners } = browser();
-    ready(island(), page);
     answers([900, 28_800], [900, 28_800]);
+    ready(island(), page);
     await elapse(0);
     page.page.visibilityState = "hidden";
     listeners.visibilitychange?.(new Event("visibilitychange"));
@@ -270,8 +276,8 @@ describe("a session island among tabs", () => {
 
   it("asks again when the back-forward cache restores the page, and not on a fresh load", async () => {
     const { page, listeners } = browser();
-    ready(island(), page);
     answers([900, 28_800], [900, 28_800]);
+    ready(island(), page);
     await elapse(0);
     listeners.pageshow?.(Object.assign(new Event("pageshow"), { persisted: false }));
     await elapse(0);
@@ -368,8 +374,8 @@ describe("channel", () => {
 describe("a session island when the operator logs out", () => {
   it("tells the site's other tabs when a logout form on the page is sent, and nothing for other forms", async () => {
     const { page, listeners } = browser();
-    ready(island(), page);
     answers([900, 28_800]);
+    ready(island(), page);
     await elapse(0);
     const form = (action: string | null) => {
       const made = document.createElement("form");
@@ -381,11 +387,11 @@ describe("a session island when the operator logs out", () => {
     for (const sent of [form("/ops/passkeys"), form(null), { target: document.createElement("div") }]) {
       listeners.submit?.(sent);
     }
-    expect(page.channel.postMessage).not.toHaveBeenCalled();
+    expect(page.channel.postMessage.mock.calls).toEqual([["renewed"]]);
     for (const sent of [form("/ops/logout"), form("/ops/logout?next=/ops")]) {
       listeners.submit?.(sent);
     }
-    expect(page.channel.postMessage.mock.calls).toEqual([["ended"], ["ended"]]);
+    expect(page.channel.postMessage.mock.calls).toEqual([["renewed"], ["ended"], ["ended"]]);
   });
 
   it("logs out alone in a browser with no channel to other tabs", () => {
@@ -394,5 +400,100 @@ describe("a session island when the operator logs out", () => {
     const made = document.createElement("form");
     made.setAttribute("action", "/ops/logout");
     expect(() => listeners.submit?.({ target: made })).not.toThrow();
+  });
+});
+
+describe("a session island's doubts", () => {
+  it("tells the site's other tabs when its page loads, since the load renewed the session", () => {
+    const { page } = browser();
+    answers([900, 28_800]);
+    ready(island(), page);
+    expect(page.channel.postMessage.mock.calls).toEqual([["renewed"]]);
+  });
+
+  it("asks again in a minute when a success carries no times, as a captive portal's page may", async () => {
+    for (const answer of [{}, { idle: "900", absolute: 28_800 }, { idle: 900 }]) {
+      asked.mockReset();
+      const { page } = browser();
+      const host = island();
+      asked.mockResolvedValueOnce(answer);
+      answers([900, 28_800]);
+      ready(host, page);
+      await elapse(RETRY - 1);
+      expect([dialog(host).open, asked.mock.calls.length]).toEqual([false, 1]);
+      await elapse(1);
+      expect(asked).toHaveBeenCalledTimes(2);
+    }
+  });
+
+  it("sees time that passed while the tab slept, within a step of waking, without asking more often", async () => {
+    const { page } = browser();
+    answers([900, 28_800]);
+    asked.mockRejectedValueOnce(new Refused("you are logged out; log in again", 401));
+    ready(island(), page);
+    await elapse(STEP - 1);
+    expect(asked).toHaveBeenCalledTimes(1);
+    // The machine sleeps for an hour; its timers did not run, but its clock moved on.
+    vi.setSystemTime(Date.now() + 3_600_000);
+    await elapse(1);
+    expect(page.location.assign).toHaveBeenCalledWith("/ops/login?ended=1&next=/ops");
+  });
+
+  it("asks again when the browser is back online", async () => {
+    const { page, listeners } = browser();
+    answers([900, 28_800], [900, 28_800]);
+    ready(island(), page);
+    await elapse(0);
+    listeners.online?.(new Event("online"));
+    await elapse(0);
+    expect(asked).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("a session island's answers out of order", () => {
+  /** Has the next request wait until the test lets it answer, or fail. */
+  function held() {
+    const hold: { answer?: (left: object) => void; fail?: (error: unknown) => void } = {};
+    asked.mockImplementationOnce(
+      () =>
+        new Promise((answer, fail) => {
+          hold.answer = answer as (left: object) => void;
+          hold.fail = fail;
+        }),
+    );
+    return hold;
+  }
+
+  it("lets only the latest request set the clock, so a stale read never reopens a dialog a stay closed", async () => {
+    const { page, listeners } = browser();
+    const host = island();
+    answers([WARN, 28_000]);
+    ready(host, page);
+    await elapse(0);
+    const read = held();
+    listeners.visibilitychange?.(new Event("visibilitychange"));
+    answers([900, 27_900]);
+    (host.querySelector("[data-stay]") as HTMLButtonElement).click();
+    await elapse(0);
+    expect(dialog(host).open).toBe(false);
+    read.answer?.({ idle: 100, absolute: 27_900 });
+    await elapse(0);
+    expect(dialog(host).open).toBe(false);
+  });
+
+  it("ignores a stale request's failure too", async () => {
+    const { page, listeners } = browser();
+    const host = island();
+    answers([900, 28_800]);
+    ready(host, page);
+    await elapse(0);
+    const read = held();
+    listeners.visibilitychange?.(new Event("visibilitychange"));
+    answers([900, 28_800]);
+    listeners.online?.(new Event("online"));
+    await elapse(0);
+    read.fail?.(new Refused("you are logged out; log in again", 401));
+    await elapse(0);
+    expect(page.location.assign).not.toHaveBeenCalled();
   });
 });
