@@ -365,7 +365,7 @@ async fn the_pages_run_only_tetsus_own_script() {
 }
 
 /// Each page before login offers its one action as a passkey island, in the shared button's look, under Tetsu's
-/// wordmark. It shows no demo business, so it has no demo banner and no "Runs on Tetsu" footer.
+/// wordmark, with no note above it and no "Runs on Tetsu" footer.
 #[tokio::test]
 async fn each_page_offers_one_passkey_island() {
     let (address, _database, _) = serving().await;

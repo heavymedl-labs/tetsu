@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-10
 - Supersedes the naming rule in [ADR-0018](0018-demo-businesses-as-data.md)
+- Amended by [ADR-0068](0068-no-demo-note.md): no demo note
 
 ## Context
 

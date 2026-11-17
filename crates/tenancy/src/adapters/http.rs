@@ -431,7 +431,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_tenant_page_shows_its_name_locations_theme_and_that_it_is_a_demo() {
+    async fn a_tenant_page_shows_its_name_locations_and_theme_and_no_demo_note() {
         let app = serving(None, &[("anvil-row", "Anvil Row Strength")]).await;
         let (status, kind, body) = get(app, "/anvil-row").await;
         assert_eq!(status, StatusCode::OK);
@@ -441,7 +441,7 @@ mod tests {
         assert!(body.contains("<li>Northside</li>"), "{body}");
         assert!(body.contains(r#"href="/assets/tetsu-test.css""#), "{body}");
         assert!(body.contains(r#"href="/anvil-row/theme.css""#), "{body}");
-        assert!(body.contains("Demo business."), "{body}");
+        assert!(!body.contains("Demo business."), "{body}");
         assert!(
             body.contains(r#"<meta name="robots" content="noindex">"#),
             "{body}"
@@ -487,14 +487,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn in_a_demo_environment_every_page_says_so() {
+    async fn in_a_demo_environment_every_page_stays_out_of_search_with_no_note() {
         let (status, _, missing) = get(serving(None, &[]).await, "/nobody").await;
         assert_eq!(status, StatusCode::NOT_FOUND);
         let (status, _, unavailable) =
             get(serving(Some(Failure::Storage), &[]).await, "/anvil-row").await;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         for body in [missing, unavailable] {
-            assert!(body.contains("<strong>Demo.</strong>"), "{body}");
+            assert!(!body.contains("<strong>Demo.</strong>"), "{body}");
             assert!(
                 body.contains(r#"<meta name="robots" content="noindex">"#),
                 "{body}"

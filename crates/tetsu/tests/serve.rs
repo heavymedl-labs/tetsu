@@ -353,7 +353,7 @@ async fn a_visitor_sees_a_tenants_page_tetsus_page_and_not_found_elsewhere() {
     assert!(tenant.contains("<h1>Sample Studio</h1>"), "{tenant}");
     assert!(tenant.contains("<li>Main Street</li>"), "{tenant}");
     assert!(tenant.contains("<li>Riverside</li>"), "{tenant}");
-    assert!(tenant.contains("Demo business."), "{tenant}");
+    assert!(!tenant.contains("Demo business."), "{tenant}");
     let lower = tenant.to_ascii_lowercase();
     assert!(
         lower.contains("strict-transport-security: max-age=31536000"),

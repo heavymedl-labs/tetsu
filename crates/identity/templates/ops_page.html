@@ -5,9 +5,7 @@
     `script`, the passkey islands' hashed URL, to what the shared page needs. -#}
 {% extends "../../../web/templates/page.html" %}
 {% block head %}<script type="module" src="{{ script }}"></script>{% endblock %}
-{#- An operator page shows no demo business, so it has no demo banner, and it is Tetsu's own page, so it needs no
-    "Runs on Tetsu" footer. #}
-{% block banner %}{% endblock %}
+{#- An operator page is Tetsu's own, so it needs no "Runs on Tetsu" footer. #}
 {% block footer %}{% endblock %}
 {% block body %}
 <main class="flex flex-1 items-center justify-center px-6 py-16">

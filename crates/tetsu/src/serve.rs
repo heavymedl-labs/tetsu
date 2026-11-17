@@ -448,7 +448,7 @@ mod tests {
                 .unwrap();
             let body = String::from_utf8(body.to_vec()).unwrap();
             assert!(body.contains("Nothing is at this address."), "{body}");
-            assert_eq!(body.contains("Demo."), demo, "{body}");
+            assert_eq!(body.contains("noindex"), demo, "{body}");
         }
     }
 
@@ -599,10 +599,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_root_page_says_when_the_site_shows_demos() {
-        assert!(get_path("/").await.contains("<strong>Demo.</strong>"));
-        // ADR-0037: the note says what is fictional, not only that this is a demo.
-        assert!(get_path("/").await.contains("here are fictional"));
+    async fn the_root_page_carries_no_demo_note() {
+        assert!(!get_path("/").await.contains("<strong>Demo.</strong>"));
+        assert!(!get_path("/").await.contains("role=\"note\""));
         assert!(!send_to(false, &get_request("/")).await.contains("Demo"));
     }
 
