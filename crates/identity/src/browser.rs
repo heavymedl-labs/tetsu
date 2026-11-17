@@ -285,10 +285,18 @@ mod tests {
 
     proptest! {
         #[test]
-        fn a_return_path_is_either_refused_or_a_plain_operator_page(raw in "\\PC{0,40}") {
+        fn a_return_path_is_either_refused_or_a_plain_operator_page(
+            raw in prop_oneof!["\\PC{0,40}", "/ops(/[a-z.%]{0,3}){0,4}"],
+        ) {
             if let Some(path) = return_path(&raw) {
                 prop_assert!(path == "/ops" || path.starts_with("/ops/"));
-                prop_assert!(!path.contains("//") && !path.split('/').any(|part| part == ".."));
+                // With a slash after it, an empty, `.`, or `..` segment shows as one of these anywhere in it.
+                let ended = format!("{path}/");
+                for bad in ["//", "/./", "/../", "%"] {
+                    prop_assert!(!ended.contains(bad), "{} holds {}", path, bad);
+                }
+            } else {
+                prop_assert_ne!(raw.as_str(), "/ops");
             }
         }
     }

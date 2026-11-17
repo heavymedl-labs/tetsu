@@ -235,3 +235,61 @@ async fn the_login_page_says_how_long_a_session_may_sit_idle() {
     let told = "For your security, we log you out after 15 minutes without activity.";
     assert!(page.body.contains(told), "{}", page.body);
 }
+
+/// A browser with no session cookie at all has no time left to read.
+#[tokio::test]
+async fn a_browser_without_a_session_has_no_time_left() {
+    let (address, _database, _) = serving().await;
+    let left = get(address, "/ops/session", "").await;
+    assert_eq!(
+        (left.status, left.json()),
+        (401, json!({ "error": "you are logged out; log in again" }))
+    );
+}
+
+/// A login page whose check for a session storage refuses is unavailable, and reported to the operator.
+#[tokio::test]
+async fn a_login_page_that_cannot_check_the_session_is_unavailable() {
+    let (address, database, cookie, _) = logged_in().await;
+    as_admin(
+        &database,
+        "REVOKE EXECUTE ON FUNCTION identity.use_session(bytea, text) FROM tetsu_identity",
+    )
+    .await;
+    let page = get(address, "/ops/login", &cookie).await;
+    assert_eq!(
+        (page.status, page.header("cache-control")),
+        (503, Some("no-store"))
+    );
+    assert!(reported(
+        "identity: could not show the login page: storage failed"
+    ));
+}
+
+/// A time left that storage answers in the wrong shape is a storage failure, unavailable to the page, never a
+/// guess at how long is left.
+#[tokio::test]
+async fn an_unreadable_time_left_is_unavailable() {
+    for (columns, row) in [
+        ("idle_left text, absolute_left bigint", "'1', 1::bigint"),
+        ("idle_left bigint, absolute_left text", "1::bigint, '1'"),
+    ] {
+        let (address, database, cookie, _) = logged_in().await;
+        as_admin(
+            &database,
+            &format!(
+                "DROP FUNCTION identity.session_left(bytea, text);
+                 CREATE FUNCTION identity.session_left(bytea, text) RETURNS TABLE ({columns})
+                 LANGUAGE sql AS $$ SELECT {row} $$;
+                 GRANT EXECUTE ON FUNCTION identity.session_left(bytea, text) TO tetsu_identity"
+            ),
+        )
+        .await;
+        let left = get(address, "/ops/session", &cookie).await;
+        assert_eq!(
+            (left.status, left.json()),
+            (503, json!({ "error": UNAVAILABLE })),
+            "{columns}"
+        );
+    }
+}
