@@ -47,6 +47,20 @@ async function press(host: HTMLElement): Promise<void> {
   await new Promise((settled) => setTimeout(settled));
 }
 
+/** Has every ceremony from now answer `next`, forgetting what was asked before. */
+function answering(next: string): void {
+  run.mockReset();
+  run.mockResolvedValue(next);
+}
+
+/** Has the next ceremony send its last request, then lose the answer, as when the network drops. */
+function losingTheAnswer(): void {
+  run.mockImplementationOnce(async (_action, _sent, _device, _signal, finishing) => {
+    finishing();
+    throw new TypeError("Failed to fetch");
+  });
+}
+
 beforeEach(() => {
   run.mockReset();
 });
@@ -110,8 +124,7 @@ describe("a passkey island whose chained sign-in is refused", () => {
     await vi.waitFor(() => expect(host.dataset.state).toBe("ready"));
     expect(status(host)).toBe("Passkey created. Continue with passkey to sign in.");
     expect(page.location.assign).not.toHaveBeenCalled();
-    run.mockReset();
-    run.mockResolvedValue("/ops");
+    answering("/ops");
     await press(host);
     expect(run).toHaveBeenCalledWith("sign-in", {}, device, expect.any(AbortSignal), expect.any(Function));
     expect(page.location.assign).toHaveBeenCalledWith("/ops");
@@ -214,6 +227,41 @@ describe("a passkey island whose chained sign-in is refused or ended", () => {
   });
 });
 
+describe("a passkey island whose enrollment answer was lost", () => {
+  it("turns to signing in, since the passkey may be kept and the link spent", async () => {
+    const host = island('action="enroll"');
+    ready(host, browser());
+    losingTheAnswer();
+    await press(host);
+    await vi.waitFor(() => expect(host.dataset.state).toBe("ready"));
+    expect([status(host), host.querySelector("[data-label]")?.textContent]).toEqual([
+      "Your passkey may have been created. Continue with passkey to sign in.",
+      "Continue with passkey",
+    ]);
+    answering("/ops");
+    await press(host);
+    expect(run).toHaveBeenCalledWith("sign-in", {}, device, expect.any(AbortSignal), expect.any(Function));
+  });
+
+  it("fails as usual when a sign-in or an addition loses its answer, since neither spends a link", async () => {
+    const host = island('action="add" form-token="F1"');
+    ready(host, browser());
+    losingTheAnswer();
+    await press(host);
+    await vi.waitFor(() => expect(host.dataset.state).toBe("failed"));
+    expect(status(host)).toBe("Something went wrong. Try again in a minute.");
+  });
+
+  it("stays an enrollment when it failed before its last request went out", async () => {
+    const host = island('action="enroll"');
+    ready(host, browser());
+    run.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    await press(host);
+    await vi.waitFor(() => expect(host.dataset.state).toBe("failed"));
+    expect(host.querySelector("[data-label]")?.textContent).toBe("Go");
+  });
+});
+
 describe("a passkey island finishing", () => {
   it("lets no press cut off a ceremony's last request, and turns back on once it is answered", async () => {
     const host = island('action="enroll"');
@@ -261,10 +309,12 @@ describe("a passkey island that cannot go on", () => {
 });
 
 describe("a passkey island in a browser without passkeys", () => {
-  it("clears an enrollment's link from the address bar even where it cannot go on", () => {
+  it("keeps an enrollment's link where it cannot use passkeys, and says to open it where it can", () => {
     const page = { ...browser(), passkeys: undefined };
-    ready(island('action="enroll"'), page);
-    expect(page.history.replaceState).toHaveBeenCalledWith(null, "", "/ops/enroll?from=mail");
+    const host = island('action="enroll"');
+    ready(host, page);
+    expect(page.history.replaceState).not.toHaveBeenCalled();
+    expect(status(host)).toBe("This browser cannot use passkeys. Open this link in one that can.");
   });
 
   it("says so where the browser cannot use passkeys, and keeps the button off", () => {

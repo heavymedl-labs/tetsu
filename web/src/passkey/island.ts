@@ -78,7 +78,7 @@ function partsOf(host: HTMLElement): Parts | undefined {
 }
 
 /** Readies a `<tetsu-passkey>`, once: its button runs its action, if it has its parts and the browser can use
- * passkeys. An enrollment's link leaves the address bar first, whatever follows. */
+ * passkeys. An enrollment's link then leaves the address bar at once. */
 export function ready(host: HTMLElement, browser: Browser): void {
   // Connected again, as when moved, an island already readied keeps its one listener.
   if (host.dataset.state !== undefined) {
@@ -88,13 +88,17 @@ export function ready(host: HTMLElement, browser: Browser): void {
   if (parts === undefined) {
     return;
   }
-  const sent = sentFor(parts.action, host, browser);
   const device = browser.credentials;
   if (browser.passkeys === undefined || device === undefined) {
-    parts.status.textContent = "This browser cannot use passkeys.";
+    // An enrollment's link stays in the address bar, so the person can open it in a browser that can.
+    parts.status.textContent =
+      parts.action === "enroll"
+        ? "This browser cannot use passkeys. Open this link in one that can."
+        : "This browser cannot use passkeys.";
     host.dataset.state = "failed";
     return;
   }
+  const sent = sentFor(parts.action, host, browser);
   const presses = new Presses({ host, parts, browser, device }, sent);
   parts.button.addEventListener("click", () => presses.press());
   parts.button.disabled = false;
@@ -115,6 +119,9 @@ class Presses {
   private action: Action;
   private sent: Record<string, string>;
   private pending: AbortController | undefined;
+  /** The presses, by their signals, whose last request went out, after which the server may have kept what it
+   * was sent. */
+  private readonly lastSent = new WeakSet<AbortSignal>();
 
   constructor(
     private readonly island: Island,
@@ -130,32 +137,42 @@ class Presses {
     this.pending = controller;
     this.say("Waiting for your device…", "waiting");
     try {
-      const next = await ceremony(
-        this.action,
-        this.sent,
-        this.island.device,
-        controller.signal,
-        this.finishing,
-      );
+      const next = await ceremony(this.action, this.sent, this.island.device, controller.signal, () => {
+        this.lastSent.add(controller.signal);
+        this.finishing();
+      });
       if (this.action === "enroll") {
         await this.chain(controller.signal);
       } else {
         this.arrive(this.action, next);
       }
     } catch (error) {
-      if (!controller.signal.aborted) {
-        this.say(said(error), "failed");
+      if (controller.signal.aborted) {
+        return;
       }
+      // An enrollment whose last request went out but whose answer was lost may have kept the passkey and spent
+      // the link, so its link is no use again; signing in is. A refusal means the server kept nothing.
+      if (this.action === "enroll" && this.lastSent.has(controller.signal) && !(error instanceof Refused)) {
+        this.toSignIn();
+        this.say("Your passkey may have been created. Continue with passkey to sign in.", "ready");
+        return;
+      }
+      this.say(said(error), "failed");
     }
+  }
+
+  /** Turns the island to signing in, for good: an enrollment's link is spent once its passkey is kept. */
+  private toSignIn(): void {
+    this.action = "sign-in";
+    this.sent = {};
+    this.island.parts.label.textContent = "Continue with passkey";
   }
 
   // An operator's session comes from a passkey sign-in, never from the link that enrolled them, so a new passkey
   // signs in at once, on this page (ADR-0067). A browser may refuse a prompt the person did not start by pressing
   // something; the button then signs in instead. A refusal from the server is said as any other.
   private async chain(signal: AbortSignal): Promise<void> {
-    this.action = "sign-in";
-    this.sent = {};
-    this.island.parts.label.textContent = "Continue with passkey";
+    this.toSignIn();
     this.say("Passkey created. Confirm once more to sign in.", "waiting");
     try {
       this.arrive(

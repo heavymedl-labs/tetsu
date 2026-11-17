@@ -52,10 +52,13 @@ export async function ceremony(
   }
   const passkey = credential as PublicKeyCredential;
   const response = signing ? assertion(passkey) : registration(passkey);
+  // A prompt can answer just as a later press ends this ceremony; an ended one sends nothing more.
+  signal.throwIfAborted();
   finishing();
   const finished = await call(`${endpoint}/finish`, { ...sent, ceremony: begun.ceremony, response }, signal);
   if (typeof finished.next !== "string") {
-    throw new Refused("the server said nowhere to go next");
+    // The server answered, so it kept what it was sent; this is no refusal, only an answer the page cannot follow.
+    throw new Error("the server said nowhere to go next");
   }
   return finished.next;
 }

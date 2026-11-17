@@ -160,11 +160,30 @@ describe("a ceremony refused by the device or a proxy", () => {
     expect([finishing.mock.calls.length, fetch.mock.calls.length]).toEqual([1, 2]);
   });
 
-  it("throws when the server says nowhere to go next, rather than going to a page that is not one", async () => {
+  it("throws when the server says nowhere to go next, as no refusal, since the server kept what it was sent", async () => {
     serve([200, { ceremony: "c", options: fixture.request }], [200, {}]);
-    await expect(ceremony("sign-in", {}, device(signed), live(), vi.fn())).rejects.toThrow(
-      new Refused("the server said nowhere to go next"),
+    const thrown = await ceremony("sign-in", {}, device(signed), live(), vi.fn()).catch(
+      (error: unknown) => error,
     );
+    expect([thrown instanceof Refused, (thrown as Error).message]).toEqual([
+      false,
+      "the server said nowhere to go next",
+    ]);
+  });
+});
+
+describe("a ceremony a later press ended", () => {
+  it("sends nothing more, and says nothing of finishing, once a later press ended it", async () => {
+    const fetch = serve([200, { ceremony: "c", options: fixture.request }]);
+    const ending = new AbortController();
+    const phone = device(signed);
+    phone.get.mockImplementationOnce(async () => {
+      ending.abort();
+      return signed;
+    });
+    const finishing = vi.fn();
+    await expect(ceremony("sign-in", {}, phone, ending.signal, finishing)).rejects.toThrow();
+    expect([finishing.mock.calls.length, fetch.mock.calls.length]).toEqual([0, 1]);
   });
 });
 
