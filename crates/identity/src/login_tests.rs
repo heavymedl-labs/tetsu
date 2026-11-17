@@ -11,7 +11,7 @@ use crate::adapters::postgres::PostgresOperators;
 use crate::domain::{Login, SessionStart, Signer};
 use crate::join_tests::{
     ORIGIN, actor, app_pool, as_admin, authenticate, failure, number, party, recorded,
-    register_keeping, replace, with_link,
+    register_keeping, replace, with_link, without_randomness,
 };
 use crate::ports::OperatorStore;
 use crate::{Answer, OperatorId, Operators, Realm};
@@ -540,16 +540,7 @@ async fn a_login_that_changes_more_of_a_passkey_than_it_may_is_a_fault() {
 async fn failures_of_the_server_are_told_apart() {
     let (operators, database, _, kept) = joined().await;
     let party = party();
-    let failing = Operators::with_fill(
-        PostgresOperators {
-            pool: app_pool(&database),
-        },
-        |_| Err(getrandom::Error::UNSUPPORTED),
-    );
-    let unavailable = format!(
-        "temporarily unavailable: no secure random source: {}",
-        getrandom::Error::UNSUPPORTED
-    );
+    let (failing, unavailable) = without_randomness(&database);
     assert_eq!(
         failure(failing.begin_login(&party).await.map(drop)),
         unavailable

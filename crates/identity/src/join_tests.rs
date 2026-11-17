@@ -24,6 +24,23 @@ use crate::{Actor, Answer, Error, Identity, OperatorId, OperatorName, Operators,
 
 pub(crate) const ORIGIN: &str = "https://ops.example.com";
 
+/// Identity over `database` with no secure random source, and what it says when it needs one.
+pub(crate) fn without_randomness(
+    database: &TestDatabase,
+) -> (Operators<PostgresOperators>, String) {
+    let failing = Operators::with_fill(
+        PostgresOperators {
+            pool: app_pool(database),
+        },
+        |_| Err(getrandom::Error::UNSUPPORTED),
+    );
+    let unavailable = format!(
+        "temporarily unavailable: no secure random source: {}",
+        getrandom::Error::UNSUPPORTED
+    );
+    (failing, unavailable)
+}
+
 /// Finishes a join as the pages would, with no session presented, and says whose it was.
 async fn joining(
     operators: &Operators<PostgresOperators>,
@@ -659,16 +676,7 @@ async fn unknown_tokens_are_refused_alike() {
 async fn failures_of_the_server_are_told_apart() {
     let (operators, database, _, link) = with_link().await;
     let party = party();
-    let failing = Operators::with_fill(
-        PostgresOperators {
-            pool: app_pool(&database),
-        },
-        |_| Err(getrandom::Error::UNSUPPORTED),
-    );
-    let unavailable = format!(
-        "temporarily unavailable: no secure random source: {}",
-        getrandom::Error::UNSUPPORTED
-    );
+    let (failing, unavailable) = without_randomness(&database);
     assert_eq!(
         failure(failing.begin_join(&party, &link).await.map(drop)),
         unavailable
