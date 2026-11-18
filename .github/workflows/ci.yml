@@ -185,19 +185,26 @@ jobs:
           name: image
           path: image.tar.gz
           retention-days: 1
-      - name: All links outside research
+      # Links between the repository's own files, and their anchors, fail the run: they cannot flake, and a broken
+      # one is ours to fix.
+      - name: Internal links
         if: steps.base.outputs.same != 'true'
         uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
-          args: --no-progress --include-fragments --exclude-path docs/research "**/*.md"
+          args: --no-progress --include-fragments --offline "**/*.md"
           fail: true
-      # Research cites third-party pages that move or block bots; check only its internal links.
-      - name: Internal links in research
+      # Links to other sites only warn, since a site that is down for a while would otherwise hold back the image
+      # and a deploy. The job summary lists each broken one. Research cites third-party pages that move or block
+      # bots, so its links to other sites are not checked.
+      - name: Links to other sites
+        id: external
         if: steps.base.outputs.same != 'true'
         uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
-          args: --no-progress --include-fragments --offline "docs/research/**/*.md"
-          fail: true
+          args: --no-progress --include-fragments --exclude-path docs/research --scheme https --scheme http "**/*.md"
+          fail: false
+      - if: steps.base.outputs.same != 'true' && steps.external.outputs.exit_code != '0'
+        run: echo "::warning title=Broken links to other sites::The link check found broken links to other sites; the job summary lists them."
       - if: steps.base.outputs.same != 'true'
         run: >-
           docker run --rm -v "$PWD:/repo" -w /repo
