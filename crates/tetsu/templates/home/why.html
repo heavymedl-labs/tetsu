@@ -4,14 +4,14 @@
 {% call ui::section("why", "why-title") %}
 {% call fig::separator(false) %}{% endcall %}
 {% call ui::head("why-title", "Yours to keep, <br>yours to leave", "Switching booking software is hard enough. Tetsu makes staying a choice: no lock-in, no surprises, and nothing of yours held back.") %}{% endcall %}
-<dl class="tetsu-reveal grid gap-x-10 gap-y-12 sm:grid-cols-2 lg:grid-cols-4">
+<dl class="tetsu-reveal grid gap-x-10 gap-y-8 sm:grid-cols-2 sm:gap-y-12 lg:grid-cols-4">
 {%- for (term, text) in [
   ("Your customers", "Accounts, history, and stored cards are yours to export."),
   ("Your processor", "Bring the one you use, or switch without moving a member."),
   ("Published prices", "One flat price per location, and 90 days' notice of any change."),
   ("An open API", "Self-serve keys, a sandbox, and signed webhooks."),
 ] %}
-<div><dt class="font-medium text-ink">{{ term }}</dt><dd class="mt-2 text-sm/6 text-pretty text-muted">{{ text }}</dd></div>
+<div><dt class="text-base font-medium text-ink">{{ term }}</dt><dd class="mt-2 text-base text-pretty text-muted">{{ text }}</dd></div>
 {%- endfor %}
 </dl>
 {% endcall %}

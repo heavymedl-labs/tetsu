@@ -90,7 +90,7 @@
 {% endmacro %}
 
 {#- A section's separator: the band's dense ends gathered at both edges of the screen, fading toward the middle
-    and down. `flip` mirrors both halves. -#}
+    and down. `flip` mirrors both halves. Phones leave it out, as their sections sit too close for it to read. -#}
 {% macro separator(flip) %}
-<div aria-hidden="true" class="pointer-events-none absolute inset-x-0 top-0 -z-10 flex h-24 sm:h-28 lg:h-32 [mask-image:linear-gradient(to_bottom,black,transparent)]"><div class="flex w-1/2 justify-start overflow-hidden [mask-image:linear-gradient(to_right,black_35%,transparent_90%)]">{% call band(0, flip) %}{% endcall %}</div><div class="flex w-1/2 justify-end overflow-hidden [mask-image:linear-gradient(to_left,black_35%,transparent_90%)]">{% call band(960, !flip) %}{% endcall %}</div></div>
+<div aria-hidden="true" class="pointer-events-none absolute inset-x-0 top-0 -z-10 hidden h-16 sm:flex lg:h-20 [mask-image:linear-gradient(to_bottom,black,transparent)]"><div class="flex w-1/2 justify-start overflow-hidden [mask-image:linear-gradient(to_right,black_35%,transparent_90%)]">{% call band(0, flip) %}{% endcall %}</div><div class="flex w-1/2 justify-end overflow-hidden [mask-image:linear-gradient(to_left,black_35%,transparent_90%)]">{% call band(960, !flip) %}{% endcall %}</div></div>
 {% endmacro %}

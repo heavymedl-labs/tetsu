@@ -518,7 +518,7 @@ mod tests {
                 .await
                 .unwrap();
             let body = String::from_utf8(body.to_vec()).unwrap();
-            // As Linear's: the site's own header and footer around "404" in the brand's slots (ADR-0035).
+            // The site's own header and footer around "404" in the brand's slots (ADR-0035).
             for shown in [
                 "<title>Page not found – Tetsu</title>",
                 "<nav aria-label=\"Tetsu\"",
@@ -1115,8 +1115,7 @@ mod tests {
 
     #[test]
     fn each_feature_section_shows_its_panels_in_its_own_arrangement() {
-        // As Linear sets its product: panels arranged in a picture, with no tabs to choose between, and each
-        // section in its own arrangement. Every panel appears somewhere on the page, in the order given.
+        // Panels arranged in a picture, with no tabs to choose between, and each section in its own arrangement. Every panel appears somewhere on the page, in the order given.
         let page = home_page(true);
         for (id, arrangement, panels) in [
             (
@@ -1355,7 +1354,7 @@ mod tests {
             "the header's wordmark"
         );
         assert_eq!(
-            booked_cells(&home_page(true), r#"<section class="text-center">"#),
+            booked_cells(&home_page(true), r#"class="tetsu-board""#),
             brand,
             "the hero board"
         );

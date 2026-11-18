@@ -1,7 +1,8 @@
 /* Tetsu's shared stylesheet (ADR-0032, ADR-0035). Tailwind reads only templates, each crate's and the shared
    ones. A tenant's brand colors come from the --tetsu-* properties its theme sheet sets after this one. */
 @import "tailwindcss" source(none);
-@import "@fontsource-variable/inter/wght.css";
+/* Inter with its optical size axis, so large headings take its tighter display cut and small text its text cut. */
+@import "@fontsource-variable/inter/opsz.css";
 /* Tetsu's own parts, one file each, with any motion beside its part: the brand's motion, the figures, the product
    pictures' parts and stories, and the feature sections' pictures. */
 @import "./motion.css";
@@ -16,10 +17,58 @@
 @theme {
   --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  /* The type scale: each size brings its own line height and tracking, tighter as it grows, so a template names a
+     size and nothing else. Body text is base (15px); mini (13px) is for navigation, buttons, and fine print. */
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.4;
+  --text-xs--letter-spacing: 0;
+  --text-mini: 0.8125rem;
+  --text-mini--line-height: 1.5;
+  --text-mini--letter-spacing: -0.01em;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.5;
+  --text-sm--letter-spacing: -0.013em;
+  --text-base: 0.9375rem;
+  --text-base--line-height: 1.6;
+  --text-base--letter-spacing: -0.011em;
+  --text-lg: 1.0625rem;
+  --text-lg--line-height: 1.6;
+  --text-lg--letter-spacing: 0;
+  --text-xl: 1.25rem;
+  --text-xl--line-height: 1.33;
+  --text-xl--letter-spacing: -0.012em;
+  --text-2xl: 1.5rem;
+  --text-2xl--line-height: 1.33;
+  --text-2xl--letter-spacing: -0.012em;
+  --text-3xl: 2rem;
+  --text-3xl--line-height: 1.125;
+  --text-3xl--letter-spacing: -0.022em;
+  /* A phone's display headline, between 3xl and 4xl. */
+  --text-display: 2.375rem;
+  --text-display--line-height: 1.1;
+  --text-display--letter-spacing: -0.022em;
+  --text-4xl: 2.5rem;
+  --text-4xl--line-height: 1.1;
+  --text-4xl--letter-spacing: -0.022em;
+  --text-5xl: 3rem;
+  --text-5xl--line-height: 1;
+  --text-5xl--letter-spacing: -0.022em;
+  --text-6xl: 3.5rem;
+  --text-6xl--line-height: 1.1;
+  --text-6xl--letter-spacing: -0.022em;
+  --text-7xl: 4rem;
+  --text-7xl--line-height: 1.06;
+  --text-7xl--letter-spacing: -0.022em;
+  --text-8xl: 4.5rem;
+  --text-8xl--line-height: 1;
+  --text-8xl--letter-spacing: -0.022em;
+  /* Medium is the weight of headings and buttons, a touch under Inter's 500; semibold of figures and emphasis. */
+  --font-weight-medium: 510;
+  --font-weight-semibold: 590;
   /* The brand's motion: fast out of the gate, settling softly. */
   --ease-tetsu: cubic-bezier(0.2, 0.8, 0.2, 1);
-  /* The widest Tetsu's own pages run, as max-w-page. */
-  --container-page: 84rem;
+  /* The widest Tetsu's own pages run, as max-w-page: a 1280px text column inside the widest gutter. */
+  --container-page: 89.75rem;
 }
 
 @theme inline {
@@ -28,6 +77,12 @@
   --color-surface: var(--tetsu-color-surface);
   --color-fill: var(--tetsu-color-fill);
   --color-line: var(--tetsu-color-line);
+  /* Edges: hairlines of the ink's opposite laid over whatever lies under them, so an edge reads a touch brighter on a
+     raised surface than on the page. Soft for edges inside a part, the plain one for a part's own edge, and strong
+     for a part raised above the rest. A filled shape, such as a track or a rule drawn as a fill, keeps line. */
+  --color-edge-soft: var(--tetsu-color-edge-soft);
+  --color-edge: var(--tetsu-color-edge);
+  --color-edge-strong: var(--tetsu-color-edge-strong);
   --color-ink: var(--tetsu-color-ink);
   --color-soft: var(--tetsu-color-soft);
   --color-muted: var(--tetsu-color-muted);
@@ -74,13 +129,15 @@
 :root {
   /* Light is Tailwind CSS's taupe palette (MIT): a tinted page under lighter panels, after Tailwind Plus's Oatmeal
      kit. Dark is Radix Colors' sand scale (MIT). By role: the page, a panel, a component inside one, a border, and
-     text in four tiers, as Linear's page uses them: ink for headings and what matters most, soft for leads, muted
-     for descriptions, and faint for labels, dates, and fine print. Faint passes WCAG AA's
-     4.5:1 on the page and on panels, unlike Linear's lowest tier. */
+     text in four tiers: ink for headings and what matters most, soft for leads, muted for descriptions, and faint
+     for labels, dates, and fine print. Faint passes WCAG AA's 4.5:1 on the page and on panels. */
   --tetsu-color-canvas: #f3f1f1;
   --tetsu-color-surface: #fbfaf9;
   --tetsu-color-fill: #e8e4e3;
   --tetsu-color-line: #d8d2d0;
+  --tetsu-color-edge-soft: rgb(0 0 0 / 0.06);
+  --tetsu-color-edge: rgb(0 0 0 / 0.1);
+  --tetsu-color-edge-strong: rgb(0 0 0 / 0.14);
   --tetsu-color-ink: #0c0a09;
   --tetsu-color-soft: #342d2a;
   --tetsu-color-muted: #5b4f4b;
@@ -102,6 +159,9 @@
     --tetsu-color-surface: #191918;
     --tetsu-color-fill: #222221;
     --tetsu-color-line: #3b3a37;
+    --tetsu-color-edge-soft: rgb(255 255 255 / 0.05);
+    --tetsu-color-edge: rgb(255 255 255 / 0.08);
+    --tetsu-color-edge-strong: rgb(255 255 255 / 0.12);
     --tetsu-color-ink: #eeeeec;
     --tetsu-color-soft: #cfceca;
     --tetsu-color-muted: #b5b3ad;
@@ -116,8 +176,39 @@
   }
 }
 
+/* A row that slides (the home page's statement, quotes, and plans): the next card's edge shows there is more, so a
+   scrollbar would only take room. */
+@utility scrollbar-none {
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* The page's gutter, from the screen's edge to its text, as px-(--tetsu-gutter): wider as the screen grows, so the
+   text sits 24px in on a phone, 36px on a tablet, 42px on a small laptop, and 78px from 1280px. A row that slides
+   reaches past it to the screen's edge, as -mx-(--tetsu-gutter). */
+:root {
+  --tetsu-gutter: 1.5rem;
+
+  @media (width >= 40rem) {
+    --tetsu-gutter: 2.25rem;
+  }
+
+  @media (width >= 64rem) {
+    --tetsu-gutter: 2.625rem;
+  }
+
+  @media (width >= 80rem) {
+    --tetsu-gutter: 4.875rem;
+  }
+}
+
 @layer base {
   html {
+    /* Inter's alternate one, with a flag, and its rounded quotes and commas. */
+    font-feature-settings: "cv01", "ss03";
     color-scheme: light;
 
     @variant dark {

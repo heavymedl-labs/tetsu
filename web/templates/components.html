@@ -20,26 +20,39 @@
 </svg>
 {% endmacro %}
 
-{#- A button's look, for a link or a button element: solid, or outlined when `secondary`; tighter when `small`, or
-    a full-width row 44px tall when `full`, as a column of login choices stacks them. It sets no margin or display
-    beyond what `full` needs, so the caller places it. -#}
+{#- A button's look, for a link or a button element: solid, or a faint fill when `secondary`. A pill 44px tall at
+    16px, 32px tall at the small step when `small`, as the header's, or a full-width row 44px tall when `full`, as a
+    column of login choices stacks them. It sets no margin, so the caller places it. -#}
 {% macro button_style(secondary = false, small = false, full = false) -%}
-rounded-full font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent {% if secondary %}border border-line text-ink transition-colors hover:bg-surface{% else %}bg-ink text-canvas transition-opacity hover:opacity-85{% endif %} {% if full %}flex h-11 w-full items-center justify-center text-[13px]{% else if small %}px-3.5 py-1.5 whitespace-nowrap{% else %}px-5 py-2.5 text-sm{% endif %}
+rounded-full font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent {% if secondary %}bg-ink/5 text-ink transition-colors hover:bg-ink/10{% else %}bg-ink text-canvas transition-opacity hover:opacity-85{% endif %} {% if full %}flex h-11 w-full items-center justify-center gap-2 text-mini{% else if small %}inline-flex h-8 items-center gap-1.5 px-3 text-mini whitespace-nowrap{% else %}inline-flex h-11 items-center gap-1.5 px-5 text-[1rem]{% endif %}
 {%- endmacro %}
 
-{#- A link drawn as a button, around what the caller writes, as `button_style` draws it. It sets no margin or
-    display beyond inline-block, so a wrapper places it. -#}
-{% macro button(href, secondary = false, small = false) %}
-<a href="{{ href }}" class="inline-block {% call button_style(secondary, small) %}{% endcall %}">{{ caller() }}</a>
+{#- Three open columns, with a hairline between each and no frame, for a row's element (`columns_style`) and each
+    column's (`column_style`). Narrower than a laptop they are a row that slides, each column a fixed 328px, so what
+    it holds keeps its size on any phone, and the next column's start and the hairline before it show there is more.
+    A column pads its text 24px, so the row starts 24px inside the gutter and its first text, and each column it
+    snaps to, lines up with the page's. From a laptop, three columns, their text on the page's edges. -#}
+{% macro columns_style() -%}
+-mx-(--tetsu-gutter) flex snap-x snap-mandatory scroll-px-[calc(var(--tetsu-gutter)-1.5rem)] overflow-x-auto px-[calc(var(--tetsu-gutter)-1.5rem)] scrollbar-none lg:-mx-8 lg:grid lg:grid-cols-3 lg:overflow-visible lg:px-0
+{%- endmacro %}
+
+{% macro column_style() -%}
+w-82 shrink-0 snap-start border-r border-edge px-6 last:border-r-0 lg:w-auto lg:px-8
+{%- endmacro %}
+
+{#- A link drawn as a solid button, around what the caller writes, as `button_style` draws it, or its small step
+    when `small`. It sets no margin, so a wrapper places it. -#}
+{% macro button(href, small = false) %}
+<a href="{{ href }}" class="{% call button_style(false, small) %}{% endcall %}">{{ caller() }}</a>
 {% endmacro %}
 
 {#- A page that says why there is nothing to show, after HyperUI's empty content 1 (MIT). -#}
 {% macro empty(code, title, text) %}
 <main class="flex flex-1 items-center justify-center p-6">
 <div class="max-w-md text-center">
-<div class="mx-auto inline-flex rounded-full border border-line bg-surface p-3 text-muted">{% call icon("frown") %}{% endcall %}</div>
+<div class="mx-auto inline-flex rounded-full border border-edge bg-surface p-3 text-muted">{% call icon("frown") %}{% endcall %}</div>
 <p class="mt-6 font-mono text-xs tracking-widest text-accent uppercase">{{ code }}</p>
-<div class="mt-2 text-3xl font-semibold tracking-tight text-balance text-ink sm:text-4xl"><h1>{{ title }}</h1></div>
+<div class="mt-2 text-3xl font-medium text-balance text-ink sm:text-4xl"><h1>{{ title }}</h1></div>
 <div class="mt-4 text-pretty text-muted"><p>{{ text }}</p></div>
 <div class="mt-8">{% call button("/") %}Go to Tetsu{% endcall %}</div>
 </div>
@@ -47,31 +60,35 @@ rounded-full font-medium focus-visible:outline-2 focus-visible:outline-offset-2 
 {% endmacro %}
 
 {#- A section of a page, at the page's width. A band or other backdrop the caller draws absolutely sits behind it,
-    across the full width. -#}
-{% macro section(id, labelledby) %}
-<section{% if !id.is_empty() %} id="{{ id }}"{% endif %} aria-labelledby="{{ labelledby }}" class="relative py-22 sm:py-32 lg:py-44">
-<div class="mx-auto max-w-page px-6 lg:px-10">
+    across the full width. Phones get a tighter rhythm, so a section spends its height
+    on what it shows. Wider, its top clears the band its separator draws (art/figures.html) by 24px, and its foot
+    makes up the rest of the space between sections: 58px on a phone, 154px on a tablet, and 266px from a laptop.
+    `opening` is the first section after the customers, which flows on from them with no band: 48px, 64px, then 96px
+    under their line. -#}
+{% macro section(id, labelledby, opening = false) %}
+<section{% if !id.is_empty() %} id="{{ id }}"{% endif %} aria-labelledby="{{ labelledby }}" class="relative {% if opening %}pt-12 sm:pt-16 xl:pt-24{% else %}pt-7 sm:pt-22 lg:pt-26{% endif %} pb-7 sm:pb-16 lg:pb-40">
+<div class="mx-auto max-w-page px-(--tetsu-gutter)">
 {{ caller() }}
 </div>
 </section>
 {% endmacro %}
 
 {#- A section's heading beside its line, or `joined` to it in two tones: the claim in ink, the rest muted, at one
-    size. Left-aligned, as Linear sets its sections, with the space every section leaves under its heading. The
+    size. Left-aligned, with the space every section leaves under its heading. The
     title, and a joined line, are trusted markup written in the template, never data, and may hold a line break. -#}
 {% macro head(id, title, text, joined = false) %}
-<div class="tetsu-reveal mb-16 sm:mb-20 lg:mb-28 {% if joined %}max-w-6xl{% else %}grid gap-6 lg:grid-cols-2 lg:gap-16{% endif %}">
-<h2 id="{{ id }}" class="text-4xl/[1.05] font-semibold tracking-[-0.035em] text-balance text-ink sm:text-5xl/[1.05]">{{ title|safe }}{% if joined %} <span class="text-muted">{{ text|safe }}</span>{% endif %}</h2>
+<div class="tetsu-reveal mb-8 sm:mb-16 xl:mb-24 {% if joined %}max-w-6xl{% else %}grid gap-6 sm:gap-8 lg:grid-cols-2 lg:gap-16{% endif %}">
+<h2 id="{{ id }}" class="text-2xl font-medium text-balance text-ink {% if joined %}sm:text-3xl{% else %}sm:text-4xl{% endif %} lg:text-5xl">{{ title|safe }}{% if joined %} <span class="text-muted">{{ text|safe }}</span>{% endif %}</h2>
 {%- if !joined %}
-<p class="max-w-[35rem] text-xl/[1.4] tracking-[-0.012em] text-pretty text-soft sm:text-2xl/[1.33]">{{ text }}</p>
+<p class="max-w-[38rem] text-base text-pretty text-soft sm:text-xl lg:text-2xl">{{ text }}</p>
 {%- endif %}
 </div>
 {% endmacro %}
 
-{#- What a feature section covers, under its picture: a label beside two columns of items, as Linear ends its
-    feature sections. -#}
+{#- What a feature section covers, under its picture: a label beside two columns of items. Phones
+    leave it out, so a section is its claim and its picture. -#}
 {% macro features(items) %}
-<div class="tetsu-reveal mt-16 grid gap-6 text-sm sm:mt-20 lg:grid-cols-2 lg:gap-16">
+<div class="tetsu-reveal mt-8 hidden gap-6 text-mini sm:grid lg:grid-cols-2 lg:gap-16">
 <p class="text-faint">Features</p>
 <ul class="grid grid-cols-2 gap-x-8 gap-y-2 text-muted">{% for item in items %}<li class="flex"><span aria-hidden="true" class="mr-2 text-faint">+</span>{{ item }}</li>{% endfor %}</ul>
 </div>
@@ -81,7 +98,7 @@ rounded-full font-medium focus-visible:outline-2 focus-visible:outline-offset-2 
 {% macro footer_column(heading, items) %}
 <div>
 <h2 class="font-medium text-ink">{{ heading }}</h2>
-<ul class="mt-4 space-y-3 text-muted">
+<ul class="mt-4 space-y-2.5 text-muted lg:mt-6">
 {%- for (href, text) in items %}
 <li>{% if href.is_empty() %}{{ text }}{% else %}<a href="{{ href }}" class="hover:text-ink">{{ text }}</a>{% endif %}</li>
 {%- endfor %}

@@ -1,25 +1,36 @@
 @layer components {
-  /* A feature section's picture (home.html), set as Linear sets its product: a view behind and a panel in front.
-     Panels come in fixed sizes, so each one has the same look at every screen width: a card (30rem), a wide card
-     (48rem), or a view (68rem), each laid out by its own width (app.html). Two arrangements, card and layer,
-     alternate down the page so neighbouring sections differ. The stage they sit on spans the text's
-     width and is 38rem tall, with panels placed in rem from its edges, and smaller screens zoom the whole stage
-     down rather than reflow it. On phones, the panel in front alone, cut short and faded out. The fades, halo, and
-     lit corners show only in a browser, so the browser tests ADR-0054 proposes will check them; the page tests check the rest. */
+  /* A feature section's picture (home.html): a view behind and a panel in front. Panels come in fixed sizes, so
+     each one has the same look at every screen width: a card (30rem), a wide card (48rem), or a view (68rem), each
+     laid out by its own width (app.html). Two arrangements, card and layer, alternate down the page so neighbouring
+     sections differ. The stage they sit on spans the text's width and is 38rem tall, with panels placed in rem from
+     its edges, and smaller screens zoom the whole stage down rather than reflow it. On phones, the panel in front
+     alone, cut short and faded out. The fades, halo, and lit corners show only in a browser, so the browser tests
+     ADR-0054 proposes will check them; the page tests check the rest. */
   .tetsu-scene {
     position: relative;
+  }
+
+  /* The scene's fade, over everything in it; where it falls depends on the screen (below). */
+  .tetsu-scene::after {
+    content: "";
+    position: absolute;
+    z-index: 2;
+    pointer-events: none;
   }
 
   .tetsu-scene-back {
     display: none;
   }
 
-  /* The panel in front stands out by tone, a halo, and a lit corner facing the text, not by dimming the view
-     behind. The view behind takes a tone between the page and a panel. */
+  /* The panel in front stands out by light rather than shadow: a rim that catches light, brightest at the corner
+     facing the text and faint all round, a soft wash of light inside that corner in the dark scheme, and a shadow in
+     the page's own color, which parts it from the view behind without darkening anything. The view behind takes a
+     tone between the page and a panel, and steps back further (below). */
   .tetsu-scene-front {
     position: relative;
 
-    /* Drawn on the wrapper, which the panel fills, since the panel clips whatever lies on its own border. */
+    /* The lit part of the rim. Drawn on the wrapper, which the panel fills, since the panel clips whatever lies on
+       its own border. */
     &::after {
       content: "";
       position: absolute;
@@ -28,7 +39,7 @@
       border-radius: var(--radius-2xl);
       pointer-events: none;
       mask-image: radial-gradient(
-        12.5rem 12.5rem at var(--tetsu-lit, 100% 0%),
+        16rem 16rem at var(--tetsu-lit, 100% 0%),
         black,
         rgb(0 0 0 / 0.6) 30%,
         rgb(0 0 0 / 0.2) 50%,
@@ -36,42 +47,74 @@
       );
 
       @variant dark {
-        border-color: rgb(255 255 255 / 0.16);
+        border-color: rgb(255 255 255 / 0.24);
       }
     }
   }
 
-  /* The halo: a tight shadow that edges the card all round, over the view behind as much as the page, and a soft
-     one that lifts it. */
+  /* The rest of the rim is the panel's own edge (app.html), and below it the shadow. In the light scheme a hairline
+     of shadow edges it too; in the dark scheme the shadow is the page's color, so it clears the view behind the
+     panel's edges rather than casting darkness, and nothing but the edge outlines it. The wash eases out over
+     several stops, so it cannot band. */
   .tetsu-scene-front > [role="img"] {
     box-shadow:
-      0 0 0 1px rgb(0 0 0 / 0.03),
-      0 1px 3px rgb(0 0 0 / 0.08),
-      0 0 32px rgb(0 0 0 / 0.14);
+      0 0 0 1px rgb(0 0 0 / 0.04),
+      0 1px 2px rgb(0 0 0 / 0.04),
+      0 8px 32px -8px rgb(0 0 0 / 0.08);
 
     @variant dark {
-      box-shadow:
-        0 0 0 1px rgb(0 0 0 / 0.4),
-        0 1px 3px rgb(0 0 0 / 0.5),
-        0 0 32px rgb(0 0 0 / 0.75);
+      background-image: radial-gradient(
+        50% 50% at var(--tetsu-lit, 100% 0%),
+        rgb(255 255 255 / 0.03),
+        rgb(255 255 255 / 0.0295) 15%,
+        rgb(255 255 255 / 0.0245) 30%,
+        rgb(255 255 255 / 0.018) 45%,
+        rgb(255 255 255 / 0.011) 60%,
+        rgb(255 255 255 / 0.005) 75%,
+        rgb(255 255 255 / 0.001) 90%,
+        transparent
+      );
+      box-shadow: 0 4px 32px color-mix(in oklab, var(--color-canvas) 60%, transparent);
     }
+  }
+
+  /* The view behind steps back. */
+  .tetsu-scene-back {
+    opacity: 0.8;
   }
 
   .tetsu-scene-back > [role="img"] {
     --tetsu-panel: color-mix(in oklab, var(--color-canvas), var(--color-surface));
   }
 
-  /* On phones, the panel in front is cut short and fades out at the bottom, as Linear ends its phone card. The
-     panel cuts itself, as it already hides its own overflow, and its fade reaches 2rem past its top and sides, so
-     the halo around it shows there and fades with it at the foot. */
+  /* On phones, the panel in front alone, at least a card's width, so it keeps its own layout and runs off the
+     screen's right edge rather than squeezing; on a wider screen it reaches that edge, taking the wider layout its
+     own width gives it, so it never stops short with empty space beside it. It is cut short, to its top, which
+     tells the story, and fades out at the bottom and at the screen's edge, which the scene reaches. The scene clips
+     at its foot and that edge, leaving the halo room above and to the left. Fades here and below are gradients of
+     the page's own color laid over a picture, not masks: browsers dither a color gradient, but draw a mask's fade
+     in visible bands, worst in the dark scheme. */
   @media (width < 48rem) {
+    .tetsu-scene {
+      margin-right: calc(-1 * var(--tetsu-gutter));
+      clip-path: inset(-2rem 0 0 -2rem);
+    }
+
+    /* The fade covers the scene and the room its clip leaves the panel's glow, above and to the left, so nothing
+       drawn outside the panel outlasts it. */
+    .tetsu-scene::after {
+      inset: -2rem 0 0 -2rem;
+      background:
+        linear-gradient(to top, var(--color-canvas), transparent 6rem),
+        linear-gradient(to left, var(--color-canvas), transparent 5rem);
+    }
+
+    .tetsu-scene-front {
+      width: max(30rem, 100%);
+    }
+
     .tetsu-scene-front > [role="img"] {
-      max-height: 26rem;
-      mask-image: linear-gradient(to top, transparent, black 10rem);
-      mask-clip: no-clip;
-      mask-position: -2rem -2rem;
-      mask-size: calc(100% + 4rem) calc(100% + 2rem);
-      mask-repeat: no-repeat;
+      max-height: 19rem;
     }
   }
 
@@ -80,6 +123,7 @@
     .tetsu-scene {
       height: 38rem;
       margin: -2rem -2rem 0;
+      overflow: clip;
       zoom: 0.62;
     }
 
@@ -124,13 +168,20 @@
       right: 0;
       left: 6rem;
       width: auto;
-      mask-image: linear-gradient(to left, transparent 3rem, black 11rem);
     }
 
-    /* Card and layer: the whole stage fades at the bottom, panels and all. */
-    .tetsu-scene-card,
-    .tetsu-scene-layer {
-      mask-image: linear-gradient(to top, transparent, black 14rem);
+    .tetsu-scene-card .tetsu-scene-back::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: linear-gradient(to left, var(--color-canvas) 3rem, transparent 11rem);
+    }
+
+    /* The whole stage fades at the bottom, panels and all. */
+    .tetsu-scene::after {
+      inset: 0;
+      background: linear-gradient(to top, var(--color-canvas), transparent 14rem);
     }
 
     /* Layer: a list across the stage behind a wide card at the text's right edge, lit at its top left. */
@@ -157,6 +208,77 @@
   @media (width >= 80rem) {
     .tetsu-scene {
       zoom: 1;
+    }
+  }
+
+  /* The week (week.html) below a tablet: zoomed to half, from the text's left edge to the screen's right, laid out at
+     twice that width and never under 56rem. A phone lays it out without the sidebar, so all five days show, today
+     among them; a wider screen reaches the width that adds the sidebar and the activity beside the days. It stops
+     just under the days, so it keeps its height as the screen grows. */
+  @media (width < 48rem) {
+    .tetsu-week-frame {
+      position: relative;
+      overflow: clip;
+    }
+
+    .tetsu-week-frame::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(to left, var(--color-canvas), transparent 3rem),
+        linear-gradient(to top, var(--color-canvas), transparent 4rem);
+    }
+
+    .tetsu-week {
+      width: max(56rem, 2 * (100vw - var(--tetsu-gutter)));
+      max-height: 36rem;
+      overflow: clip;
+      zoom: 0.5;
+    }
+  }
+
+  /* On the narrowest phones, the week zooms a step further, so today's column clears the fade at the screen's edge. */
+  @media (width < 25rem) {
+    .tetsu-week {
+      zoom: 0.45;
+    }
+  }
+
+  @media (width < 23rem) {
+    .tetsu-week {
+      zoom: 0.4;
+    }
+  }
+
+  /* On a tablet or small laptop, the week whole, at the width that gives it the sidebar and the activity beside the
+     days, zoomed to fit the text's width, rather than reflowing into a tall column below that width. */
+  @media (48rem <= width < 80rem) {
+    .tetsu-week {
+      width: max(68rem, (100vw - 2 * var(--tetsu-gutter)) / 0.6);
+      zoom: 0.6;
+    }
+  }
+}
+
+/* On a phone, a panel in front shows only what tells its story within the phone's shorter cut: it drops what it marks
+   .tetsu-off-phone, or .tetsu-off-narrow while it is narrow, and shows what it marks .tetsu-on-phone, which its own
+   width would hide. Outside the layer, so these win over the panel's own utilities, which lay it out by its width and
+   cannot tell a phone from a card. */
+@media (width < 48rem) {
+  .tetsu-scene-front .tetsu-off-phone {
+    display: none;
+  }
+
+  .tetsu-scene-front .tetsu-on-phone {
+    display: block;
+  }
+
+  /* What a panel drops only while it is a card's width, not once a wider phone gives it room. */
+  @container (width < 36rem) {
+    .tetsu-scene-front .tetsu-off-narrow {
+      display: none;
     }
   }
 }

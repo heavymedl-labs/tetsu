@@ -4,8 +4,8 @@
 {% call app::panel("Today's payments arriving, with a new one charged to a card on file, and this week's payout rising past the last seven") %}
 {% call app::bar("Payments", "· Today, Thursday, November 12") %}<p class="font-mono text-xs text-muted">Your processor</p>{% endcall %}
 <div class="grid grid-cols-1 @2xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
-<div class="p-4 @xl:p-6">
-<ul class="divide-y divide-line">
+<div class="p-6">
+<ul class="divide-y divide-edge-soft">
 <li class="tetsu-in flex items-center gap-3 py-2.5 [--at:0.22]"><span class="w-9 font-mono text-[11px] text-muted">7:04</span><span class="min-w-0 flex-1"><span class="block truncate text-ink">Maya Ruiz</span><span class="block truncate font-mono text-[11px] text-muted">Hot flow, drop-in · Card on file</span></span><span class="font-mono text-xs text-ink">$30.24</span><span class="grid font-mono text-[11px] *:col-start-1 *:row-start-1"><span class="tetsu-out text-muted [--at:0.3]">Charging</span><span class="tetsu-in flex items-center gap-1 text-ink [--at:0.3]"><span aria-hidden="true" class="size-1.5 rounded-full bg-forge"></span>Paid</span></span></li>
 
 {%- for (time, name, line, amount) in payments %}
@@ -14,7 +14,7 @@
 {%- endfor %}
 </ul>
 </div>
-<div class="flex flex-col border-t border-line bg-fill/40 p-4 @xl:p-6 @2xl:border-t-0 @2xl:border-l">
+<div class="flex flex-col border-t border-edge bg-fill/40 p-6 @2xl:border-t-0 @2xl:border-l">
 {% call app::label("Next payout") %}{% endcall %}
 <p class="mt-1 text-2xl font-semibold tracking-tight text-ink">$18,420.55</p>
 <p class="text-xs text-muted">Arrives Monday, November 16 · Checking ·· 6045</p>

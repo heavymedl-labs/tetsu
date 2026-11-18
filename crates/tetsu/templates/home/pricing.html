@@ -3,13 +3,16 @@
 {% call ui::section("pricing", "plans") %}
 {% call fig::separator(true) %}{% endcall %}
 {% call ui::head("plans", "Simple pricing, per location.", "Unlimited staff and customers, and no contract.", joined = true) %}{% endcall %}
-<div class="tetsu-reveal grid gap-4 md:grid-cols-3 lg:gap-6">
+{#- Plans as open columns (components.html). A plan is its name, its price, then its line and its features, each
+    under a rule; its line keeps two lines' height, so the rules line up across plans. The popular plan says so in a
+    word beside its name. #}
+<div role="region" aria-label="Plans" tabindex="0" class="tetsu-reveal {% call ui::columns_style() %}{% endcall %}">
 {%- for (name, price, per, line, items, popular) in [
   ("Starter", "$79", "/ month", "For a single location getting started.", ["Classes, appointments, and rentals", "Online booking page", "Card payments"], false),
   ("Growth", "$149", "/ month", "For busy businesses with members.", ["Everything in Starter", "Memberships and class packs", "Waitlists and reminders"], true),
   ("Multi-location", "$129", "/ location", "For brands with two locations or more.", ["Everything in Growth", "Shared memberships", "Reports across locations"], false),
 ] %}
-<div class="{% if *popular %}relative rounded-2xl border border-forge/60 bg-surface p-6 shadow-[0_0_40px_-12px_var(--tetsu-color-forge)] lg:p-8{% else %}rounded-2xl border border-line bg-surface p-6 lg:p-8{% endif %}">{% if *popular %}<p class="absolute -top-3 left-8 rounded-full bg-accent px-2 py-0.5 font-mono text-xs text-on-accent">Most popular</p>{% endif %}<h3 class="font-medium text-ink">{{ name }}</h3><p class="mt-4 text-4xl font-semibold tracking-tight text-ink">{{ price }}<span class="text-base font-normal text-faint"> {{ per }}</span></p><p class="mt-2 text-sm text-muted">{{ line }}</p><ul class="mt-8 space-y-3 border-t border-line pt-6 text-sm text-ink">{% for item in items %}<li class="flex gap-3"><span class="{% if *popular %}text-forge{% else %}text-muted{% endif %}">{% call ui::icon("check") %}{% endcall %}</span>{{ item }}</li>{% endfor %}</ul></div>
+<div class="{% call ui::column_style() %}{% endcall %}"><h3 class="flex flex-wrap items-baseline gap-x-3 text-2xl font-medium text-ink">{{ name }}{% if *popular %}<span class="font-mono text-xs font-normal text-accent">Most popular</span>{% endif %}</h3><p class="mt-3 text-lg text-ink"><span class="font-medium">{{ price }}</span><span class="text-muted"> {{ per }}</span></p><p class="mt-5 min-h-[calc(3em+1.25rem)] border-t border-edge pt-5 text-sm text-muted">{{ line }}</p><ul class="mt-5 space-y-3 border-t border-edge pt-6 text-sm text-ink">{% for item in items %}<li class="flex gap-3"><span class="{% if *popular %}text-forge{% else %}text-muted{% endif %}">{% call ui::icon("check") %}{% endcall %}</span>{{ item }}</li>{% endfor %}</ul></div>
 {%- endfor %}
 </div>
 {% endcall %}

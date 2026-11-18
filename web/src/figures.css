@@ -127,3 +127,22 @@
     }
   }
 }
+
+/* The hero's board (art/board.html) at its own proportions, 2124 by 384, as tall as the hero gives it, and set so its
+   wordmark, drawn from x 780, starts at the text's left edge (home/hero.html): a masthead on the same edge as the
+   headline under it and every section below. The board runs off both sides of the screen, fading out before
+   either, and the page clips what runs past. */
+.tetsu-board {
+  --tetsu-board-height: 13rem;
+  margin-left: calc(var(--tetsu-gutter) - var(--tetsu-board-height) * 780 / 384);
+  width: calc(var(--tetsu-board-height) * 2124 / 384);
+  height: var(--tetsu-board-height);
+
+  @media (width >= 40rem) {
+    --tetsu-board-height: 18rem;
+  }
+
+  @media (width >= 64rem) {
+    --tetsu-board-height: 22rem;
+  }
+}

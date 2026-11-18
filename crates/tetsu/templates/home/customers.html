@@ -1,5 +1,8 @@
-<section id="customers" aria-label="Customers" class="tetsu-reveal mx-auto mt-20 max-w-page px-6 pb-22 text-center sm:mt-28 sm:pb-32 lg:px-10 lg:pb-44">
-<ul class="grid grid-cols-2 items-center gap-x-8 gap-y-10 text-muted sm:grid-cols-3 lg:grid-cols-6">
+<section id="customers" aria-label="Customers" class="tetsu-reveal mx-auto mt-8 max-w-page px-(--tetsu-gutter) sm:mt-13 xl:mt-28">
+{#- The names in one row at every width, and their line under them at the page's left.
+    Narrower than a laptop the row slides, its last name cut by the edge to show there is more; it never moves by
+    itself (ADR-0035). Wherever the row fits, the names spread across the text's width. #}
+<ul aria-label="Customers" tabindex="0" class="-mx-(--tetsu-gutter) flex items-center justify-between gap-10 overflow-x-auto px-(--tetsu-gutter) whitespace-nowrap text-muted scrollbar-none lg:mx-0 lg:overflow-visible lg:px-0">
 <li class="text-sm font-light tracking-[0.3em] uppercase">Northbound</li>
 <li class="font-mono text-sm font-semibold tracking-tight uppercase">Copperline</li>
 <li class="text-lg font-semibold tracking-[0.15em] uppercase">Pinewake</li>
@@ -7,5 +10,5 @@
 <li class="font-serif text-lg tracking-wide">Willow &amp; Ash</li>
 <li class="text-lg font-extrabold tracking-tight uppercase italic">Ironbark</li>
 </ul>
-<p class="mt-12 font-mono text-xs tracking-widest text-faint uppercase">Booked daily at 1,200+ studios, salons, clubs, and campgrounds</p>
+<p class="mt-9 font-mono text-xs tracking-widest text-faint uppercase">Booked daily at 1,200+ studios, salons, clubs, and campgrounds</p>
 </section>

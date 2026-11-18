@@ -4,16 +4,16 @@
 {% block title %}{{ name }} – Tetsu{% endblock %}
 {% block card %}
 <h1 class="mt-6 text-lg font-medium text-balance text-ink">{{ name }}</h1>
-<p class="mt-1 text-[13px] text-muted">Logged in to Tetsu</p>
+<p class="mt-1 text-mini text-muted">Logged in to Tetsu</p>
 {#- The passkeys island tells the operator's devices every passkey listed here, so a device can hide one Tetsu
     removed. #}
 <tetsu-passkeys user="{{ user }}" credentials="{{ credentials }}" class="mt-8 block">
-<ul aria-label="Passkeys" class="divide-y divide-line rounded-xl border border-line bg-surface text-left text-[13px] text-ink">
+<ul aria-label="Passkeys" class="divide-y divide-edge-soft rounded-xl border border-edge bg-surface text-left text-mini text-ink">
 {% for passkey in passkeys %}<li class="px-4 py-3">{{ passkey }}</li>
 {% endfor %}</ul>
 </tetsu-passkeys>
 {% if can_add && fresh %}{% call ui::passkey("add", form, true) %}Add a second passkey{% endcall %}
-{% else if can_add %}<p class="mt-8 text-[13px] text-pretty text-muted">To add a second passkey, log out and log in
+{% else if can_add %}<p class="mt-8 text-mini text-pretty text-muted">To add a second passkey, log out and log in
 again: adding one needs a login from the last ten minutes.</p>
 {% endif %}
 <form method="post" action="/ops/logout" class="mt-3">

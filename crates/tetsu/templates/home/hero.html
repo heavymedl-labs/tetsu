@@ -1,15 +1,16 @@
 {#- Outside a demo the page is only the hero, since everything after it is fictional (ADR-0037). #}
-{% import "../../../web/templates/components.html" as ui %}
-<section class="text-center">
-{#- Tetsu's wordmark, booked into an open week. #}
-<div class="mx-auto h-52 max-w-[1600px] text-ink sm:h-72 lg:h-88">{% include "art/board.html" %}</div>
-<div class="relative mx-auto -mt-8 max-w-5xl px-6 sm:-mt-12 lg:-mt-16">
+<section>
+{#- Tetsu's wordmark, booked into an open week, at the text's left edge, with the headline, its line, and the
+    links under it on the same edge (figures.css). #}
+<div class="mx-auto max-w-page text-ink"><div class="tetsu-board">{% include "art/board.html" %}</div></div>
+<div class="relative mx-auto -mt-8 max-w-page px-(--tetsu-gutter) sm:-mt-12 lg:-mt-16">
 {#- The visible headline is the page's heading, with the name for readers and search engines. #}
-<h1 class="tetsu-lift text-5xl/[1.05] font-semibold tracking-[-0.045em] text-balance text-ink sm:text-7xl/[1.02]"><span class="sr-only">Tetsu: </span>Booking software,<br class="hidden sm:block"> built like iron.</h1>
-<p class="tetsu-rise mx-auto mt-6 max-w-xl text-lg/8 text-pretty text-soft [animation-delay:150ms]">Built to carry every booking, membership, and payment, and built so you're never locked in.</p>
-{% if demo %}<div class="tetsu-rise mt-10 flex flex-wrap items-center justify-center gap-3 [animation-delay:250ms]">
-{% call ui::button("#pricing") %}See plans{% endcall %}
-{% call ui::button("#product", secondary = true) %}See it in action <span aria-hidden="true">→</span>{% endcall %}
-</div>{% endif %}
+<h1 class="tetsu-lift text-display font-medium text-balance text-ink sm:text-6xl lg:text-7xl/none"><span class="sr-only">Tetsu: </span>Booking software,<br class="hidden sm:block"> built like iron.</h1>
+{#- Under the headline, its line at the left and the links as plain text, on one row from a laptop with the links at the
+    right edge, and under the line narrower. #}
+<div class="mt-5 flex flex-col gap-5 lg:mt-8 lg:flex-row lg:gap-8 lg:items-baseline lg:justify-between">
+<p class="tetsu-rise max-w-xl text-base text-pretty text-muted lg:max-w-2xl [animation-delay:150ms]">Built to carry every booking, membership, and payment, and built so you're never locked in.</p>
+{% if demo %}<p class="tetsu-rise flex shrink-0 flex-wrap gap-x-6 gap-y-2 text-[1rem] text-ink [animation-delay:250ms]"><a href="#pricing" class="hover:text-soft">See plans</a><a href="#product" class="hover:text-soft">See it in action <span aria-hidden="true">→</span></a></p>{% endif %}
+</div>
 </div>
 </section>
