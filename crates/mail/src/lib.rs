@@ -3,15 +3,15 @@
 //! per key.
 //!
 //! The public surface (ADR-0021): the module's registration, [`Mail`]; the adapter constructor, [`post_office`],
-//! which returns a [`PostOffice`]; the SMTP adapter, [`Smtp`], and its settings; the [`Allowlist`]; and what the
-//! mailbox shows, [`Captured`].
+//! which returns a [`PostOffice`], the kernel's `Mailer` and `Mailbox`; the SMTP adapter, [`Smtp`], and its
+//! settings; and the [`Allowlist`].
 
 mod adapters;
 mod domain;
 
 pub use adapters::postgres::{PostOffice, post_office};
 pub use adapters::smtp::{Smtp, SmtpSettings};
-pub use domain::{Allowlist, Captured};
+pub use domain::Allowlist;
 
 use tetsu_kernel::{Migration, Module, Storage};
 

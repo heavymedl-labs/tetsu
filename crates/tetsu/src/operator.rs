@@ -341,6 +341,7 @@ fn link_url(origin: &str, token: &InviteToken) -> String {
 mod tests {
     use super::*;
     use crate::args;
+    use tetsu_kernel::Mailbox;
     use tetsu_mail::PostOffice;
     use tetsu_postgres::test_support::Scratch;
 
@@ -475,7 +476,7 @@ mod tests {
             created[2],
             "kept the invite for kurt@example.com in the mailbox, since TETSU_MAIL_ALLOW does not list it"
         );
-        let mailbox = office.mailbox().await.unwrap();
+        let mailbox = office.captured().await.unwrap();
         assert_eq!(mailbox.len(), 1);
         assert_eq!(mailbox[0].recipient, "kurt@example.com");
         assert!(mailbox[0].text.contains(url), "{}", mailbox[0].text);
@@ -506,7 +507,7 @@ mod tests {
             invited[1].starts_with("could not read operator 1's email address: "),
             "{invited:?}"
         );
-        assert_eq!(office.mailbox().await.unwrap(), vec![]);
+        assert_eq!(office.captured().await.unwrap(), vec![]);
     }
 
     /// Each way an invite's email can go has its own words, and every failure says the link still works.

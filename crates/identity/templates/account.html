@@ -16,6 +16,7 @@
 {% else if can_add %}<p class="mt-8 text-mini text-pretty text-muted">To add a second passkey, log out and log in
 again: adding one needs a login from the last ten minutes.</p>
 {% endif %}
+<p class="mt-6 text-mini"><a href="/ops/mailbox" class="text-ink underline underline-offset-2">Mailbox</a></p>
 <form method="post" action="/ops/logout" class="mt-3">
 <input type="hidden" name="form" value="{{ form }}">
 <button type="submit" class="{% call shared::button_style(true, false, true) %}{% endcall %}">Log out</button>

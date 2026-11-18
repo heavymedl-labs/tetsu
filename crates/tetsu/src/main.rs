@@ -277,12 +277,12 @@ async fn ready(
         .collect();
     let consumers = vec![
         tetsu_audit::consumer(&["identity"]),
-        tetsu_identity::notices(office),
+        tetsu_identity::notices(office.clone()),
     ];
     let dispatcher = tetsu_postgres::Dispatcher::new(pool.clone(), &schemas, consumers)
         .await
         .map_err(|error| explain(&*error))?;
-    let operators = operator_pages(local, demo)?;
+    let operators = operator_pages(local, demo, office)?;
     let tenants = tetsu_tenancy::postgres_store(pool.clone());
     refuse_reserved_addresses(&tenants).await?;
     let modules = tetsu_tenancy::router(tenants, demo, assets::STYLESHEET, report).merge(
@@ -301,7 +301,11 @@ async fn ready(
 
 /// What Identity's operator pages need: their passkeys belong to the site's own origin, the only one that may send
 /// them a state-changing request.
-fn operator_pages(local: &settings::Local, demo: bool) -> Result<tetsu_identity::Web, String> {
+fn operator_pages(
+    local: &settings::Local,
+    demo: bool,
+    mailbox: std::sync::Arc<dyn tetsu_kernel::Mailbox>,
+) -> Result<tetsu_identity::Web, String> {
     local.beside("DATABASE_URL", &["TETSU_ORIGIN"])?;
     let origin = settings::origin(|name| local.var(name))?;
     Ok(tetsu_identity::Web {
@@ -312,6 +316,7 @@ fn operator_pages(local: &settings::Local, demo: bool) -> Result<tetsu_identity:
         script: assets::PASSKEY_SCRIPT,
         session_script: assets::SESSION_SCRIPT,
         scheme_script: assets::SCHEME_SCRIPT,
+        mailbox,
         report,
     })
 }

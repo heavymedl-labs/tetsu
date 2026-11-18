@@ -22,7 +22,7 @@ use crate::domain::{
 use crate::passkeys::{RelyingParty, base64url};
 use crate::ports::OperatorStore;
 use crate::use_cases::Operators;
-use tetsu_kernel::{Requester, Scheme};
+use tetsu_kernel::{Mailbox, Requester, Scheme};
 
 const ACCOUNT: &str = "/ops";
 const LOGIN: &str = "/ops/login";
@@ -37,10 +37,12 @@ const LOGOUT: &str = "/ops/logout";
 /// How long the browser's session has left (GET), and staying logged in (POST), for the session island.
 const SESSION: &str = "/ops/session";
 /// Any other path under `/ops`: a login for anyone logged out, and not found for an operator.
+/// The operators' mailbox: email kept rather than sent (ADR-0074).
+const MAILBOX: &str = "/ops/mailbox";
 const ELSEWHERE: &str = "/ops/{*rest}";
 
 /// Every path Identity serves, which the composition root checks each start with a name no tenant may hold.
-pub const PATHS: [&str; 12] = [
+pub const PATHS: [&str; 13] = [
     ACCOUNT,
     LOGIN,
     LOGIN_BEGIN,
@@ -52,6 +54,7 @@ pub const PATHS: [&str; 12] = [
     ADD_FINISH,
     LOGOUT,
     SESSION,
+    MAILBOX,
     ELSEWHERE,
 ];
 
@@ -87,6 +90,8 @@ pub struct Web {
     pub session_script: &'static str,
     /// The color scheme control's script, which every operator page loads (ADR-0070).
     pub scheme_script: &'static str,
+    /// The messages Mail kept rather than sent, which the mailbox page shows (ADR-0074).
+    pub mailbox: Arc<dyn Mailbox>,
     pub report: fn(&str),
 }
 
@@ -133,6 +138,28 @@ struct AccountPage {
     can_add: bool,
     fresh: bool,
     form: String,
+}
+
+#[derive(Template)]
+#[template(path = "mailbox.html")]
+struct MailboxPage {
+    demo: bool,
+    stylesheet: &'static str,
+    script: &'static str,
+    scheme_script: &'static str,
+    /// The radio the color scheme control checks, from the visitor's cookie (ADR-0070).
+    scheme: &'static str,
+    session_script: &'static str,
+    messages: Vec<Kept>,
+    form: String,
+}
+
+/// A kept message as the mailbox lists it.
+struct Kept {
+    recipient: String,
+    subject: String,
+    text: String,
+    ago: String,
 }
 
 #[derive(Template)]
@@ -189,6 +216,7 @@ where
             SESSION,
             get(time_left::<S>).merge(logged_in_route::<S>(LoggedIn::Stay)),
         )
+        .route(MAILBOX, get(mailbox::<S>))
         .route(ELSEWHERE, get(elsewhere::<S>))
         .layer(DefaultBodyLimit::max(LARGEST_BODY))
         .with_state(Arc::new(Served { operators, web }))
@@ -270,6 +298,55 @@ async fn account<S: OperatorStore>(State(served): Shared<S>, headers: HeaderMap)
         Ok(Some(page)) => page,
         Ok(None) => see_other(LOGIN),
         Err(error) => unavailable_page(&served.web, "could not show an operator's page", &error),
+    }
+}
+
+/// The operators' mailbox. Anyone without a live session is sent to log in, returning here after.
+async fn mailbox<S: OperatorStore>(
+    State(served): Shared<S>,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    let web = &served.web;
+    let viewer = match viewing(&served, &headers).await {
+        Ok(Some((_, form))) => form,
+        Ok(None) => return see_other(&return_to(uri.path())),
+        Err(error) => return unavailable_page(web, "could not show the mailbox", &error),
+    };
+    let Ok(captured) = web.mailbox.captured().await else {
+        let error = Error::Unavailable("the mailbox could not be read".into());
+        return unavailable_page(web, "could not show the mailbox", &error);
+    };
+    let now = SystemTime::now();
+    page(&MailboxPage {
+        demo: web.demo,
+        stylesheet: web.stylesheet,
+        script: web.script,
+        scheme_script: web.scheme_script,
+        scheme: scheme_of(&headers).as_str(),
+        session_script: web.session_script,
+        messages: captured
+            .into_iter()
+            .map(|message| Kept {
+                ago: ago(message.at, now),
+                recipient: message.recipient,
+                subject: message.subject,
+                text: message.text,
+            })
+            .collect(),
+        form: viewer,
+    })
+}
+
+/// How long ago `at` was, in the largest whole unit: just now, minutes, hours, or days.
+fn ago(at: SystemTime, now: SystemTime) -> String {
+    let minutes = now.duration_since(at).unwrap_or_default().as_secs() / 60;
+    match minutes {
+        0 => "just now".to_string(),
+        1..60 => format!("{minutes} min ago"),
+        60..1440 => format!("{} h ago", minutes / 60),
+        1440..2880 => "1 day ago".to_string(),
+        _ => format!("{} days ago", minutes / 1440),
     }
 }
 
@@ -802,4 +879,32 @@ fn browser(headers: &HeaderMap, operator: Option<crate::OperatorId>) -> Actor {
         operator,
         Device::from_user_agent(text(headers, &header::USER_AGENT)),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ago_names_the_largest_whole_unit() {
+        let now = SystemTime::now();
+        for (seconds, said) in [
+            (0, "just now"),
+            (59, "just now"),
+            (60, "1 min ago"),
+            (3599, "59 min ago"),
+            (3600, "1 h ago"),
+            (86_399, "23 h ago"),
+            (86_400, "1 day ago"),
+            (172_799, "1 day ago"),
+            (172_800, "2 days ago"),
+        ] {
+            assert_eq!(
+                ago(now - Duration::from_secs(seconds), now),
+                said,
+                "{seconds}"
+            );
+        }
+        assert_eq!(ago(now + Duration::from_secs(90), now), "just now");
+    }
 }

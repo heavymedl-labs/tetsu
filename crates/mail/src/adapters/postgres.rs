@@ -4,13 +4,13 @@
 use std::time::SystemTime;
 
 use deadpool_postgres::Transaction;
-use tetsu_kernel::{Delivery, MailError, Mailer, Message};
+use tetsu_kernel::{Captured, Delivery, MailError, Mailbox, Mailer, Message, Reading};
 use tetsu_postgres::{Failure, ModuleTransaction, Pool};
 use tokio_postgres::Row;
 use tokio_postgres::types::ToSql;
 
 use super::smtp::Smtp;
-use crate::domain::{Allowlist, Captured};
+use crate::domain::Allowlist;
 
 /// Mail's schema, which names the role its transactions act as (ADR-0042).
 const SCHEMA: &str = "mail";
@@ -48,23 +48,21 @@ impl Mailer for PostOffice {
     }
 }
 
-impl PostOffice {
-    /// The newest hundred messages kept for the mailbox page, newest first.
-    ///
-    /// # Errors
-    /// Fails if Postgres cannot be reached or the read fails.
-    pub async fn mailbox(&self) -> Result<Vec<Captured>, MailError> {
-        self.transact(async |transaction| {
+/// The newest hundred messages kept for the mailbox page, newest first.
+impl Mailbox for PostOffice {
+    fn captured(&self) -> Reading<'_> {
+        Box::pin(self.transact(async |transaction| {
             transaction
                 .query(MAILBOX, &[])
                 .await?
                 .iter()
                 .map(captured)
                 .collect()
-        })
-        .await
+        }))
     }
+}
 
+impl PostOffice {
     /// Claims the key, then sends; a failed send gives the key back, so a later attempt may try again. A process
     /// that stops between sending and that answer leaves the key claimed, so the message is never sent twice.
     async fn relay(&self, smtp: &Smtp, message: &Message) -> Result<Delivery, MailError> {

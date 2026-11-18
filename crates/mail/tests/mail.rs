@@ -7,7 +7,7 @@ mod support;
 use std::time::Duration;
 
 use support::{Mailpit, PASSWORD, address, allow, as_owner, database, free_port, message};
-use tetsu_kernel::{Delivery, MailError, Mailer, Message};
+use tetsu_kernel::{Delivery, MailError, Mailbox, Mailer, Message};
 use tetsu_mail::{Allowlist, Smtp, SmtpSettings, post_office};
 use tetsu_postgres::{Settings, pool};
 
@@ -18,7 +18,7 @@ async fn a_message_to_someone_off_the_allowlist_is_kept_once_for_the_mailbox() {
     let sent = message("ada@example.com", "invite:1");
     assert_eq!(office.send(&sent).await, Ok(Delivery::Captured));
     assert_eq!(office.send(&sent).await, Ok(Delivery::Repeated));
-    let mailbox = office.mailbox().await.expect("the mailbox");
+    let mailbox = office.captured().await.expect("the mailbox");
     assert_eq!(mailbox.len(), 1);
     assert_eq!(mailbox[0].recipient, "ada@example.com");
     assert_eq!(mailbox[0].subject, "Your invite");
@@ -37,7 +37,7 @@ async fn the_mailbox_shows_the_newest_hundred_first() {
             .await
             .expect("kept");
     }
-    let mailbox = office.mailbox().await.expect("the mailbox");
+    let mailbox = office.captured().await.expect("the mailbox");
     assert_eq!(mailbox.len(), 100);
     assert!(mailbox.windows(2).all(|pair| pair[0].at >= pair[1].at));
 }
@@ -69,7 +69,7 @@ async fn an_unreachable_store_is_unavailable() {
         office.send(&message("ada@example.com", "k")).await,
         Err(MailError::Unavailable)
     );
-    assert_eq!(office.mailbox().await, Err(MailError::Unavailable));
+    assert_eq!(office.captured().await, Err(MailError::Unavailable));
 }
 
 #[tokio::test]
@@ -93,7 +93,7 @@ async fn a_message_to_the_allowlist_goes_out_once_by_smtp_over_tls() {
         full["HTML"].as_str().map(str::trim),
         Some("<p>Open the link.</p>")
     );
-    assert_eq!(office.mailbox().await.expect("the mailbox"), vec![]);
+    assert_eq!(office.captured().await.expect("the mailbox"), vec![]);
 }
 
 #[tokio::test]
@@ -199,7 +199,7 @@ async fn a_message_refused_at_commit_is_refused_and_leaves_nothing() {
         office.send(&message("ada@example.com", "k")).await,
         Err(MailError::Refused)
     );
-    assert_eq!(office.mailbox().await.expect("the mailbox"), vec![]);
+    assert_eq!(office.captured().await.expect("the mailbox"), vec![]);
 }
 
 #[test]
@@ -236,7 +236,7 @@ async fn a_key_that_cannot_be_claimed_keeps_nothing() {
         office.send(&message("ada@example.com", "k")).await,
         Err(MailError::Refused)
     );
-    assert_eq!(office.mailbox().await.expect("the mailbox"), vec![]);
+    assert_eq!(office.captured().await.expect("the mailbox"), vec![]);
 }
 
 #[tokio::test]
@@ -260,7 +260,7 @@ async fn a_mailbox_that_cannot_be_read_is_refused() {
     let (pool, database) = database().await;
     as_owner(&database, "REVOKE SELECT ON mail.captured FROM tetsu_mail").await;
     let office = post_office(pool, None, Allowlist::default());
-    assert_eq!(office.mailbox().await, Err(MailError::Refused));
+    assert_eq!(office.captured().await, Err(MailError::Refused));
 }
 
 #[tokio::test]
@@ -287,7 +287,7 @@ async fn a_kept_message_whose_column_reads_as_the_wrong_type_is_refused() {
             ),
         )
         .await;
-        assert_eq!(office.mailbox().await, Err(MailError::Refused), "{column}");
+        assert_eq!(office.captured().await, Err(MailError::Refused), "{column}");
     }
 }
 

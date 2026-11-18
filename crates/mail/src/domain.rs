@@ -1,7 +1,5 @@
 //! What Mail decides by: who gets real email, and what a kept message shows.
 
-use std::time::SystemTime;
-
 use tetsu_kernel::Address;
 
 /// The addresses that get real email by SMTP (ADR-0044). Every other message is kept for the mailbox page, so the
@@ -29,16 +27,6 @@ impl Allowlist {
     pub fn contains(&self, address: &Address) -> bool {
         self.0.contains(address)
     }
-}
-
-/// A message kept rather than sent, as the mailbox page shows it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Captured {
-    pub recipient: String,
-    pub subject: String,
-    pub text: String,
-    pub html: String,
-    pub at: SystemTime,
 }
 
 #[cfg(test)]

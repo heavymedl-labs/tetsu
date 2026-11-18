@@ -7,7 +7,7 @@ use std::net::IpAddr;
 
 mod mail;
 
-pub use mail::{Address, Delivery, MailError, Mailer, Message};
+pub use mail::{Address, Captured, Delivery, MailError, Mailbox, Mailer, Message, Reading};
 
 /// One numbered SQL file. Versions only ever grow, and an applied file never changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

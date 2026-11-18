@@ -2,8 +2,8 @@
 
 use std::fmt::Write as _;
 use std::net::SocketAddr;
-use std::sync::Mutex;
-use tetsu_kernel::Requester;
+use std::sync::{Arc, Mutex};
+use tetsu_kernel::{Captured, MailError, Mailbox, Reading, Requester};
 
 use passkey::types::Passkey;
 use serde_json::{Value, json};
@@ -59,13 +59,39 @@ impl Reply {
     }
 }
 
-/// Serves Identity's routes on a port of their own, over a fresh database with Kurt Medley's link issued.
-pub(crate) async fn serving() -> (SocketAddr, TestDatabase, String) {
-    let (operators, database, _, link) = with_link().await;
-    (serve(operators).await, database, link)
+/// A mailbox holding what a test set, or failing when it holds nothing at all.
+struct Kept(Option<Vec<Captured>>);
+
+impl Mailbox for Kept {
+    fn captured(&self) -> Reading<'_> {
+        Box::pin(std::future::ready(
+            self.0.clone().ok_or(MailError::Unavailable),
+        ))
+    }
 }
 
-async fn serve(operators: Operators<PostgresOperators>) -> SocketAddr {
+/// The mailbox most tests serve: one invite kept five minutes ago, whose text holds markup the page must escape.
+fn sample_mailbox() -> Arc<dyn Mailbox> {
+    Arc::new(Kept(Some(vec![Captured {
+        recipient: "ada@example.com".into(),
+        subject: "Your invite to Tetsu".into(),
+        text: "Open <b>this</b> link:\nhttps://ops.example.com/ops/join#abc".into(),
+        html: "<script>alert(1)</script>".into(),
+        at: std::time::SystemTime::now() - std::time::Duration::from_secs(5 * 60 + 30),
+    }])))
+}
+
+/// Serves Identity's routes on a port of their own, over a fresh database with Kurt Medley's link issued.
+pub(crate) async fn serving() -> (SocketAddr, TestDatabase, String) {
+    serving_with(sample_mailbox()).await
+}
+
+async fn serving_with(mailbox: Arc<dyn Mailbox>) -> (SocketAddr, TestDatabase, String) {
+    let (operators, database, _, link) = with_link().await;
+    (serve(operators, mailbox).await, database, link)
+}
+
+async fn serve(operators: Operators<PostgresOperators>, mailbox: Arc<dyn Mailbox>) -> SocketAddr {
     let web = Web {
         party: party(),
         origins: Origins::parse(&[ORIGIN]).expect("origins"),
@@ -74,6 +100,7 @@ async fn serve(operators: Operators<PostgresOperators>) -> SocketAddr {
         script: SCRIPT,
         session_script: SESSION_SCRIPT,
         scheme_script: "/assets/scheme-test.js",
+        mailbox,
         report,
     };
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("binds");
@@ -219,7 +246,11 @@ pub(crate) fn form_on(page: &str) -> String {
 /// Kurt Medley, joined and logged in through the pages: the server, the database, his cookie, and the form token
 /// his page carries.
 pub(crate) async fn logged_in() -> (SocketAddr, TestDatabase, String, String) {
-    let (address, database, link) = serving().await;
+    logged_in_with(sample_mailbox()).await
+}
+
+async fn logged_in_with(mailbox: Arc<dyn Mailbox>) -> (SocketAddr, TestDatabase, String, String) {
+    let (address, database, link) = serving_with(mailbox).await;
     // A browser that joined presents that session when it logs in, which ends it.
     let (passkey, joined) = join(address, &link).await;
     let finished = login_sending(address, passkey, &joined, None).await;
@@ -763,4 +794,65 @@ async fn a_limit_says_when_to_try_again() {
         let said = format!("too many tries from your network. Try again in {when}");
         assert_eq!(body, json!({ "error": said }).to_string(), "{wait}");
     }
+}
+
+/// The mailbox shows each kept message's text, escaped, to a logged-in operator, linked from their page; its HTML
+/// never reaches the page.
+#[tokio::test]
+async fn an_operator_reads_the_mailbox() {
+    let (address, _database, cookie, _) = logged_in().await;
+    assert!(
+        get(address, "/ops", &cookie)
+            .await
+            .body
+            .contains(r#"href="/ops/mailbox""#)
+    );
+    let page = get(address, "/ops/mailbox", &cookie).await;
+    assert_eq!(
+        (page.status, page.header("cache-control")),
+        (200, Some("no-store"))
+    );
+    for shown in [
+        "<h2 class=\"text-mini font-medium text-ink\">Your invite to Tetsu</h2>",
+        "To ada@example.com · 5 min ago",
+        "Open &#60;b&#62;this&#60;/b&#62; link:\nhttps://ops.example.com/ops/join#abc",
+        r#"href="/ops""#,
+    ] {
+        assert!(page.body.contains(shown), "{shown} in {}", page.body);
+    }
+    assert!(!page.body.contains("alert(1)"));
+}
+
+/// An empty mailbox says so, and one that cannot be read is unavailable and reported.
+#[tokio::test]
+async fn an_empty_or_unreadable_mailbox_says_so() {
+    let (address, _database, cookie, _) = logged_in_with(Arc::new(Kept(Some(Vec::new())))).await;
+    let empty = get(address, "/ops/mailbox", &cookie).await;
+    assert!(empty.body.contains("Nothing kept yet."), "{}", empty.body);
+    let (address, _database, cookie, _) = logged_in_with(Arc::new(Kept(None))).await;
+    let broken = get(address, "/ops/mailbox", &cookie).await;
+    assert_eq!(broken.status, 503);
+    assert!(reported(
+        "identity: could not show the mailbox: temporarily unavailable: the mailbox could not be read"
+    ));
+}
+
+/// Anyone logged out is sent to log in and back; a session that cannot be checked is unavailable.
+#[tokio::test]
+async fn the_mailbox_is_for_operators_alone() {
+    let (address, database, cookie, _) = logged_in().await;
+    let outside = get(address, "/ops/mailbox", "").await;
+    assert_eq!(
+        (outside.status, outside.header("location")),
+        (303, Some("/ops/login?next=/ops/mailbox"))
+    );
+    as_admin(
+        &database,
+        "REVOKE EXECUTE ON FUNCTION identity.use_session(bytea, text) FROM tetsu_identity",
+    )
+    .await;
+    assert_eq!(get(address, "/ops/mailbox", &cookie).await.status, 503);
+    assert!(reported(
+        "identity: could not show the mailbox: storage failed"
+    ));
 }

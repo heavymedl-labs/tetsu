@@ -12,7 +12,8 @@ An operator may hold an email address ([ADR-0074](../../docs/adr/0074-operator-e
 `invite_message` renders their invite from templates, and `notices(mailer)` is an outbox consumer of Identity's own
 events that emails an operator when a login or an added passkey goes through, keyed on the event, with no link in it
 (`v5.0.0-6.3.5`, `v5.0.0-6.3.7`). A notice that cannot go just now is retried; one the mail server refuses is
-dropped.
+dropped. `/ops/mailbox` shows a logged-in operator the email kept rather than sent, newest first, as text, through
+the kernel's `Mailbox` port, which Mail implements; a message's HTML is never shown.
 
 - **Session tokens are 256 random bits** from the operating system's source, written as 64 lowercase hexadecimal
   digits. Only their SHA-256 hash is stored ([ADR-0047](../../docs/adr/0047-sign-in-libraries.md)), and a token
