@@ -5202,6 +5202,7 @@ dependencies = [
  "tetsu-postgres",
  "tokio",
  "tokio-postgres",
+ "tracing",
  "webauthn-rs",
 ]
 
@@ -5221,6 +5222,7 @@ dependencies = [
  "tetsu-postgres",
  "tokio",
  "tokio-postgres",
+ "tracing",
 ]
 
 [[package]]

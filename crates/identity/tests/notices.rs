@@ -91,12 +91,12 @@ mod support {
 }
 
 #[tokio::test]
-async fn a_login_and_an_added_passkey_are_each_told_once() {
+async fn a_login_a_passkey_and_a_join_are_each_told_once() {
     let (_database, pool, dispatcher, recorder) = ready().await;
     let login = record(
         &pool,
         "identity.logged_in",
-        r#"{"operator_id": 1, "outcome": "changed"}"#,
+        r#"{"operator_id": 1, "outcome": "changed", "actor": "operator-1@Firefox on Linux"}"#,
     )
     .await;
     record(
@@ -105,10 +105,16 @@ async fn a_login_and_an_added_passkey_are_each_told_once() {
         r#"{"operator_id": 1, "outcome": "changed"}"#,
     )
     .await;
+    record(
+        &pool,
+        "identity.invite_redeemed",
+        r#"{"operator_id": 1, "outcome": "changed"}"#,
+    )
+    .await;
     dispatcher.deliver_due().await.unwrap();
     dispatcher.deliver_due().await.unwrap();
     let sent = recorder.sent();
-    assert_eq!(sent.len(), 2);
+    assert_eq!(sent.len(), 3, "a login, a passkey added, and a join");
     let subjects: Vec<&str> = sent.iter().map(Message::subject).collect();
     assert!(
         subjects.contains(&"New login to your Tetsu account"),
@@ -126,7 +132,11 @@ async fn a_login_and_an_added_passkey_are_each_told_once() {
         sent.iter()
             .any(|message| message.key() == format!("notice:{login}"))
     );
-    assert!(sent[0].text().contains(" UTC."), "{}", sent[0].text());
+    let told = sent
+        .iter()
+        .find(|message| message.key() == format!("notice:{login}"))
+        .unwrap();
+    assert!(told.text().contains(" UTC, from Firefox on Linux."));
 }
 
 #[tokio::test]
@@ -194,6 +204,49 @@ async fn an_address_that_cannot_be_looked_up_leaves_the_notice_to_retry() {
         .await
         .unwrap()
         .batch_execute("REVOKE SELECT (email) ON identity.operators FROM tetsu_identity")
+        .await
+        .unwrap();
+    record(
+        &pool,
+        "identity.logged_in",
+        r#"{"operator_id": 1, "outcome": "changed"}"#,
+    )
+    .await;
+    assert_eq!(dispatcher.deliver_due().await.unwrap(), 0);
+    assert_eq!(recorder.sent(), Vec::<Message>::new());
+}
+
+/// An address someone wrote into the table by hand that is not plain gets no notice, and the event is done.
+#[tokio::test]
+async fn an_address_that_is_not_plain_is_told_nothing() {
+    let (database, pool, dispatcher, recorder) = ready().await;
+    connect(&database)
+        .await
+        .unwrap()
+        .batch_execute("UPDATE identity.operators SET email = 'ops@localhost' WHERE id = 1")
+        .await
+        .unwrap();
+    record(
+        &pool,
+        "identity.logged_in",
+        r#"{"operator_id": 1, "outcome": "changed"}"#,
+    )
+    .await;
+    assert_eq!(dispatcher.deliver_due().await.unwrap(), 1);
+    assert_eq!(recorder.sent(), Vec::<Message>::new());
+}
+
+/// An address that reads as the wrong type is a fault, so the notice is tried again rather than dropped.
+#[tokio::test]
+async fn an_address_that_cannot_be_read_leaves_the_notice_to_retry() {
+    let (database, pool, dispatcher, recorder) = ready().await;
+    connect(&database)
+        .await
+        .unwrap()
+        .batch_execute(
+            "ALTER TABLE identity.operators DROP CONSTRAINT operators_email_check;
+             ALTER TABLE identity.operators ALTER COLUMN email TYPE bytea USING convert_to(email, 'UTF8')",
+        )
         .await
         .unwrap();
     record(

@@ -36,9 +36,9 @@ const ADD_FINISH: &str = "/ops/passkeys/finish";
 const LOGOUT: &str = "/ops/logout";
 /// How long the browser's session has left (GET), and staying logged in (POST), for the session island.
 const SESSION: &str = "/ops/session";
-/// Any other path under `/ops`: a login for anyone logged out, and not found for an operator.
 /// The operators' mailbox: email kept rather than sent (ADR-0074).
 const MAILBOX: &str = "/ops/mailbox";
+/// Any other path under `/ops`: a login for anyone logged out, and not found for an operator.
 const ELSEWHERE: &str = "/ops/{*rest}";
 
 /// Every path Identity serves, which the composition root checks each start with a name no tenant may hold.
@@ -308,13 +308,14 @@ async fn mailbox<S: OperatorStore>(
     uri: Uri,
 ) -> Response {
     let web = &served.web;
-    let viewer = match viewing(&served, &headers).await {
-        Ok(Some((_, form))) => form,
+    // As on the operator's own page, a live session counts only while its operator is still enabled.
+    let viewer = match operator_viewing(&served, &headers).await {
+        Ok(Some(form)) => form,
         Ok(None) => return see_other(&return_to(uri.path())),
         Err(error) => return unavailable_page(web, "could not show the mailbox", &error),
     };
     let Ok(captured) = web.mailbox.captured().await else {
-        let error = Error::Unavailable("the mailbox could not be read".into());
+        let error = Error::Unavailable("mail's store failed; its log says why".into());
         return unavailable_page(web, "could not show the mailbox", &error);
     };
     let now = SystemTime::now();
@@ -336,6 +337,17 @@ async fn mailbox<S: OperatorStore>(
             .collect(),
         form: viewer,
     })
+}
+
+/// The form token for a request whose live session names an enabled operator; none otherwise.
+async fn operator_viewing<S: OperatorStore>(
+    served: &Served<S>,
+    headers: &HeaderMap,
+) -> Result<Option<String>, Error> {
+    let Some((session, form)) = viewing(served, headers).await? else {
+        return Ok(None);
+    };
+    Ok(served.operators.account(&session).await?.map(|_| form))
 }
 
 /// How long ago `at` was, in the largest whole unit: just now, minutes, hours, or days.

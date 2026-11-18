@@ -38,6 +38,7 @@ esac
 if [[ "$(.tools/bin/betterleaks version 2>/dev/null)" != "$betterleaks" ]]; then
   download="$(mktemp -d)"
   archive="$download/betterleaks.tar.gz"
+  trap 'rm -rf "$download"' EXIT
   curl -fsSL -o "$archive" \
     "https://github.com/betterleaks/betterleaks/releases/download/v$betterleaks/betterleaks_${betterleaks}_$asset.tar.gz"
   if [[ "$(sha256sum "$archive" 2>/dev/null || shasum -a 256 "$archive")" != "$sum "* ]]; then
@@ -48,6 +49,7 @@ if [[ "$(.tools/bin/betterleaks version 2>/dev/null)" != "$betterleaks" ]]; then
   tar -xzf "$archive" -C "$download" betterleaks
   install -m 755 "$download/betterleaks" .tools/bin/betterleaks
   rm -rf "$download"
+  trap - EXIT
 fi
 # Mailpit, a local mail server the SMTP adapter's tests send to (ADR-0074), is checked against the SHA-256 its
 # release published, read 2026-11-18, before it is installed. It is never deployed.
@@ -65,6 +67,7 @@ esac
 if [[ "$(.tools/bin/mailpit version 2>/dev/null)" != *"v$mailpit "* ]]; then
   download="$(mktemp -d)"
   archive="$download/mailpit.tar.gz"
+  trap 'rm -rf "$download"' EXIT
   curl -fsSL -o "$archive" "https://github.com/axllent/mailpit/releases/download/v$mailpit/mailpit-$asset.tar.gz"
   if [[ "$(sha256sum "$archive" 2>/dev/null || shasum -a 256 "$archive")" != "$sum "* ]]; then
     rm -rf "$download"
@@ -74,4 +77,5 @@ if [[ "$(.tools/bin/mailpit version 2>/dev/null)" != *"v$mailpit "* ]]; then
   tar -xzf "$archive" -C "$download" mailpit
   install -m 755 "$download/mailpit" .tools/bin/mailpit
   rm -rf "$download"
+  trap - EXIT
 fi

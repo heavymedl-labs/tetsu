@@ -21,6 +21,7 @@ subtle.workspace = true
 tetsu-kernel.workspace = true
 tetsu-postgres.workspace = true
 tokio-postgres.workspace = true
+tracing.workspace = true
 webauthn-rs.workspace = true
 
 [dev-dependencies]

@@ -34,8 +34,13 @@ mod support {
             .env("TETSU_ORIGIN", "http://localhost:8080")
             .env("TETSU_TRUSTED_PROXIES", "0");
         // A developer's or CI's own OpenTelemetry settings never reach a test server.
+        // Export and mail settings in the shell that runs the tests never reach a test server.
         for (name, _) in std::env::vars_os() {
-            if name.to_string_lossy().starts_with("OTEL_") {
+            let name_text = name.to_string_lossy();
+            if ["OTEL_", "TETSU_SMTP_", "TETSU_MAIL_"]
+                .iter()
+                .any(|prefix| name_text.starts_with(prefix))
+            {
                 command.env_remove(name);
             }
         }
@@ -517,6 +522,23 @@ async fn it_refuses_to_start_before_migrating() {
         .unwrap_or_else(|| panic!("a start_failed line in {stdout}"));
     assert_eq!(failed["level"], "ERROR", "{stdout}");
     assert_eq!(failed["message"], "could not start serving", "{stdout}");
+}
+
+/// A stray `.env` where serving starts cannot send a named database's mail through a server of its own choosing.
+#[tokio::test]
+async fn a_stray_env_file_cannot_change_where_mail_goes() {
+    let database = fresh_database().await.expect("a test database");
+    ready(&database);
+    let folder =
+        tetsu_postgres::test_support::Scratch::folder("serve-stray-mail").expect("a folder");
+    std::fs::write(folder.join(".env"), "TETSU_SMTP_HOST=smtp.example.com\n").expect("a .env");
+    let output = refused(tetsu(&database, &["serve"]).current_dir(&*folder));
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("TETSU_SMTP_HOST comes from .env but DATABASE_URL does not"),
+        "{stderr}"
+    );
 }
 
 /// A site route would hide a tenant whose address a later release reserved, so serving refuses to start (#90).

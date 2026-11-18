@@ -3,8 +3,9 @@
 //! who ran the command and what came of it.
 //!
 //! An invite link is printed only to a terminal, never to a pipe, so it cannot land in CI's output or a log by
-//! accident. That guards against mistakes; the trust boundary is access to the database, which this command
-//! logs in to directly (ADR-0040, `v5.0.0-6.4.1`).
+//! accident, and emailed only to an address on the allowlist; it is never kept for the mailbox, where another
+//! operator could read it. Who can reach a link is whoever runs this command against the database, and the holder
+//! of the operator's mailbox (ADR-0040, ADR-0074, `v5.0.0-6.4.1`).
 
 use std::env::VarError;
 use std::io::Read;
@@ -104,7 +105,7 @@ pub async fn run(
             allow: tetsu_mail::Allowlist::default(),
         }
     };
-    let smtp = mail.smtp.as_ref().map(tetsu_mail::Smtp::new).transpose()?;
+    let smtp = settings::smtp(&mail)?;
     let pool = crate::connect(&local).await?;
     let office = tetsu_mail::post_office(pool.clone(), smtp, mail.allow);
     let operators = tetsu_identity::postgres_store(pool);
@@ -266,24 +267,24 @@ async fn issued(
 /// What came of emailing an invite to `to`.
 fn delivered(to: &Address, sent: Result<Delivery, MailError>) -> String {
     let to = to.as_str();
+    let still = "the link above still works";
     match sent {
         Ok(Delivery::Sent) => format!("emailed the invite link to {to}"),
-        Ok(Delivery::Captured) => {
-            format!(
-                "kept the invite for {to} in the mailbox, since TETSU_MAIL_ALLOW does not list it"
-            )
-        }
-        Ok(Delivery::Repeated) => format!("the invite for {to} was emailed before"),
+        Ok(Delivery::Repeated) => format!("the invite for {to} was handed over before"),
+        Ok(Delivery::Withheld) => format!(
+            "did not email the invite to {to}, since an invite goes only by a mail server to an address on TETSU_MAIL_ALLOW, and is never kept; {still}"
+        ),
+        // An invite is never kept, so this would be a fault in Mail, said as one.
+        Ok(Delivery::Captured) => format!(
+            "kept the invite for {to} in the mailbox, which should never happen; disable the operator and report it"
+        ),
         Err(MailError::Unavailable) => {
-            format!("could not email the invite link to {to} just now; the link above still works")
+            format!("could not email the invite link to {to} just now; {still}")
         }
-        Err(MailError::Refused) => {
-            format!("the mail server refused the invite for {to}; the link above still works")
-        }
+        Err(MailError::Refused) => format!("the mail server refused the invite for {to}; {still}"),
     }
 }
 
-/// What disabling an operator did, with how many sessions and invite links it ended.
 /// What removing an operator's passkeys did, and what they do next.
 fn removed(id: OperatorId, removal: Removal) -> String {
     format!(
@@ -294,6 +295,7 @@ fn removed(id: OperatorId, removal: Removal) -> String {
     )
 }
 
+/// What disabling an operator did, with how many sessions and invite links it ended.
 fn disabled(id: OperatorId, done: Disabling) -> String {
     if done.done {
         format!(
@@ -451,7 +453,7 @@ mod tests {
         );
         assert_eq!(
             run(invite(), || Ok(Local::file_only(&host)), true).await,
-            Err("the SMTP host \"not a host\" is not a name TLS can check".into())
+            Err("TETSU_SMTP_HOST must be a host name TLS can check".into())
         );
         let stray = Local::file_only("TETSU_SMTP_HOST=smtp.example.com\n");
         assert!(
@@ -462,24 +464,19 @@ mod tests {
         );
     }
 
-    /// Creating an operator emails their invite, here kept in the mailbox since no server is set, and says so.
+    /// Creating an operator issues their invite and prints it; with no mail server set, the invite is withheld
+    /// rather than kept, since the mailbox would show any operator its live link.
     #[tokio::test]
-    async fn a_created_operators_invite_is_emailed() {
+    async fn a_created_operators_invite_is_never_kept() {
         let (operators, office, _database) = migrated().await;
         let created = said(&operators, &office, creating("Kurt Medley")).await;
         assert_eq!(created.len(), 3, "{created:?}");
         assert_eq!(created[0], "created operator 1, Kurt Medley");
-        let url = created[1]
-            .strip_prefix("invite link, good once and for an hour: ")
-            .unwrap();
-        assert_eq!(
-            created[2],
-            "kept the invite for kurt@example.com in the mailbox, since TETSU_MAIL_ALLOW does not list it"
-        );
-        let mailbox = office.captured().await.unwrap();
-        assert_eq!(mailbox.len(), 1);
-        assert_eq!(mailbox[0].recipient, "kurt@example.com");
-        assert!(mailbox[0].text.contains(url), "{}", mailbox[0].text);
+        assert!(created[1].starts_with(
+            "invite link, good once and for an hour: https://ops.example.com/ops/join#"
+        ));
+        assert!(created[2].starts_with("did not email the invite to kurt@example.com, since"));
+        assert_eq!(office.captured().await.unwrap(), vec![]);
     }
 
     /// An operator with no address is still issued a link, which is printed and not emailed; one whose address
@@ -520,8 +517,16 @@ mod tests {
                 "emailed the invite link to ada@example.com",
             ),
             (
+                Ok(Delivery::Captured),
+                "kept the invite for ada@example.com in the mailbox, which should never happen; disable the operator and report it",
+            ),
+            (
                 Ok(Delivery::Repeated),
-                "the invite for ada@example.com was emailed before",
+                "the invite for ada@example.com was handed over before",
+            ),
+            (
+                Ok(Delivery::Withheld),
+                "did not email the invite to ada@example.com, since an invite goes only by a mail server to an address on TETSU_MAIL_ALLOW, and is never kept; the link above still works",
             ),
             (
                 Err(MailError::Unavailable),

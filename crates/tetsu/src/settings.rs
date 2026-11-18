@@ -467,8 +467,10 @@ fn decoded(text: impl AsRef<str>) -> Option<String> {
     String::from_utf8(bytes).ok()
 }
 
-/// A missing or blank variable is `None`, and surrounding spaces are dropped. One that is not UTF-8 is an error,
-/// not a missing value.
+/// How long one SMTP send may take. A notice sends inside a transaction Postgres ends after 10 idle seconds
+/// (ADR-0060), and Mail also waits on its pool before and after, so this leaves room for both.
+const SMTP_LIMIT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// The mail settings (ADR-0074), which go with the database, since its mail is what they send.
 pub const MAIL: [&str; 6] = [
     "TETSU_SMTP_HOST",
@@ -513,11 +515,24 @@ pub fn mail(var: impl Fn(&str) -> Result<String, VarError>) -> Result<Mail, Stri
             username: required("TETSU_SMTP_USERNAME")?,
             password: required("TETSU_SMTP_PASSWORD")?,
             from,
+            limit: SMTP_LIMIT,
         }),
         allow,
     })
 }
 
+/// The SMTP adapter the mail settings name, if they name a server. A host TLS cannot check is refused here, at
+/// start, by the variable's name and never its value.
+pub fn smtp(mail: &Mail) -> Result<Option<tetsu_mail::Smtp>, String> {
+    mail.smtp
+        .as_ref()
+        .map(tetsu_mail::Smtp::new)
+        .transpose()
+        .map_err(|_| "TETSU_SMTP_HOST must be a host name TLS can check".to_string())
+}
+
+/// A missing or blank variable is `None`, and surrounding spaces are dropped. One that is not UTF-8 is an error,
+/// not a missing value.
 fn value(
     var: impl Fn(&str) -> Result<String, VarError>,
     name: &str,

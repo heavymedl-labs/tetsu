@@ -1,6 +1,6 @@
 Hello,
 
-{{ what }} on {{ at }}.
+{{ what }} on {{ at }}, from {{ device }}.
 
 If this wasn't you, ask the maintainer to disable your account now.
 

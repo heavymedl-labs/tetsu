@@ -833,7 +833,7 @@ async fn an_empty_or_unreadable_mailbox_says_so() {
     let broken = get(address, "/ops/mailbox", &cookie).await;
     assert_eq!(broken.status, 503);
     assert!(reported(
-        "identity: could not show the mailbox: temporarily unavailable: the mailbox could not be read"
+        "identity: could not show the mailbox: temporarily unavailable: mail's store failed; its log says why"
     ));
 }
 
@@ -848,6 +848,12 @@ async fn the_mailbox_is_for_operators_alone() {
     );
     as_admin(
         &database,
+        "REVOKE EXECUTE ON FUNCTION identity.account(bytea) FROM tetsu_identity",
+    )
+    .await;
+    assert_eq!(get(address, "/ops/mailbox", &cookie).await.status, 503);
+    as_admin(
+        &database,
         "REVOKE EXECUTE ON FUNCTION identity.use_session(bytea, text) FROM tetsu_identity",
     )
     .await;
@@ -855,4 +861,50 @@ async fn the_mailbox_is_for_operators_alone() {
     assert!(reported(
         "identity: could not show the mailbox: storage failed"
     ));
+}
+
+/// A mailer that keeps what it is handed.
+struct Handed(Mutex<Vec<tetsu_kernel::Message>>);
+
+impl tetsu_kernel::Mailer for Handed {
+    fn send(
+        &self,
+        message: &tetsu_kernel::Message,
+    ) -> impl std::future::Future<Output = Result<tetsu_kernel::Delivery, MailError>> + Send {
+        self.0.lock().expect("a lock").push(message.clone());
+        std::future::ready(Ok(tetsu_kernel::Delivery::Sent))
+    }
+}
+
+/// The events a real join and login record reach the notices as they expect them: the operator is told of the
+/// passkey joining stored and of the login, at their address.
+#[tokio::test]
+async fn a_real_join_and_login_are_told_to_the_operator() {
+    let (_, database, _, _) = logged_in().await;
+    as_admin(
+        &database,
+        "UPDATE identity.operators SET email = 'kurt@example.com'",
+    )
+    .await;
+    let mailer = Arc::new(Handed(Mutex::new(Vec::new())));
+    let pool = tetsu_postgres::pool(&database.as_app()).expect("a pool");
+    let dispatcher =
+        tetsu_postgres::Dispatcher::new(pool, &["identity"], vec![crate::notices(mailer.clone())])
+            .await
+            .expect("a dispatcher");
+    dispatcher.deliver_due().await.expect("delivers");
+    let sent = mailer.0.lock().expect("a lock").clone();
+    let mut subjects: Vec<&str> = sent.iter().map(tetsu_kernel::Message::subject).collect();
+    subjects.sort_unstable();
+    assert_eq!(
+        subjects,
+        [
+            "A passkey was added to your Tetsu account",
+            "New login to your Tetsu account"
+        ]
+    );
+    assert!(
+        sent.iter()
+            .all(|message| message.to().as_str() == "kurt@example.com")
+    );
 }

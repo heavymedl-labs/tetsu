@@ -5,8 +5,8 @@
 {% block width %}max-w-2xl text-left{% endblock %}
 {% block card %}
 <h1 class="mt-6 text-lg font-medium text-balance text-ink">Mailbox</h1>
-<p class="mt-1 text-mini text-pretty text-muted">Email kept rather than sent, newest first, for a week. Only addresses
-on the allowlist get real email.</p>
+<p class="mt-1 text-mini text-pretty text-muted">Email from the past week that went to no inbox, newest first. Every
+operator sees it, and invites are never kept here.</p>
 {% if messages.is_empty() %}<p class="mt-8 text-mini text-muted">Nothing kept yet.</p>
 {% else %}<ol aria-label="Kept email" class="mt-8 space-y-4">
 {% for message in messages %}<li class="rounded-xl border border-edge bg-surface p-4">

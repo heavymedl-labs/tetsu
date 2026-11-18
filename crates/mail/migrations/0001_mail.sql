@@ -6,15 +6,19 @@ SET lock_timeout = '5s';
 SET statement_timeout = '30s';
 
 -- A key names the event that caused a message, so it is sent once however
--- often it is handed over. A row is claimed before a message goes out and
--- removed if sending fails, so a later attempt may try again. It holds no
--- address and no body.
+-- often it is handed over. A row is claimed as sending before a message goes
+-- out, and settled as sent, captured, or refused, or given back when the send
+-- failed. A claim still sending after two minutes was abandoned by a stop,
+-- and may be taken again.
+-- It holds no address and no body.
 CREATE TABLE sends (
     message_key text PRIMARY KEY CHECK (
         octet_length(message_key) BETWEEN 1 AND 128
         AND message_key ~ '^[A-Za-z0-9._:-]+$'
     ),
-    route text NOT NULL CHECK (route IN ('captured', 'sent')),
+    route text NOT NULL CHECK (
+        route IN ('sending', 'sent', 'captured', 'refused')
+    ),
     claimed_at timestamptz NOT NULL DEFAULT now()
 );
 
@@ -45,3 +49,5 @@ COMMENT ON TABLE captured IS
 'tetsu:global: mail to operators belongs to no business';
 
 CREATE INDEX captured_newest ON captured (captured_at DESC);
+
+CREATE INDEX sends_oldest ON sends (claimed_at);

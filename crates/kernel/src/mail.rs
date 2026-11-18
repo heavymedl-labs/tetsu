@@ -10,6 +10,9 @@ const MAX_LOCAL: usize = 64;
 const MAX_LABEL: usize = 63;
 /// Longest idempotency key, as the Mail module stores it.
 const MAX_KEY: usize = 128;
+/// Longest subject a header line holds (RFC 5322), and longest body, as the Mail module stores them.
+const MAX_SUBJECT: usize = 998;
+const MAX_BODY: usize = 1024 * 1024;
 
 /// A plain email address: a dot-atom local part, `@`, and a domain of letters, digits, and hyphens with at least
 /// two labels, written in lowercase. Anything else is refused, such as a quoted local part, a display name, an
@@ -91,25 +94,51 @@ pub struct Message {
     text: String,
     html: String,
     key: String,
+    kept: bool,
 }
 
 impl Message {
-    /// A message, or none if its subject holds a line break, or its key is empty, longer than 128 bytes, or holds
-    /// anything but letters, digits, `.`, `_`, `:`, and `-`.
+    /// A message, or none if its subject holds a control character or line separator or runs past 998 characters,
+    /// either body holds a NUL or runs past 1 MiB, or its key is empty, longer than 128 bytes, or holds anything but
+    /// letters, digits, `.`, `_`, `:`, and `-`. It may be kept for the mailbox when it is not sent, unless marked [`Self::never_kept`].
     #[must_use]
     pub fn new(to: Address, subject: &str, text: &str, html: &str, key: &str) -> Option<Self> {
-        let subject_ok = !subject.contains(['\r', '\n']);
+        // Line and paragraph separators count as control characters to Postgres, and NUL is never text there.
+        let subject_ok = subject.chars().count() <= MAX_SUBJECT
+            && !subject
+                .chars()
+                .any(|c| c.is_control() || matches!(c, '\u{2028}' | '\u{2029}'));
+        let bodies_ok = [text, html]
+            .iter()
+            .all(|body| body.len() <= MAX_BODY && !body.contains('\0'));
         let key_ok = (1..=MAX_KEY).contains(&key.len())
             && key
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b"._:-".contains(&b));
-        (subject_ok && key_ok).then(|| Self {
+        (subject_ok && bodies_ok && key_ok).then(|| Self {
             to,
             subject: subject.to_string(),
             text: text.to_string(),
             html: html.to_string(),
             key: key.to_string(),
+            kept: true,
         })
+    }
+
+    /// This message, never kept for the mailbox: one that holds a secret, such as a live invite link, goes only to
+    /// its recipient, or nowhere (ADR-0074).
+    #[must_use]
+    pub fn never_kept(self) -> Self {
+        Self {
+            kept: false,
+            ..self
+        }
+    }
+
+    /// Whether it may be kept for the mailbox when it is not sent.
+    #[must_use]
+    pub fn may_be_kept(&self) -> bool {
+        self.kept
     }
 
     #[must_use]
@@ -157,33 +186,46 @@ pub enum Delivery {
     Captured,
     /// Its key was handed over before, so nothing more was done.
     Repeated,
+    /// It was neither sent nor kept: its recipient is not on the allowlist, and it may never be kept.
+    Withheld,
 }
 
 /// Why a message did not go out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MailError {
-    /// The mail server or the store could not be reached or failed; trying again later may work.
+    /// The mail server or the store could not be reached, failed, or is set up wrong, or another attempt at the
+    /// same key is under way; trying again later may work.
     Unavailable,
-    /// The mail server refused the message for good, such as an address it will not deliver to; trying again will
-    /// not help.
+    /// The mail server refused the message itself for good, such as an address it will not deliver to; trying again
+    /// will not help.
     Refused,
 }
 
 /// Sends email for the modules (ADR-0044). A message goes out once per key: handing the same key over again does
-/// nothing more, and a failed attempt leaves the key free to try again.
+/// nothing more once it went, and a failed or abandoned attempt leaves the key to be tried again.
 pub trait Mailer: Send + Sync {
     /// Sends or captures `message`, as its recipient and the allowlist decide.
     fn send(&self, message: &Message) -> impl Future<Output = Result<Delivery, MailError>> + Send;
 }
 
 /// A message kept rather than sent, as the operators' mailbox shows it (ADR-0044).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Captured {
     pub recipient: String,
     pub subject: String,
     pub text: String,
     pub html: String,
     pub at: std::time::SystemTime,
+}
+
+/// A kept message holds an address and may hold a link, so its debug form shows only when it was kept.
+impl fmt::Debug for Captured {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Captured")
+            .field("at", &self.at)
+            .finish_non_exhaustive()
+    }
 }
 
 /// What reading the mailbox comes to: its newest kept messages, newest first.
@@ -326,12 +368,47 @@ mod tests {
     }
 
     #[test]
+    fn a_message_may_be_kept_unless_marked_never_kept() {
+        let message = Message::new(
+            Address::parse("ada@example.com").unwrap(),
+            "Hi",
+            "t",
+            "h",
+            "k",
+        )
+        .unwrap();
+        assert!(message.may_be_kept());
+        assert!(!message.never_kept().may_be_kept());
+    }
+
+    #[test]
+    fn a_kept_message_keeps_personal_data_out_of_debug() {
+        let kept = Captured {
+            recipient: "ada@example.com".into(),
+            subject: "s".into(),
+            text: "secret link".into(),
+            html: "h".into(),
+            at: std::time::SystemTime::UNIX_EPOCH,
+        };
+        let shown = format!("{kept:?}");
+        assert!(shown.starts_with("Captured { at: "), "{shown}");
+        assert!(
+            !shown.contains("ada") && !shown.contains("secret"),
+            "{shown}"
+        );
+    }
+
+    #[test]
     fn a_message_refuses_a_broken_subject_or_key() {
         let to = || Address::parse("ada@example.com").unwrap();
         for (subject, key) in [
             ("Hi\r\nBcc: eve@example.com", "k"),
             ("Hi\nthere", "k"),
             ("Hi\r", "k"),
+            ("Hi\tthere", "k"),
+            ("Hi\u{0}", "k"),
+            ("Hi\u{2028}there", "k"),
+            ("Hi\u{2029}there", "k"),
             ("Hi", ""),
             ("Hi", "has space"),
             ("Hi", "slash/no"),
@@ -343,6 +420,15 @@ mod tests {
             );
         }
         assert!(Message::new(to(), "Hi", "t", "h", &"k".repeat(128)).is_some());
+        assert!(Message::new(to(), &"s".repeat(998), "t", "h", "k").is_some());
+        assert!(Message::new(to(), &"s".repeat(999), "t", "h", "k").is_none());
+        let body = "b".repeat(1024 * 1024);
+        assert!(Message::new(to(), "Hi", &body, &body, "k").is_some());
+        assert!(Message::new(to(), "Hi", &format!("{body}b"), "h", "k").is_none());
+        assert!(Message::new(to(), "Hi", "t", &format!("{body}b"), "k").is_none());
         assert!(Message::new(to(), "Hi", "t", "h", &"k".repeat(129)).is_none());
+        assert!(Message::new(to(), "Hi", "t\0", "h", "k").is_none());
+        assert!(Message::new(to(), "Hi", "t", "h\0", "k").is_none());
+        assert!(Message::new(to(), "Hi — ü", "t\u{2028}", "h", "k").is_some());
     }
 }

@@ -37,6 +37,31 @@ pub async fn as_owner(database: &TestDatabase, sql: &str) {
         .expect("runs");
 }
 
+/// How a key stands in `mail.sends`, read as the owner.
+pub async fn route(database: &TestDatabase, key: &str) -> Option<String> {
+    tetsu_postgres::connect(database)
+        .await
+        .expect("connects")
+        .query_opt(
+            "SELECT route FROM mail.sends WHERE message_key = $1",
+            &[&key],
+        )
+        .await
+        .expect("reads")
+        .map(|row| row.try_get("route").expect("a route"))
+}
+
+/// Ages a claim past its two minutes, as if the attempt holding it had stopped.
+pub async fn lapse(database: &TestDatabase, key: &str) {
+    as_owner(
+        database,
+        &format!(
+            "UPDATE mail.sends SET claimed_at = now() - interval '3 minutes' WHERE message_key = '{key}'"
+        ),
+    )
+    .await;
+}
+
 pub fn allow(text: &str) -> Allowlist {
     Allowlist::parse(text).expect("an allowlist")
 }
@@ -68,6 +93,11 @@ pub struct Mailpit {
 impl Mailpit {
     /// Starts Mailpit on free local ports, requiring implicit TLS and [`USER`]'s login.
     pub async fn start() -> Self {
+        Self::start_allowing(None).await
+    }
+
+    /// As [`Self::start`], refusing for good every recipient `allowed` does not match.
+    pub async fn start_allowing(allowed: Option<&str>) -> Self {
         static STARTED: AtomicU32 = AtomicU32::new(0);
         let name = format!("mailpit-{}", STARTED.fetch_add(1, Ordering::Relaxed));
         let files = Scratch::folder(&name).expect("a scratch folder");
@@ -75,7 +105,7 @@ impl Mailpit {
         std::fs::write(files.join("auth"), format!("{USER}:{PASSWORD}\n")).expect("an auth file");
         let (smtp, http) = (free_port(), free_port());
         let mailpit = Self {
-            child: spawn(&files, smtp, http, &key, &cert),
+            child: spawn(&files, (smtp, http), (&key, &cert), allowed),
             smtp,
             http,
             certificate: std::fs::read(&cert).expect("the certificate"),
@@ -100,6 +130,7 @@ impl Mailpit {
             username: USER.to_string(),
             password: password.to_string(),
             from: address("tetsu@sandbox.example.com"),
+            limit: Duration::from_secs(5),
         }
     }
 
@@ -179,8 +210,17 @@ fn certificate(files: &Path) -> (PathBuf, PathBuf) {
 }
 
 /// Mailpit on `smtp` and `http`, requiring implicit TLS with `key` and `cert`, and the login in `files`.
-fn spawn(files: &Path, smtp: u16, http: u16, key: &Path, cert: &Path) -> Child {
-    Command::new(binary())
+fn spawn(
+    files: &Path,
+    (smtp, http): (u16, u16),
+    (key, cert): (&Path, &Path),
+    allowed: Option<&str>,
+) -> Child {
+    let mut command = Command::new(binary());
+    if let Some(allowed) = allowed {
+        command.arg("--smtp-allowed-recipients").arg(allowed);
+    }
+    command
         .arg("--smtp")
         .arg(format!("127.0.0.1:{smtp}"))
         .arg("--listen")

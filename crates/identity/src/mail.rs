@@ -20,7 +20,8 @@ struct InviteHtml<'a> {
 }
 
 /// An operator's invite to `to`, carrying `link`, keyed on the link's token, so the same link is sent once
-/// however often it is handed over. The key holds the token's hash, never the token.
+/// however often it is handed over. The key holds the token's hash, never the token, and the invite is never kept
+/// for the mailbox, where another operator could read the live link (ADR-0074).
 #[must_use]
 pub fn invite_message(to: Address, link: &str, token: &InviteToken) -> Option<Message> {
     let key = format!("invite:{}", to_hex(&token.hash()));
@@ -29,6 +30,7 @@ pub fn invite_message(to: Address, link: &str, token: &InviteToken) -> Option<Me
         .ok()
         .zip(InviteHtml { link }.render().ok())
         .and_then(|(text, html)| Message::new(to, INVITE_SUBJECT, &text, &html, &key))
+        .map(Message::never_kept)
 }
 
 /// What a notice tells an operator of, by the event that records it (ADR-0074).
@@ -43,7 +45,8 @@ impl Notice {
     pub(crate) fn of(kind: &str) -> Option<Self> {
         match kind {
             "identity.logged_in" => Some(Self::Login),
-            "identity.passkey_added" => Some(Self::Passkey),
+            // Joining stores the operator's first passkey, so it is told like any other.
+            "identity.passkey_added" | "identity.invite_redeemed" => Some(Self::Passkey),
             _ => None,
         }
     }
@@ -68,6 +71,7 @@ impl Notice {
 struct NoticeText<'a> {
     what: &'a str,
     at: &'a str,
+    device: &'a str,
 }
 
 #[derive(Template)]
@@ -76,20 +80,39 @@ struct NoticeHtml<'a> {
     subject: &'a str,
     what: &'a str,
     at: &'a str,
+    device: &'a str,
 }
 
-/// A notice to `email` of what happened `at`, keyed on the event that recorded it, so a retried event is told
-/// once; none for an address that is not plain.
+/// When and from where a notice's event happened: `at` in words, and the coarse label of the device that acted
+/// (`v5.0.0-6.3.5`).
+#[derive(Clone, Copy)]
+pub(crate) struct Happened<'a> {
+    pub(crate) at: &'a str,
+    pub(crate) device: &'a str,
+}
+
+/// A notice to `email` of what `happened`, keyed on the event that recorded it, so a retried event is told once;
+/// none for an address that is not plain.
 pub(crate) fn notice_message(
     notice: Notice,
     email: &str,
-    at: &str,
+    happened: &Happened<'_>,
     event: &str,
 ) -> Option<Message> {
     let (subject, what) = (notice.subject(), notice.what());
+    let Happened { at, device } = *happened;
     Address::parse(email)
-        .zip(NoticeText { what, at }.render().ok())
-        .zip(NoticeHtml { subject, what, at }.render().ok())
+        .zip(NoticeText { what, at, device }.render().ok())
+        .zip(
+            NoticeHtml {
+                subject,
+                what,
+                at,
+                device,
+            }
+            .render()
+            .ok(),
+        )
         .and_then(|((to, text), html)| {
             Message::new(to, subject, &text, &html, &format!("notice:{event}"))
         })
@@ -111,6 +134,7 @@ mod tests {
             invite_message(Address::parse("ada@example.com").unwrap(), link, &token).unwrap();
         assert_eq!(message.to().as_str(), "ada@example.com");
         assert_eq!(message.subject(), "Your invite to Tetsu");
+        assert!(!message.may_be_kept());
         assert!(
             message
                 .text()
@@ -128,21 +152,24 @@ mod tests {
     fn a_notice_says_what_happened_and_when() {
         assert_eq!(Notice::of("identity.logged_in"), Some(Notice::Login));
         assert_eq!(Notice::of("identity.passkey_added"), Some(Notice::Passkey));
+        assert_eq!(
+            Notice::of("identity.invite_redeemed"),
+            Some(Notice::Passkey)
+        );
         assert_eq!(Notice::of("identity.joined"), None);
-        let at = "November 18, 2026, 21:04 UTC";
+        let at = &Happened {
+            at: "November 18, 2026, 21:04 UTC",
+            device: "Firefox on Linux",
+        };
         let login = notice_message(Notice::Login, "ada@example.com", at, "e-1").unwrap();
         assert_eq!(login.subject(), "New login to your Tetsu account");
         assert_eq!(login.key(), "notice:e-1");
-        assert!(
-            login
-                .text()
-                .contains("You logged in to Tetsu on November 18, 2026, 21:04 UTC.")
-        );
-        assert!(
-            login
-                .html()
-                .contains("<p>You logged in to Tetsu on November 18, 2026, 21:04 UTC.</p>")
-        );
+        assert!(login.text().contains(
+            "You logged in to Tetsu on November 18, 2026, 21:04 UTC, from Firefox on Linux."
+        ));
+        assert!(login.html().contains(
+            "<p>You logged in to Tetsu on November 18, 2026, 21:04 UTC, from Firefox on Linux.</p>"
+        ));
         assert!(!login.html().contains("href"));
         let passkey = notice_message(Notice::Passkey, "ada@example.com", at, "e-2").unwrap();
         assert_eq!(

@@ -200,7 +200,10 @@ async fn run_serve(source: &settings::Source) -> Result<(), String> {
         .await
         .unwrap_or_else(|_| Err("serving panicked while starting".into()));
     let served = match started {
-        Ok((listener, app, dispatcher)) => serve_and_deliver(listener, app, dispatcher, stop).await,
+        Ok((listener, app, dispatcher)) => {
+            let deliver = async move |stopped| dispatcher.run(DELIVERY_POLL, stopped).await;
+            serve_and_deliver(listener, app, deliver, stop).await
+        }
         Err(why) => {
             tracing::error!(alert = "start_failed", "could not start serving");
             Err(why)
@@ -217,37 +220,64 @@ async fn run_serve(source: &settings::Source) -> Result<(), String> {
 /// process records wakes it at once (ADR-0043).
 const DELIVERY_POLL: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// Serves and delivers events side by side until `stop` finishes, then lets both finish what they hold. Should
-/// serving stop on its own, delivery stops with it.
-async fn serve_and_deliver(
+/// Serves and delivers events side by side until `stop` finishes. Both then wind down together within the same
+/// grace, after which delivery is cancelled; an unfinished pass rolls back, and its events go on the next start.
+/// Should delivery stop on its own, which only a panic does, serving stops too, so the host starts the process again
+/// rather than serve with no events delivered.
+async fn serve_and_deliver<F>(
     listener: tokio::net::TcpListener,
     app: axum::Router,
-    dispatcher: tetsu_postgres::Dispatcher,
+    deliver: impl FnOnce(Stopped) -> F,
     stop: impl std::future::Future<Output = ()> + Send + 'static,
-) -> Result<(), String> {
-    let (stopping, stopped) = tokio::sync::watch::channel(());
-    let stopping = std::sync::Arc::new(stopping);
-    let signal = {
-        let stopping = stopping.clone();
-        tokio::spawn(async move {
-            stop.await;
-            let _ = stopping.send(());
-        })
+) -> Result<(), String>
+where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
+    let (stopping, stopped) = tokio::sync::watch::channel(false);
+    let mut delivering = tokio::spawn(deliver(until(stopped.clone())));
+    let serving = async {
+        let served = serve::run(listener, app, until(stopped.clone()), serve::GRACE).await;
+        stopping.send_replace(true);
+        served
     };
-    let until = |mut stopped: tokio::sync::watch::Receiver<()>| async move {
-        let _ = stopped.changed().await;
+    let watching = async {
+        // Delivery ends only once told to stop, which a failed server also tells it; ending untold means it stopped
+        // on its own. A handle that finished is never waited on again.
+        let ended = tokio::select! {
+            () = stop => None,
+            ended = &mut delivering => Some(ended),
+        };
+        let died = ended.is_some() && !*stopped.borrow();
+        stopping.send_replace(true);
+        if died {
+            tracing::error!(
+                alert = "delivery_stopped",
+                "events stopped being delivered, so serving stops for a restart"
+            );
+        } else if ended.is_none()
+            && tokio::time::timeout(serve::GRACE, &mut delivering)
+                .await
+                .is_err()
+        {
+            delivering.abort();
+        }
+        died
     };
-    let delivering = {
-        let stopped = stopped.clone();
-        tokio::spawn(async move { dispatcher.run(DELIVERY_POLL, until(stopped)).await })
-    };
-    let served = serve::run(listener, app, until(stopped), serve::GRACE)
-        .await
-        .map_err(|error| format!("serving stopped: {error}"));
-    let _ = stopping.send(());
-    signal.abort();
-    let _ = delivering.await;
-    served
+    let (served, died) = tokio::join!(serving, watching);
+    served.map_err(|error| format!("serving stopped: {error}"))?;
+    if died {
+        return Err("event delivery stopped".to_string());
+    }
+    Ok(())
+}
+
+/// Finishes once serving is told to stop.
+type Stopped = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
+
+fn until(mut stopped: tokio::sync::watch::Receiver<bool>) -> Stopped {
+    Box::pin(async move {
+        let _ = stopped.wait_for(|stopping| *stopping).await;
+    })
 }
 
 /// Reads the settings, reaches the database, and binds the port: everything serving needs before it listens,
@@ -267,7 +297,7 @@ async fn ready(
     let address = settings::listen(|name| local.var(name))?;
     local.beside("DATABASE_URL", &settings::MAIL)?;
     let mail = settings::mail(|name| local.var(name))?;
-    let smtp = mail.smtp.as_ref().map(tetsu_mail::Smtp::new).transpose()?;
+    let smtp = settings::smtp(&mail)?;
     let pool = connect(local).await?;
     let office = std::sync::Arc::new(tetsu_mail::post_office(pool.clone(), smtp, mail.allow));
     let schemas: Vec<&str> = MODULES
@@ -276,6 +306,8 @@ async fn ready(
         .map(|storage| storage.schema)
         .collect();
     let consumers = vec![
+        // Every module that records events today; one that starts to must join this list, or its events reach no
+        // audit record (ADR-0045).
         tetsu_audit::consumer(&["identity"]),
         tetsu_identity::notices(office.clone()),
     ];
@@ -426,6 +458,44 @@ fn summary(modules: &[&dyn Module]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn listener() -> tokio::net::TcpListener {
+        tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap()
+    }
+
+    /// Delivery that ends untold stops serving with an error, so the host restarts the process.
+    #[tokio::test]
+    async fn serving_stops_when_delivery_stops_on_its_own() {
+        let served = serve_and_deliver(
+            listener().await,
+            axum::Router::new(),
+            async |_| {},
+            std::future::pending(),
+        )
+        .await;
+        assert_eq!(served, Err("event delivery stopped".to_string()));
+    }
+
+    /// A stop ends serving and delivery cleanly: delivery finishes its pass before serving returns, and finishing
+    /// once told is no failure.
+    #[tokio::test]
+    async fn a_stop_waits_for_delivery_to_finish_its_pass() {
+        let finished = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = finished.clone();
+        let served = serve_and_deliver(
+            listener().await,
+            axum::Router::new(),
+            async move |stopped| {
+                stopped.await;
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            },
+            async {},
+        )
+        .await;
+        assert_eq!(served, Ok(()));
+        assert!(finished.load(std::sync::atomic::Ordering::SeqCst));
+    }
 
     struct Named(&'static str);
 
