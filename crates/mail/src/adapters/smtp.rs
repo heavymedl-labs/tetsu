@@ -35,6 +35,9 @@ pub struct Smtp {
     limit: Duration,
 }
 
+/// Names what is wrong without repeating the host, which a mistaken setting could fill with a login.
+const REFUSED_HOST: &str = "the SMTP host is not a name TLS can check";
+
 type Sending<'a> = Pin<Box<dyn Future<Output = Result<(), Failed>> + Send + 'a>>;
 
 impl Smtp {
@@ -47,7 +50,7 @@ impl Smtp {
         let tls = ServerName::try_from(settings.host.as_str())
             .ok()
             .and_then(|_| TlsParameters::new(settings.host.clone()).ok());
-        Ok(Self::with_tls(settings, tls.ok_or(refused_host())?))
+        Ok(Self::with_tls(settings, tls.ok_or(REFUSED_HOST)?))
     }
 
     /// An adapter that also trusts the certificate authority in `pem`, as a test's local mail server needs.
@@ -66,7 +69,7 @@ impl Smtp {
                     .build_rustls()
                     .ok()
             });
-        let refused = format!("{}, or the PEM holds no certificate", refused_host());
+        let refused = format!("{REFUSED_HOST}, or the PEM holds no certificate");
         Ok(Self::with_tls(settings, tls.ok_or(refused)?))
     }
 
@@ -125,11 +128,6 @@ impl Smtp {
             .await
             .unwrap_or(Err(Failed::Unknown))
     }
-}
-
-/// Names what is wrong without repeating the host, which a mistaken setting could fill with a login.
-fn refused_host() -> String {
-    "the SMTP host is not a name TLS can check".to_string()
 }
 
 /// The mailbox for a plain address, with no display name. A plain address is stricter than any `lettre` checks,

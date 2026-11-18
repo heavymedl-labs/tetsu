@@ -100,11 +100,11 @@ impl PostOffice {
             Claim::Busy => return Err(MailError::Unavailable),
             Claim::Settled => return Ok(Delivery::Repeated),
         }
-        let sent = smtp.deliver(message).await;
-        let route = match sent {
-            Ok(()) => Some("sent"),
-            Err(Failed::Refused) => Some("refused"),
-            Err(Failed::NotTaken) => None,
+        // How the key is settled, with no route giving it back, and what the caller is told.
+        let (route, answer) = match smtp.deliver(message).await {
+            Ok(()) => (Some("sent"), Ok(Delivery::Sent)),
+            Err(Failed::Refused) => (Some("refused"), Err(MailError::Refused)),
+            Err(Failed::NotTaken) => (None, Err(MailError::Unavailable)),
             Err(Failed::Unknown) => return Err(MailError::Unavailable),
         };
         let recorded = self
@@ -118,11 +118,7 @@ impl PostOffice {
         if recorded.is_err() {
             tracing::warn!("mail: a key could not be settled, so its claim lapses in two minutes");
         }
-        match sent {
-            Ok(()) => Ok(Delivery::Sent),
-            Err(Failed::Refused) => Err(MailError::Refused),
-            Err(_) => Err(MailError::Unavailable),
-        }
+        answer
     }
 
     /// Claims the key, keeps the message, and forgets what is past keeping, in one transaction.
