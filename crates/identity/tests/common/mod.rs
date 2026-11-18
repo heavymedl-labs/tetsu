@@ -35,7 +35,7 @@ pub async fn migrated() -> (TestDatabase, Operators<impl OperatorStore>) {
 pub async fn with_kurt() -> (TestDatabase, Operators<impl OperatorStore>, OperatorId) {
     let (database, operators) = migrated().await;
     let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
+        .create(&name("Kurt Medley"), None, &actor())
         .await
         .expect("creates");
     (database, operators, kurt)

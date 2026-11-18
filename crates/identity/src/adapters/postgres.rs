@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use tetsu_kernel::{Migration, Requester};
+use tetsu_kernel::{Address, Migration, Requester};
 use tetsu_postgres::{Failure, ModuleTransaction, NewEvent, Pool};
 use tokio_postgres::Row;
 use tokio_postgres::types::{FromSql, ToSql};
@@ -36,11 +36,16 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 4,
         sql: include_str!("../../migrations/0004_rate_limits.sql"),
     },
+    Migration {
+        version: 5,
+        sql: include_str!("../../migrations/0005_operator_email.sql"),
+    },
 ];
 /// Identity's schema, which names the role its transactions act as (ADR-0042).
 const SCHEMA: &str = "identity";
 
 const INSERT_OPERATOR: &str = include_str!("../../sql/insert_operator.sql");
+const OPERATOR_EMAIL: &str = include_str!("../../sql/operator_email.sql");
 const USE_SESSION: &str = include_str!("../../sql/use_session.sql");
 const SESSION_LEFT: &str = include_str!("../../sql/session_left.sql");
 const END_SESSION: &str = include_str!("../../sql/end_session.sql");
@@ -262,14 +267,22 @@ impl OperatorStore for PostgresOperators {
     async fn insert_operator(
         &self,
         name: &OperatorName,
+        email: Option<&Address>,
         actor: &Actor,
     ) -> Result<OperatorId, Error> {
+        let parameters: [&(dyn ToSql + Sync); 2] = [&name.as_str(), &email.map(Address::as_str)];
         created(
-            self.decided(INSERT_OPERATOR, &[&name.as_str()], |rows| {
-                creation(rows, actor)
-            })
-            .await?,
+            self.decided(INSERT_OPERATOR, &parameters, |rows| creation(rows, actor))
+                .await?,
         )
+    }
+
+    async fn operator_email(&self, operator: OperatorId) -> Result<Option<Address>, Error> {
+        self.query(OPERATOR_EMAIL, &[&operator.get()])
+            .await?
+            .first()
+            .map_or(Ok(None), |row| column::<Option<String>>(row, "email"))
+            .and_then(|email| email.as_deref().map(address_from).transpose())
     }
 
     async fn use_session(&self, hash: &[u8; 32], realm: Realm) -> Result<Option<Session>, Error> {
@@ -700,6 +713,12 @@ fn issuance(rows: &[Row], id: i64, actor: &Actor) -> Decided<Issue> {
         .map_or(Ok(None), |row| column::<Option<String>>(row, "issued"))
         .and_then(|answer| answer.as_deref().map(issue_from).transpose())?;
     Ok((issue, Some(issuance_event(issue, id, actor))))
+}
+
+/// A stored address that is not plain is a storage failure, since only a plain one is ever written.
+fn address_from(text: &str) -> Result<Address, Error> {
+    Address::parse(text)
+        .ok_or_else(|| Error::Storage("a stored email address is not plain".to_string()))
 }
 
 /// An answer Identity's database never writes is a storage failure, never a guess.
@@ -1224,6 +1243,7 @@ mod tests {
         let failed = operators
             .create(
                 &OperatorName::parse("Kurt Medley").expect("a name"),
+                None,
                 &support::actor(),
             )
             .await;
@@ -1250,6 +1270,7 @@ mod tests {
         let kurt = operators
             .create(
                 &OperatorName::parse("Kurt Medley").expect("a name"),
+                None,
                 &support::actor(),
             )
             .await
@@ -1276,6 +1297,7 @@ mod tests {
         let lee = operators
             .create(
                 &OperatorName::parse("Lee Park").expect("a name"),
+                None,
                 &support::actor(),
             )
             .await
@@ -1324,6 +1346,7 @@ mod tests {
         let kurt = failing
             .create(
                 &OperatorName::parse("Kurt Medley").expect("a name"),
+                None,
                 &support::actor(),
             )
             .await

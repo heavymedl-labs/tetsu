@@ -177,6 +177,7 @@ pub(crate) async fn with_link() -> (
     let kurt = operators
         .create(
             &OperatorName::parse("Kurt Medley").expect("a name"),
+            None,
             &actor(),
         )
         .await
@@ -407,7 +408,11 @@ async fn a_registration_finishes_only_its_own_ceremony() {
     let (operators, _database, kurt, link) = with_link().await;
     let party = party();
     let lee = operators
-        .create(&OperatorName::parse("Lee Park").expect("a name"), &actor())
+        .create(
+            &OperatorName::parse("Lee Park").expect("a name"),
+            None,
+            &actor(),
+        )
         .await
         .expect("creates");
     let lee_link = operators.invite(lee, &actor()).await.expect("issues");
@@ -719,7 +724,11 @@ async fn redeeming() -> (
 ) {
     let (operators, database, kurt, _) = with_link().await;
     let lee = operators
-        .create(&OperatorName::parse("Lee Park").expect("a name"), &actor())
+        .create(
+            &OperatorName::parse("Lee Park").expect("a name"),
+            None,
+            &actor(),
+        )
         .await
         .expect("creates");
     let link_hash = operators

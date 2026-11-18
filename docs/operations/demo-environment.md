@@ -227,12 +227,21 @@ Make it once, readable only by you (`chmod 600 .env.demo`), with these lines:
 ```text
 DATABASE_URL=<the Render service's DATABASE_URL, which is tetsu_app's>
 TETSU_ORIGIN=https://tetsu-demo.onrender.com
+TETSU_SMTP_HOST=smtp.mailgun.org
+TETSU_SMTP_USERNAME=<Mailgun's SMTP login for the sandbox domain>
+TETSU_SMTP_PASSWORD=<its password>
+TETSU_MAIL_FROM=<an address on the sandbox domain>
+TETSU_MAIL_ALLOW=<you, and the people who accepted Mailgun's invitation, separated by commas>
 ```
+
+The mail lines are optional: without them, invites and notices are kept for the mailbox page rather than sent.
+Mailgun's sandbox delivers only to up to five addresses, each of which accepts Mailgun's invitation first
+([ADR-0074](../adr/0074-operator-email-in-development.md)).
 
 Then, from the commit the demo runs:
 
 ```bash
-cargo tetsu --env demo operator create "Your Name"   # prints the invite link, good once and for an hour
+cargo tetsu --env demo operator create "Your Name" you@example.com   # prints the invite link, and emails it
 cargo tetsu --env demo operator list
 ```
 

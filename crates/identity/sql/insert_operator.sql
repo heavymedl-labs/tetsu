@@ -1,8 +1,9 @@
--- Adds an operator with no passkey, and says whether it did: a name already
+-- Adds an operator with no passkey, and their email address if given, and
+-- says whether it did: a name already
 -- taken adds none, and names the operator who holds it, if the statement can
 -- see them yet.
 WITH added AS (
-    INSERT INTO identity.operators (name) VALUES ($1)
+    INSERT INTO identity.operators (name, email) VALUES ($1, $2)
     ON CONFLICT (name) DO NOTHING
     RETURNING id
 )

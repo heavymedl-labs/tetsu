@@ -19,7 +19,7 @@ mod support {
         let database = ready().await;
         let pool = pool(&database.as_app()).expect("a pool");
         postgres_store(pool.clone())
-            .create(&name("Kurt Medley"), &actor())
+            .create(&name("Kurt Medley"), None, &actor())
             .await
             .expect("creates");
         (database, pool)
@@ -242,7 +242,7 @@ async fn an_unknown_operator_is_issued_no_link() {
 async fn sessions_end_for_one_operator_or_all() {
     let (database, operators, kurt) = with_kurt().await;
     let lee = operators
-        .create(&name("Lee Park"), &actor())
+        .create(&name("Lee Park"), None, &actor())
         .await
         .expect("creates");
     for operator in [kurt, kurt, lee] {
@@ -280,7 +280,7 @@ async fn sessions_end_for_one_operator_or_all() {
 async fn operators_are_listed_oldest_first() {
     let (_database, operators, kurt) = with_kurt().await;
     let lee = operators
-        .create(&name("Lee Park"), &actor())
+        .create(&name("Lee Park"), None, &actor())
         .await
         .expect("creates");
     operators.disable(lee, &actor()).await.expect("disables");
@@ -321,7 +321,7 @@ async fn a_disable_waits_for_a_login_or_link_being_written_then_ends_it() {
         let pool = pool(&database.as_app()).expect("a pool");
         let operators = postgres_store(pool.clone());
         let kurt = operators
-            .create(&name("Kurt Medley"), &actor())
+            .create(&name("Kurt Medley"), None, &actor())
             .await
             .expect("creates");
         // Only a login starts a session, so the administrator stands in for one.
@@ -357,7 +357,7 @@ async fn ending_sessions_waits_for_a_login_being_written() {
         let pool = pool(&database.as_app()).expect("a pool");
         let operators = postgres_store(pool.clone());
         let kurt = operators
-            .create(&name("Kurt Medley"), &actor())
+            .create(&name("Kurt Medley"), None, &actor())
             .await
             .expect("creates");
         // Only a login starts a session, so the administrator stands in for one.
@@ -489,7 +489,7 @@ async fn each_command_fails_as_storage_when_the_database_refuses_it() {
     .await;
     assert!(storage(
         operators
-            .create(&name("Lee Park"), &actor())
+            .create(&name("Lee Park"), None, &actor())
             .await
             .map(drop)
     ));
@@ -827,7 +827,7 @@ async fn a_session_starts_after_the_wait_that_held_it_up() {
     let pool = pool(&database.as_app()).expect("a pool");
     let operators = postgres_store(pool.clone());
     operators
-        .create(&name("Kurt Medley"), &actor())
+        .create(&name("Kurt Medley"), None, &actor())
         .await
         .expect("creates");
     let mut admin = connect(&database).await.expect("connects");
@@ -907,11 +907,11 @@ async fn an_operator_is_added_by_a_plain_name_alone() {
 async fn a_name_already_taken_is_refused_and_recorded() {
     let (database, operators) = migrated().await;
     operators
-        .create(&name("Kurt Medley"), &actor())
+        .create(&name("Kurt Medley"), None, &actor())
         .await
         .expect("creates");
     assert_eq!(
-        operators.create(&name("Kurt Medley"), &actor()).await,
+        operators.create(&name("Kurt Medley"), None, &actor()).await,
         Err(Error::Invalid("operator 1 already has that name".into()))
     );
     let (kind, payload) = events(&database).await.pop().expect("an event");
@@ -935,7 +935,7 @@ async fn a_name_taken_while_a_create_waits_is_refused() {
         .await
         .expect("writes");
     let creating =
-        tokio::spawn(async move { operators.create(&name("Kurt Medley"), &actor()).await });
+        tokio::spawn(async move { operators.create(&name("Kurt Medley"), None, &actor()).await });
     waits_for_a_lock(&database).await;
     writing.commit().await.expect("commits");
     assert_eq!(
@@ -957,7 +957,7 @@ async fn a_disable_waits_for_an_enable_being_written() {
     let pool = pool(&database.as_app()).expect("a pool");
     let operators = postgres_store(pool.clone());
     let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
+        .create(&name("Kurt Medley"), None, &actor())
         .await
         .expect("creates");
     operators.disable(kurt, &actor()).await.expect("disables");
@@ -989,7 +989,7 @@ async fn a_disable_waits_for_an_enable_being_written() {
 async fn a_joined_or_disabled_operator_is_issued_no_link() {
     let (database, operators, kurt) = with_kurt().await;
     let lee = operators
-        .create(&name("Lee Park"), &actor())
+        .create(&name("Lee Park"), None, &actor())
         .await
         .expect("creates");
     as_admin(&database, &passkey_for(kurt.get())).await;
@@ -1026,11 +1026,11 @@ async fn a_joined_or_disabled_operator_is_issued_no_link() {
 async fn the_list_shows_passkeys_and_open_links() {
     let (database, operators, kurt) = with_kurt().await;
     let lee = operators
-        .create(&name("Lee Park"), &actor())
+        .create(&name("Lee Park"), None, &actor())
         .await
         .expect("creates");
     let ana = operators
-        .create(&name("Ana Ortiz"), &actor())
+        .create(&name("Ana Ortiz"), None, &actor())
         .await
         .expect("creates");
     operators.invite(kurt, &actor()).await.expect("issues");
@@ -1063,7 +1063,7 @@ async fn a_disable_or_second_begin_waits_for_a_begin_being_written() {
         let pool = pool(&database.as_app()).expect("a pool");
         let operators = postgres_store(pool.clone());
         let kurt = operators
-            .create(&name("Kurt Medley"), &actor())
+            .create(&name("Kurt Medley"), None, &actor())
             .await
             .expect("creates");
         let link = operators
@@ -1113,7 +1113,7 @@ async fn a_begin_waits_for_a_new_link_being_written() {
     let pool = pool(&database.as_app()).expect("a pool");
     let operators = postgres_store(pool.clone());
     let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
+        .create(&name("Kurt Medley"), None, &actor())
         .await
         .expect("creates");
     let old = operators

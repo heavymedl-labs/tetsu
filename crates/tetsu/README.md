@@ -18,8 +18,8 @@ names no business that uses Tetsu. Its root page names fictional customers only 
 | `tetsu reset <schema>...` | Drops module schemas, then migrates, which builds them afresh. Only where `TETSU_DEMO` is true, and only modules' schemas; all or none |
 | `tetsu replay <schema> <event id>` | Makes an event that stopped retrying due again, from the outboxes of the module whose schema recorded it |
 | `tetsu rename <address> <new slug>` | Moves the tenant at an address, such as one a release has since reserved, to a new slug and its address |
-| `tetsu operator create <name>` | Creates an operator and prints their invite link, good once and for an hour. Prints a link only to a terminal |
-| `tetsu operator invite <id>` | Prints a new invite link for an operator, replacing the last. Only to a terminal |
+| `tetsu operator create <name> <email>` | Creates an operator, prints their invite link, good once and for an hour, and emails it to them ([ADR-0074](../../docs/adr/0074-operator-email-in-development.md)). Prints a link only to a terminal |
+| `tetsu operator invite <id>` | Prints a new invite link for an operator, replacing the last, and emails it if they have an address. Only to a terminal |
 | `tetsu operator list` | Lists operators: ID, name, whether they are enabled, their passkeys, and the minutes left on an open invite link |
 | `tetsu operator disable <id>` | Disables an operator, ending their sessions and invite link |
 | `tetsu operator enable <id>` | Enables a disabled operator again; their sessions stay ended |
@@ -29,7 +29,7 @@ names no business that uses Tetsu. Its root page names fictional customers only 
 The deploy workflow runs `check`, `reset`, `replay`, and `rename` against the demo ([runbook](../../docs/operations/demo-environment.md)).
 
 `tetsu --env <name> <command>` runs any command with the settings in `.env.<name>` in place of `.env`, such as
-`cargo tetsu --env demo operator create "Ada Lovelace"` against the demo. The file must exist, and the environment
+`cargo tetsu --env demo operator create "Ada Lovelace" ada@example.com` against the demo. The file must exist, and the environment
 still wins over it ([ADR-0073](../../docs/adr/0073-settings-files-per-environment.md)).
 
 A folder means its `.toml` files at the top level, in name order, leaving out hidden files. One that is not a
@@ -95,7 +95,7 @@ Once, with the test Postgres from [AGENTS.md](../../AGENTS.md#checks) running:
 cp .env.example .env
 cargo tetsu setup
 cargo tetsu seed crates/tetsu/tests/fixtures/sample.toml
-cargo tetsu operator create "Your Name"   # prints your invite link
+cargo tetsu operator create "Your Name" you@example.com   # prints your invite link, and keeps its email in the mailbox
 ```
 
 The test Postgres keeps its data in memory, so after it restarts the database is gone: run `cargo tetsu setup` again.
@@ -117,6 +117,11 @@ Stop the server when you are done.
 | `TETSU_ORIGIN` | `serve`, `operator create`, `operator invite` | The site's own origin, such as `https://tetsu-demo.onrender.com`: the operator pages' passkeys belong to it, only it may send them a state-changing request, and invite links point to it. `https`, or `http` for this machine alone, with no path. From `.env` only when `DATABASE_URL` is too |
 | `TETSU_LOG_FORMAT` | `serve` | `json` or `text`. Unset, logs are text a person reads when they reach a terminal, and JSON anywhere else ([ADR-0071](../../docs/adr/0071-readable-logs-in-a-terminal.md)) |
 | `TETSU_TRUSTED_PROXIES` | `serve` | How many proxies stand in front, each adding an `X-Forwarded-For` entry, from 0 to 10 with no default: `0` locally, `3` on Render. Rate limits key on the entry the first of them added ([ADR-0072](../../docs/adr/0072-rate-limits-by-network-address.md)) |
+| `TETSU_SMTP_HOST` | `serve`, `operator create`, `operator invite` | Optional: the SMTP server mail goes through, over implicit TLS ([ADR-0074](../../docs/adr/0074-operator-email-in-development.md)). Without it, every message is kept for the mailbox page. From `.env` only when `DATABASE_URL` is too, as are the settings below |
+| `TETSU_SMTP_PORT` | as above | The server's implicit-TLS port, `465` by default |
+| `TETSU_SMTP_USERNAME`, `TETSU_SMTP_PASSWORD` | as above | The server's login, required with a host. The password is a secret, never logged |
+| `TETSU_MAIL_FROM` | as above | The address mail comes from, required with a host, such as Mailgun's sandbox address |
+| `TETSU_MAIL_ALLOW` | as above | Optional: the addresses, separated by commas, that get real email. Every other message is kept for the mailbox page |
 | `PORT` | `serve` | The port a host such as Render sets, listened on at every interface. Without it, `serve` listens on `127.0.0.1:8080` |
 | `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`, or `OTEL_EXPORTER_OTLP_ENDPOINT` with `/v1/logs` added | `serve` | Optional: where logs are exported over OTLP ([ADR-0049](../../docs/adr/0049-log-export.md)). HTTPS, or HTTP to this machine. Without it, nothing is exported |
 | `OTEL_EXPORTER_OTLP_LOGS_HEADERS` or `OTEL_EXPORTER_OTLP_HEADERS` | `serve` | Optional: percent-encoded `name=value` pairs sent with each export, such as the backend's key |

@@ -21,13 +21,14 @@ use std::process::ExitCode;
 use tetsu_audit::Audit;
 use tetsu_identity::Identity;
 use tetsu_kernel::Module;
+use tetsu_mail::Mail;
 use tetsu_tenancy::Tenancy;
 
 /// Every module the binary runs, in the order their migrations apply.
-const MODULES: &[&dyn Module] = &[&Tenancy, &Identity, &Audit];
+const MODULES: &[&dyn Module] = &[&Tenancy, &Identity, &Audit, &Mail];
 const USAGE: &str = "usage: tetsu [--env <name>] [setup | migrate | seed [--check] <file or folder> | serve | check | reset <schema>... \
                      | replay <schema> <event id> | rename <address> <new slug> \
-                     | operator <create <name> | invite <id> | list | disable <id> | enable <id> \
+                     | operator <create <name> <email> | invite <id> | list | disable <id> | enable <id> \
                      | remove-passkeys <id> | end-sessions <id | --all>>]";
 
 #[derive(Debug, PartialEq, Eq)]

@@ -5,9 +5,10 @@
 use std::time::Duration;
 
 use tetsu_identity::{
-    Change, Error, ForChange, Identity, Logout, Origins, Realm, RelyingParty, SessionToken,
-    postgres_store,
+    Change, Error, ForChange, Identity, Logout, OperatorId, Origins, Realm, RelyingParty,
+    SessionToken, postgres_store,
 };
+use tetsu_kernel::Address;
 use tetsu_postgres::test_support::TestDatabase;
 use tetsu_postgres::{ModuleTransaction, Settings, connect, isolation_violations, pool};
 
@@ -186,11 +187,11 @@ async fn a_started_session_is_found_by_its_token_and_records_each_request() {
 async fn each_operator_gets_their_own_id_and_a_random_user_handle() {
     let (database, operators) = migrated().await;
     let first = operators
-        .create(&name("Kurt Medley"), &actor())
+        .create(&name("Kurt Medley"), None, &actor())
         .await
         .expect("creates");
     let second = operators
-        .create(&name("Lee Park"), &actor())
+        .create(&name("Lee Park"), None, &actor())
         .await
         .expect("creates");
     assert_ne!(first, second);
@@ -295,7 +296,7 @@ async fn requests_at_the_same_moment_never_end_a_live_session() {
     let database = ready().await;
     let operators = std::sync::Arc::new(postgres_store(pool(&database.as_app()).expect("a pool")));
     let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
+        .create(&name("Kurt Medley"), None, &actor())
         .await
         .expect("creates");
     let token = text(&logged_in(&database, kurt).await);
@@ -504,7 +505,7 @@ async fn a_create_answer_that_cannot_be_read_is_a_storage_failure() {
     )
     .await;
     assert_eq!(
-        operators.create(&name("Kurt Medley"), &actor()).await,
+        operators.create(&name("Kurt Medley"), None, &actor()).await,
         Err(Error::Storage(
             "error deserializing column 0: cannot convert between the Rust type `i64` and the Postgres type `int4`"
                 .to_string()
@@ -546,7 +547,7 @@ async fn an_unreachable_database_is_an_error() {
     let operators =
         postgres_store(pool(&Settings::from_values(&url, Some("disable"))).expect("a pool"));
     assert!(matches!(
-        operators.create(&name("Kurt Medley"), &actor()).await,
+        operators.create(&name("Kurt Medley"), None, &actor()).await,
         Err(Error::Storage(_))
     ));
 }
@@ -566,7 +567,7 @@ async fn an_operator_id_of_the_wrong_type_is_an_error() {
     )
     .await;
     assert!(matches!(
-        operators.create(&name("Kurt Medley"), &actor()).await,
+        operators.create(&name("Kurt Medley"), None, &actor()).await,
         Err(Error::Storage(_))
     ));
 }
@@ -583,7 +584,7 @@ async fn a_transaction_that_cannot_begin_is_an_error() {
         .replacen("postgres@", &format!("{outsider}@"), 1);
     let operators =
         postgres_store(pool(&Settings::from_values(&url, Some("disable"))).expect("a pool"));
-    let refused = operators.create(&name("Kurt Medley"), &actor()).await;
+    let refused = operators.create(&name("Kurt Medley"), None, &actor()).await;
     drop(operators);
     as_admin(&database, &format!("DROP ROLE {outsider}")).await;
     assert!(matches!(refused, Err(Error::Storage(_))), "{refused:?}");
@@ -711,7 +712,7 @@ async fn requests_at_the_same_moment_never_revive_a_spent_session() {
     let database = ready().await;
     let operators = std::sync::Arc::new(postgres_store(pool(&database.as_app()).expect("a pool")));
     let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
+        .create(&name("Kurt Medley"), None, &actor())
         .await
         .expect("creates");
     let token = text(&logged_in(&database, kurt).await);
@@ -741,7 +742,7 @@ async fn requests_at_the_same_moment_never_revive_a_spent_session() {
 async fn starting_a_session_removes_only_the_operators_spent_ones() {
     let (database, operators, kurt) = with_kurt().await;
     let ana = operators
-        .create(&name("Ana Ortiz"), &actor())
+        .create(&name("Ana Ortiz"), None, &actor())
         .await
         .expect("creates");
     for operator in [kurt, kurt, kurt, ana] {
@@ -900,7 +901,7 @@ async fn the_database_takes_the_longest_name_the_domain_takes() {
     let (database, operators) = migrated().await;
     let longest = "é".repeat(100);
     operators
-        .create(&name(&longest), &actor())
+        .create(&name(&longest), None, &actor())
         .await
         .expect("fits");
     for refused in [String::new(), "é".repeat(101)] {
@@ -928,7 +929,7 @@ async fn the_database_takes_the_longest_name_the_domain_takes() {
 async fn the_database_keeps_only_named_transports() {
     let (database, operators) = migrated().await;
     let kurt = operators
-        .create(&name("Kurt Medley"), &actor())
+        .create(&name("Kurt Medley"), None, &actor())
         .await
         .expect("creates")
         .get();
@@ -972,7 +973,7 @@ async fn a_change_whose_event_cannot_be_recorded_is_undone() {
     )
     .await;
     assert!(matches!(
-        operators.create(&name("Kurt Medley"), &actor()).await,
+        operators.create(&name("Kurt Medley"), None, &actor()).await,
         Err(Error::Storage(why)) if why.contains("outbox_global")
     ));
     let client = connect(&database).await.expect("connects");
@@ -997,4 +998,50 @@ async fn a_disabled_operators_session_is_refused_and_removed() {
     .await;
     assert_eq!(operators.session([text(&token).as_str()]).await, Ok(None));
     assert_eq!(count(&database, "true").await, 0, "removed");
+}
+
+/// An operator keeps the email address they were created with, for their invite and notices (ADR-0074); one made
+/// without, or one who does not exist, has none.
+#[tokio::test]
+async fn an_operator_keeps_the_email_address_they_were_created_with() {
+    let (_database, operators) = migrated().await;
+    let ada = Address::parse("ada@example.com").expect("an address");
+    let with = operators
+        .create(&name("Ada Lovelace"), Some(&ada), &actor())
+        .await
+        .expect("created");
+    let without = operators
+        .create(&name("Lee Park"), None, &actor())
+        .await
+        .expect("created");
+    assert_eq!(operators.email(with).await, Ok(Some(ada)));
+    assert_eq!(operators.email(without).await, Ok(None));
+    assert_eq!(
+        operators
+            .email(OperatorId::parse("999").expect("an ID"))
+            .await,
+        Ok(None)
+    );
+}
+
+/// A stored address that is not plain, or one that cannot be read, is a storage failure.
+#[tokio::test]
+async fn an_email_address_that_cannot_be_read_is_a_storage_failure() {
+    let (database, operators) = migrated().await;
+    let id = operators
+        .create(&name("Ada Lovelace"), None, &actor())
+        .await
+        .expect("created");
+    as_admin(
+        &database,
+        "UPDATE identity.operators SET email = 'ada@localhost'",
+    )
+    .await;
+    assert!(matches!(operators.email(id).await, Err(Error::Storage(_))));
+    as_admin(
+        &database,
+        "REVOKE SELECT ON identity.operators FROM tetsu_identity",
+    )
+    .await;
+    assert!(matches!(operators.email(id).await, Err(Error::Storage(_))));
 }

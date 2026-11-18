@@ -469,6 +469,55 @@ fn decoded(text: impl AsRef<str>) -> Option<String> {
 
 /// A missing or blank variable is `None`, and surrounding spaces are dropped. One that is not UTF-8 is an error,
 /// not a missing value.
+/// The mail settings (ADR-0074), which go with the database, since its mail is what they send.
+pub const MAIL: [&str; 6] = [
+    "TETSU_SMTP_HOST",
+    "TETSU_SMTP_PORT",
+    "TETSU_SMTP_USERNAME",
+    "TETSU_SMTP_PASSWORD",
+    "TETSU_MAIL_FROM",
+    "TETSU_MAIL_ALLOW",
+];
+
+/// Where mail goes: an SMTP server, if one is set, and the addresses it may send to; every other message is kept
+/// for the mailbox page.
+pub struct Mail {
+    pub smtp: Option<tetsu_mail::SmtpSettings>,
+    pub allow: tetsu_mail::Allowlist,
+}
+
+/// Reads the mail settings: with `TETSU_SMTP_HOST`, the server's implicit-TLS port from `TETSU_SMTP_PORT`, default
+/// 465, its login from `TETSU_SMTP_USERNAME` and `TETSU_SMTP_PASSWORD`, and the sender from `TETSU_MAIL_FROM`, each
+/// required; and the addresses that get real email, separated by commas, from `TETSU_MAIL_ALLOW`. Without a host,
+/// every message is kept. Errors name the variable and never repeat its value, since one is a password.
+pub fn mail(var: impl Fn(&str) -> Result<String, VarError>) -> Result<Mail, String> {
+    let allow = value(&var, "TETSU_MAIL_ALLOW")?
+        .map_or(Some(tetsu_mail::Allowlist::default()), |text| {
+            tetsu_mail::Allowlist::parse(&text)
+        })
+        .ok_or("TETSU_MAIL_ALLOW must be plain email addresses separated by commas")?;
+    let Some(host) = value(&var, "TETSU_SMTP_HOST")? else {
+        return Ok(Mail { smtp: None, allow });
+    };
+    let required =
+        |name: &str| value(&var, name)?.ok_or(format!("{name} must be set with TETSU_SMTP_HOST"));
+    let port = value(&var, "TETSU_SMTP_PORT")?
+        .map_or(Some(465), |port| port.parse().ok().filter(|port| *port > 0))
+        .ok_or("TETSU_SMTP_PORT must be a port number")?;
+    let from = tetsu_kernel::Address::parse(&required("TETSU_MAIL_FROM")?)
+        .ok_or("TETSU_MAIL_FROM must be a plain email address")?;
+    Ok(Mail {
+        smtp: Some(tetsu_mail::SmtpSettings {
+            host,
+            port,
+            username: required("TETSU_SMTP_USERNAME")?,
+            password: required("TETSU_SMTP_PASSWORD")?,
+            from,
+        }),
+        allow,
+    })
+}
+
 fn value(
     var: impl Fn(&str) -> Result<String, VarError>,
     name: &str,
@@ -502,6 +551,114 @@ mod tests {
         let both = "DATABASE_URL=postgres://localhost/tetsu\nDATABASE_TLS=disable\n";
         assert_eq!(Local::file_only(both).beside(lead, &followers), Ok(()));
         assert_eq!(Local::file_only("").beside(lead, &followers), Ok(()));
+    }
+
+    fn mail_from(set: &[(&str, &str)]) -> Result<Mail, String> {
+        mail(|name| {
+            set.iter()
+                .find(|(set, _)| *set == name)
+                .map(|(_, value)| (*value).to_string())
+                .ok_or(VarError::NotPresent)
+        })
+    }
+
+    const SMTP: [(&str, &str); 4] = [
+        ("TETSU_SMTP_HOST", "smtp.mailgun.org"),
+        ("TETSU_SMTP_USERNAME", "postmaster@sandbox.mailgun.org"),
+        ("TETSU_SMTP_PASSWORD", "a-secret-password"),
+        ("TETSU_MAIL_FROM", "tetsu@sandbox.mailgun.org"),
+    ];
+
+    /// With no server, every message is kept, and the allowlist is still read.
+    #[test]
+    fn without_a_host_mail_is_only_kept() {
+        let kept = mail_from(&[]).unwrap();
+        assert!(kept.smtp.is_none());
+        assert_eq!(kept.allow, tetsu_mail::Allowlist::default());
+        let listed =
+            mail_from(&[("TETSU_MAIL_ALLOW", "ada@example.com, lee@example.org")]).unwrap();
+        assert_eq!(
+            listed.allow,
+            tetsu_mail::Allowlist::parse("ada@example.com,lee@example.org").unwrap()
+        );
+    }
+
+    #[test]
+    fn a_host_brings_its_port_login_and_sender() {
+        let smtp = mail_from(&SMTP).unwrap().smtp.unwrap();
+        assert_eq!(
+            (
+                smtp.host.as_str(),
+                smtp.port,
+                smtp.username.as_str(),
+                smtp.password.as_str()
+            ),
+            (
+                "smtp.mailgun.org",
+                465,
+                "postmaster@sandbox.mailgun.org",
+                "a-secret-password"
+            )
+        );
+        assert_eq!(smtp.from.as_str(), "tetsu@sandbox.mailgun.org");
+        let mut other = SMTP.to_vec();
+        other.push(("TETSU_SMTP_PORT", "2465"));
+        assert_eq!(mail_from(&other).unwrap().smtp.unwrap().port, 2465);
+    }
+
+    /// Each error names what is wrong and never a value, since one is the password.
+    #[test]
+    fn mail_settings_that_are_wrong_say_which() {
+        for (name, refused) in [
+            (
+                "TETSU_SMTP_USERNAME",
+                "TETSU_SMTP_USERNAME must be set with TETSU_SMTP_HOST",
+            ),
+            (
+                "TETSU_SMTP_PASSWORD",
+                "TETSU_SMTP_PASSWORD must be set with TETSU_SMTP_HOST",
+            ),
+            (
+                "TETSU_MAIL_FROM",
+                "TETSU_MAIL_FROM must be set with TETSU_SMTP_HOST",
+            ),
+        ] {
+            let without: Vec<_> = SMTP.into_iter().filter(|(set, _)| *set != name).collect();
+            assert_eq!(mail_from(&without).err(), Some(refused.to_string()));
+        }
+        for (name, bad, refused) in [
+            (
+                "TETSU_SMTP_PORT",
+                "0",
+                "TETSU_SMTP_PORT must be a port number",
+            ),
+            (
+                "TETSU_SMTP_PORT",
+                "smtp",
+                "TETSU_SMTP_PORT must be a port number",
+            ),
+            (
+                "TETSU_SMTP_PORT",
+                "70000",
+                "TETSU_SMTP_PORT must be a port number",
+            ),
+            (
+                "TETSU_MAIL_FROM",
+                "Tetsu <a@b.c>",
+                "TETSU_MAIL_FROM must be a plain email address",
+            ),
+            (
+                "TETSU_MAIL_ALLOW",
+                "ada@example.com;lee@example.org",
+                "TETSU_MAIL_ALLOW must be plain email addresses separated by commas",
+            ),
+        ] {
+            let mut set: Vec<_> = SMTP.into_iter().filter(|(set, _)| *set != name).collect();
+            set.push((name, bad));
+            let error = mail_from(&set).err().unwrap();
+            assert_eq!(error, refused);
+            assert!(!error.contains("a-secret-password"));
+        }
     }
 
     fn listening(port: Option<&str>) -> Result<SocketAddr, String> {

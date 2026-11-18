@@ -94,17 +94,26 @@ async fn reset_starts_the_demo_over_and_nowhere_else() {
     assert!(err(&refused).contains("reset runs only where TETSU_DEMO is true"));
     let unknown = tetsu(&database, &["reset", "tenancy", "public"], Some("true"));
     assert!(err(&unknown).contains("\"public\" is not a module's schema here"));
-    assert_eq!(schemas(&database).await, ["audit", "identity", "tenancy"]);
+    assert_eq!(
+        schemas(&database).await,
+        ["audit", "identity", "mail", "tenancy"]
+    );
     let reset = tetsu(&database, &["reset", "tenancy", "audit"], Some("true"));
     assert!(reset.status.success(), "{reset:?}");
     assert_eq!(
         out(&reset),
-        "dropped: tenancy, audit\nmigrated: tenancy, identity, audit\n"
+        "dropped: tenancy, audit\nmigrated: tenancy, identity, audit, mail\n"
     );
-    assert_eq!(schemas(&database).await, ["audit", "identity", "tenancy"]);
+    assert_eq!(
+        schemas(&database).await,
+        ["audit", "identity", "mail", "tenancy"]
+    );
     let rerun = tetsu(&database, &["migrate"], None);
     assert!(rerun.status.success(), "{rerun:?}");
-    assert_eq!(schemas(&database).await, ["audit", "identity", "tenancy"]);
+    assert_eq!(
+        schemas(&database).await,
+        ["audit", "identity", "mail", "tenancy"]
+    );
 }
 
 /// A tenant moves to a new slug as the application role, and a bad or taken slug changes nothing.
@@ -169,14 +178,17 @@ async fn setup_creates_the_database_once_and_migrates() {
     assert!(first.status.success(), "{first:?}");
     assert_eq!(
         out(&first),
-        "created the database\nmigrated: tenancy, identity, audit\n"
+        "created the database\nmigrated: tenancy, identity, audit, mail\n"
     );
-    assert_eq!(schemas(&database).await, ["audit", "identity", "tenancy"]);
+    assert_eq!(
+        schemas(&database).await,
+        ["audit", "identity", "mail", "tenancy"]
+    );
     let again = tetsu(&database, &["setup"], None);
     assert!(again.status.success(), "{again:?}");
     assert_eq!(
         out(&again),
-        "the database exists\nmigrated: tenancy, identity, audit\n"
+        "the database exists\nmigrated: tenancy, identity, audit, mail\n"
     );
     let refused = tetsu(&database, &["setup", "now"], None);
     assert!(

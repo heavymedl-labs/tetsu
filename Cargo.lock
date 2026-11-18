@@ -5132,6 +5132,7 @@ dependencies = [
  "tetsu-audit",
  "tetsu-identity",
  "tetsu-kernel",
+ "tetsu-mail",
  "tetsu-postgres",
  "tetsu-tenancy",
  "tokio",

@@ -8,6 +8,7 @@
 mod adapters;
 mod browser;
 mod domain;
+mod mail;
 mod passkeys;
 mod ports;
 mod use_cases;
@@ -34,6 +35,7 @@ pub use domain::{
     OperatorName, OperatorSummary, RateLimit, Realm, Redemption, Refusal, Removal, Session,
     SessionStart, SessionToken, Signer, TakenAddition, TakenCeremony, TimeLeft,
 };
+pub use mail::invite_message;
 pub use passkeys::RelyingParty;
 pub use ports::OperatorStore;
 pub use use_cases::Operators;

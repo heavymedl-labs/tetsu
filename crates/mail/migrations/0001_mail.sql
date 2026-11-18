@@ -26,7 +26,8 @@ COMMENT ON TABLE sends IS
 -- sent.
 CREATE TABLE captured (
     message_key text PRIMARY KEY
-    REFERENCES sends (message_key) ON DELETE CASCADE,
+    REFERENCES sends (message_key) ON DELETE CASCADE
+    CHECK (octet_length(message_key) BETWEEN 1 AND 128),
     recipient text NOT NULL CHECK (
         octet_length(recipient) BETWEEN 3 AND 254
         AND recipient !~ '[[:cntrl:][:space:]]'

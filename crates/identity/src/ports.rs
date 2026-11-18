@@ -7,19 +7,26 @@ use crate::domain::{
 };
 use std::future::Future;
 use std::time::Duration;
-use tetsu_kernel::Requester;
+use tetsu_kernel::{Address, Requester};
 
 /// Where operators and their sessions are kept. A session is reached only by its token's hash and realm, one at a
 /// time (ADR-0048), and the store keeps each realm's limits beside its own clock, so no caller can stretch a
 /// session. The Postgres adapter implements it, and tests may use their own.
 pub trait OperatorStore {
-    /// Stores a new operator, with no passkey yet. Each change below records an audit event naming `actor`, with
-    /// its outcome, in the same transaction.
+    /// Stores a new operator, with their email address if given and no passkey yet. Each change below records an
+    /// audit event naming `actor`, with its outcome, in the same transaction.
     fn insert_operator(
         &self,
         name: &OperatorName,
+        email: Option<&Address>,
         actor: &Actor,
     ) -> impl Future<Output = Result<OperatorId, Error>> + Send;
+
+    /// An operator's email address, or none for one who has none or does not exist (ADR-0074).
+    fn operator_email(
+        &self,
+        operator: OperatorId,
+    ) -> impl Future<Output = Result<Option<Address>, Error>> + Send;
 
     /// Records a request on the live session stored under a token's hash in a realm, and returns it. A session
     /// past either of the realm's limits is removed instead, and none is returned; one in another realm is none.

@@ -215,7 +215,7 @@ impl std::fmt::Debug for SessionToken {
 }
 
 /// Bytes as lowercase hexadecimal digits.
-fn to_hex<const N: usize>(bytes: &[u8; N]) -> String {
+pub(crate) fn to_hex<const N: usize>(bytes: &[u8; N]) -> String {
     let mut text = String::with_capacity(N * 2);
     for byte in bytes {
         text.push(char::from(HEX[usize::from(byte >> 4)]));

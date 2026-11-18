@@ -11,15 +11,16 @@ use std::io::Read;
 
 use tetsu_identity::{
     Actor, Disabling, InviteToken, OperatorId, OperatorName, OperatorStore, OperatorSummary,
-    Operators, Removal,
+    Operators, Removal, invite_message,
 };
+use tetsu_kernel::{Address, Delivery, MailError, Mailer};
 
 use crate::settings::{self, Local};
 
 /// An operator command, with what it acts on.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Operator {
-    Create { name: OperatorName },
+    Create { name: OperatorName, email: Address },
     Invite { id: OperatorId },
     List,
     Disable { id: OperatorId },
@@ -29,8 +30,8 @@ pub enum Operator {
     EndAllSessions,
 }
 
-const USAGE: &str = "operator takes create <name>, invite <id>, list, disable <id>, enable <id>, remove-passkeys \
-                     <id>, or end-sessions <id | --all>";
+const USAGE: &str = "operator takes create <name> <email>, invite <id>, list, disable <id>, enable <id>, \
+                     remove-passkeys <id>, or end-sessions <id | --all>";
 
 /// The operator command its words name, with its arguments checked.
 pub fn parse(rest: &[String]) -> Result<Operator, String> {
@@ -39,10 +40,13 @@ pub fn parse(rest: &[String]) -> Result<Operator, String> {
     };
     match (command.as_str(), arguments) {
         // A name like an option, such as --help, is a mistake, never an operator to create and join.
-        ("create", [name]) if name.trim_start().starts_with('-') => Err(USAGE.into()),
-        ("create", [name]) => OperatorName::parse(name)
-            .map(|name| Operator::Create { name })
-            .map_err(|error| error.to_string()),
+        ("create", [name, _]) if name.trim_start().starts_with('-') => Err(USAGE.into()),
+        ("create", [name, email]) => {
+            let name = OperatorName::parse(name).map_err(|error| error.to_string())?;
+            let email =
+                Address::parse(email).ok_or(format!("{email:?} is not a plain email address"))?;
+            Ok(Operator::Create { name, email })
+        }
         ("list", []) => Ok(Operator::List),
         ("end-sessions", [all]) if all == "--all" => Ok(Operator::EndAllSessions),
         (command, [text]) => with_id(command, text),
@@ -90,8 +94,21 @@ pub async fn run(
         login(|name| std::env::var(name)).as_deref(),
         read_small("/etc/hostname").as_deref().and_then(host_name),
     );
-    let operators = tetsu_identity::postgres_store(crate::connect(&local).await?);
-    act(&operators, operator, &origin, &by).await
+    // Only a command that issues a link sends mail, so only it reads the mail settings.
+    let mail = if issues_link {
+        local.beside("DATABASE_URL", &settings::MAIL)?;
+        settings::mail(|name| local.var(name))?
+    } else {
+        settings::Mail {
+            smtp: None,
+            allow: tetsu_mail::Allowlist::default(),
+        }
+    };
+    let smtp = mail.smtp.as_ref().map(tetsu_mail::Smtp::new).transpose()?;
+    let pool = crate::connect(&local).await?;
+    let office = tetsu_mail::post_office(pool.clone(), smtp, mail.allow);
+    let operators = tetsu_identity::postgres_store(pool);
+    act(&operators, &office, operator, &origin, &by).await
 }
 
 /// Where a link points. A link holds a live token, so a `.env` may name the origin only when it names the database
@@ -141,19 +158,22 @@ fn host_name(text: &str) -> Option<&str> {
         .find(|line| !line.is_empty() && !line.starts_with('#'))
 }
 
-/// Does what an operator command asks, through Identity's use cases.
+/// Does what an operator command asks, through Identity's use cases, emailing any invite link it issues.
 async fn act(
     operators: &Operators<impl OperatorStore>,
+    mailer: &impl Mailer,
     operator: Operator,
     origin: &str,
     by: &Actor,
 ) -> Result<Vec<String>, String> {
     let said = match operator {
-        Operator::Create { name } => return create(operators, &name, origin, by).await,
-        Operator::Invite { id } => operators
-            .invite(id, by)
-            .await
-            .map(|token| vec![link(origin, &token)]),
+        Operator::Create { name, email } => {
+            return create(operators, mailer, &name, &email, origin, by).await;
+        }
+        Operator::Invite { id } => match operators.invite(id, by).await {
+            Ok(token) => return Ok(issued(operators, mailer, id, origin, &token).await),
+            Err(error) => Err(error),
+        },
         Operator::List => operators
             .list()
             .await
@@ -189,12 +209,14 @@ async fn act(
 /// operator exists without a link, and the error names them so the link can be issued again.
 async fn create(
     operators: &Operators<impl OperatorStore>,
+    mailer: &impl Mailer,
     name: &OperatorName,
+    email: &Address,
     origin: &str,
     by: &Actor,
 ) -> Result<Vec<String>, String> {
     let id = operators
-        .create(name, by)
+        .create(name, Some(email), by)
         .await
         .map_err(|error| error.to_string())?;
     let token = operators.invite(id, by).await.map_err(|error| {
@@ -203,10 +225,62 @@ async fn create(
             id = id.get()
         )
     })?;
-    Ok(vec![
-        format!("created operator {}, {}", id.get(), name.as_str()),
-        link(origin, &token),
-    ])
+    let mut said = vec![format!("created operator {}, {}", id.get(), name.as_str())];
+    said.extend(issued(operators, mailer, id, origin, &token).await);
+    Ok(said)
+}
+
+/// What issuing a link said: the link, printed as always, and what came of emailing it (ADR-0074). A link that
+/// could not be emailed still works, so mail never fails the command.
+async fn issued(
+    operators: &Operators<impl OperatorStore>,
+    mailer: &impl Mailer,
+    id: OperatorId,
+    origin: &str,
+    token: &InviteToken,
+) -> Vec<String> {
+    let url = link_url(origin, token);
+    let emailed = match operators.email(id).await {
+        Ok(Some(to)) => {
+            let sent = match invite_message(to.clone(), &url, token) {
+                Some(message) => mailer.send(&message).await,
+                None => Err(MailError::Refused),
+            };
+            delivered(&to, sent)
+        }
+        Ok(None) => format!(
+            "operator {} has no email address, so the link was not emailed",
+            id.get()
+        ),
+        Err(error) => format!(
+            "could not read operator {}'s email address: {error}",
+            id.get()
+        ),
+    };
+    vec![
+        format!("invite link, good once and for an hour: {url}"),
+        emailed,
+    ]
+}
+
+/// What came of emailing an invite to `to`.
+fn delivered(to: &Address, sent: Result<Delivery, MailError>) -> String {
+    let to = to.as_str();
+    match sent {
+        Ok(Delivery::Sent) => format!("emailed the invite link to {to}"),
+        Ok(Delivery::Captured) => {
+            format!(
+                "kept the invite for {to} in the mailbox, since TETSU_MAIL_ALLOW does not list it"
+            )
+        }
+        Ok(Delivery::Repeated) => format!("the invite for {to} was emailed before"),
+        Err(MailError::Unavailable) => {
+            format!("could not email the invite link to {to} just now; the link above still works")
+        }
+        Err(MailError::Refused) => {
+            format!("the mail server refused the invite for {to}; the link above still works")
+        }
+    }
 }
 
 /// What disabling an operator did, with how many sessions and invite links it ended.
@@ -259,17 +333,15 @@ fn listed(operator: &OperatorSummary) -> String {
 /// The invite link, with the token in the fragment, which a browser never sends to the server or in a
 /// `Referer`, so it stays out of the server's logs. A browser's history keeps it, and a container run with a
 /// terminal (`docker run -t`) logs it, which is why it is good once and for an hour.
-fn link(origin: &str, token: &InviteToken) -> String {
-    format!(
-        "invite link, good once and for an hour: {origin}/ops/join#{}",
-        token.to_text()
-    )
+fn link_url(origin: &str, token: &InviteToken) -> String {
+    format!("{origin}/ops/join#{}", token.to_text())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::args;
+    use tetsu_mail::PostOffice;
     use tetsu_postgres::test_support::Scratch;
 
     #[test]
@@ -277,9 +349,10 @@ mod tests {
         let kurt = OperatorId::parse("7").unwrap();
         for (words, parsed) in [
             (
-                &["create", "Kurt Medley"][..],
+                &["create", "Kurt Medley", "kurt@example.com"][..],
                 Operator::Create {
                     name: OperatorName::parse("Kurt Medley").unwrap(),
+                    email: Address::parse("kurt@example.com").unwrap(),
                 },
             ),
             (&["invite", "7"], Operator::Invite { id: kurt }),
@@ -298,13 +371,15 @@ mod tests {
         for bad in [
             &[][..],
             &["create"],
+            &["create", "Kurt Medley"],
+            &["create", "Kurt Medley", "kurt@example.com", "more"],
             &["list", "all"],
             &["remove", "7"],
             &["end-sessions"],
-            &["create", "--help"],
-            &["create", "-x"],
-            &["create", " --help"],
-            &["create", "\u{A0}-x"],
+            &["create", "--help", "a@example.com"],
+            &["create", "-x", "a@example.com"],
+            &["create", " --help", "a@example.com"],
+            &["create", "\u{A0}-x", "a@example.com"],
         ] {
             assert_eq!(parse(&args(bad)), Err(USAGE.into()), "{bad:?}");
         }
@@ -312,16 +387,21 @@ mod tests {
             parse(&args(&["disable", "seven"])),
             Err("\"seven\" is not an operator ID".into())
         );
-        assert!(parse(&args(&["create", ""])).is_err(), "an empty name");
+        assert!(
+            parse(&args(&["create", "", "a@example.com"])).is_err(),
+            "an empty name"
+        );
+        assert_eq!(
+            parse(&args(&["create", "Kurt Medley", "Kurt <kurt@example.com>"])),
+            Err("\"Kurt <kurt@example.com>\" is not a plain email address".into())
+        );
     }
 
     /// A link is issued only to a terminal, checked before anything is created or read.
     #[tokio::test]
     async fn a_link_is_issued_only_to_a_terminal() {
         for operator in [
-            Operator::Create {
-                name: OperatorName::parse("Kurt Medley").unwrap(),
-            },
+            creating("Kurt Medley"),
             Operator::Invite {
                 id: OperatorId::parse("7").unwrap(),
             },
@@ -348,6 +428,111 @@ mod tests {
         )
         .await;
         assert_eq!(refused, Err("TETSU_ORIGIN must be set".into()));
+    }
+
+    /// Mail settings that are wrong stop a command that issues a link before it touches the database, and a
+    /// stray `.env` cannot reroute a named database's mail.
+    #[tokio::test]
+    async fn wrong_mail_settings_stop_a_link_before_anything_is_made() {
+        let base =
+            "DATABASE_URL=postgres://127.0.0.1:1/none\nTETSU_ORIGIN=https://ops.example.com\n";
+        let invite = || Operator::Invite {
+            id: OperatorId::parse("7").unwrap(),
+        };
+        let missing = format!("{base}TETSU_SMTP_HOST=smtp.example.com\n");
+        assert_eq!(
+            run(invite(), || Ok(Local::file_only(&missing)), true).await,
+            Err("TETSU_MAIL_FROM must be set with TETSU_SMTP_HOST".into())
+        );
+        let host = format!(
+            "{base}TETSU_SMTP_HOST=not a host\nTETSU_SMTP_USERNAME=u\nTETSU_SMTP_PASSWORD=p\n\
+             TETSU_MAIL_FROM=tetsu@example.com\n"
+        );
+        assert_eq!(
+            run(invite(), || Ok(Local::file_only(&host)), true).await,
+            Err("the SMTP host \"not a host\" is not a name TLS can check".into())
+        );
+        let stray = Local::file_only("TETSU_SMTP_HOST=smtp.example.com\n");
+        assert!(
+            stray
+                .beside("DATABASE_URL", &settings::MAIL)
+                .unwrap_err()
+                .starts_with("TETSU_SMTP_HOST comes from .env but DATABASE_URL does not")
+        );
+    }
+
+    /// Creating an operator emails their invite, here kept in the mailbox since no server is set, and says so.
+    #[tokio::test]
+    async fn a_created_operators_invite_is_emailed() {
+        let (operators, office, _database) = migrated().await;
+        let created = said(&operators, &office, creating("Kurt Medley")).await;
+        assert_eq!(created.len(), 3, "{created:?}");
+        assert_eq!(created[0], "created operator 1, Kurt Medley");
+        let url = created[1]
+            .strip_prefix("invite link, good once and for an hour: ")
+            .unwrap();
+        assert_eq!(
+            created[2],
+            "kept the invite for kurt@example.com in the mailbox, since TETSU_MAIL_ALLOW does not list it"
+        );
+        let mailbox = office.mailbox().await.unwrap();
+        assert_eq!(mailbox.len(), 1);
+        assert_eq!(mailbox[0].recipient, "kurt@example.com");
+        assert!(mailbox[0].text.contains(url), "{}", mailbox[0].text);
+    }
+
+    /// An operator with no address is still issued a link, which is printed and not emailed; one whose address
+    /// cannot be read says so.
+    #[tokio::test]
+    async fn an_invite_without_an_address_is_printed_only() {
+        let (operators, office, database) = migrated().await;
+        let id = operators
+            .create(&OperatorName::parse("Lee Park").unwrap(), None, &by())
+            .await
+            .unwrap();
+        let invited = said(&operators, &office, Operator::Invite { id }).await;
+        assert_eq!(
+            invited[1],
+            "operator 1 has no email address, so the link was not emailed"
+        );
+        tetsu_postgres::connect(&database)
+            .await
+            .unwrap()
+            .batch_execute("REVOKE SELECT (email) ON identity.operators FROM tetsu_identity")
+            .await
+            .unwrap();
+        let invited = said(&operators, &office, Operator::Invite { id }).await;
+        assert!(
+            invited[1].starts_with("could not read operator 1's email address: "),
+            "{invited:?}"
+        );
+        assert_eq!(office.mailbox().await.unwrap(), vec![]);
+    }
+
+    /// Each way an invite's email can go has its own words, and every failure says the link still works.
+    #[test]
+    fn each_delivery_says_what_came_of_it() {
+        let to = Address::parse("ada@example.com").unwrap();
+        for (sent, said) in [
+            (
+                Ok(Delivery::Sent),
+                "emailed the invite link to ada@example.com",
+            ),
+            (
+                Ok(Delivery::Repeated),
+                "the invite for ada@example.com was emailed before",
+            ),
+            (
+                Err(MailError::Unavailable),
+                "could not email the invite link to ada@example.com just now; the link above still works",
+            ),
+            (
+                Err(MailError::Refused),
+                "the mail server refused the invite for ada@example.com; the link above still works",
+            ),
+        ] {
+            assert_eq!(delivered(&to, sent), said);
+        }
     }
 
     /// A `.env` names where links point only when it names the database too, so a stray one cannot send a real
@@ -458,45 +643,59 @@ mod tests {
 
     const ORIGIN: &str = "https://ops.example.com";
 
+    /// Creating `name`, whose address is their first name at example.com.
+    fn creating(name: &str) -> Operator {
+        let first = name.split(' ').next().unwrap_or(name).to_lowercase();
+        Operator::Create {
+            name: OperatorName::parse(name).unwrap(),
+            email: Address::parse(&format!("{first}@example.com")).unwrap(),
+        }
+    }
+
     fn by() -> Actor {
         Actor::parse("kurt@workstation").unwrap()
     }
 
     /// What a command said, as the maintainer ran it.
-    async fn said(operators: &Operators<impl OperatorStore>, operator: Operator) -> Vec<String> {
-        act(operators, operator, ORIGIN, &by()).await.unwrap()
+    async fn said(
+        operators: &Operators<impl OperatorStore>,
+        office: &PostOffice,
+        operator: Operator,
+    ) -> Vec<String> {
+        act(operators, office, operator, ORIGIN, &by())
+            .await
+            .unwrap()
     }
 
-    /// Identity's use cases over a fresh, migrated database, kept while the test runs.
+    /// Identity's use cases and a post office that keeps every message, over a fresh, migrated database, kept while
+    /// the test runs.
     async fn migrated() -> (
         Operators<impl OperatorStore>,
+        PostOffice,
         tetsu_postgres::test_support::TestDatabase,
     ) {
-        let database =
-            tetsu_postgres::test_support::migrated_database(&[&tetsu_identity::Identity])
-                .await
-                .unwrap();
+        let database = tetsu_postgres::test_support::migrated_database(&[
+            &tetsu_identity::Identity,
+            &tetsu_mail::Mail,
+        ])
+        .await
+        .unwrap();
         let pool = tetsu_postgres::pool(&database.as_app()).unwrap();
-        (tetsu_identity::postgres_store(pool), database)
+        let office = tetsu_mail::post_office(pool.clone(), None, tetsu_mail::Allowlist::default());
+        (tetsu_identity::postgres_store(pool), office, database)
     }
 
     /// Each command acts through Identity's use cases, against a real database, and says what it did.
     #[tokio::test]
     async fn each_command_acts_and_says_what_it_did() {
-        let (operators, _database) = migrated().await;
+        let (operators, office, _database) = migrated().await;
         let kurt = OperatorId::parse("1").unwrap();
-        let created = said(
-            &operators,
-            Operator::Create {
-                name: OperatorName::parse("Kurt Medley").unwrap(),
-            },
-        )
-        .await;
+        let created = said(&operators, &office, creating("Kurt Medley")).await;
         assert_eq!(created[0], "created operator 1, Kurt Medley");
         let prefix = "invite link, good once and for an hour: https://ops.example.com/ops/join#";
         for line in [
             &created[1],
-            &said(&operators, Operator::Invite { id: kurt }).await[0],
+            &said(&operators, &office, Operator::Invite { id: kurt }).await[0],
         ] {
             let token = line
                 .strip_prefix(prefix)
@@ -507,15 +706,15 @@ mod tests {
             );
         }
         assert_eq!(
-            said(&operators, Operator::List).await,
+            said(&operators, &office, Operator::List).await,
             ["1  Kurt Medley  enabled  0 passkeys  link open 60 min"]
         );
         assert_eq!(
-            said(&operators, Operator::EndSessions { id: kurt }).await,
+            said(&operators, &office, Operator::EndSessions { id: kurt }).await,
             ["ended 0 sessions of operator 1"]
         );
         assert_eq!(
-            said(&operators, Operator::EndAllSessions).await,
+            said(&operators, &office, Operator::EndAllSessions).await,
             ["ended 0 operator sessions"]
         );
     }
@@ -523,17 +722,12 @@ mod tests {
     /// Removing an operator's passkeys says how many and what ended, and names the command that issues a new link.
     #[tokio::test]
     async fn removing_passkeys_names_the_next_step() {
-        let (operators, _database) = migrated().await;
-        said(
-            &operators,
-            Operator::Create {
-                name: OperatorName::parse("Kurt Medley").unwrap(),
-            },
-        )
-        .await;
+        let (operators, office, _database) = migrated().await;
+        said(&operators, &office, creating("Kurt Medley")).await;
         assert_eq!(
             said(
                 &operators,
+                &office,
                 Operator::RemovePasskeys {
                     id: OperatorId::parse("1").unwrap()
                 }
@@ -548,37 +742,38 @@ mod tests {
     /// Disabling and enabling say what they did, and a disabled operator is issued no link.
     #[tokio::test]
     async fn an_operator_is_disabled_and_enabled_again() {
-        let (operators, _database) = migrated().await;
+        let (operators, office, _database) = migrated().await;
         let kurt = OperatorId::parse("1").unwrap();
-        said(
-            &operators,
-            Operator::Create {
-                name: OperatorName::parse("Kurt Medley").unwrap(),
-            },
-        )
-        .await;
+        said(&operators, &office, creating("Kurt Medley")).await;
         assert_eq!(
-            said(&operators, Operator::Disable { id: kurt }).await,
+            said(&operators, &office, Operator::Disable { id: kurt }).await,
             ["disabled operator 1, ending 0 sessions and 1 invite links"]
         );
         assert_eq!(
-            said(&operators, Operator::Disable { id: kurt }).await,
+            said(&operators, &office, Operator::Disable { id: kurt }).await,
             ["operator 1 was already disabled"]
         );
         assert_eq!(
-            said(&operators, Operator::List).await,
+            said(&operators, &office, Operator::List).await,
             ["1  Kurt Medley  disabled  0 passkeys"]
         );
         assert_eq!(
-            act(&operators, Operator::Invite { id: kurt }, ORIGIN, &by()).await,
+            act(
+                &operators,
+                &office,
+                Operator::Invite { id: kurt },
+                ORIGIN,
+                &by()
+            )
+            .await,
             Err("invalid: no enabled operator 1".into())
         );
         assert_eq!(
-            said(&operators, Operator::Enable { id: kurt }).await,
+            said(&operators, &office, Operator::Enable { id: kurt }).await,
             ["enabled operator 1, who logs in afresh"]
         );
         assert_eq!(
-            said(&operators, Operator::Enable { id: kurt }).await,
+            said(&operators, &office, Operator::Enable { id: kurt }).await,
             ["operator 1 was already enabled"]
         );
 
@@ -590,7 +785,7 @@ mod tests {
             Operator::EndSessions { id: nobody },
         ] {
             assert_eq!(
-                act(&operators, command, ORIGIN, &by()).await,
+                act(&operators, &office, command, ORIGIN, &by()).await,
                 Err("invalid: no operator 9".into())
             );
         }
@@ -600,7 +795,7 @@ mod tests {
     /// issued again rather than a second operator made.
     #[tokio::test]
     async fn a_failed_link_after_creating_names_the_new_operator() {
-        let (operators, database) = migrated().await;
+        let (operators, office, database) = migrated().await;
         tetsu_postgres::connect(&database)
             .await
             .unwrap()
@@ -610,10 +805,8 @@ mod tests {
             .await
             .unwrap();
         let by = Actor::parse("kurt@workstation").unwrap();
-        let created = Operator::Create {
-            name: OperatorName::parse("Kurt Medley").unwrap(),
-        };
-        let refused = act(&operators, created, "https://ops.example.com", &by)
+        let created = creating("Kurt Medley");
+        let refused = act(&operators, &office, created, "https://ops.example.com", &by)
             .await
             .unwrap_err();
         assert!(

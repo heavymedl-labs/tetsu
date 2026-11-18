@@ -49,6 +49,7 @@ mod support {
         tetsu_identity::postgres_store(pool(&database.as_app()).expect("a pool"))
             .create(
                 &OperatorName::parse("Kurt Medley").expect("a name"),
+                None,
                 &tetsu_identity::Actor::parse("kurt@workstation").expect("an actor"),
             )
             .await
@@ -72,7 +73,10 @@ use support::{err, operator, operator_in, out, with_kurt};
 async fn no_invite_link_is_printed_to_a_pipe() {
     let database = with_kurt().await;
     let app = database.as_app();
-    for args in [&["create", "Lee Park"][..], &["invite", "1"]] {
+    for args in [
+        &["create", "Lee Park", "lee@example.com"][..],
+        &["invite", "1"],
+    ] {
         let refused = operator(&app, args);
         assert_eq!(refused.status.code(), Some(1), "{args:?}");
         assert!(

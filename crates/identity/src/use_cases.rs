@@ -9,7 +9,7 @@ use crate::domain::{
 };
 use crate::passkeys::RelyingParty;
 use crate::ports::OperatorStore;
-use tetsu_kernel::Requester;
+use tetsu_kernel::{Address, Requester};
 
 /// The operator realm's use cases over a store. It offers nothing that reaches the store, so no caller can read or
 /// write a session except through these.
@@ -33,12 +33,26 @@ impl<S: OperatorStore> Operators<S> {
         Self { store, fill }
     }
 
-    /// Creates an operator with no passkey, for ADR-0040's join command, and records it for the audit record.
+    /// Creates an operator with no passkey, and their email address if given (ADR-0074), for ADR-0040's join
+    /// command, and records it for the audit record.
     ///
     /// # Errors
     /// Fails if storage fails.
-    pub async fn create(&self, name: &OperatorName, actor: &Actor) -> Result<OperatorId, Error> {
-        self.store.insert_operator(name, actor).await
+    pub async fn create(
+        &self,
+        name: &OperatorName,
+        email: Option<&Address>,
+        actor: &Actor,
+    ) -> Result<OperatorId, Error> {
+        self.store.insert_operator(name, email, actor).await
+    }
+
+    /// An operator's email address, for their invite and notices, or none for one who has none or does not exist.
+    ///
+    /// # Errors
+    /// Fails if storage fails.
+    pub async fn email(&self, operator: OperatorId) -> Result<Option<Address>, Error> {
+        self.store.operator_email(operator).await
     }
 
     /// Issues an operator's invite link token, good once and for an hour, replacing any earlier link, and
