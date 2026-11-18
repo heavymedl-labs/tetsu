@@ -1,6 +1,11 @@
 /* A figure plays when its .group is hovered, or, on a screen without hover, as it scrolls into view: .tetsu-play
-   turns --tetsu-play to 1 on a scroll timeline. The group-on variant matches either (art/figures.html). */
+   turns --tetsu-play to 1 on a scroll timeline. Narrower than a laptop, where figures sit in a row that slides, a
+   figure stays as it ends rather than plays. The group-on variant matches any of these (art/figures.html). */
 @custom-variant group-on {
+  @media (width < 64rem) {
+    @slot;
+  }
+
   @media (hover: hover) {
     &:is(:where(.group):hover *) {
       @slot;
