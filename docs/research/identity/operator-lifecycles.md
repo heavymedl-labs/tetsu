@@ -6,6 +6,9 @@ flow), and compares how Tetsu handles each with current practice. The timeout va
 [session review](session-and-csrf-review.md) and [ADR-0048](../../adr/0048-sign-in-design.md); this note is about what
 a person sees and can do at each edge.
 
+The rest of being logged in, such as how a person knows they are and where their account lives, is in
+[the signed-in experience](signed-in-experience.md) (2026-11-18).
+
 ## Summary
 
 The server side is sound: every limit is enforced in Postgres, and every refusal is safe. The gaps are in what the
