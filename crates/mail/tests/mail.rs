@@ -1,6 +1,6 @@
 //! Mail against a real Postgres and a local Mailpit: each message goes once, by SMTP to an address on the allowlist
 //! and into the mailbox for anyone else, a message that may never be kept goes only to the allowlist, and a key a
-//! failed send held is given back, while one a stop left is taken again once its claim lapses.
+//! send the server did not take is given back, while one whose outcome is unknown lapses after two minutes.
 
 #[cfg(test)]
 mod support;
@@ -160,8 +160,10 @@ async fn a_refused_login_gives_the_key_back() {
     assert_eq!(mailpit.messages().await.len(), 1);
 }
 
+/// A server that cannot be reached may have taken nothing, but a dropped connection looks the same, so the claim is
+/// left to lapse rather than risk sending the message again at once.
 #[tokio::test]
-async fn a_server_that_cannot_be_reached_gives_the_key_back() {
+async fn a_server_that_cannot_be_reached_leaves_the_claim_to_lapse() {
     let mailpit = Mailpit::start().await;
     let (pool, database) = database().await;
     let mut settings = mailpit.settings(PASSWORD);
@@ -172,7 +174,7 @@ async fn a_server_that_cannot_be_reached_gives_the_key_back() {
         office.send(&message("ada@example.com", "k")).await,
         Err(MailError::Unavailable)
     );
-    assert_eq!(route(&database, "k").await, None);
+    assert_eq!(route(&database, "k").await.as_deref(), Some("sending"));
 }
 
 /// A recipient the server refuses for good is refused once, and settled, so no one tries again.
@@ -200,13 +202,14 @@ async fn a_refused_recipient_is_refused_once() {
 #[tokio::test]
 async fn a_server_whose_certificate_is_not_trusted_is_never_sent_to() {
     let mailpit = Mailpit::start().await;
-    let (pool, _database) = database().await;
+    let (pool, database) = database().await;
     let untrusting = Smtp::new(&mailpit.settings(PASSWORD)).expect("an adapter");
     let office = post_office(pool, Some(untrusting), allow("ada@example.com"));
     assert_eq!(
         office.send(&message("ada@example.com", "k")).await,
         Err(MailError::Unavailable)
     );
+    assert_eq!(route(&database, "k").await.as_deref(), Some("sending"));
     assert_eq!(mailpit.messages().await, Vec::<serde_json::Value>::new());
 }
 
@@ -230,7 +233,7 @@ async fn a_certificate_for_another_name_is_never_sent_to() {
 #[tokio::test]
 async fn a_send_past_its_limit_is_unavailable() {
     let mailpit = Mailpit::start().await;
-    let (pool, _database) = database().await;
+    let (pool, database) = database().await;
     let silent = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("binds");
@@ -241,10 +244,15 @@ async fn a_send_past_its_limit_is_unavailable() {
     let office = post_office(pool, Some(slow), allow("ada@example.com"));
     let started = std::time::Instant::now();
     assert_eq!(
-        office.send(&message("ada@example.com", "k")).await,
+        office.send(&message("ada@example.com", "notice:1")).await,
         Err(MailError::Unavailable)
     );
     assert!(started.elapsed() < Duration::from_secs(3));
+    assert_eq!(
+        route(&database, "notice:1").await.as_deref(),
+        Some("sending"),
+        "the server may have taken it, so the claim lapses"
+    );
 }
 
 #[tokio::test]
@@ -384,17 +392,16 @@ async fn a_key_being_sent_by_smtp_is_left_to_its_attempt() {
     assert_eq!(mailpit.messages().await, Vec::<serde_json::Value>::new());
 }
 
-/// Clean-up is apart from the send, so a failed one loses no message, and the next send tries it again.
 #[tokio::test]
-async fn a_failed_clean_up_still_keeps_the_message() {
+async fn a_failed_clean_up_keeps_nothing_and_leaves_the_key_free() {
     let (pool, database) = database().await;
     as_owner(&database, "REVOKE DELETE ON mail.captured FROM tetsu_mail").await;
     let office = post_office(pool, None, Allowlist::default());
     assert_eq!(
         office.send(&message("ada@example.com", "k")).await,
-        Ok(Delivery::Captured)
+        Err(MailError::Unavailable)
     );
-    assert_eq!(office.captured().await.expect("the mailbox").len(), 1);
+    assert_eq!(route(&database, "k").await, None);
 }
 
 #[tokio::test]

@@ -242,13 +242,15 @@ async fn issued(
 ) -> Vec<String> {
     let url = link_url(origin, token);
     let emailed = match operators.email(id).await {
-        Ok(Some(to)) => {
-            let sent = match invite_message(to.clone(), &url, token) {
-                Some(message) => mailer.send(&message).await,
-                None => Err(MailError::Refused),
-            };
-            delivered(&to, sent)
-        }
+        Ok(Some(to)) => match invite_message(to.clone(), &url, token) {
+            Some(message) => delivered(&to, mailer.send(&message).await),
+            None => {
+                format!(
+                    "could not write the invite email for {}; the link above still works",
+                    to.as_str()
+                )
+            }
+        },
         Ok(None) => format!(
             "operator {} has no email address, so the link was not emailed",
             id.get()

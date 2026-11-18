@@ -35,6 +35,12 @@ impl<M: Mailer + 'static> Consumer for Notices<M> {
         event.producer == "identity" && Notice::of(&event.kind).is_some()
     }
 
+    /// A security notice is worth sending late, so one mail cannot send for keeps retrying hourly, as the audit
+    /// record's events do, and is reported when it runs out of attempts (ADR-0045).
+    fn never_lose(&self) -> bool {
+        true
+    }
+
     fn apply<'a>(&'a self, transaction: &'a Transaction<'a>, event: &'a Event) -> Applied<'a> {
         Box::pin(async move {
             let told = changed(&event.payload).zip(Notice::of(&event.kind));

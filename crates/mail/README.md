@@ -6,14 +6,15 @@ The `Mailer` port's adapters ([ADR-0044](../../docs/adr/0044-email-delivery.md),
 send.
 
 - **A message goes once per key.** The post office claims the key in `mail.sends` as sending, then settles it as
-  sent, captured, or refused, or gives it back when the send failed, so the next attempt tries at once. A claim
-  still sending after two minutes, left by a cancelled task or a stop, is taken again, so no message is stranded;
-  while one is held, another attempt is told to try later. A send whose answer was lost may go twice, which its
-  `Message-ID`, made from the key, lets a server or reader see. Old kept mail and keys are forgotten after every
-  send.
-- **Only a refused mailbox is final.** A 550, 551, or 553 reply is `Refused`. Every other failure, such as a
-  refused login or sender, a quota, TLS, an outage, a send past its limit, or the store, is `Unavailable` and worth
-  trying again. Each is logged by its reply code and kind, never the address.
+  sent, captured, or refused. When the server answers with an error, it did not take the message, so the key is
+  given back and the next attempt tries at once. When the outcome is unknown, after a timeout, a failed handshake,
+  or a dropped connection, the claim is left to lapse after two minutes, as one a stop left does; while it is held,
+  another attempt is told to try later. So a message the server took goes at most twice, which its `Message-ID`,
+  made from the key, lets a reader see. Settling or keeping also forgets kept mail past a week and keys past thirty
+  days.
+- **Only a refused mailbox is final.** A 550, 551, or 553 whose enhanced code is 5.1 is `Refused`. Every other
+  failure, such as a refused login or sender, a quota, TLS, an outage, a send past its limit, or the store, is
+  `Unavailable` and worth trying again. Each is logged by its reply code and kind, never the address.
 - **Only the allowlist gets real email.** With an SMTP server set, a message to an address on the allowlist goes out
   over implicit TLS, never STARTTLS; every other message is kept in `mail.captured` for the operators' mailbox page,
   for a week. Without a server, every message is kept. A message marked never kept, such as an invite with its live

@@ -258,3 +258,10 @@ async fn an_address_that_cannot_be_read_leaves_the_notice_to_retry() {
     assert_eq!(dispatcher.deliver_due().await.unwrap(), 0);
     assert_eq!(recorder.sent(), Vec::<Message>::new());
 }
+
+/// A security notice is worth sending late, so it keeps retrying hourly rather than giving up.
+#[tokio::test]
+async fn a_notice_is_never_lost() {
+    let (_database, _pool, _dispatcher, recorder) = ready().await;
+    assert!(tetsu_identity::notices(recorder).never_lose());
+}

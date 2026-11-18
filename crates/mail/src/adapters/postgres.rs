@@ -1,7 +1,8 @@
 //! The post office: Mail's `Mailer` over Postgres. It claims each key before acting, so a message goes once, then
 //! keeps the message for the mailbox page or hands it to SMTP, and settles the key with what came of it, or gives it
-//! back when the send failed. A claim left sending by a stop may be taken again after two minutes, so no message is
-//! stranded. Driver types stay in this file (ADR-0007).
+//! back when the server did not take the message. A claim left sending, by a stop or a send whose outcome is not
+//! known, may be taken again after two minutes, so no message is stranded. Driver types stay in this file
+//! (ADR-0007).
 
 use std::time::SystemTime;
 
@@ -11,7 +12,7 @@ use tetsu_postgres::{Failure, ModuleTransaction, Pool};
 use tokio_postgres::Row;
 use tokio_postgres::types::ToSql;
 
-use super::smtp::Smtp;
+use super::smtp::{Failed, Smtp};
 use crate::domain::Allowlist;
 
 /// Mail's schema, which names the role its transactions act as (ADR-0042).
@@ -49,15 +50,13 @@ impl Mailer for PostOffice {
             _ => Ok(Delivery::Withheld),
         };
         if let Err(error) = delivery {
-            // The key's kind alone, such as invite or notice, never the address.
-            let kind = message.key().split(':').next().unwrap_or_default();
+            // The key's kind alone, such as invite or notice, never the address, nor a key with no kind.
+            let kind = message
+                .key()
+                .split_once(':')
+                .map_or("other", |(kind, _)| kind);
             tracing::warn!(kind, ?error, "mail: a message did not go");
         }
-        // What is past keeping goes after every send, so a store that only relays is cleaned too. A failure here is
-        // logged, and the next send tries again.
-        let _ = self
-            .transact(async |transaction| transaction.execute(FORGET, &[]).await)
-            .await;
         delivery
     }
 }
@@ -88,9 +87,10 @@ enum Claim {
 }
 
 impl PostOffice {
-    /// Claims the key, sends, and settles it as sent, or refused for good. A send that failed otherwise gives the key
-    /// back, so the next attempt tries again at once; one whose answer was lost, such as a send past its limit that
-    /// the server took, may then go twice, which its `Message-ID` lets a mail server or reader see.
+    /// Claims the key, sends, and settles it as sent, or refused for good. A send the server did not take gives the
+    /// key back, so the next attempt tries again at once. One whose outcome is not known leaves the claim to lapse,
+    /// so a message the server did take goes at most twice, which its `Message-ID` lets a reader see. Settling also
+    /// forgets what is past keeping, so a store that only relays is cleaned too.
     async fn relay(&self, smtp: &Smtp, message: &Message) -> Result<Delivery, MailError> {
         match self
             .transact(async |transaction| claim(transaction, message, "sending").await)
@@ -103,21 +103,29 @@ impl PostOffice {
         let sent = smtp.deliver(message).await;
         let route = match sent {
             Ok(()) => Some("sent"),
-            Err(MailError::Refused) => Some("refused"),
-            Err(MailError::Unavailable) => None,
+            Err(Failed::Refused) => Some("refused"),
+            Err(Failed::NotTaken) => None,
+            Err(Failed::Unknown) => return Err(MailError::Unavailable),
         };
         let recorded = self
             .transact(async |transaction| {
-                transaction.execute(SETTLE, &[&message.key(), &route]).await
+                transaction
+                    .execute(SETTLE, &[&message.key(), &route])
+                    .await?;
+                transaction.execute(FORGET, &[]).await
             })
             .await;
         if recorded.is_err() {
             tracing::warn!("mail: a key could not be settled, so its claim lapses in two minutes");
         }
-        sent.map(|()| Delivery::Sent)
+        match sent {
+            Ok(()) => Ok(Delivery::Sent),
+            Err(Failed::Refused) => Err(MailError::Refused),
+            Err(_) => Err(MailError::Unavailable),
+        }
     }
 
-    /// Claims the key and keeps the message, in one transaction.
+    /// Claims the key, keeps the message, and forgets what is past keeping, in one transaction.
     async fn keep(&self, message: &Message) -> Result<Delivery, MailError> {
         self.transact(async |transaction| {
             match claim(transaction, message, "captured").await? {
@@ -133,6 +141,7 @@ impl PostOffice {
                 &message.html(),
             ];
             transaction.execute(CAPTURE, &fields).await?;
+            transaction.execute(FORGET, &[]).await?;
             Ok(Ok(Delivery::Captured))
         })
         .await?

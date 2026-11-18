@@ -13,7 +13,7 @@ use lettre::transport::smtp::client::{Certificate, Tls, TlsParameters};
 use lettre::{AsyncSmtpTransport, AsyncTransport, Tokio1Executor};
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, ServerName};
-use tetsu_kernel::{Address, MailError, Message};
+use tetsu_kernel::{Address, Message};
 
 /// Where and as whom Tetsu sends: the provider's host and implicit-TLS port, its login, and the address mail comes
 /// from. The password is a secret (ADR-0074), so this has no debug form.
@@ -35,7 +35,7 @@ pub struct Smtp {
     limit: Duration,
 }
 
-type Sending<'a> = Pin<Box<dyn Future<Output = Result<(), MailError>> + Send + 'a>>;
+type Sending<'a> = Pin<Box<dyn Future<Output = Result<(), Failed>> + Send + 'a>>;
 
 impl Smtp {
     /// An adapter for `settings`.
@@ -92,9 +92,8 @@ impl Smtp {
     /// Sends `message` as a plain-text and HTML alternative.
     ///
     /// # Errors
-    /// `Refused` if the server refuses the message for good, and `Unavailable` for anything trying again may fix,
-    /// such as an outage, a refused login, or a send past the limit.
-    pub(crate) async fn deliver(&self, message: &Message) -> Result<(), MailError> {
+    /// Why it did not go, as [`Failed`] sorts it. A send past the limit is `Unknown`.
+    pub(crate) async fn deliver(&self, message: &Message) -> Result<(), Failed> {
         // The key in hex: a valid `Message-ID` for any key, and a different one for each.
         let key = message.key().bytes().fold(String::new(), |mut hex, byte| {
             let _ = write!(hex, "{byte:02x}");
@@ -112,7 +111,7 @@ impl Smtp {
             ));
         // `lettre` refuses a message only without a sender or a recipient, which this one always has, so the
         // refusal is chosen without a branch no test could reach.
-        let refusal: Sending<'_> = Box::pin(ready(Err(MailError::Refused)));
+        let refusal: Sending<'_> = Box::pin(ready(Err(Failed::Refused)));
         let sending = email.ok().map_or(refusal, |email| -> Sending<'_> {
             Box::pin(async move {
                 self.transport
@@ -124,7 +123,7 @@ impl Smtp {
         });
         tokio::time::timeout(self.limit, sending)
             .await
-            .unwrap_or(Err(MailError::Unavailable))
+            .unwrap_or(Err(Failed::Unknown))
     }
 }
 
@@ -142,11 +141,22 @@ fn mailbox(address: &Address) -> Mailbox {
     )
 }
 
-/// Only a refused mailbox (550, 551, or 553) is final. Every other failure, such as a refused login or sender, a
-/// quota, a TLS failure, or an outage, is Tetsu's setup or the server's state, which a fix mends, so it is tried
-/// again. Each is logged by its reply code and whether it timed out, failed TLS, or was permanent, which hold no
-/// address and no secret.
-fn sort(error: &SmtpError) -> MailError {
+/// Why a send did not go, which decides what becomes of its key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Failed {
+    /// The recipient's mailbox was refused for good.
+    Refused,
+    /// The server answered with an error, so it did not take the message: try again at once.
+    NotTaken,
+    /// Whether the server took it is not known, as after a timeout, a failed TLS handshake, or a dropped connection:
+    /// try again only once the claim lapses, so a message it did take goes at most twice.
+    Unknown,
+}
+
+/// Only a refused mailbox is final. Every other failure, such as a refused login or sender, a quota, a TLS failure,
+/// or an outage, is Tetsu's setup or the server's state, which a fix mends. Each is logged by its reply code and
+/// whether it timed out, failed TLS, or was permanent, which hold no address and no secret.
+fn sort(error: &SmtpError) -> Failed {
     let code = error.status().map(|code| code.to_string());
     let (timeout, tls, permanent) = (error.is_timeout(), error.is_tls(), error.is_permanent());
     tracing::warn!(
@@ -156,15 +166,61 @@ fn sort(error: &SmtpError) -> MailError {
         permanent,
         "mail: the SMTP server did not take a message"
     );
-    match code.as_deref() {
-        Some("550" | "551" | "553") => MailError::Refused,
-        _ => MailError::Unavailable,
+    if mailbox_refused(code.as_deref(), &error.to_string()) {
+        Failed::Refused
+    } else if code.is_some() {
+        Failed::NotTaken
+    } else {
+        Failed::Unknown
     }
+}
+
+/// Whether a reply refuses the recipient's mailbox for good: a 550, 551, or 553 whose enhanced code is 5.1, about
+/// the address (RFC 3463). The same codes also refuse a sender or a quota, which a fix mends, so a reply without that
+/// enhanced code is not final.
+fn mailbox_refused(code: Option<&str>, reply: &str) -> bool {
+    matches!(code, Some("550" | "551" | "553")) && reply.contains(" 5.1.")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_refused_mailbox_is_final() {
+        for (code, reply, refused) in [
+            (
+                Some("550"),
+                "permanent error (550): 5.1.1 No such user",
+                true,
+            ),
+            (Some("551"), "permanent error (551): 5.1.6 Moved", true),
+            (
+                Some("553"),
+                "permanent error (553): 5.1.3 Bad address syntax",
+                true,
+            ),
+            (
+                Some("553"),
+                "permanent error (553): 5.7.1 Sender address rejected",
+                false,
+            ),
+            (
+                Some("550"),
+                "permanent error (550): 5.4.5 Daily sending limit exceeded",
+                false,
+            ),
+            (
+                Some("550"),
+                "permanent error (550): Mailbox unavailable",
+                false,
+            ),
+            (Some("554"), "permanent error (554): 5.1.1 Rejected", false),
+            (None, "network error: 5.1.1", false),
+        ] {
+            assert_eq!(mailbox_refused(code, reply), refused, "{reply}");
+        }
+    }
 
     /// `mailbox` skips `lettre`'s own checks, which is safe only while every plain address passes them.
     #[test]

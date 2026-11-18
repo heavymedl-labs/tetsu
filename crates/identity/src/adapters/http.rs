@@ -308,9 +308,9 @@ async fn mailbox<S: OperatorStore>(
     uri: Uri,
 ) -> Response {
     let web = &served.web;
-    // As on the operator's own page, a live session counts only while its operator is still enabled.
-    let viewer = match operator_viewing(&served, &headers).await {
-        Ok(Some(form)) => form,
+    // A disabled operator's session is refused when it is used, so a live one is an enabled operator's.
+    let viewer = match viewing(&served, &headers).await {
+        Ok(Some((_, form))) => form,
         Ok(None) => return see_other(&return_to(uri.path())),
         Err(error) => return unavailable_page(web, "could not show the mailbox", &error),
     };
@@ -337,17 +337,6 @@ async fn mailbox<S: OperatorStore>(
             .collect(),
         form: viewer,
     })
-}
-
-/// The form token for a request whose live session names an enabled operator; none otherwise.
-async fn operator_viewing<S: OperatorStore>(
-    served: &Served<S>,
-    headers: &HeaderMap,
-) -> Result<Option<String>, Error> {
-    let Some((session, form)) = viewing(served, headers).await? else {
-        return Ok(None);
-    };
-    Ok(served.operators.account(&session).await?.map(|_| form))
 }
 
 /// How long ago `at` was, in the largest whole unit: just now, minutes, hours, or days.

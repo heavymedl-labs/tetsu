@@ -70,12 +70,12 @@ impl Mailbox for Kept {
     }
 }
 
-/// The mailbox most tests serve: one invite kept five minutes ago, whose text holds markup the page must escape.
+/// The mailbox most tests serve: one notice kept five minutes ago, whose text holds markup the page must escape.
 fn sample_mailbox() -> Arc<dyn Mailbox> {
     Arc::new(Kept(Some(vec![Captured {
         recipient: "ada@example.com".into(),
-        subject: "Your invite to Tetsu".into(),
-        text: "Open <b>this</b> link:\nhttps://ops.example.com/ops/join#abc".into(),
+        subject: "New login to your Tetsu account".into(),
+        text: "You logged in from <b>Firefox</b> on Linux.".into(),
         html: "<script>alert(1)</script>".into(),
         at: std::time::SystemTime::now() - std::time::Duration::from_secs(5 * 60 + 30),
     }])))
@@ -813,9 +813,9 @@ async fn an_operator_reads_the_mailbox() {
         (200, Some("no-store"))
     );
     for shown in [
-        "<h2 class=\"text-mini font-medium text-ink\">Your invite to Tetsu</h2>",
+        "<h2 class=\"text-mini font-medium text-ink\">New login to your Tetsu account</h2>",
         "To ada@example.com · 5 min ago",
-        "Open &#60;b&#62;this&#60;/b&#62; link:\nhttps://ops.example.com/ops/join#abc",
+        "You logged in from &#60;b&#62;Firefox&#60;/b&#62; on Linux.",
         r#"href="/ops""#,
     ] {
         assert!(page.body.contains(shown), "{shown} in {}", page.body);
@@ -848,12 +848,6 @@ async fn the_mailbox_is_for_operators_alone() {
     );
     as_admin(
         &database,
-        "REVOKE EXECUTE ON FUNCTION identity.account(bytea) FROM tetsu_identity",
-    )
-    .await;
-    assert_eq!(get(address, "/ops/mailbox", &cookie).await.status, 503);
-    as_admin(
-        &database,
         "REVOKE EXECUTE ON FUNCTION identity.use_session(bytea, text) FROM tetsu_identity",
     )
     .await;
@@ -861,6 +855,23 @@ async fn the_mailbox_is_for_operators_alone() {
     assert!(reported(
         "identity: could not show the mailbox: storage failed"
     ));
+}
+
+/// A disabled operator's live session no longer opens the mailbox.
+#[tokio::test]
+async fn a_disabled_operator_cannot_read_the_mailbox() {
+    let (address, database, cookie, _) = logged_in().await;
+    assert_eq!(get(address, "/ops/mailbox", &cookie).await.status, 200);
+    as_admin(
+        &database,
+        "UPDATE identity.operators SET disabled_at = now()",
+    )
+    .await;
+    let refused = get(address, "/ops/mailbox", &cookie).await;
+    assert_eq!(
+        (refused.status, refused.header("location")),
+        (303, Some("/ops/login?next=/ops/mailbox"))
+    );
 }
 
 /// A mailer that keeps what it is handed.
