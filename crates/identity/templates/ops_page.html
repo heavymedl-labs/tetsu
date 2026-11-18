@@ -1,5 +1,5 @@
 {#- The shell of each operator page: the look ADR-0035 gives Tetsu's own pages, in a layout of Tetsu's own:
-    one narrow card in the middle of the page, Tetsu's wordmark above a small heading, full-width choices, and a
+    one narrow card in the middle of the page, Tetsu's wordmark, which links home, above a small heading, full-width choices, and a
     muted line under them. The card settles
     into place as it fades in, and the wordmark's slots book in, so the page shows it is ready. A page's struct adds
     `script`, the passkey islands' hashed URL, `scheme_script`, the color scheme control's, and `scheme`, the
@@ -14,7 +14,7 @@
 {% block body %}
 <main class="flex flex-1 items-center justify-center px-6 py-16">
 <div class="tetsu-settle w-full max-w-72 text-center">
-<div class="mx-auto h-8 w-fit text-ink">{% include "../../../web/templates/wordmark.html" %}</div>
+<a href="/" aria-label="Tetsu home" class="mx-auto block h-8 w-fit text-ink focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent">{% include "../../../web/templates/wordmark.html" %}</a>
 {% block card %}{% endblock %}
 {% block noscript %}<noscript><p class="mt-4 text-mini text-muted">Passkeys need JavaScript, which this browser has turned off.</p></noscript>{% endblock %}
 </div>

@@ -406,7 +406,7 @@ async fn the_pages_run_only_tetsus_own_script() {
 }
 
 /// Each page before login offers its one action as a passkey island, in the shared button's look, under Tetsu's
-/// wordmark, with no note above it and no "Runs on Tetsu" footer.
+/// wordmark, which links home, with no note above it and no "Runs on Tetsu" footer.
 #[tokio::test]
 async fn each_page_offers_one_passkey_island() {
     let (address, _database, _) = serving().await;
@@ -418,6 +418,7 @@ async fn each_page_offers_one_passkey_island() {
         for shown in [
             format!("<tetsu-passkey action=\"{action}\""),
             "viewBox=\"0 0 564 144\"".to_string(),
+            "<a href=\"/\" aria-label=\"Tetsu home\"".to_string(),
             "disabled:opacity-50 rounded-full font-medium focus-visible:outline-2".to_string(),
         ] {
             assert!(page.body.contains(&shown), "{shown} in {}", page.body);
