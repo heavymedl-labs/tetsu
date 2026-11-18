@@ -89,6 +89,10 @@ mod support {
     }
 
     /// Every event Identity has recorded, oldest first, as type and payload.
+    pub fn address(text: &str) -> tetsu_kernel::Address {
+        tetsu_kernel::Address::parse(text).expect("an address")
+    }
+
     pub async fn events(database: &TestDatabase) -> Vec<(String, Value)> {
         connect(database)
             .await
@@ -115,7 +119,9 @@ mod support {
 mod common;
 
 use common::{actor, logged_in, migrated, name, ready, with_kurt};
-use support::{as_admin, disabled, events, kurt_and_pool, number, passkey_for, waits_for_a_lock};
+use support::{
+    address, as_admin, disabled, events, kurt_and_pool, number, passkey_for, waits_for_a_lock,
+};
 
 /// The link's token is stored only as its SHA-256 hash, is good for an hour, and a new one replaces the last; each
 /// issue is recorded with the operator's ID and nothing of the token (ADR-0040, ADR-0047).
@@ -220,9 +226,17 @@ async fn an_unknown_operator_is_issued_no_link() {
         operators.end_sessions(nobody, &actor()).await.map(drop),
         no_operator
     );
+    assert_eq!(
+        operators
+            .set_email(nobody, &address("ada@example.com"), &actor())
+            .await
+            .map(drop),
+        no_operator
+    );
     let refused = json!({"operator_id": 42, "actor": "kurt@workstation", "outcome": "refused"});
     let ended = json!({"operator_id": 42, "realm": "operator", "ended": null,
                        "actor": "kurt@workstation", "outcome": "refused"});
+    let refused_email = refused.clone();
     let unissued = json!({"operator_id": 42, "actor": "kurt@workstation", "outcome": "refused",
                           "reason": "unknown"});
     assert_eq!(
@@ -232,7 +246,34 @@ async fn an_unknown_operator_is_issued_no_link() {
             ("identity.operator_disabled".into(), refused.clone()),
             ("identity.operator_enabled".into(), refused),
             ("identity.sessions_ended".into(), ended),
+            ("identity.operator_email_set".into(), refused_email),
         ]
+    );
+}
+
+/// An operator made without an address is given one, and a new one replaces it; each change is recorded by the
+/// operator alone, never the address (ADR-0074).
+#[tokio::test]
+async fn an_operators_email_address_is_set_and_changed() {
+    let (database, operators, kurt) = with_kurt().await;
+    let before = events(&database).await.len();
+    assert_eq!(operators.email(kurt).await, Ok(None));
+    let ada = address("ada@example.com");
+    assert_eq!(operators.set_email(kurt, &ada, &actor()).await, Ok(true));
+    assert_eq!(operators.email(kurt).await, Ok(Some(ada.clone())));
+    assert_eq!(operators.set_email(kurt, &ada, &actor()).await, Ok(false));
+    let lee = address("lee@example.org");
+    assert_eq!(operators.set_email(kurt, &lee, &actor()).await, Ok(true));
+    assert_eq!(operators.email(kurt).await, Ok(Some(lee)));
+    let set = |outcome: &str| {
+        (
+            "identity.operator_email_set".to_string(),
+            json!({"operator_id": kurt.get(), "actor": "kurt@workstation", "outcome": outcome}),
+        )
+    };
+    assert_eq!(
+        events(&database).await[before..],
+        [set("changed"), set("unchanged"), set("changed")]
     );
 }
 
@@ -473,6 +514,12 @@ async fn each_command_fails_as_storage_when_the_database_refuses_it() {
     assert!(storage(operators.enable(kurt, &actor()).await.map(drop)));
     assert!(storage(
         operators.remove_passkeys(kurt, &actor()).await.map(drop)
+    ));
+    assert!(storage(
+        operators
+            .set_email(kurt, &address("ada@example.com"), &actor())
+            .await
+            .map(drop)
     ));
     assert!(storage(
         operators.end_sessions(kurt, &actor()).await.map(drop)

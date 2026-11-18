@@ -44,12 +44,17 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 6,
         sql: tetsu_postgres::INBOX,
     },
+    Migration {
+        version: 7,
+        sql: include_str!("../../migrations/0007_set_operator_email.sql"),
+    },
 ];
 /// Identity's schema, which names the role its transactions act as (ADR-0042).
 const SCHEMA: &str = "identity";
 
 const INSERT_OPERATOR: &str = include_str!("../../sql/insert_operator.sql");
 const OPERATOR_EMAIL: &str = include_str!("../../sql/operator_email.sql");
+const SET_OPERATOR_EMAIL: &str = include_str!("../../sql/set_operator_email.sql");
 const USE_SESSION: &str = include_str!("../../sql/use_session.sql");
 const SESSION_LEFT: &str = include_str!("../../sql/session_left.sql");
 const END_SESSION: &str = include_str!("../../sql/end_session.sql");
@@ -287,6 +292,25 @@ impl OperatorStore for PostgresOperators {
             .first()
             .map_or(Ok(None), |row| column::<Option<String>>(row, "email"))
             .and_then(|email| email.as_deref().map(address_from).transpose())
+    }
+
+    async fn set_operator_email(
+        &self,
+        operator: OperatorId,
+        email: &Address,
+        actor: &Actor,
+    ) -> Result<Option<bool>, Error> {
+        let id = operator.get();
+        // The event names the operator, never the address, as creating one does.
+        self.change(SET_OPERATOR_EMAIL, &[&id, &email.as_str()], |changed| {
+            event(
+                "identity.operator_email_set",
+                actor,
+                outcome(changed),
+                json!({"operator_id": id}),
+            )
+        })
+        .await
     }
 
     async fn use_session(&self, hash: &[u8; 32], realm: Realm) -> Result<Option<Session>, Error> {

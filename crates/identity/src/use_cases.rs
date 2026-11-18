@@ -55,6 +55,23 @@ impl<S: OperatorStore> Operators<S> {
         self.store.operator_email(operator).await
     }
 
+    /// Sets an operator's email address, where their invites and notices go from now on, and says whether it changed
+    /// (ADR-0074).
+    ///
+    /// # Errors
+    /// Fails with [`Error::Invalid`] for an operator who does not exist, or if storage fails.
+    pub async fn set_email(
+        &self,
+        operator: OperatorId,
+        email: &Address,
+        actor: &Actor,
+    ) -> Result<bool, Error> {
+        self.store
+            .set_operator_email(operator, email, actor)
+            .await?
+            .ok_or_else(|| no_operator(operator))
+    }
+
     /// Issues an operator's invite link token, good once and for an hour, replacing any earlier link, and
     /// records whether one was issued, never the token (ADR-0040). The command prints it only to its own terminal.
     ///

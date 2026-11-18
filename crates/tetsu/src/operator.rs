@@ -22,6 +22,7 @@ use crate::settings::{self, Local};
 #[derive(Debug, PartialEq, Eq)]
 pub enum Operator {
     Create { name: OperatorName, email: Address },
+    Email { id: OperatorId, email: Address },
     Invite { id: OperatorId },
     List,
     Disable { id: OperatorId },
@@ -31,8 +32,8 @@ pub enum Operator {
     EndAllSessions,
 }
 
-const USAGE: &str = "operator takes create <name> <email>, invite <id>, list, disable <id>, enable <id>, \
-                     remove-passkeys <id>, or end-sessions <id | --all>";
+const USAGE: &str = "operator takes create <name> <email>, email <id> <email>, invite <id>, list, disable <id>, \
+                     enable <id>, remove-passkeys <id>, or end-sessions <id | --all>";
 
 /// The operator command its words name, with its arguments checked.
 pub fn parse(rest: &[String]) -> Result<Operator, String> {
@@ -44,15 +45,27 @@ pub fn parse(rest: &[String]) -> Result<Operator, String> {
         ("create", [name, _]) if name.trim_start().starts_with('-') => Err(USAGE.into()),
         ("create", [name, email]) => {
             let name = OperatorName::parse(name).map_err(|error| error.to_string())?;
-            let email =
-                Address::parse(email).ok_or(format!("{email:?} is not a plain email address"))?;
-            Ok(Operator::Create { name, email })
+            Ok(Operator::Create {
+                name,
+                email: plain(email)?,
+            })
+        }
+        ("email", [id, email]) => {
+            let id = OperatorId::parse(id).ok_or(format!("{id:?} is not an operator ID"))?;
+            Ok(Operator::Email {
+                id,
+                email: plain(email)?,
+            })
         }
         ("list", []) => Ok(Operator::List),
         ("end-sessions", [all]) if all == "--all" => Ok(Operator::EndAllSessions),
         (command, [text]) => with_id(command, text),
         _ => Err(USAGE.into()),
     }
+}
+
+fn plain(email: &str) -> Result<Address, String> {
+    Address::parse(email).ok_or(format!("{email:?} is not a plain email address"))
 }
 
 /// A command that acts on one operator, with that operator's ID.
@@ -171,6 +184,17 @@ async fn act(
         Operator::Create { name, email } => {
             return create(operators, mailer, &name, &email, origin, by).await;
         }
+        Operator::Email { id, email } => operators.set_email(id, &email, by).await.map(|done| {
+            vec![if done {
+                format!(
+                    "operator {} now gets their invites and notices at {}",
+                    id.get(),
+                    email.as_str()
+                )
+            } else {
+                format!("operator {} already has that address", id.get())
+            }]
+        }),
         Operator::Invite { id } => match operators.invite(id, by).await {
             Ok(token) => return Ok(issued(operators, mailer, id, origin, &token).await),
             Err(error) => Err(error),
@@ -348,6 +372,32 @@ mod tests {
     use tetsu_kernel::Mailbox;
     use tetsu_mail::PostOffice;
     use tetsu_postgres::test_support::Scratch;
+
+    /// Setting an address takes an operator ID and a plain address, and nothing more.
+    #[test]
+    fn the_email_command_takes_an_id_and_a_plain_address() {
+        assert_eq!(
+            parse(&args(&["email", "7", "kurt@example.com"])),
+            Ok(Operator::Email {
+                id: OperatorId::parse("7").unwrap(),
+                email: Address::parse("kurt@example.com").unwrap(),
+            })
+        );
+        for bad in [
+            &["email", "7"][..],
+            &["email", "7", "kurt@example.com", "more"],
+        ] {
+            assert_eq!(parse(&args(bad)), Err(USAGE.into()), "{bad:?}");
+        }
+        assert_eq!(
+            parse(&args(&["email", "seven", "kurt@example.com"])),
+            Err("\"seven\" is not an operator ID".into())
+        );
+        assert_eq!(
+            parse(&args(&["email", "7", "Kurt <kurt@example.com>"])),
+            Err("\"Kurt <kurt@example.com>\" is not a plain email address".into())
+        );
+    }
 
     #[test]
     fn operator_commands_are_parsed_exactly() {
@@ -724,6 +774,18 @@ mod tests {
         assert_eq!(
             said(&operators, &office, Operator::EndAllSessions).await,
             ["ended 0 operator sessions"]
+        );
+        let email = |text: &str| Operator::Email {
+            id: kurt,
+            email: Address::parse(text).unwrap(),
+        };
+        assert_eq!(
+            said(&operators, &office, email("kurt@example.org")).await,
+            ["operator 1 now gets their invites and notices at kurt@example.org"]
+        );
+        assert_eq!(
+            said(&operators, &office, email("kurt@example.org")).await,
+            ["operator 1 already has that address"]
         );
     }
 

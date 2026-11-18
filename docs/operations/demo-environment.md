@@ -234,7 +234,8 @@ TETSU_MAIL_FROM=<an address on the sandbox domain>
 TETSU_MAIL_ALLOW=<you, and the people who accepted Mailgun's invitation, separated by commas>
 ```
 
-The mail lines are optional: without them, invites and notices are kept for the mailbox page rather than sent.
+The mail lines are optional: without them, notices are kept for the mailbox page rather than sent, and invites,
+which are never kept, are only printed.
 Mailgun's sandbox delivers only to up to five addresses, each of which accepts Mailgun's invitation first
 ([ADR-0074](../adr/0074-operator-email-in-development.md)).
 
@@ -243,6 +244,7 @@ Then, from the commit the demo runs:
 ```bash
 cargo tetsu --env demo operator create "Your Name" you@example.com   # prints the invite link, and emails it
 cargo tetsu --env demo operator list
+cargo tetsu --env demo operator email 1 you@example.com   # gives an operator made before addresses one
 ```
 
 Open the link to join with a passkey; it logs you in at `/ops`. Every other `operator` command works the same way.

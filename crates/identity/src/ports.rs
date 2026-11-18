@@ -28,6 +28,15 @@ pub trait OperatorStore {
         operator: OperatorId,
     ) -> impl Future<Output = Result<Option<Address>, Error>> + Send;
 
+    /// Sets an operator's email address, and says whether it changed, or none for an operator who does not exist
+    /// (ADR-0074).
+    fn set_operator_email(
+        &self,
+        operator: OperatorId,
+        email: &Address,
+        actor: &Actor,
+    ) -> impl Future<Output = Result<Option<bool>, Error>> + Send;
+
     /// Records a request on the live session stored under a token's hash in a realm, and returns it. A session
     /// past either of the realm's limits is removed instead, and none is returned; one in another realm is none.
     /// Checking and recording are one step, so requests at the same moment cannot end a live session or revive a
