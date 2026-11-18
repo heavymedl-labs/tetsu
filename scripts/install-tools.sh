@@ -49,3 +49,29 @@ if [[ "$(.tools/bin/betterleaks version 2>/dev/null)" != "$betterleaks" ]]; then
   install -m 755 "$download/betterleaks" .tools/bin/betterleaks
   rm -rf "$download"
 fi
+# Mailpit, a local mail server the SMTP adapter's tests send to (ADR-0074), is checked against the SHA-256 its
+# release published, read 2026-11-18, before it is installed. It is never deployed.
+mailpit=1.34.0
+case "$(uname -s)-$(uname -m)" in
+  Linux-x86_64) asset=linux-amd64 sum=af236b42f171b1c74f0ac5ff444f44d36f2f2ecc0134f5a2f1d4e307e56a0d2c ;;
+  Linux-aarch64 | Linux-arm64) asset=linux-arm64 sum=179f3fe9642edb3a123edc613003e45641869c5b2728c2076c7bef1c3e09dd01 ;;
+  Darwin-arm64) asset=darwin-arm64 sum=32933e0bd17e9738f19ab2eb5ec4d50e183448c9f29ba97e762d418a0f72e854 ;;
+  Darwin-x86_64) asset=darwin-amd64 sum=a497582d4e9f9a5d0eea84f8622530533dce0797cf8a4952bd7a59487e5d9c7c ;;
+  *)
+    echo "error: no Mailpit release for $(uname -s) $(uname -m)" >&2
+    exit 1
+    ;;
+esac
+if [[ "$(.tools/bin/mailpit version 2>/dev/null)" != *"v$mailpit "* ]]; then
+  download="$(mktemp -d)"
+  archive="$download/mailpit.tar.gz"
+  curl -fsSL -o "$archive" "https://github.com/axllent/mailpit/releases/download/v$mailpit/mailpit-$asset.tar.gz"
+  if [[ "$(sha256sum "$archive" 2>/dev/null || shasum -a 256 "$archive")" != "$sum "* ]]; then
+    rm -rf "$download"
+    echo "error: the Mailpit download does not match its published SHA-256" >&2
+    exit 1
+  fi
+  tar -xzf "$archive" -C "$download" mailpit
+  install -m 755 "$download/mailpit" .tools/bin/mailpit
+  rm -rf "$download"
+fi

@@ -57,7 +57,7 @@ if [[ "${1:-}" == "--fast" ]]; then
   shift
 fi
 
-for tool in cargo-llvm-cov cargo-mutants .tools/bin/betterleaks .tools/bin/lizard .tools/bin/ruff \
+for tool in cargo-llvm-cov cargo-mutants .tools/bin/betterleaks .tools/bin/mailpit .tools/bin/lizard .tools/bin/ruff \
   .tools/bin/shellcheck .tools/bin/shfmt .tools/bin/squawk .tools/bin/sqlfluff; do
   if ! command -v "$tool" >/dev/null; then
     echo "error: $tool is missing. Run scripts/install-tools.sh" >&2

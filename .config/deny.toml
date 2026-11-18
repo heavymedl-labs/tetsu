@@ -38,6 +38,9 @@ allow = [
     "CDLA-Permissive-2.0",
     # webauthn-rs, shipped unmodified; file-level copyleft (ADR-0047).
     "MPL-2.0",
+    # quoted_printable, which lettre uses to encode email text (ADR-0074); public-domain equivalent, and already
+    # allowed for npm.
+    "0BSD",
 ]
 confidence-threshold = 0.93
 # Our own crates are unpublished.
