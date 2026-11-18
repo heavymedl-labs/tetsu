@@ -3,7 +3,8 @@
 - Status: Accepted
 - Date: 2026-11-11
 - The SMTP adapter and the choice of its library moved from #110 to the first slice that emails a real person by
-  [ADR-0057](0057-operator-passkeys-before-level-2.md)
+  [ADR-0057](0057-operator-passkeys-before-level-2.md), and back into #110 by [ADR-0074](0074-operator-email-in-development.md)
+- The choice of Resend superseded, until Tetsu has a domain, by [ADR-0074](0074-operator-email-in-development.md)
 
 ## Context
 

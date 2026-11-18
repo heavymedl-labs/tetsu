@@ -7,6 +7,7 @@
   loses both
 - Moves [ADR-0044](0044-email-delivery.md)'s SMTP adapter, and the choice of its library, from
   [#110](https://github.com/heavymedl-labs/tetsu/issues/110) to the first slice that emails a real person
+- That move reversed by [ADR-0074](0074-operator-email-in-development.md), which builds the SMTP adapter in #110
 
 ## Context
 

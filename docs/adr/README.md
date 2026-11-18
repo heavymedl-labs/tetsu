@@ -78,7 +78,7 @@ number, and add a row below. Never renumber.
 | [0071](0071-readable-logs-in-a-terminal.md) | Readable logs in a terminal | Changing how log lines are laid out | Accepted |
 | [0072](0072-rate-limits-by-network-address.md) | Rate limits by network address | Changing rate limits or how a requester's address is read | Accepted |
 | [0073](0073-settings-files-per-environment.md) | Settings files per environment | Running `tetsu` against a hosted environment, or keeping its secrets | Accepted |
-| [0074](0074-operator-email-in-development.md) | Operator email in development | Sending email, changing the mail provider, or changing how operators are invited | Proposed |
+| [0074](0074-operator-email-in-development.md) | Operator email in development | Sending email, changing the mail provider, or changing how operators are invited | Accepted |
 | [0068](0068-no-demo-note.md) | No demo note | Changing what marks a demo page | Proposed |
 
 ## Open decisions
