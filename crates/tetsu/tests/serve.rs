@@ -767,3 +767,47 @@ async fn a_refused_export_is_reported_on_standard_output() {
         "{rest}"
     );
 }
+
+/// Serving delivers the events modules record, so a login reaches the audit record: here one recorded before the
+/// server starts, which its first pass delivers.
+#[tokio::test]
+async fn serving_delivers_events_to_the_audit_record() {
+    let database = tetsu_postgres::test_support::fresh_database()
+        .await
+        .expect("a test database");
+    ready(&database);
+    let pool = tetsu_postgres::pool(&database.as_app()).expect("a pool");
+    let mut client = pool.get().await.expect("a connection");
+    let transaction = tetsu_postgres::ModuleTransaction::begin(&mut client, "identity")
+        .await
+        .expect("begins");
+    transaction
+        .record(&tetsu_postgres::NewEvent {
+            kind: "identity.logged_in",
+            version: 1,
+            payload: r#"{"operator_id": 1, "outcome": "refused"}"#,
+            keep: false,
+        })
+        .await
+        .expect("recorded");
+    transaction.commit().await.expect("committed");
+    let _server = start(&database);
+    let owner = tetsu_postgres::connect(&database).await.expect("connects");
+    let mut recorded = 0;
+    for _ in 0..100 {
+        recorded = owner
+            .query_one(
+                "SELECT count(*) FROM audit.records_global WHERE event_type = 'identity.logged_in'",
+                &[],
+            )
+            .await
+            .expect("counts")
+            .try_get::<_, i64>(0)
+            .expect("a count");
+        if recorded == 1 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert_eq!(recorded, 1);
+}

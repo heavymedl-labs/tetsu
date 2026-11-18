@@ -13,7 +13,7 @@ names no business that uses Tetsu. Its root page names fictional customers only 
 | `tetsu migrate` | Runs each module's new migrations |
 | `tetsu seed <file or folder>` | Creates the tenants in seed files, and skips any whose slug exists |
 | `tetsu seed --check <file or folder>` | Checks seed files without a database |
-| `tetsu serve` | Serves the public pages, and the operator pages at `/ops`, until SIGTERM or SIGINT, then finishes open requests for up to 10 seconds. Refuses to start before `migrate`, or while a tenant holds an address now reserved for Tetsu's own pages |
+| `tetsu serve` | Serves the public pages, and the operator pages at `/ops`, and delivers the events modules record to the audit record and the operators' notices, until SIGTERM or SIGINT, then finishes open requests for up to 10 seconds. Refuses to start before `migrate`, or while a tenant holds an address now reserved for Tetsu's own pages |
 | `tetsu check` | Checks the server version, every isolation rule in the catalog, and that no module's role sees a tenant-owned row with no tenant set; fails naming each problem. Run as the owner role |
 | `tetsu reset <schema>...` | Drops module schemas, then migrates, which builds them afresh. Only where `TETSU_DEMO` is true, and only modules' schemas; all or none |
 | `tetsu replay <schema> <event id>` | Makes an event that stopped retrying due again, from the outboxes of the module whose schema recorded it |

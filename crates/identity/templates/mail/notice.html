@@ -1,0 +1,12 @@
+{#- A notice of an operator's login or new passkey (ADR-0074). It carries no link, so it cannot be mistaken for a
+    request to act through it, and mail readers ignore most stylesheets, so it has none. -#}
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>{{ subject }}</title></head>
+<body>
+<p>Hello,</p>
+<p>{{ what }} on {{ at }}.</p>
+<p>If this wasn't you, ask the maintainer to disable your account now.</p>
+<p>Tetsu</p>
+</body>
+</html>

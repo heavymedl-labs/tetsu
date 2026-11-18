@@ -200,9 +200,7 @@ async fn run_serve(source: &settings::Source) -> Result<(), String> {
         .await
         .unwrap_or_else(|_| Err("serving panicked while starting".into()));
     let served = match started {
-        Ok((listener, app)) => serve::run(listener, app, stop, serve::GRACE)
-            .await
-            .map_err(|error| format!("serving stopped: {error}")),
+        Ok((listener, app, dispatcher)) => serve_and_deliver(listener, app, dispatcher, stop).await,
         Err(why) => {
             tracing::error!(alert = "start_failed", "could not start serving");
             Err(why)
@@ -215,12 +213,75 @@ async fn run_serve(source: &settings::Source) -> Result<(), String> {
     served
 }
 
-/// Reads the settings, reaches the database, and binds the port: everything serving needs before it listens.
-async fn ready(local: &settings::Local) -> Result<(tokio::net::TcpListener, axum::Router), String> {
+/// How often the dispatcher looks for events another process recorded, or ones due to be tried again; one this
+/// process records wakes it at once (ADR-0043).
+const DELIVERY_POLL: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Serves and delivers events side by side until `stop` finishes, then lets both finish what they hold. Should
+/// serving stop on its own, delivery stops with it.
+async fn serve_and_deliver(
+    listener: tokio::net::TcpListener,
+    app: axum::Router,
+    dispatcher: tetsu_postgres::Dispatcher,
+    stop: impl std::future::Future<Output = ()> + Send + 'static,
+) -> Result<(), String> {
+    let (stopping, stopped) = tokio::sync::watch::channel(());
+    let stopping = std::sync::Arc::new(stopping);
+    let signal = {
+        let stopping = stopping.clone();
+        tokio::spawn(async move {
+            stop.await;
+            let _ = stopping.send(());
+        })
+    };
+    let until = |mut stopped: tokio::sync::watch::Receiver<()>| async move {
+        let _ = stopped.changed().await;
+    };
+    let delivering = {
+        let stopped = stopped.clone();
+        tokio::spawn(async move { dispatcher.run(DELIVERY_POLL, until(stopped)).await })
+    };
+    let served = serve::run(listener, app, until(stopped), serve::GRACE)
+        .await
+        .map_err(|error| format!("serving stopped: {error}"));
+    let _ = stopping.send(());
+    signal.abort();
+    let _ = delivering.await;
+    served
+}
+
+/// Reads the settings, reaches the database, and binds the port: everything serving needs before it listens,
+/// with the dispatcher that delivers events to the audit record and the operators' notices.
+async fn ready(
+    local: &settings::Local,
+) -> Result<
+    (
+        tokio::net::TcpListener,
+        axum::Router,
+        tetsu_postgres::Dispatcher,
+    ),
+    String,
+> {
     let demo = settings::demo(|name| local.var(name))?;
     let proxies = settings::proxies(|name| local.var(name))?;
     let address = settings::listen(|name| local.var(name))?;
+    local.beside("DATABASE_URL", &settings::MAIL)?;
+    let mail = settings::mail(|name| local.var(name))?;
+    let smtp = mail.smtp.as_ref().map(tetsu_mail::Smtp::new).transpose()?;
     let pool = connect(local).await?;
+    let office = std::sync::Arc::new(tetsu_mail::post_office(pool.clone(), smtp, mail.allow));
+    let schemas: Vec<&str> = MODULES
+        .iter()
+        .filter_map(|module| module.storage())
+        .map(|storage| storage.schema)
+        .collect();
+    let consumers = vec![
+        tetsu_audit::consumer(&["identity"]),
+        tetsu_identity::notices(office),
+    ];
+    let dispatcher = tetsu_postgres::Dispatcher::new(pool.clone(), &schemas, consumers)
+        .await
+        .map_err(|error| explain(&*error))?;
     let operators = operator_pages(local, demo)?;
     let tenants = tetsu_tenancy::postgres_store(pool.clone());
     refuse_reserved_addresses(&tenants).await?;
@@ -235,7 +296,7 @@ async fn ready(local: &settings::Local) -> Result<(tokio::net::TcpListener, axum
         .local_addr()
         .map_err(|error| format!("could not read the listening address: {error}"))?;
     tracing::info!("serving on http://{bound}");
-    Ok((listener, app))
+    Ok((listener, app, dispatcher))
 }
 
 /// What Identity's operator pages need: their passkeys belong to the site's own origin, the only one that may send

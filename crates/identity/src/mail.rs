@@ -31,6 +31,70 @@ pub fn invite_message(to: Address, link: &str, token: &InviteToken) -> Option<Me
         .and_then(|(text, html)| Message::new(to, INVITE_SUBJECT, &text, &html, &key))
 }
 
+/// What a notice tells an operator of, by the event that records it (ADR-0074).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Notice {
+    Login,
+    Passkey,
+}
+
+impl Notice {
+    /// The notice an event of `kind` calls for, if any.
+    pub(crate) fn of(kind: &str) -> Option<Self> {
+        match kind {
+            "identity.logged_in" => Some(Self::Login),
+            "identity.passkey_added" => Some(Self::Passkey),
+            _ => None,
+        }
+    }
+
+    fn subject(self) -> &'static str {
+        match self {
+            Self::Login => "New login to your Tetsu account",
+            Self::Passkey => "A passkey was added to your Tetsu account",
+        }
+    }
+
+    fn what(self) -> &'static str {
+        match self {
+            Self::Login => "You logged in to Tetsu",
+            Self::Passkey => "A passkey was added to your Tetsu account",
+        }
+    }
+}
+
+#[derive(Template)]
+#[template(path = "mail/notice.txt")]
+struct NoticeText<'a> {
+    what: &'a str,
+    at: &'a str,
+}
+
+#[derive(Template)]
+#[template(path = "mail/notice.html")]
+struct NoticeHtml<'a> {
+    subject: &'a str,
+    what: &'a str,
+    at: &'a str,
+}
+
+/// A notice to `email` of what happened `at`, keyed on the event that recorded it, so a retried event is told
+/// once; none for an address that is not plain.
+pub(crate) fn notice_message(
+    notice: Notice,
+    email: &str,
+    at: &str,
+    event: &str,
+) -> Option<Message> {
+    let (subject, what) = (notice.subject(), notice.what());
+    Address::parse(email)
+        .zip(NoticeText { what, at }.render().ok())
+        .zip(NoticeHtml { subject, what, at }.render().ok())
+        .and_then(|((to, text), html)| {
+            Message::new(to, subject, &text, &html, &format!("notice:{event}"))
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -58,6 +122,39 @@ mod tests {
                 .contains(r#"<a href="https://tetsu.example/ops/join#abc&#38;def">"#),
         );
         assert!(message.text().contains("works once, for an hour"));
+    }
+
+    #[test]
+    fn a_notice_says_what_happened_and_when() {
+        assert_eq!(Notice::of("identity.logged_in"), Some(Notice::Login));
+        assert_eq!(Notice::of("identity.passkey_added"), Some(Notice::Passkey));
+        assert_eq!(Notice::of("identity.joined"), None);
+        let at = "November 18, 2026, 21:04 UTC";
+        let login = notice_message(Notice::Login, "ada@example.com", at, "e-1").unwrap();
+        assert_eq!(login.subject(), "New login to your Tetsu account");
+        assert_eq!(login.key(), "notice:e-1");
+        assert!(
+            login
+                .text()
+                .contains("You logged in to Tetsu on November 18, 2026, 21:04 UTC.")
+        );
+        assert!(
+            login
+                .html()
+                .contains("<p>You logged in to Tetsu on November 18, 2026, 21:04 UTC.</p>")
+        );
+        assert!(!login.html().contains("href"));
+        let passkey = notice_message(Notice::Passkey, "ada@example.com", at, "e-2").unwrap();
+        assert_eq!(
+            passkey.subject(),
+            "A passkey was added to your Tetsu account"
+        );
+        assert!(
+            passkey
+                .text()
+                .contains("A passkey was added to your Tetsu account on ")
+        );
+        assert!(notice_message(Notice::Login, "ada@localhost", at, "e-3").is_none());
     }
 
     #[test]

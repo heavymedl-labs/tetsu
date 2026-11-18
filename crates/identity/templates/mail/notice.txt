@@ -1,0 +1,7 @@
+Hello,
+
+{{ what }} on {{ at }}.
+
+If this wasn't you, ask the maintainer to disable your account now.
+
+Tetsu

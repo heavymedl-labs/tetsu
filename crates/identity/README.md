@@ -8,6 +8,12 @@ So far, `Operators` creates, lists, disables, and enables operators, issues thei
 finishes joining with their first passkey, logs them in with it, adds their second, removes their passkeys, and
 starts, finds, and ends their sessions. `postgres_store(pool)` returns it over Postgres.
 
+An operator may hold an email address ([ADR-0074](../../docs/adr/0074-operator-email-in-development.md)).
+`invite_message` renders their invite from templates, and `notices(mailer)` is an outbox consumer of Identity's own
+events that emails an operator when a login or an added passkey goes through, keyed on the event, with no link in it
+(`v5.0.0-6.3.5`, `v5.0.0-6.3.7`). A notice that cannot go just now is retried; one the mail server refuses is
+dropped.
+
 - **Session tokens are 256 random bits** from the operating system's source, written as 64 lowercase hexadecimal
   digits. Only their SHA-256 hash is stored ([ADR-0047](../../docs/adr/0047-sign-in-libraries.md)), and a token
   is never printed.

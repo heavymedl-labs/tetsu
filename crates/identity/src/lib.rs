@@ -26,6 +26,7 @@ mod limit_tests;
 #[cfg(test)]
 mod login_tests;
 
+pub use adapters::events::notices;
 pub use adapters::http::{PATHS, Web, router};
 pub use adapters::postgres::postgres_store;
 pub use browser::{Change, CheckedSession, ForChange, Logout, Origins};
