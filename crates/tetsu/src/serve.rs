@@ -758,6 +758,18 @@ mod tests {
         }
     }
 
+    /// The root page asks for its text's font as it starts, rather than once the stylesheet has arrived, so the
+    /// headline paints in it rather than switching to it; and it is the font the stylesheet uses.
+    #[test]
+    fn the_root_page_preloads_the_font_its_stylesheet_uses() {
+        let preload = format!(
+            r#"<link rel="preload" href="{}" as="font" type="font/woff2" crossorigin>"#,
+            assets::FONT
+        );
+        assert!(home_page(true).contains(&preload));
+        assert!(stylesheet().contains(assets::FONT));
+    }
+
     /// The page tells the browser its scheme before any stylesheet arrives, so a page kept light never flashes dark
     /// in a dark system, and the browser bar takes the kept scheme's color; with none kept, both follow the system.
     #[tokio::test]

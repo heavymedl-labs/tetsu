@@ -64,9 +64,11 @@ w-82 shrink-0 snap-start border-r border-edge px-6 last:border-r-0 lg:w-auto lg:
     on what it shows. Wider, its top clears the band its separator draws (art/figures.html) by 24px, and its foot
     makes up the rest of the space between sections: 58px on a phone, 154px on a tablet, and 266px from a laptop.
     `opening` is the first section after the customers, which flows on from them with no band: 48px, 64px, then 96px
-    under their line. -#}
+    under their line. A browser skips drawing a section until it nears the screen, holding its place at 640px until
+    then and at its own height once drawn, so a page's load draws only its top; what a section draws stays inside
+    it. -#}
 {% macro section(id, labelledby, opening = false) %}
-<section{% if !id.is_empty() %} id="{{ id }}"{% endif %} aria-labelledby="{{ labelledby }}" class="relative {% if opening %}pt-12 sm:pt-16 xl:pt-24{% else %}pt-7 sm:pt-22 lg:pt-26{% endif %} pb-7 sm:pb-16 lg:pb-40">
+<section{% if !id.is_empty() %} id="{{ id }}"{% endif %} aria-labelledby="{{ labelledby }}" class="relative [contain-intrinsic-size:auto_40rem] [content-visibility:auto] {% if opening %}pt-12 sm:pt-16 xl:pt-24{% else %}pt-7 sm:pt-22 lg:pt-26{% endif %} pb-7 sm:pb-16 lg:pb-40">
 <div class="mx-auto max-w-page px-(--tetsu-gutter)">
 {{ caller() }}
 </div>

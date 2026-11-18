@@ -9,6 +9,9 @@
 {% block color_scheme %}{% include "../../../web/templates/color_scheme.html" %}{% endblock %}
 {% block head %}
 <script type="module" src="{{ crate::assets::SCHEME_SCRIPT }}"></script>
+{#- The text's font, Latin only, asked for as the page starts rather than once the stylesheet has arrived, so text
+    paints in it rather than switching to it. A font is always fetched with CORS, so the preload says so too. #}
+<link rel="preload" href="{{ crate::assets::FONT }}" as="font" type="font/woff2" crossorigin>
 <meta name="description" content="{% block description %}Scheduling, memberships, rentals, and payments for studios, salons, courts, and campgrounds, on published prices, with the payment processor you choose.{% endblock %}">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Tetsu">

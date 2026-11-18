@@ -37,14 +37,18 @@ pub fn files(json: &str) -> Result<Vec<(String, String)>, String> {
         .collect()
 }
 
-/// The files a page links to by name, the brand files (docs/brand) and the operator pages' scripts, by source and by
-/// the constant that names each one's URL.
-const LINKED: [(&str, &str); 5] = [
+/// The files a page links to by name, the brand files (docs/brand), the operator pages' scripts, and the font
+/// Tetsu's own pages preload, by source and by the constant that names each one's URL.
+const LINKED: [(&str, &str); 6] = [
     ("../docs/brand/tetsu-avatar.svg", "ICON"),
     ("../docs/brand/tetsu-avatar.png", "TOUCH_ICON"),
     ("src/passkey/ops.ts", "PASSKEY_SCRIPT"),
     ("src/session/ops.ts", "SESSION_SCRIPT"),
     ("src/scheme/ops.ts", "SCHEME_SCRIPT"),
+    (
+        "../node_modules/@fontsource-variable/inter/files/inter-latin-opsz-normal.woff2",
+        "FONT",
+    ),
 ];
 
 /// The Rust source of the asset table: each built file's URL, content type, and bytes, read from `root` with
@@ -187,8 +191,19 @@ mod tests {
                 "src/passkey/ops.ts".to_string(),
                 "assets/passkey-Ij5.js".to_string(),
             ),
+            (
+                "../node_modules/@fontsource-variable/inter/files/inter-latin-opsz-normal.woff2"
+                    .to_string(),
+                "assets/inter-latin-opsz-normal-Kl6.woff2".to_string(),
+            ),
         ];
         let table = table("/build", &files).unwrap();
+        assert!(
+            table.contains(
+                "pub const FONT: &str = \"/assets/inter-latin-opsz-normal-Kl6.woff2\";\n"
+            ),
+            "{table}"
+        );
         assert!(
             table.contains("pub const PASSKEY_SCRIPT: &str = \"/assets/passkey-Ij5.js\";\n"),
             "{table}"

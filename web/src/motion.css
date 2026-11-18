@@ -98,6 +98,12 @@
       animation: tetsu-book 700ms var(--ease-tetsu) both;
     }
 
+    /* The footer's wordmark is far below the screen as the page loads, where no one would see it book in, so it
+       stands still rather than cost the page its frames. */
+    footer .tetsu-slot {
+      animation: none;
+    }
+
     .tetsu-hot {
       animation:
         tetsu-book 700ms var(--ease-tetsu) both,
