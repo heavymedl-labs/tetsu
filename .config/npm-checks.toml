@@ -30,7 +30,6 @@ allow = [
 [advisories]
 # An advisory we cannot clear, by its GHSA id.
 ignore = [
-    { id = "GHSA-fc5q-39xc-vjpf", reason = "picomatch 4.0.7 and earlier, only through Vite, Vitest, and tinyglobby at build and test time, matching globs we write; no release fixes it yet. Tracked in #146. Review by 2026-12-17." },
 ]
 
 [overrides]
