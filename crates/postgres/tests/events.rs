@@ -254,13 +254,50 @@ mod support {
     #[derive(Clone, Default)]
     pub struct Logs(Arc<std::sync::Mutex<Vec<u8>>>);
 
+    thread_local! {
+        static CAPTURING: std::cell::RefCell<Option<Logs>> = const { std::cell::RefCell::new(None) };
+    }
+
+    /// Stops a capture when dropped.
+    pub struct Capture;
+
+    impl Drop for Capture {
+        fn drop(&mut self) {
+            CAPTURING.with(|capturing| capturing.replace(None));
+        }
+    }
+
+    /// Writes to the capture of the thread logging, or nowhere.
+    struct ThisThread;
+
+    impl std::io::Write for ThisThread {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            CAPTURING.with(|capturing| match &mut *capturing.borrow_mut() {
+                Some(logs) => logs.write(bytes),
+                None => Ok(bytes.len()),
+            })
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
     impl Logs {
-        pub fn subscriber(&self) -> impl tracing::Subscriber + Send + Sync {
-            let logs = self.clone();
-            tracing_subscriber::fmt()
-                .json()
-                .with_writer(move || logs.clone())
-                .finish()
+        /// Captures what this thread logs until the returned guard drops. One subscriber serves the whole binary:
+        /// tracing caches across threads whether any subscriber wants a log call, so a subscriber set for one
+        /// thread can lose its lines while another test's thread sets or drops its own.
+        pub fn capture(&self) -> Capture {
+            static GLOBAL: std::sync::Once = std::sync::Once::new();
+            GLOBAL.call_once(|| {
+                let subscriber = tracing_subscriber::fmt()
+                    .json()
+                    .with_writer(|| ThisThread)
+                    .finish();
+                tracing::subscriber::set_global_default(subscriber).expect("the only subscriber");
+            });
+            CAPTURING.with(|capturing| capturing.replace(Some(self.clone())));
+            Capture
         }
 
         pub fn lines(&self) -> Vec<String> {
@@ -442,7 +479,7 @@ async fn an_event_stops_after_ten_failures_and_says_so() {
     ledger.failing.store(true, Ordering::SeqCst);
     let id = record(&pool, 7, &JOINED, true).await;
     let logs = Logs::default();
-    let _guard = tracing::subscriber::set_default(logs.subscriber());
+    let _guard = logs.capture();
     for _ in 0..MAX_ATTEMPTS + 2 {
         run_as_owner(&database, "UPDATE people.outbox SET due_at = now()").await;
         dispatcher.deliver_due().await.expect("tries");
@@ -756,7 +793,7 @@ async fn a_kept_event_that_keeps_failing_says_so_once() {
     )
     .await;
     let logs = Logs::default();
-    let _guard = tracing::subscriber::set_default(logs.subscriber());
+    let _guard = logs.capture();
     for _ in 0..MAX_ATTEMPTS + 3 {
         run_as_owner(&database, "UPDATE people.outbox SET due_at = now()").await;
         dispatcher.deliver_due().await.expect("tries");
@@ -965,7 +1002,7 @@ async fn a_consumer_s_database_error_is_logged_without_its_values() {
     ledger.leaky.store(true, Ordering::SeqCst);
     record(&pool, 1, &JOINED, true).await;
     let logs = Logs::default();
-    let _guard = tracing::subscriber::set_default(logs.subscriber());
+    let _guard = logs.capture();
     dispatcher.deliver_due().await.expect("tries");
     let text = logs.lines().join("\n");
     assert!(text.contains("event not applied"), "{text}");
@@ -987,7 +1024,7 @@ async fn a_shortage_ends_the_whole_pass() {
     record(&pool, 2, &JOINED, true).await;
     record_global(&pool, &JOINED).await;
     let logs = Logs::default();
-    let _guard = tracing::subscriber::set_default(logs.subscriber());
+    let _guard = logs.capture();
     let mut held = Vec::new();
     for _ in 1..pool.status().max_size {
         held.push(pool.get().await.expect("a connection"));
