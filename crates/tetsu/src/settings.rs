@@ -498,9 +498,17 @@ pub fn mail(var: impl Fn(&str) -> Result<String, VarError>) -> Result<Mail, Stri
             tetsu_mail::Allowlist::parse(&text)
         })
         .ok_or("TETSU_MAIL_ALLOW must be plain email addresses separated by commas")?;
-    let Some(host) = value(&var, "TETSU_SMTP_HOST")? else {
-        return Ok(Mail { smtp: None, allow });
-    };
+    let smtp = value(&var, "TETSU_SMTP_HOST")?
+        .map(|host| smtp_settings(&var, host))
+        .transpose()?;
+    Ok(Mail { smtp, allow })
+}
+
+/// The SMTP server at `host`, with the settings it requires.
+fn smtp_settings(
+    var: impl Fn(&str) -> Result<String, VarError>,
+    host: String,
+) -> Result<tetsu_mail::SmtpSettings, String> {
     let required =
         |name: &str| value(&var, name)?.ok_or(format!("{name} must be set with TETSU_SMTP_HOST"));
     let port = value(&var, "TETSU_SMTP_PORT")?
@@ -508,16 +516,13 @@ pub fn mail(var: impl Fn(&str) -> Result<String, VarError>) -> Result<Mail, Stri
         .ok_or("TETSU_SMTP_PORT must be a port number")?;
     let from = tetsu_kernel::Address::parse(&required("TETSU_MAIL_FROM")?)
         .ok_or("TETSU_MAIL_FROM must be a plain email address")?;
-    Ok(Mail {
-        smtp: Some(tetsu_mail::SmtpSettings {
-            host,
-            port,
-            username: required("TETSU_SMTP_USERNAME")?,
-            password: required("TETSU_SMTP_PASSWORD")?,
-            from,
-            limit: SMTP_LIMIT,
-        }),
-        allow,
+    Ok(tetsu_mail::SmtpSettings {
+        host,
+        port,
+        username: required("TETSU_SMTP_USERNAME")?,
+        password: required("TETSU_SMTP_PASSWORD")?,
+        from,
+        limit: SMTP_LIMIT,
     })
 }
 
@@ -568,13 +573,18 @@ mod tests {
         assert_eq!(Local::file_only("").beside(lead, &followers), Ok(()));
     }
 
-    fn mail_from(set: &[(&str, &str)]) -> Result<Mail, String> {
-        mail(|name| {
+    /// The variables `set` names, as the environment would give them.
+    fn vars<'a>(set: &'a [(&str, &str)]) -> impl Fn(&str) -> Result<String, VarError> + 'a {
+        |name| {
             set.iter()
                 .find(|(set, _)| *set == name)
                 .map(|(_, value)| (*value).to_string())
                 .ok_or(VarError::NotPresent)
-        })
+        }
+    }
+
+    fn mail_from(set: &[(&str, &str)]) -> Result<Mail, String> {
+        mail(vars(set))
     }
 
     const SMTP: [(&str, &str); 4] = [
@@ -621,9 +631,9 @@ mod tests {
         assert_eq!(mail_from(&other).unwrap().smtp.unwrap().port, 2465);
     }
 
-    /// Each error names what is wrong and never a value, since one is the password.
+    /// A server needs its login and sender, and a missing one is named.
     #[test]
-    fn mail_settings_that_are_wrong_say_which() {
+    fn missing_mail_settings_say_which() {
         for (name, refused) in [
             (
                 "TETSU_SMTP_USERNAME",
@@ -641,6 +651,11 @@ mod tests {
             let without: Vec<_> = SMTP.into_iter().filter(|(set, _)| *set != name).collect();
             assert_eq!(mail_from(&without).err(), Some(refused.to_string()));
         }
+    }
+
+    /// A malformed setting is named, and the error never repeats a value, since one is the password.
+    #[test]
+    fn malformed_mail_settings_say_which() {
         for (name, bad, refused) in [
             (
                 "TETSU_SMTP_PORT",
@@ -949,12 +964,7 @@ mod tests {
     }
 
     fn exporting(set: &[(&str, &str)]) -> Result<Option<Export>, String> {
-        export(|name| {
-            set.iter()
-                .find(|(set, _)| *set == name)
-                .map(|(_, value)| (*value).to_string())
-                .ok_or(VarError::NotPresent)
-        })
+        export(vars(set))
     }
 
     #[test]

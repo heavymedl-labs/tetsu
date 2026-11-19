@@ -292,11 +292,48 @@ async fn ready(
     let demo = settings::demo(|name| local.var(name))?;
     let proxies = settings::proxies(|name| local.var(name))?;
     let address = settings::listen(|name| local.var(name))?;
+    let (smtp, allow) = mail(local)?;
+    let pool = connect(local).await?;
+    let office = std::sync::Arc::new(tetsu_mail::post_office(pool.clone(), smtp, allow));
+    let dispatcher = delivery(&pool, &office).await?;
+    let operators = operator_pages(local, demo, office)?;
+    let tenants = tetsu_tenancy::postgres_store(pool.clone());
+    refuse_reserved_addresses(&tenants).await?;
+    let modules = tetsu_tenancy::router(tenants, demo, assets::STYLESHEET, report).merge(
+        tetsu_identity::router(tetsu_identity::postgres_store(pool), operators),
+    );
+    let app = serve::app(modules, demo, proxies, serve::not_found);
+    Ok((bind(address).await?, app, dispatcher))
+}
+
+/// Binds `address`, and says where serving listens.
+async fn bind(address: std::net::SocketAddr) -> Result<tokio::net::TcpListener, String> {
+    let listener = tokio::net::TcpListener::bind(address)
+        .await
+        .map_err(|error| format!("could not listen on {address}: {error}"))?;
+    let bound = listener
+        .local_addr()
+        .map_err(|error| format!("could not read the listening address: {error}"))?;
+    tracing::info!("serving on http://{bound}");
+    Ok(listener)
+}
+
+/// The SMTP adapter and allowlist the mail settings name, which a stray `.env` may set only beside the database
+/// (ADR-0074).
+pub(crate) fn mail(
+    local: &settings::Local,
+) -> Result<(Option<tetsu_mail::Smtp>, tetsu_mail::Allowlist), String> {
     local.beside("DATABASE_URL", &settings::MAIL)?;
     let mail = settings::mail(|name| local.var(name))?;
-    let smtp = settings::smtp(&mail)?;
-    let pool = connect(local).await?;
-    let office = std::sync::Arc::new(tetsu_mail::post_office(pool.clone(), smtp, mail.allow));
+    Ok((settings::smtp(&mail)?, mail.allow))
+}
+
+/// The dispatcher that delivers every module's events to the audit record, and Identity's to the notices, which
+/// `office` sends.
+async fn delivery(
+    pool: &tetsu_postgres::Pool,
+    office: &std::sync::Arc<tetsu_mail::PostOffice>,
+) -> Result<tetsu_postgres::Dispatcher, String> {
     let schemas: Vec<&str> = MODULES
         .iter()
         .filter_map(|module| module.storage())
@@ -308,24 +345,9 @@ async fn ready(
         tetsu_audit::consumer(&["identity"]),
         tetsu_identity::notices(office.clone()),
     ];
-    let dispatcher = tetsu_postgres::Dispatcher::new(pool.clone(), &schemas, consumers)
+    tetsu_postgres::Dispatcher::new(pool.clone(), &schemas, consumers)
         .await
-        .map_err(|error| explain(&*error))?;
-    let operators = operator_pages(local, demo, office)?;
-    let tenants = tetsu_tenancy::postgres_store(pool.clone());
-    refuse_reserved_addresses(&tenants).await?;
-    let modules = tetsu_tenancy::router(tenants, demo, assets::STYLESHEET, report).merge(
-        tetsu_identity::router(tetsu_identity::postgres_store(pool), operators),
-    );
-    let app = serve::app(modules, demo, proxies, serve::not_found);
-    let listener = tokio::net::TcpListener::bind(address)
-        .await
-        .map_err(|error| format!("could not listen on {address}: {error}"))?;
-    let bound = listener
-        .local_addr()
-        .map_err(|error| format!("could not read the listening address: {error}"))?;
-    tracing::info!("serving on http://{bound}");
-    Ok((listener, app, dispatcher))
+        .map_err(|error| explain(&*error))
 }
 
 /// What Identity's operator pages need: their passkeys belong to the site's own origin, the only one that may send

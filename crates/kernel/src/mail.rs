@@ -218,16 +218,6 @@ pub struct Captured {
     pub at: std::time::SystemTime,
 }
 
-/// A kept message holds an address and may hold a link, so its debug form shows only when it was kept.
-impl fmt::Debug for Captured {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("Captured")
-            .field("at", &self.at)
-            .finish_non_exhaustive()
-    }
-}
-
 /// What reading the mailbox comes to: its newest kept messages, newest first.
 pub type Reading<'a> =
     std::pin::Pin<Box<dyn Future<Output = Result<Vec<Captured>, MailError>> + Send + 'a>>;
@@ -236,6 +226,16 @@ pub type Reading<'a> =
 /// back a boxed future so a page can hold any mailbox as `dyn Mailbox`.
 pub trait Mailbox: Send + Sync {
     fn captured(&self) -> Reading<'_>;
+}
+
+/// A kept message holds an address and may hold a link, so its debug form shows only when it was kept.
+impl fmt::Debug for Captured {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Captured")
+            .field("at", &self.at)
+            .finish_non_exhaustive()
+    }
 }
 
 #[cfg(test)]

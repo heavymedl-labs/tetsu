@@ -101,11 +101,11 @@ impl Mailpit {
         static STARTED: AtomicU32 = AtomicU32::new(0);
         let name = format!("mailpit-{}", STARTED.fetch_add(1, Ordering::Relaxed));
         let files = Scratch::folder(&name).expect("a scratch folder");
-        let (key, cert) = certificate(&files);
+        let (_, cert) = certificate(&files);
         std::fs::write(files.join("auth"), format!("{USER}:{PASSWORD}\n")).expect("an auth file");
         let (smtp, http) = (free_port(), free_port());
         let mailpit = Self {
-            child: spawn(&files, (smtp, http), (&key, &cert), allowed),
+            child: spawn(&files, smtp, http, allowed),
             smtp,
             http,
             certificate: std::fs::read(&cert).expect("the certificate"),
@@ -209,13 +209,8 @@ fn certificate(files: &Path) -> (PathBuf, PathBuf) {
     (key, cert)
 }
 
-/// Mailpit on `smtp` and `http`, requiring implicit TLS with `key` and `cert`, and the login in `files`.
-fn spawn(
-    files: &Path,
-    (smtp, http): (u16, u16),
-    (key, cert): (&Path, &Path),
-    allowed: Option<&str>,
-) -> Child {
+/// Mailpit on `smtp` and `http`, requiring implicit TLS with the key, certificate, and login in `files`.
+fn spawn(files: &Path, smtp: u16, http: u16, allowed: Option<&str>) -> Child {
     let mut command = Command::new(binary());
     if let Some(allowed) = allowed {
         command.arg("--smtp-allowed-recipients").arg(allowed);
@@ -226,9 +221,9 @@ fn spawn(
         .arg("--listen")
         .arg(format!("127.0.0.1:{http}"))
         .arg("--smtp-tls-cert")
-        .arg(cert)
+        .arg(files.join("cert.pem"))
         .arg("--smtp-tls-key")
-        .arg(key)
+        .arg(files.join("key.pem"))
         .arg("--smtp-require-tls")
         .arg("--smtp-auth-file")
         .arg(files.join("auth"))
