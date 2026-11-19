@@ -2,6 +2,7 @@
 
 import os
 import shutil
+import signal
 import tempfile
 import unittest
 from pathlib import Path
@@ -172,11 +173,26 @@ class CleanTest(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in (self.root / ".tools").iterdir()), ["bin"])
         self.assertFalse((self.root / "target" / "mutants-tmp").exists())
 
+    def test_routine_kills_a_test_a_killed_mutation_run_left_running(self):
+        """A mutant can make a test hang, and a test that caught SIGTERM outlives cargo-mutants' kill, so
+        anything still running from a mutation run's copy is killed outright. One in target/debug is not."""
+        copy = f"{self.root}/target/mutants-tmp/cargo-mutants-tetsu-x.tmp/target/mutants/deps"
+        self.process(40, "tetsu-732bf5d3d", f"{copy}/tetsu-732bf5d3de9c4a48 (deleted)", environ())
+        self.process(
+            41, "tetsu-0a1b2c3d4", f"{self.root}/target/debug/deps/tetsu-0a1b2c3d4e5f6071", environ()
+        )
+        self.process(42, "tetsu-0a1b2c3d4", f"{self.root}/target/mutants-tmpx/tetsu", environ())
+        clean.main(["--routine"], self.host)
+        self.assertEqual(self.kill.call_args_list, [mock.call(40, signal.SIGKILL)])
+
     def test_a_process_that_ends_while_read_is_skipped(self):
         self.process(30, "tetsu", "/work/tetsu/target/debug/tetsu", environ(TEST_URL))
         (self.proc / "30" / "environ").unlink()
         self.assertEqual(list(clean.tetsu_processes(self.proc)), [])
         self.assertEqual(list(clean.tetsu_processes(self.proc / "missing")), [])
+        (self.proc / "31").mkdir()
+        self.assertEqual(list(clean.mutation_runs(self.proc, self.root)), [])
+        self.assertEqual(list(clean.mutation_runs(self.proc / "missing", self.root)), [])
 
     def test_a_server_already_gone_is_not_an_error(self):
         self.kill.side_effect = ProcessLookupError

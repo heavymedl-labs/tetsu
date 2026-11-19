@@ -4,13 +4,15 @@
 With --routine, which scripts/check.sh runs on the way out, it removes only what nothing still uses:
 - `tetsu` servers tests left running, such as when cargo-mutants kills a test that timed out: those whose
   DATABASE_URL names a test database, t_<seconds>_<process>_<count>. A server started by hand keeps running.
+- anything still running from a mutation run's copy of the repository, killed outright: a mutant can make a
+  test hang, and a test that caught SIGTERM outlives cargo-mutants' own kill.
 - temporary files a test process left once that process is gone: `tetsu-<process>-*` and
   `t_<seconds>_<process>_<count>.pem`.
 - the copies and output mutation and coverage runs keep while they run (cargo-mutants', StrykerJS's, and
   Vitest's), dangling container images, and build cache unused for 7 days.
 - superseded build artifacts under target/. Cargo names each `<unit>-<hash>` and never removes the copies a
   change replaces, so target/ only grows. Of each unit's copies it keeps the newest eight, and removes older
-  ones a week after they were written; one still needed is rebuilt. One profile holds several live copies of
+  ones a day after they were written; one still needed is rebuilt. One profile holds several live copies of
   a unit, for checking and building, with each set of features, and Cargo leaves a live copy's time as it
   was, so a copy pruned too soon is rebuilt on every run. CI prunes none: its build cache starts fresh each
   month.
@@ -43,7 +45,8 @@ BUILD_UNIT = re.compile(r"(.*)-(?:[0-9a-f]{16}|[0-9a-z]{13})(\..*)?")
 KEPT_COPIES = 8
 # Build output folders sit in a profile folder, such as target/debug or target/nightly/<triple>/debug.
 PROFILE_DEPTH = 3
-SETTLE = 7 * 24 * 3600
+# A day, since a busy week builds tens of copies of each unit, which a week's wait would all keep.
+SETTLE = 24 * 3600
 # Each is removed when its run ends, unless the run was killed.
 RUN_LEFTOVERS = ["target/mutants-tmp", ".tools/stryker-tmp", ".tools/coverage-web"]
 REPORTS = ["target/mutants.out", "target/mutants.out.old", "mutants.out", "mutants.out.old"]
@@ -72,6 +75,24 @@ def tetsu_processes(proc):
             yield int(entry.name), str((entry / "exe").readlink()), (entry / "environ").read_bytes()
         except OSError:
             continue
+
+
+def executable(entry):
+    """What a process in /proc runs, or none for one that ended or cannot be read."""
+    try:
+        return str((entry / "exe").readlink())
+    except OSError:
+        return None
+
+
+def mutation_runs(proc, root):
+    """Each process running what a mutation run built in its copy of the repository, even once removed."""
+    copies = f"{root / 'target' / 'mutants-tmp'}{os.sep}"
+    if not proc.is_dir():
+        return
+    for entry in proc.iterdir():
+        if entry.name.isdigit() and (executable(entry) or "").startswith(copies):
+            yield int(entry.name)
 
 
 def servers(processes, routine, root):
@@ -119,10 +140,10 @@ def remove(path):
         path.unlink(missing_ok=True)
 
 
-def stop(pids):
+def stop(pids, how=signal.SIGTERM):
     for pid in pids:
         with contextlib.suppress(ProcessLookupError):
-            os.kill(pid, signal.SIGTERM)
+            os.kill(pid, how)
 
 
 def docker(*args):
@@ -153,6 +174,10 @@ def main(args, host=None):
     stop(found)
     if found:
         print(f"stopped {len(found)} tetsu {'test servers' if routine else 'processes'}")
+    stranded = list(mutation_runs(host.proc, host.root))
+    stop(stranded, signal.SIGKILL)
+    if stranded:
+        print(f"killed {len(stranded)} processes a mutation run left running")
     for leftover in left_by_gone_tests(host.temporary, host.alive):
         remove(leftover)
     superseded = [] if host.ci else list(superseded_builds(host.root / "target", host.now))
