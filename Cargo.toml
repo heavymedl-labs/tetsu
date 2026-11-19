@@ -90,3 +90,8 @@ debug = false
 
 [profile.dev]
 debug = "line-tables-only"
+
+# Dependencies keep no debug info: a backtrace still names the lines of Tetsu's own code, and each test binary
+# loses most of its size, which target/ holds many copies of.
+[profile.dev.package."*"]
+debug = false
