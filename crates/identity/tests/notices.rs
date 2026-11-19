@@ -265,3 +265,23 @@ async fn a_notice_is_never_lost() {
     let (_database, _pool, _dispatcher, recorder) = ready().await;
     assert!(tetsu_identity::notices(recorder).never_lose());
 }
+
+/// Only Identity's own logins, added passkeys, and joins are told; another module's event of the same kind is not
+/// Identity's to tell.
+#[tokio::test]
+async fn the_notices_want_only_identitys_own_events() {
+    let (_database, _pool, _dispatcher, recorder) = ready().await;
+    let notices = tetsu_identity::notices(recorder);
+    let event = |producer: &str, kind: &str| tetsu_postgres::Event {
+        id: "e-1".into(),
+        producer: producer.into(),
+        tenant: None,
+        kind: kind.into(),
+        version: 1,
+        occurred_at: std::time::SystemTime::UNIX_EPOCH,
+        payload: "{}".into(),
+    };
+    assert!(notices.wants(&event("identity", "identity.logged_in")));
+    assert!(!notices.wants(&event("tenancy", "identity.logged_in")));
+    assert!(!notices.wants(&event("identity", "identity.operator_created")));
+}

@@ -241,26 +241,23 @@ where
         served
     };
     let watching = async {
-        // Delivery ends only once told to stop, which a failed server also tells it; ending untold means it stopped
-        // on its own. A handle that finished is never waited on again.
-        let ended = tokio::select! {
-            () = stop => None,
-            ended = &mut delivering => Some(ended),
+        // Delivery ends only once told to stop, so ending first means it stopped on its own. A server that failed
+        // tells it to stop too, so that failure also raises this alert beside its own error.
+        let died = tokio::select! {
+            () = stop => false,
+            _ = &mut delivering => true,
         };
-        let died = ended.is_some() && !*stopped.borrow();
         stopping.send_replace(true);
         if died {
             tracing::error!(
                 alert = "delivery_stopped",
                 "events stopped being delivered, so serving stops for a restart"
             );
-        } else if ended.is_none()
-            && tokio::time::timeout(serve::GRACE, &mut delivering)
-                .await
-                .is_err()
-        {
-            delivering.abort();
+        } else {
+            let _ = tokio::time::timeout(serve::GRACE, &mut delivering).await;
         }
+        // Past the grace, delivery is cancelled; a task already finished is left as it is.
+        delivering.abort();
         died
     };
     let (served, died) = tokio::join!(serving, watching);
