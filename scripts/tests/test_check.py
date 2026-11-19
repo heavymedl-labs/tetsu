@@ -90,6 +90,7 @@ class CheckScript(unittest.TestCase):
         scan = f'#!/bin/sh\necho "scan $1" >> "{self.log}"\n'
         write(self.root / "scripts" / "scan-secrets.sh", scan, EXECUTABLE)
         write(self.root / ".tools" / "bin" / "betterleaks", "#!/bin/sh\n", EXECUTABLE)
+        write(self.root / ".tools" / "bin" / "mailpit", "#!/bin/sh\n", EXECUTABLE)
 
     no_database = False
 
@@ -614,6 +615,10 @@ class CheckScript(unittest.TestCase):
         self.assertIn("scripts/install-tools.sh", result.stderr)
 
 
+# What the pinned Mailpit prints for its version.
+MAILPIT = "#!/bin/sh\necho 'mailpit v1.34.0 compiled with go1.27.4 on linux/amd64'\n"
+
+
 class InstallTools(unittest.TestCase):
     def test_pins_every_tool(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -623,6 +628,7 @@ class InstallTools(unittest.TestCase):
             shutil.copy(ROOT / "scripts" / "install-tools.sh", root / "scripts")
             write(root / ".config/nightly-toolchain", "nightly-2026-11-01\n")
             write(root / ".tools" / "bin" / "betterleaks", "#!/bin/sh\necho 1.10.0\n", EXECUTABLE)
+            write(root / ".tools" / "bin" / "mailpit", MAILPIT, EXECUTABLE)
             for tool in ("cargo", "uv", "rustup", "curl"):
                 write(root / "bin" / tool, f'#!/bin/sh\necho "{tool} $*" >> "{log}"\n', EXECUTABLE)
             result = run([root / "scripts" / "install-tools.sh"], root, PATH=f"{root / 'bin'}:/usr/bin:/bin")
@@ -649,6 +655,7 @@ class InstallTools(unittest.TestCase):
             shutil.copy(ROOT / "scripts" / "install-tools.sh", root / "scripts")
             write(root / ".config/nightly-toolchain", "nightly-2026-11-01\n")
             write(root / ".tools" / "bin" / "betterleaks", "#!/bin/sh\necho 1.10.0\n", EXECUTABLE)
+            write(root / ".tools" / "bin" / "mailpit", MAILPIT, EXECUTABLE)
             for tool in ("cargo", "uv"):
                 write(root / "bin" / tool, "#!/bin/sh\n", EXECUTABLE)
             no_default = f'[ "$1" = default ] && [ -z "$2" ] && exit 1\necho "rustup $*" >> "{log}"'
@@ -682,6 +689,31 @@ class InstallTools(unittest.TestCase):
                 r"releases/download/v1\.10\.0/betterleaks_1\.10\.0_(linux|darwin)_(x64|arm64)\.tar\.gz",
             )
             self.assertIn("1.9.0", (root / ".tools" / "bin" / "betterleaks").read_text())
+
+    def test_a_mail_server_download_that_fails_its_checksum_is_not_installed(self):
+        """Mailpit, for the SMTP tests, is downloaded from its pinned release only when missing or outdated,
+        and installed only if it matches the SHA-256 in the script (ADR-0074)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log = root / "log"
+            (root / "scripts").mkdir()
+            shutil.copy(ROOT / "scripts" / "install-tools.sh", root / "scripts")
+            write(root / ".config/nightly-toolchain", "nightly-2026-11-01\n")
+            write(root / ".tools" / "bin" / "betterleaks", "#!/bin/sh\necho 1.10.0\n", EXECUTABLE)
+            old = "#!/bin/sh\necho 'mailpit v1.33.0 compiled with go1.27.4 on linux/amd64'\n"
+            write(root / ".tools" / "bin" / "mailpit", old, EXECUTABLE)
+            for tool in ("cargo", "uv", "rustup"):
+                write(root / "bin" / tool, "#!/bin/sh\n", EXECUTABLE)
+            curl = f'echo "curl $*" >> "{log}"\nwhile [ "$1" != -o ]; do shift; done\necho tampered > "$2"'
+            write(root / "bin" / "curl", f"#!/bin/sh\n{curl}\n", EXECUTABLE)
+            result = run([root / "scripts" / "install-tools.sh"], root, PATH=f"{root / 'bin'}:/usr/bin:/bin")
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("the Mailpit download does not match its published SHA-256", result.stderr)
+            self.assertRegex(
+                log.read_text(),
+                r"axllent/mailpit/releases/download/v1\.34\.0/mailpit-(linux|darwin)-(amd64|arm64)\.tar\.gz",
+            )
+            self.assertIn("v1.33.0", (root / ".tools" / "bin" / "mailpit").read_text())
 
 
 class PrePushHook(unittest.TestCase):
