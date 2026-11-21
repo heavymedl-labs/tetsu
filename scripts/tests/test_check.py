@@ -69,7 +69,7 @@ class CheckScript(unittest.TestCase):
         # git diff --quiet answers as the environment says: 0, unchanged since the base, unless a test says.
         self.stub(
             "git",
-            'if [ "$1" = merge-base ]; then echo abc; '
+            'if [ "$1" = merge-base ]; then echo "${MERGE_BASE-abc}"; '
             'elif [ "$1 $2" = "diff --quiet" ]; then echo "$@" >> "'
             + str(self.log)
             + '"; exit "${DIFF_QUIET-0}"; else echo "$@" >> "'
@@ -401,6 +401,16 @@ class CheckScript(unittest.TestCase):
         self.assertEqual(self.check().returncode, 0)
         self.assertEqual(self.slow_stages_ran(), (True, True))
         result = self.check()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.slow_stages_ran(), (False, False))
+        self.assertIn("coverage and mutation testing are skipped", result.stderr)
+
+    def test_a_pass_is_reused_after_a_push_moves_the_base(self):
+        # A push moves origin/main, but the same Rust and checks still give the same result, so a docs-only
+        # push after it skips coverage rather than running it again.
+        self.assertEqual(self.check(MERGE_BASE="abc").returncode, 0)
+        self.assertEqual(self.slow_stages_ran(), (True, True))
+        result = self.check(MERGE_BASE="def")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.slow_stages_ran(), (False, False))
         self.assertIn("coverage and mutation testing are skipped", result.stderr)

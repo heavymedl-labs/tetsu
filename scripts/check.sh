@@ -255,12 +255,12 @@ else
   exit "$npm_status"
 fi
 # Coverage and mutation testing give the same result for the same Rust, so a pass is recorded against a
-# fingerprint of every input they read: the Rust and its build settings, the checks themselves, and the base the
-# mutants are drawn against. A later run outside CI that finds the same fingerprint skips both and says so.
+# fingerprint of every input they read: the Rust and its build settings, and the checks themselves. A later run
+# outside CI that finds the same fingerprint skips both and says so. The base is left out: a push moves it, but the
+# mutants drawn against the new base are changes the last pass already tested, so a docs-only push after it skips.
 rust_inputs=(crates Cargo.toml Cargo.lock rust-toolchain.toml .config/nightly-toolchain .cargo scripts/check.sh
   scripts/check_coverage.py)
 fingerprint="$({
-  echo "base $merge"
   { find "${rust_inputs[@]}" -type f 2>/dev/null || true; } | LC_ALL=C sort | while IFS= read -r file; do
     sha256sum "$file"
   done
