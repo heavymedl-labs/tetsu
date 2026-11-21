@@ -1,6 +1,6 @@
 # 0076. Pull requests from contributors
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-21
 - Supersedes [ADR-0014](0014-checks-and-duties.md)'s return of branches, pull requests, and branch protection when a
   second contributor joins

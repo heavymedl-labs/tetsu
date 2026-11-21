@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-06
 - CI after every push suspended by [ADR-0023](0023-ci-on-demand.md)
+- Return of pull requests and branch protection for everyone superseded by [ADR-0076](0076-pull-requests-from-contributors.md)
 
 ## Context
 
