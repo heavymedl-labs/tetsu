@@ -5,10 +5,11 @@ Tetsu's additions to the `code-review-and-quality` skill, for the review that
 vendor. Start a new context with read-only access, and give it the issue and the diff, but not the
 author's plan or reasoning.
 
-**Doubt mode** folds in the `doubt-driven-development` skill. Use it for a Tier 1 change, one that crosses a
-module or isolation boundary, one that changes trust (TLS, sessions, secrets, who may do what), and one the issue
-or the author calls risky. Add the doubt block to the prompt, with the claims to doubt written as questions and
-none of the author's reasons for believing them.
+**Doubt mode** folds in the `doubt-driven-development` skill
+([ADR-0077](adr/0077-doubt-mode-in-the-fresh-review.md)). Use it for a Tier 1 change, one that crosses a module or
+isolation boundary, one that changes trust (TLS, sessions, secrets, who may do what), and one the issue or the
+author calls risky. Add the doubt block to the prompt, with the claims to doubt written as questions and none of
+the author's reasons for believing them.
 
 ```text
 You are reviewing a change you did not write. Do not edit anything.
