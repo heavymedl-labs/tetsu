@@ -9,7 +9,8 @@ place of any of yours, for `cargo tetsu --env mailpit` (ADR-0073). Only you can 
 login, and it goes when the script stops, by Ctrl+C, Ctrl+\\, closing its terminal, or kill. Only kill -9 or a
 crash leaves it, and the next run then asks you to remove it. `.env` itself is never touched. Only the
 addresses given reach Mailpit, so give your operator's to see their invite, which Tetsu itself never keeps.
-Mailpit's inbox, kept in `.tools/mailpit/`, opens with no login to anyone using this machine.
+Mailpit's inbox, kept in `.tools/mailpit/`, opens with no login to anyone using this machine. Two first runs
+started at the same instant can make the certificate twice; restarting both mends it.
 
 usage: scripts/mailpit.py <address> [address ...]
 """
@@ -37,6 +38,8 @@ EXPORTED = re.compile(r"DATABASE_URL|TETSU_(SMTP|MAIL)_\w+")
 MAIL = re.compile(r"^\s*TETSU_(SMTP|MAIL)_\w+\s*=.*\n?", re.MULTILINE)
 
 
+# How the script is stopped, besides kill -9: Ctrl+C, Ctrl+\\, a closed terminal, and kill.
+STOPS = (signal.SIGINT, signal.SIGQUIT, signal.SIGHUP, signal.SIGTERM)
 REFUSED_EXISTING = ".env.mailpit already exists: a Mailpit runs, or one was killed. If none runs, remove it."
 
 
@@ -135,9 +138,15 @@ def main(addresses):
     made = False
     try:
         # Made only if absent, so a run started at the same moment never overwrites another's, and readable
-        # only by its owner from the start, since it holds the login. Only a file this run made is removed.
-        descriptor = os.open(SETTINGS, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        made = True
+        # only by its owner from the start, since it holds the login. Only a file this run made is removed. A
+        # stop is held while the file is made and recorded, so none lands between the two; tests cannot time a
+        # signal to that instant, so this rests on reading.
+        held = signal.pthread_sigmask(signal.SIG_BLOCK, STOPS)
+        try:
+            descriptor = os.open(SETTINGS, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            made = True
+        finally:
+            signal.pthread_sigmask(signal.SIG_SETMASK, held)
         with os.fdopen(descriptor, "w") as file:
             file.write("\n".join(settings) + "\n")
         print(next_steps(addresses[0]), flush=True)
@@ -148,6 +157,9 @@ def main(addresses):
     except KeyboardInterrupt:
         return 0
     finally:
+        # A second stop, such as Ctrl+C pressed twice, cannot cut the cleanup short.
+        for again in STOPS:
+            signal.signal(again, signal.SIG_IGN)
         if made:
             SETTINGS.unlink(missing_ok=True)
 
