@@ -13,10 +13,10 @@ People and coding agents follow the same workflow and the rules in
    `docs/glossary`, `adr/tenant-isolation`, or `ci/coverage`.
 3. Keep the branch and pull request to that one issue.
 4. Follow the [duties](AGENTS.md#duties), run the [checks](AGENTS.md#checks), and
-   do a [docs audit](#docs-audit) if you changed docs or issues. Once per
-   clone, install [uv](https://docs.astral.sh/uv/) and [rustup](https://rustup.rs/), run `scripts/install-tools.sh` and `git config core.hooksPath .githooks`, copy `.env.example` to `.env`,
-   so formatters and linters run
-   before each commit, and the full checks before each push.
+   do a [docs audit](#docs-audit) if you changed docs or issues. Once per clone, install
+   [uv](https://docs.astral.sh/uv/) and [rustup](https://rustup.rs/), run `scripts/install-tools.sh`, copy
+   `.env.example` to `.env`, and run `git config core.hooksPath .githooks`, so formatters and linters run before
+   each commit, and the full checks before each push.
 5. Open a pull request with the template filled in and `Closes #N`.
 
 Only a contributor's changes take steps 2, 3, and 5, from a fork, and the maintainer reviews each one with them. A
