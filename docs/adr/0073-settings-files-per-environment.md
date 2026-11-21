@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-17
 - Supersedes the production secrets rule of [ADR-0050](0050-local-settings-file.md)
+- The environment winning over the file superseded, for the mail settings, by [ADR-0078](0078-mail-settings-from-one-place.md)
 
 ## Context
 

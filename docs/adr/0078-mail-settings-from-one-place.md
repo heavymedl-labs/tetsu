@@ -1,6 +1,6 @@
 # 0078. Mail settings from one place
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-21
 - Supersedes, for the mail settings only, [ADR-0073](0073-settings-files-per-environment.md)'s rule that the
   environment wins over the file for any setting
