@@ -25,6 +25,7 @@ business is a tenant, isolated in the database itself, and industries add only w
 - **Identity:** operators, who join with a passkey from a one-time invite link and log in with it at `/ops`, with
   server-side sessions whose tokens are stored only as hashes
 - **Domain events:** delivered once through an outbox, retried, and logged when they stop
+- **Mail:** operators' invites and notices, sent by SMTP to listed addresses and otherwise kept for a mailbox page
 - **Operations:** JSON logs with alert fields, exported to any OTLP backend
 
 Next: login ([#20](https://github.com/heavymedl-labs/tetsu/issues/20)), then bookings and payments.
@@ -44,6 +45,7 @@ cargo tetsu serve       # http://localhost:8080
 where `tetsu` reads `.env`.
 
 One-time setup is in [crates/tetsu](crates/tetsu/README.md#run-locally). `scripts/check.sh` runs every check.
+To test its security, and to report what you find privately, see [SECURITY.md](SECURITY.md).
 
 ## Runs on
 
@@ -56,7 +58,7 @@ Free tiers for now, each behind a setting or a port so it can be swapped
 | Database | [Neon](https://neon.com), Postgres 18 ([ADR-0012](docs/adr/0012-first-hosting-and-deploys.md)) | Live |
 | Code, CI, images | [GitHub](https://github.com/heavymedl-labs/tetsu) ([ADR-0023](docs/adr/0023-ci-on-demand.md), [ADR-0033](docs/adr/0033-deploys-on-demand.md)) | Live |
 | Logs and alerts | [Grafana Cloud](https://grafana.com/products/cloud/) ([ADR-0049](docs/adr/0049-log-export.md)) | Live |
-| Email | [Resend](https://resend.com) ([ADR-0044](docs/adr/0044-email-delivery.md)) | With login |
+| Email | [Mailgun](https://www.mailgun.com)'s sandbox ([ADR-0074](docs/adr/0074-operator-email-in-development.md)) | Built; its settings come next |
 
 ## License
 
