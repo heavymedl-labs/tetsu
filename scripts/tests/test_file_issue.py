@@ -248,6 +248,15 @@ class FileIssue(unittest.TestCase):
         labels = [create[i + 1] for i, a in enumerate(create) if a == "--label"]
         self.assertEqual(labels, ["task", "area: web", "area: security"])
 
+    def test_work_in_no_code_area_is_labelled_area_none(self):
+        # Such as research or interviews, so the board check still finds an area label on it.
+        result = self.file(
+            "task", "T", str(self.body), "--tier", "none", "--priority", "later", area=("--area", "none")
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        create = next(c for c in self.calls() if c[:2] == ["issue", "create"])
+        self.assertIn("area: none", create)
+
     def test_an_area_is_required_and_must_be_known(self):
         for area in ((), ("--area", "sql")):
             result = self.file("task", "T", str(self.body), "--tier", "2", "--priority", "now", area=area)

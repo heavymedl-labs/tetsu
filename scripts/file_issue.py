@@ -30,7 +30,8 @@ TIERS = {"1": "1", "2": "2", "3": "3", "none": "None"}
 LOOKS = 5
 PRIORITIES = {"now": "Now", "next": "Next", "later": "Later", "anytime": "Anytime"}
 TYPES = {"task": "Task", "adr": "Decision"}
-AREAS = ["database", "infra", "security", "server", "tooling", "web"]
+# "none" is for work in no code area, such as research or interviews.
+AREAS = ["database", "infra", "none", "security", "server", "tooling", "web"]
 
 
 class FileIssueError(Exception):

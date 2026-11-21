@@ -86,7 +86,8 @@ sets its status to Todo, and to Done when it closes. Keep the rest true:
   different milestones; **Task**, work for one change; **Decision**, a choice an ADR
   settles; and **Bug**. A Task, Decision, or Bug is a sub-issue of one Feature, and
   carries an `area:` label for each place its work happens: `web`, `server`,
-  `database`, `security`, `infra`, or `tooling`. `scripts/file_issue.py` files one
+  `database`, `security`, `infra`, or `tooling`, or `none` for work in no code
+  area, such as research or interviews. `scripts/file_issue.py` files one
   with all of these in one step, its feature given with `--parent`, each area
   with `--area`, and who takes it with `--assignee`; set them by hand on an issue
   filed any other way, such as from a form. Every issue also lists the

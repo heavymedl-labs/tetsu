@@ -97,6 +97,12 @@ class CheckBoard(unittest.TestCase):
         self.assertIn("#2 Issue 2: no parent feature, no area: label", out)
         self.assertNotIn("#1 ", out)
 
+    def test_area_none_counts_as_an_area(self):
+        result = self.check(
+            {"issues": [FEATURE, issue(2, labels=("task", "area: none"))], "items": [item(1), item(2)]}
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+
     def test_a_closed_issue_not_done_is_named(self):
         out = self.broken([issue(2, state="CLOSED")], [item(2, status="Todo")])
         self.assertIn("#2 Issue 2: closed, but the board says Todo", out)
