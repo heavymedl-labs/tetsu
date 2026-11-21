@@ -4,6 +4,7 @@
 - Date: 2026-11-06
 - CI after every push suspended by [ADR-0023](0023-ci-on-demand.md)
 - Return of pull requests and branch protection for everyone superseded by [ADR-0076](0076-pull-requests-from-contributors.md)
+- Fresh review's rule-violations-only findings superseded, for risky changes, by [ADR-0077](0077-doubt-mode-in-the-fresh-review.md)
 
 ## Context
 

@@ -1,6 +1,6 @@
 # 0077. Doubt mode in the fresh review
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-21
 - Supersedes, for the changes it names, [ADR-0014](0014-checks-and-duties.md)'s rule that the fresh review's
   findings are rule violations only

@@ -81,7 +81,7 @@ number, and add a row below. Never renumber.
 | [0074](0074-operator-email-in-development.md) | Operator email in development | Sending email, changing the mail provider, or changing how operators are invited | Accepted |
 | [0075](0075-github-secret-scanning.md) | GitHub secret scanning | Changing the secret scan, or GitHub's security settings | Accepted |
 | [0076](0076-pull-requests-from-contributors.md) | Pull requests from contributors | Taking a contributor's change, or changing who reviews what | Accepted |
-| [0077](0077-doubt-mode-in-the-fresh-review.md) | Doubt mode in the fresh review | Reviewing a risky change, or changing the fresh review | Proposed |
+| [0077](0077-doubt-mode-in-the-fresh-review.md) | Doubt mode in the fresh review | Reviewing a risky change, or changing the fresh review | Accepted |
 | [0068](0068-no-demo-note.md) | No demo note | Changing what marks a demo page | Proposed |
 
 ## Open decisions
