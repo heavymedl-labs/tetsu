@@ -31,7 +31,8 @@ The deploy workflow runs `check`, `reset`, `replay`, and `rename` against the de
 
 `tetsu --env <name> <command>` runs any command with the settings in `.env.<name>` in place of `.env`, such as
 `cargo tetsu --env demo operator create "Ada Lovelace" ada@example.com` against the demo. The file must exist, and the environment
-still wins over it ([ADR-0073](../../docs/adr/0073-settings-files-per-environment.md)).
+still wins over it ([ADR-0073](../../docs/adr/0073-settings-files-per-environment.md)), except that the mail
+settings come all from one or all from the other ([ADR-0078](../../docs/adr/0078-mail-settings-from-one-place.md)).
 
 A folder means its `.toml` files at the top level, in name order, leaving out hidden files. One that is not a
 regular file fails the run. Seeding

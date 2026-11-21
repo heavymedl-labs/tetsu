@@ -127,7 +127,7 @@ impl Local {
 
     /// Refuses `settings` that come partly from the file and partly from the environment, which set them as a
     /// whole: mixed, a password or server from one could reach the other's, such as a real login reaching a local
-    /// Mailpit.
+    /// Mailpit (ADR-0078).
     ///
     /// # Errors
     /// Names the first from each.
