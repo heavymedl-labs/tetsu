@@ -87,21 +87,21 @@ sets its status to Todo, and to Done when it closes. Keep the rest true:
   settles; and **Bug**. A Task, Decision, or Bug is a sub-issue of one Feature, and
   carries an `area:` label for each place its work happens: `web`, `server`,
   `database`, `security`, `infra`, or `tooling`. `scripts/file_issue.py` files one
-  with all of these in one step, its feature given with `--parent` and each area
-  with `--area`; set them by hand on an issue filed any other way, such as from a
-  form. Every issue also lists the
+  with all of these in one step, its feature given with `--parent`, each area
+  with `--area`, and who takes it with `--assignee`; set them by hand on an issue
+  filed any other way, such as from a form. Every issue also lists the
   ASVS chapters and requirements its change must meet, which its commits repeat in
   an `ASVS:` footer ([ADR-0029](docs/adr/0029-security-target-revised.md)).
-- The views: **Board** is the current milestone by status; **By feature** groups
-  open work under its feature; **Decisions** lists the open choices by priority;
-  **By milestone** shows each feature, with its sub-issues, under its milestone;
-  and **Backlog** holds everything.
-- The **Backlog** view groups work by status and sorts it by priority. Within a
-  priority, items keep their board position, so the Todo group reads top to
-  bottom in the order the work happens: each blocker above what it blocks, and a
-  parent issue below its sub-issues. Place a new item where it belongs.
-- **The next task** is the first item in the Todo group that nothing blocks.
-  Keep Now to the few items actually next, and move the rest to Next.
+- The views: **Board** is the current milestone by status; **Decisions** lists
+  the open choices by priority; and **All open** lists every open issue under its
+  milestone, by priority, with its feature beside it.
+- Within a priority, **All open** keeps each item's board position, so each
+  milestone reads top to bottom in the order the work happens: each blocker above
+  what it blocks, and a parent issue below its sub-issues. Place a new item where
+  it belongs.
+- **The next task** is the first item in the current milestone of **All open**
+  that nothing blocks. Keep Now to the few items actually next, and move the rest
+  to Next.
 - Set an issue's status to In Progress when work on it starts, since no
   workflow does. Closing it sets Done.
 - When an issue waits on another, including a choice a Decision settles,
@@ -113,7 +113,9 @@ sets its status to Todo, and to Done when it closes. Keep the rest true:
   scope or risk changes, and at the end of a working session that pushed code
   or closed issues. Say what finished, what is next, any risk, and whether the CI run
   that ended the session passed ([ADR-0023](docs/adr/0023-ci-on-demand.md)).
-- Update the project README when milestones or field meanings change.
+- Update the project README when milestones, views, or field meanings change.
+- Before a session that filed or closed issues ends, run `scripts/check_board.py`.
+  It names each issue that breaks these rules, and says when the board is tidy.
 
 ## Commits
 
