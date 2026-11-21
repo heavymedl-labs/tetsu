@@ -106,7 +106,7 @@ sets `TETSU_DEMO`.
 To see the email it sends, invites included, run `scripts/mailpit.py you@example.com` in another terminal, with
 your operator's address. While it runs, `.env.mailpit` holds `.env`'s settings with mail sent to a local Mailpit,
 shown at `http://localhost:8025`: run Tetsu with `cargo tetsu --env mailpit`, as the steps it prints say. `.env`
-is never touched. Mail settings exported in your shell win over any file, so unset them first.
+is never touched. Tetsu refuses mail settings exported in your shell beside the file's, so unset them first.
 
 Then `cargo tetsu serve` serves `http://localhost:8080` until Ctrl+C. Settings come from `.env` for any the
 environment leaves unset ([ADR-0050](../../docs/adr/0050-local-settings-file.md)), so no command needs them typed.
@@ -123,7 +123,7 @@ Stop the server when you are done.
 | `TETSU_ORIGIN` | `serve`, `operator create`, `operator invite` | The site's own origin, such as `https://tetsu-demo.onrender.com`: the operator pages' passkeys belong to it, only it may send them a state-changing request, and invite links point to it. `https`, or `http` for this machine alone, with no path. From `.env` only when `DATABASE_URL` is too |
 | `TETSU_LOG_FORMAT` | `serve` | `json` or `text`. Unset, logs are text a person reads when they reach a terminal, and JSON anywhere else ([ADR-0071](../../docs/adr/0071-readable-logs-in-a-terminal.md)) |
 | `TETSU_TRUSTED_PROXIES` | `serve` | How many proxies stand in front, each adding an `X-Forwarded-For` entry, from 0 to 10 with no default: `0` locally, `3` on Render. Rate limits key on the entry the first of them added ([ADR-0072](../../docs/adr/0072-rate-limits-by-network-address.md)) |
-| `TETSU_SMTP_HOST` | `serve`, `operator create`, `operator invite` | Optional: the SMTP server mail goes through, over implicit TLS ([ADR-0074](../../docs/adr/0074-operator-email-in-development.md)). Without it, every message is kept for the mailbox page, except an invite, which is never kept. From `.env` only when `DATABASE_URL` is too, as are the settings below |
+| `TETSU_SMTP_HOST` | `serve`, `operator create`, `operator invite` | Optional: the SMTP server mail goes through, over implicit TLS ([ADR-0074](../../docs/adr/0074-operator-email-in-development.md)). Without it, every message is kept for the mailbox page, except an invite, which is never kept. From `.env` only when `DATABASE_URL` is too, as are the settings below, and all of them from one place: some exported and some from a file are refused |
 | `TETSU_SMTP_PORT` | as above | The server's implicit-TLS port, `465` by default |
 | `TETSU_SMTP_USERNAME`, `TETSU_SMTP_PASSWORD` | as above | The server's login, required with a host. The password is a secret, never logged |
 | `TETSU_SMTP_CA_FILE` | as above | Optional: a PEM certificate authority the server is also trusted by, besides the public ones, such as the local Mailpit's, which `scripts/mailpit.py` sets in `.env.mailpit` while it runs |

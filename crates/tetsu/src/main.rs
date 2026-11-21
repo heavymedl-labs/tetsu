@@ -324,6 +324,7 @@ pub(crate) fn mail(
     local: &settings::Local,
 ) -> Result<(Option<tetsu_mail::Smtp>, tetsu_mail::Allowlist), String> {
     local.beside("DATABASE_URL", &settings::MAIL)?;
+    local.together(&settings::MAIL)?;
     let mail = settings::mail(|name| local.var(name))?;
     Ok((settings::smtp(&mail)?, mail.allow))
 }

@@ -125,6 +125,27 @@ impl Local {
         }
     }
 
+    /// Refuses `settings` that come partly from the file and partly from the environment, which set them as a
+    /// whole: mixed, a password or server from one could reach the other's, such as a real login reaching a local
+    /// Mailpit.
+    ///
+    /// # Errors
+    /// Names the first from each.
+    pub fn together(&self, settings: &[&str]) -> Result<(), String> {
+        let from_file = settings.iter().find(|name| self.in_file(name));
+        let exported = settings
+            .iter()
+            .find(|name| !matches!(self.environment(name), Err(VarError::NotPresent)));
+        match (from_file, exported) {
+            (Some(file_name), Some(exported)) => Err(format!(
+                "{file_name} comes from {file} but {exported} from the environment; set these settings all in one \
+                 place, so a password or server from one cannot reach the other's",
+                file = self.name
+            )),
+            _ => Ok(()),
+        }
+    }
+
     fn environment(&self, name: &str) -> Result<String, VarError> {
         if self.environment {
             std::env::var(name)

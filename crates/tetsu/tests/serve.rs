@@ -541,6 +541,47 @@ async fn a_stray_env_file_cannot_change_where_mail_goes() {
     );
 }
 
+/// Mail settings come from one place: one exported where serving starts, beside others in its settings file, would
+/// send a real password to a local Mailpit, or Mailpit's login to a real provider.
+#[test]
+fn mail_settings_from_both_the_environment_and_a_file_are_refused() {
+    let folder =
+        tetsu_postgres::test_support::Scratch::folder("serve-mixed-mail").expect("a folder");
+    std::fs::write(
+        folder.join(".env.mailpit"),
+        "DATABASE_URL=postgres://tetsu@127.0.0.1:1/tetsu\nDATABASE_TLS=disable\nTETSU_DEMO=true\n\
+         TETSU_TRUSTED_PROXIES=0\nTETSU_SMTP_HOST=localhost\n\
+         TETSU_SMTP_USERNAME=tetsu\nTETSU_MAIL_FROM=tetsu@tetsu.localhost\n",
+    )
+    .expect("a settings file");
+    let mut command = Command::new(env!("CARGO_BIN_EXE_tetsu"));
+    command
+        .args(["--env", "mailpit", "serve"])
+        .current_dir(&*folder)
+        .env_remove("DATABASE_URL")
+        .env_remove("DATABASE_TLS")
+        .env_remove("DATABASE_CA_FILE")
+        .env("TETSU_SMTP_PASSWORD", "a-real-password");
+    for (name, _) in std::env::vars_os() {
+        let name = name.to_string_lossy().into_owned();
+        if name != "TETSU_SMTP_PASSWORD"
+            && (name.starts_with("TETSU_") || name.starts_with("OTEL_"))
+        {
+            command.env_remove(name);
+        }
+    }
+    let output = refused(&mut command);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(
+            "TETSU_SMTP_HOST comes from .env.mailpit but TETSU_SMTP_PASSWORD from the environment"
+        ),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("a-real-password"), "{stderr}");
+}
+
 /// A site route would hide a tenant whose address a later release reserved, so serving refuses to start (#90).
 #[tokio::test]
 async fn it_refuses_to_start_while_a_tenant_holds_a_reserved_address() {

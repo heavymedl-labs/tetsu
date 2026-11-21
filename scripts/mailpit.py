@@ -6,9 +6,10 @@ real provider would (ADR-0074). Both are made in `.tools/mailpit/` the first tim
 
 While Mailpit runs, `.env.mailpit` holds `.env`'s settings, with the mail settings that reach Mailpit in
 place of any of yours, for `cargo tetsu --env mailpit` (ADR-0073). Only you can read it, since it holds the
-login, and it goes when the script stops, by Ctrl+C, closing its terminal, or kill. Only kill -9 or a crash
-leaves it, and the next run then asks you to remove it. `.env` itself is never touched. Only the addresses
-given reach Mailpit, so give your operator's to see their invite, which is never kept anywhere else.
+login, and it goes when the script stops, by Ctrl+C, Ctrl+\\, closing its terminal, or kill. Only kill -9 or a
+crash leaves it, and the next run then asks you to remove it. `.env` itself is never touched. Only the
+addresses given reach Mailpit, so give your operator's to see their invite, which Tetsu itself never keeps.
+Mailpit's inbox, kept in `.tools/mailpit/`, opens with no login to anyone using this machine.
 
 usage: scripts/mailpit.py <address> [address ...]
 """
@@ -34,6 +35,9 @@ WEB = 8025
 EXPORTED = re.compile(r"DATABASE_URL|TETSU_(SMTP|MAIL)_\w+")
 # A mail setting in `.env`, which the script's own take the place of.
 MAIL = re.compile(r"^\s*TETSU_(SMTP|MAIL)_\w+\s*=.*\n?", re.MULTILINE)
+
+
+REFUSED_EXISTING = ".env.mailpit already exists: a Mailpit runs, or one was killed. If none runs, remove it."
 
 
 def certificate():
@@ -69,7 +73,7 @@ def refusal():
     if not ENV.exists():
         return "there is no .env yet. Run: cp .env.example .env"
     if SETTINGS.exists():
-        return ".env.mailpit already exists: a Mailpit runs, or one was killed. If none runs, remove it."
+        return REFUSED_EXISTING
     exported = sorted(name for name in os.environ if EXPORTED.fullmatch(name))
     if exported:
         return (
@@ -79,7 +83,7 @@ def refusal():
 
 
 def stop(_signal, _frame):
-    """A closed terminal or kill stops Mailpit as Ctrl+C does, so its settings file still goes."""
+    """Ctrl+\\, a closed terminal, or kill stops Mailpit as Ctrl+C does, so its settings file still goes."""
     raise KeyboardInterrupt
 
 
@@ -126,19 +130,26 @@ def main(addresses):
     command += ["--smtp-tls-cert", str(cert), "--smtp-tls-key", str(key), "--smtp-require-tls"]
     command += ["--smtp-auth-file", str(auth), "--database", str(FILES / "mailpit.db")]
     command += ["--disable-version-check"]
-    for hangup in (signal.SIGTERM, signal.SIGHUP):
+    for hangup in (signal.SIGTERM, signal.SIGHUP, signal.SIGQUIT):
         signal.signal(hangup, stop)
-    # Made only if absent, and readable only by its owner from the start, since it holds the login.
-    descriptor = os.open(SETTINGS, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    made = False
     try:
+        # Made only if absent, so a run started at the same moment never overwrites another's, and readable
+        # only by its owner from the start, since it holds the login. Only a file this run made is removed.
+        descriptor = os.open(SETTINGS, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        made = True
         with os.fdopen(descriptor, "w") as file:
             file.write("\n".join(settings) + "\n")
         print(next_steps(addresses[0]), flush=True)
         return subprocess.run(command, check=False).returncode
+    except FileExistsError:
+        print(f"error: {REFUSED_EXISTING}", file=sys.stderr)
+        return 1
     except KeyboardInterrupt:
         return 0
     finally:
-        SETTINGS.unlink(missing_ok=True)
+        if made:
+            SETTINGS.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

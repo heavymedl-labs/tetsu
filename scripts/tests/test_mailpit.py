@@ -23,6 +23,9 @@ args = sys.argv[1:]
 open(os.environ["LOG"], "a").write(json.dumps(["openssl", *args]) + "\\n")
 for flag in ("-keyout", "-out"):
     open(args[args.index(flag) + 1], "w").write(flag)
+# As a second run would, starting at the same moment: its file appears after this run's check.
+if os.environ.get("RACING"):
+    open(os.environ["SETTINGS"], "w").write("TETSU_SMTP_HOST=other\\n")
 """
 MAILPIT = """#!/usr/bin/env python3
 import json, os, sys, time
@@ -152,8 +155,8 @@ class Mailpit(unittest.TestCase):
                 self.assertFalse(self.settings.exists())
 
     def test_any_way_it_is_stopped_removes_its_file_and_stops_mailpit(self):
-        # Ctrl+C, a closed terminal, or kill.
-        for sent in (signal.SIGINT, signal.SIGHUP, signal.SIGTERM):
+        # Ctrl+C, Ctrl+\\, a closed terminal, or kill.
+        for sent in (signal.SIGINT, signal.SIGQUIT, signal.SIGHUP, signal.SIGTERM):
             with self.subTest(sent=sent.name):
                 status, mailpit = self.stopped_by(sent)
                 self.assertEqual(status, 0)
@@ -168,6 +171,12 @@ class Mailpit(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn(".env.mailpit already exists", result.stderr)
         self.assertEqual(self.settings.read_text(), "TETSU_SMTP_HOST=localhost\n")
+        self.assertEqual(self.calls("mailpit"), [])
+
+    def test_a_file_that_appears_after_the_check_is_never_overwritten_or_removed(self):
+        result = self.start("avery@example.com", RACING="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.settings.read_text(), "TETSU_SMTP_HOST=other\n")
         self.assertEqual(self.calls("mailpit"), [])
 
     def test_mail_settings_in_the_environment_are_refused(self):
