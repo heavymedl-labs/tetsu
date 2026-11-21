@@ -107,7 +107,8 @@ export function ready(host: HTMLElement, browser: Browser): void {
     return;
   }
   const sent = sentFor(parts.action, host, browser);
-  if (parts.action === "join" && sent.link === "") {
+  // Only a join sends a link, so only a join can lack one.
+  if (sent.link === "") {
     parts.status.textContent =
       "This page no longer holds its invite link, which leaves the address bar once the page opens. Open the link from your invite again.";
     host.dataset.state = "failed";
