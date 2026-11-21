@@ -193,10 +193,6 @@ class FileIssue(unittest.TestCase):
         self.assertIn("none.md", result.stderr)
         self.assertEqual(self.calls(), [])
 
-
-if __name__ == "__main__":
-    unittest.main()
-
     def test_a_task_is_typed_task_and_an_adr_decision(self):
         for label, kind in (("task", "Task"), ("adr", "Decision")):
             self.log.unlink(missing_ok=True)
@@ -225,6 +221,17 @@ if __name__ == "__main__":
         self.assertIn("filed https://github.com/o/r/issues/7", result.stderr)
         self.assertIn("and its parent if one was named", result.stderr)
 
+    def test_an_assignee_is_given_the_issue_as_it_is_filed(self):
+        result = self.file("task", "T", self.body, "--tier", "2", "--priority", "now", "--assignee", "pat")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        create = next(c for c in self.calls() if c[:2] == ["issue", "create"])
+        self.assertEqual(create[create.index("--assignee") + 1], "pat")
+
+    def test_without_an_assignee_no_one_is_assigned(self):
+        self.file("task", "T", self.body, "--tier", "2", "--priority", "now")
+        create = next(c for c in self.calls() if c[:2] == ["issue", "create"])
+        self.assertNotIn("--assignee", create)
+
     def test_each_area_becomes_a_label(self):
         result = self.file(
             "task",
@@ -246,3 +253,7 @@ if __name__ == "__main__":
             result = self.file("task", "T", str(self.body), "--tier", "2", "--priority", "now", area=area)
             self.assertEqual(result.returncode, 2, area)
             self.assertFalse(any(c[:2] == ["issue", "create"] for c in self.calls()), area)
+
+
+if __name__ == "__main__":
+    unittest.main()

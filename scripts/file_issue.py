@@ -3,10 +3,10 @@
 
 usage: scripts/file_issue.py <task|adr> <title> <body file> --tier <1|2|3|none>
            --priority <now|next|later|anytime> --area <area> [--area <area> ...] [--milestone <title>]
-           [--parent <feature issue number>]
+           [--parent <feature issue number>] [--assignee <login>]
 
 A task is typed Task and an adr Decision. Each --area adds an `area: ` label for where the work happens.
---parent makes the new issue a sub-issue of that feature.
+--parent makes the new issue a sub-issue of that feature, and --assignee gives it to that GitHub user.
 
 Everything the board needs is looked up before the issue exists, so a bad value or a changed board fails with
 nothing filed. If the board refuses an edit after that, the error names the filed issue and what is still
@@ -112,6 +112,7 @@ def file_issue(args):
         milestone,
         "--body-file",
         str(args.body),
+        *(("--assignee", args.assignee) if args.assignee else ()),
     )
     try:
         if args.parent is not None:
@@ -157,6 +158,7 @@ def main():
     parser.add_argument("--area", required=True, action="append", choices=AREAS)
     parser.add_argument("--milestone")
     parser.add_argument("--parent", type=int)
+    parser.add_argument("--assignee")
     args = parser.parse_args()
     try:
         url = file_issue(args)
