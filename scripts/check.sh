@@ -5,6 +5,34 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+fast=false
+if [[ "${1:-}" == "--fast" ]]; then
+  fast=true
+  shift
+fi
+
+# A full run cleans up on the way out, however it ends, even at its first step: it removes what nothing uses, such
+# as a killed test's server and files, cargo-mutants' copies, superseded build artifacts, and old build cache (#124).
+# It drops every test database too, pass or fail, since tests drop their own but a killed test cannot (#43); only
+# once a test Postgres has answered, since before then there is none to reach.
+work=""
+postgres=false
+finish() {
+  local status=$?
+  if [[ -n "$work" ]]; then
+    rm -rf "$work"
+  fi
+  python3 scripts/clean.py --routine
+  if [[ "$postgres" == true ]] && ! cargo run -q -p tetsu-postgres --example drop_test_databases; then
+    echo "error: test databases were not dropped; drop them or rerun the checks" >&2
+    status=1
+  fi
+  exit "$status"
+}
+if [[ "$fast" == false ]]; then
+  trap finish EXIT
+fi
+
 wanted="$(cat .nvmrc)"
 # .nvmrc names an exact release, which fixes npm's version too, or a major version.
 right_node() {
@@ -49,12 +77,6 @@ fi
 manifest=crates/tetsu/assets/build/.vite/manifest.json
 if [[ ! -f "$manifest" ]] || [[ -n "$(find web crates/*/templates package-lock.json -type f -newer "$manifest" -print -quit)" ]]; then
   npx --no-install vite build --config web/vite.config.ts --logLevel error
-fi
-
-fast=false
-if [[ "${1:-}" == "--fast" ]]; then
-  fast=true
-  shift
 fi
 
 for tool in cargo-llvm-cov cargo-mutants .tools/bin/betterleaks .tools/bin/mailpit .tools/bin/lizard .tools/bin/ruff \
@@ -139,6 +161,7 @@ fi
 if [[ "$url" =~ $authority ]] && ! (echo >"/dev/tcp/${BASH_REMATCH[2]}/${BASH_REMATCH[3]}") 2>/dev/null; then
   no_postgres "${BASH_REMATCH[2]}:${BASH_REMATCH[3]}"
 fi
+postgres=true
 
 base="origin/main"
 if [[ "${1:-}" == "--base" ]]; then
@@ -186,20 +209,6 @@ python3 scripts/check_dated_entries.py .config/npm-checks.toml overrides entries
 
 # Limits are in ADR-0015 and ADR-0016. Cargo skips the benchmark harness, except for formatting.
 work="$(mktemp -d)"
-# Drop every test database on the way out, pass or fail. Tests drop their own, but a killed test cannot (#43).
-# Then remove what nothing uses: a killed test's server and files, cargo-mutants' copies, superseded build
-# artifacts, and old build cache (#124).
-finish() {
-  local status=$?
-  rm -rf "$work"
-  python3 scripts/clean.py --routine
-  if ! cargo run -q -p tetsu-postgres --example drop_test_databases; then
-    echo "error: test databases were not dropped; drop them or rerun the checks" >&2
-    status=1
-  fi
-  exit "$status"
-}
-trap finish EXIT
 
 # npm dependencies (ADR-0034). Advisories and deprecations need the network: when the audit or the registry cannot
 # be reached, the last passing check of the same lockfile counts for 7 days, and everything else still runs.

@@ -489,6 +489,30 @@ class CheckScript(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("cargo run -q -p tetsu-postgres --example drop_test_databases", self.log.read_text())
 
+    def test_a_run_stopped_at_its_first_step_still_cleans_up(self):
+        self.stub("node", "echo v10.15.3")
+        result = self.check()
+        self.assertEqual(result.returncode, 1)
+        log = self.log.read_text()
+        self.assertIn("python scripts/clean.py --routine", log)
+        # No test Postgres has answered yet, so there is none to drop databases on.
+        self.assertNotIn("drop_test_databases", log)
+        self.assertNotIn("test databases were not dropped", result.stderr)
+
+    def test_a_run_stopped_for_want_of_a_test_postgres_cleans_up_without_dropping(self):
+        self.no_database = True
+        result = self.check()
+        self.assertEqual(result.returncode, 1)
+        log = self.log.read_text()
+        self.assertIn("python scripts/clean.py --routine", log)
+        self.assertNotIn("drop_test_databases", log)
+        self.assertNotIn("test databases were not dropped", result.stderr)
+
+    def test_fast_mode_leaves_the_cleanup_to_full_runs(self):
+        result = self.check("--fast")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("clean.py", self.log.read_text())
+
     def test_fails_when_the_final_sweep_cannot_drop_the_test_databases(self):
         self.stub("cargo", f'echo "cargo $*" >> "{self.log}"; [ "$1" != run ]')
         result = self.check()
@@ -517,7 +541,8 @@ class CheckScript(unittest.TestCase):
         self.stub("cargo", "exit 1")
         result = self.check()
         self.assertEqual(result.returncode, 1)
-        self.assertFalse(self.log.exists())
+        # Nothing after the failing stage runs but the cleanup.
+        self.assertEqual(self.log.read_text().strip(), "python scripts/clean.py --routine")
 
     def test_switches_node_through_nvm(self):
         self.stub("node", 'if [ -n "$NVM_SWITCHED" ]; then echo v26.1.0; else echo v10.15.3; fi')
