@@ -51,8 +51,8 @@ fn is_environment(name: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
-/// Settings a local `.env` file holds (ADR-0050), or an environment's `.env.<name>` (ADR-0073). The environment always
-/// wins over them. The default holds no settings and never reads the environment, so a test given one cannot reach
+/// Settings a local `.env` file holds (ADR-0050), or an environment's `.env.<name>` (ADR-0073). The environment wins
+/// over them, except that the mail settings come all from one or all from the other (ADR-0078). The default holds no settings and never reads the environment, so a test given one cannot reach
 /// whatever database its shell exports.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Local {

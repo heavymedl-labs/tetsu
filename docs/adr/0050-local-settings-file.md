@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Production secrets rule superseded by [ADR-0073](0073-settings-files-per-environment.md)
+- The environment winning over the file superseded, for the mail settings, by [ADR-0078](0078-mail-settings-from-one-place.md)
 - Date: 2026-11-13
 
 ## Context
