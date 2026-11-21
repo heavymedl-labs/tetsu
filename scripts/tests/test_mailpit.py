@@ -164,6 +164,28 @@ class Mailpit(unittest.TestCase):
                 with self.assertRaises(ProcessLookupError):
                     os.kill(mailpit, 0)
 
+    def test_a_second_stop_cannot_cut_the_cleanup_short(self):
+        mailpit = self.root / "mailpit.pid"
+        mailpit.unlink(missing_ok=True)
+        script = subprocess.Popen(
+            ["python3", str(self.root / "scripts" / "mailpit.py"), "avery@example.com"],
+            cwd=self.root,
+            env=self.environment(MAILPIT_WAIT=str(mailpit)),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
+        deadline = time.monotonic() + 10
+        while not mailpit.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        for sent in (signal.SIGINT, signal.SIGTERM, signal.SIGINT):
+            script.send_signal(sent)
+        _, stderr = script.communicate(timeout=10)
+        self.assertEqual(script.returncode, 0, stderr)
+        self.assertNotIn(b"Traceback", stderr)
+        self.assertFalse(self.settings.exists())
+        with self.assertRaises(ProcessLookupError):
+            os.kill(int(mailpit.read_text()), 0)
+
     def test_a_file_already_there_is_left_alone(self):
         # Another run's, or one kill -9 left: either way it is the person's to remove.
         self.settings.write_text("TETSU_SMTP_HOST=localhost\n")

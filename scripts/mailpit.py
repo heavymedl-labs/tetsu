@@ -10,7 +10,8 @@ login, and it goes when the script stops, by Ctrl+C, Ctrl+\\, closing its termin
 crash leaves it, and the next run then asks you to remove it. `.env` itself is never touched. Only the
 addresses given reach Mailpit, so give your operator's to see their invite, which Tetsu itself never keeps.
 Mailpit's inbox, kept in `.tools/mailpit/`, opens with no login to anyone using this machine. Two first runs
-started at the same instant can make the certificate twice; restarting both mends it.
+started at the same instant can leave a key and certificate that do not match, and Mailpit then cannot start:
+remove `.tools/mailpit/key.pem` and `cert.pem`, and the next run makes them again.
 
 usage: scripts/mailpit.py <address> [address ...]
 """
@@ -21,6 +22,7 @@ import secrets
 import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -40,6 +42,10 @@ MAIL = re.compile(r"^\s*TETSU_(SMTP|MAIL)_\w+\s*=.*\n?", re.MULTILINE)
 
 # How the script is stopped, besides kill -9: Ctrl+C, Ctrl+\\, a closed terminal, and kill.
 STOPS = (signal.SIGINT, signal.SIGQUIT, signal.SIGHUP, signal.SIGTERM)
+# Set by the first stop, after which any other is ignored.
+STOPPING = []
+# How long Mailpit has to stop when asked, before it is killed.
+GRACE = 5
 REFUSED_EXISTING = ".env.mailpit already exists: a Mailpit runs, or one was killed. If none runs, remove it."
 
 
@@ -86,8 +92,27 @@ def refusal():
 
 
 def stop(_signal, _frame):
-    """Ctrl+\\, a closed terminal, or kill stops Mailpit as Ctrl+C does, so its settings file still goes."""
+    """The first stop ends the run, which then stops Mailpit and removes its settings file. Any later one,
+    such as Ctrl+C pressed twice, is ignored, so nothing cuts that cleanup short."""
+    if STOPPING:
+        return
+    STOPPING.append(True)
     raise KeyboardInterrupt
+
+
+def ended(child):
+    """Stops Mailpit, asking first and killing it if it has not stopped in time."""
+    try:
+        os.kill(child, signal.SIGTERM)
+        deadline = time.monotonic() + GRACE
+        while os.waitpid(child, os.WNOHANG) == (0, 0):
+            if time.monotonic() > deadline:
+                os.kill(child, signal.SIGKILL)
+                os.waitpid(child, 0)
+                return
+            time.sleep(0.05)
+    except (ChildProcessError, ProcessLookupError):
+        return
 
 
 def next_steps(address):
@@ -133,9 +158,9 @@ def main(addresses):
     command += ["--smtp-tls-cert", str(cert), "--smtp-tls-key", str(key), "--smtp-require-tls"]
     command += ["--smtp-auth-file", str(auth), "--database", str(FILES / "mailpit.db")]
     command += ["--disable-version-check"]
-    for hangup in (signal.SIGTERM, signal.SIGHUP, signal.SIGQUIT):
-        signal.signal(hangup, stop)
-    made = False
+    for each in STOPS:
+        signal.signal(each, stop)
+    made, child = False, None
     try:
         # Made only if absent, so a run started at the same moment never overwrites another's, and readable
         # only by its owner from the start, since it holds the login. Only a file this run made is removed. A
@@ -150,16 +175,24 @@ def main(addresses):
         with os.fdopen(descriptor, "w") as file:
             file.write("\n".join(settings) + "\n")
         print(next_steps(addresses[0]), flush=True)
-        return subprocess.run(command, check=False).returncode
+        # Started with stops held too, so a stop always finds Mailpit's process to end; Mailpit itself starts
+        # with none held.
+        held = signal.pthread_sigmask(signal.SIG_BLOCK, STOPS)
+        try:
+            child = os.posix_spawn(command[0], command, os.environ, setsigmask=())
+        finally:
+            signal.pthread_sigmask(signal.SIG_SETMASK, held)
+        _, status = os.waitpid(child, 0)
+        child = None
+        return os.waitstatus_to_exitcode(status)
     except FileExistsError:
         print(f"error: {REFUSED_EXISTING}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
+        if child is not None:
+            ended(child)
         return 0
     finally:
-        # A second stop, such as Ctrl+C pressed twice, cannot cut the cleanup short.
-        for again in STOPS:
-            signal.signal(again, signal.SIG_IGN)
         if made:
             SETTINGS.unlink(missing_ok=True)
 
