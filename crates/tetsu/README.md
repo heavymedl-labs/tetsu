@@ -105,7 +105,8 @@ sets `TETSU_DEMO`.
 
 To see the email it sends, invites included, run `scripts/mailpit.py you@example.com` in another terminal, with
 your operator's address, before `serve`. It points `.env` at a local Mailpit until it stops, shows mail at
-`http://localhost:8025`, and prints the next steps.
+`http://localhost:8025`, and prints the next steps. It refuses mail settings of your own in `.env` or exported
+where it runs; unset any exported only where `serve` runs.
 
 Then `cargo tetsu serve` serves `http://localhost:8080` until Ctrl+C. Settings come from `.env` for any the
 environment leaves unset ([ADR-0050](../../docs/adr/0050-local-settings-file.md)), so no command needs them typed.

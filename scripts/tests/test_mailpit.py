@@ -6,6 +6,7 @@ import shutil
 import signal
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -138,24 +139,61 @@ class Mailpit(unittest.TestCase):
         self.start("avery@example.com")
         self.assertEqual(stat.S_IMODE(self.env.stat().st_mode), 0o600)
 
-    def test_a_running_mailpits_settings_are_left_alone(self):
-        live = (
+    def block_for(self, pid):
+        return (
             LOCAL
-            + f"\n# Local Mailpit for process {os.getpid()}, set by scripts/mailpit.py until it stops.\n"
+            + f"\n# Local Mailpit for process {pid}, set by scripts/mailpit.py until it stops.\n"
+            + "TETSU_SMTP_HOST=localhost\n# End of local Mailpit.\n"
         )
-        live += "TETSU_SMTP_HOST=localhost\n# End of local Mailpit.\n"
+
+    def test_a_running_mailpits_settings_are_left_alone(self):
+        # A process running scripts/mailpit.py, as another run of it would be.
+        other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", "scripts/mailpit.py"])
+        self.addCleanup(other.wait)
+        self.addCleanup(other.kill)
+        live = self.block_for(other.pid)
         self.env.write_text(live)
         result = self.start("lee@example.org")
         self.assertEqual(result.returncode, 1)
-        self.assertIn(f"a local Mailpit already runs, as process {os.getpid()}", result.stderr)
+        self.assertIn(f"a local Mailpit already runs, as process {other.pid}", result.stderr)
         self.assertEqual(self.env.read_text(), live)
         self.assertEqual(self.calls("mailpit"), [])
 
-    def test_mail_settings_in_the_environment_are_never_overridden(self):
-        result = self.start("avery@example.com", TETSU_SMTP_HOST="smtp.mailgun.org", TETSU_MAIL_FROM="")
+    def test_a_block_whose_process_is_now_something_else_is_replaced(self):
+        # After kill -9 or a reboot, its process id may name an unrelated process, such as this test.
+        self.env.write_text(self.block_for(os.getpid()))
+        result = self.start("lee@example.org")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.env.read_text(), LOCAL)
+
+    def test_a_symlinked_env_stays_a_link(self):
+        shared = self.root / "shared.env"
+        shared.write_text(LOCAL)
+        self.env.unlink()
+        self.env.symlink_to(shared)
+        self.start("avery@example.com", ENV_FILE=str(shared))
+        self.assertTrue(self.env.is_symlink())
+        self.assertEqual(shared.read_text(), LOCAL)
+
+    def test_no_partial_copy_of_env_is_left_behind(self):
+        # Not even one an earlier run left when it was interrupted mid-write.
+        partial = self.root / ".env.mailpit-partial"
+        partial.write_text("TETSU_SMTP_PASSWORD=old\n")
+        self.start("avery@example.com")
+        self.assertFalse(partial.exists())
+
+    def test_an_exported_database_url_is_refused(self):
+        # serve then takes no mail setting from .env, so the block would do nothing.
+        result = self.start("avery@example.com", DATABASE_URL="postgres://elsewhere/db")
         self.assertEqual(result.returncode, 1)
-        self.assertIn("the environment sets TETSU_SMTP_HOST", result.stderr)
-        self.assertNotIn("TETSU_MAIL_FROM", result.stderr)
+        self.assertIn("DATABASE_URL is exported", result.stderr)
+        self.assertEqual(self.env.read_text(), LOCAL)
+
+    def test_mail_settings_in_the_environment_are_never_overridden(self):
+        # Even an empty one, which serve still prefers to .env's.
+        result = self.start("avery@example.com", TETSU_SMTP_HOST="smtp.mailgun.org", TETSU_MAIL_ALLOW="")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("the environment sets TETSU_MAIL_ALLOW, TETSU_SMTP_HOST", result.stderr)
         self.assertEqual(self.env.read_text(), LOCAL)
 
     def test_the_rest_of_env_is_kept_while_it_runs(self):

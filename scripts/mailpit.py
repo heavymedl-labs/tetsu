@@ -6,9 +6,10 @@ real provider would (ADR-0074). Both are made in `.tools/mailpit/` the first tim
 
 While Mailpit runs, a marked block in `.env` points Tetsu at it. Stopping the script, by Ctrl+C, closing its
 terminal, or kill, stops Mailpit and takes the block out again, keeping any other edit, so mail goes back to
-/ops/mailbox. It never overrides mail settings of your own, in `.env` or the environment, nor a running
-Mailpit's. Only the addresses given reach Mailpit, as TETSU_MAIL_ALLOW, so give your operator's to see their
-invite, which is never kept anywhere else.
+/ops/mailbox. Only kill -9 or a crash leaves the block, which the next run replaces. It never overrides mail
+settings in `.env`, or exported where it starts, nor a running Mailpit's; settings exported only where `serve`
+runs are yours to unset. Only the addresses given reach Mailpit, as TETSU_MAIL_ALLOW, so give your operator's
+to see their invite, which is never kept anywhere else.
 
 usage: scripts/mailpit.py <address> [address ...]
 """
@@ -64,13 +65,12 @@ def login():
 
 
 def running(pid):
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+    """Whether `pid` is a run of this script, not just any process: after kill -9 or a reboot, a left block's
+    process id may belong to something else."""
+    shown = subprocess.run(
+        ["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True, check=False
+    )
+    return "mailpit.py" in shown.stdout
 
 
 def without_blocks(text, pids=None):
@@ -79,11 +79,18 @@ def without_blocks(text, pids=None):
 
 
 def save(text):
-    """Writes `.env` whole or not at all, keeping its permissions, so an interrupt cannot cut it short."""
-    partial = ENV.with_name(".env.mailpit-partial")
-    partial.write_text(text)
-    partial.chmod(ENV.stat().st_mode)
-    partial.replace(ENV)
+    """Writes `.env` whole or not at all, so an interrupt cannot cut it short. The copy is made with `.env`'s
+    permissions from the start, since it holds a password, and replaces the file a symlinked `.env` names."""
+    target = ENV.resolve()
+    partial = target.with_name(f"{target.name}.mailpit-partial")
+    partial.unlink(missing_ok=True)
+    descriptor = os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_EXCL, target.stat().st_mode & 0o777)
+    try:
+        with os.fdopen(descriptor, "w") as file:
+            file.write(text)
+        partial.replace(target)
+    finally:
+        partial.unlink(missing_ok=True)
 
 
 def stop(_signal, _frame):
@@ -117,7 +124,10 @@ def refusal():
     live = [int(pid) for pid in BLOCK.findall(text) if running(int(pid))]
     if live:
         return f"a local Mailpit already runs, as process {live[0]}. Stop it first."
-    exported = sorted(name for name, value in os.environ.items() if SETTING.fullmatch(name) and value)
+    if "DATABASE_URL" in os.environ:
+        return "DATABASE_URL is exported, so serve takes no mail settings from .env. Unset it to use .env's."
+    # Even an empty one, which serve still prefers to .env's.
+    exported = sorted(name for name in os.environ if SETTING.fullmatch(name))
     for where, own in (
         (".env already sets", sorted(set(MAIL.findall(without_blocks(text))))),
         ("the environment sets", exported),
