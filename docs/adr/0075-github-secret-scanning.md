@@ -1,6 +1,6 @@
 # 0075. GitHub secret scanning
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-21
 - Supersedes [ADR-0027](0027-secrets-revised.md)'s rejection of GitHub secret scanning
 

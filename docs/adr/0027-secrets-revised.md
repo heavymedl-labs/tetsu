@@ -1,6 +1,7 @@
 # 0027. Secrets, revised
 
 - Status: Accepted
+- Rejection of GitHub secret scanning superseded by [ADR-0075](0075-github-secret-scanning.md)
 - Date: 2026-11-08
 - Supersedes [ADR-0024](0024-secrets.md)
 
