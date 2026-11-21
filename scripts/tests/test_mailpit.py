@@ -1,21 +1,22 @@
-"""The local Mailpit makes its certificate and login once, and points .env at itself only while it runs."""
+"""The local Mailpit makes its certificate and login once, and gives Tetsu a settings file while it runs."""
 
 import json
 import os
+import re
 import shutil
 import signal
 import stat
 import subprocess
-import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
 
-from scripts.tests.support import ROOT, clean_env, run, write
+from scripts.tests.support import ROOT, clean_env, write
 
-# Each logs how it was run. openssl writes the files it was asked for. mailpit also logs .env as it stands
-# while Mailpit runs, then exits as MAILPIT_EXIT says.
+# Each logs how it was run. openssl writes the files it was asked for. mailpit also logs .env.mailpit's mode
+# and text as Mailpit starts, then waits if MAILPIT_WAIT names a file for its process id, and exits as
+# MAILPIT_EXIT says.
 OPENSSL = """#!/usr/bin/env python3
 import json, os, sys
 args = sys.argv[1:]
@@ -25,16 +26,17 @@ for flag in ("-keyout", "-out"):
 """
 MAILPIT = """#!/usr/bin/env python3
 import json, os, sys, time
-env = open(os.environ["ENV_FILE"]).read()
-open(os.environ["LOG"], "a").write(json.dumps(["mailpit", env, *sys.argv[1:]]) + "\\n")
-if os.environ.get("MAILPIT_APPEND"):
-    open(os.environ["ENV_FILE"], "a").write(os.environ["MAILPIT_APPEND"])
+mode = oct(os.stat(os.environ["SETTINGS"]).st_mode & 0o777)
+settings = open(os.environ["SETTINGS"]).read()
+open(os.environ["LOG"], "a").write(json.dumps(["mailpit", mode, settings, *sys.argv[1:]]) + "\\n")
 if os.environ.get("MAILPIT_WAIT"):
     open(os.environ["MAILPIT_WAIT"], "w").write(str(os.getpid()))
     time.sleep(60)
 sys.exit(int(os.environ.get("MAILPIT_EXIT") or 0))
 """
 LOCAL = "DATABASE_URL=postgres://postgres@localhost:54329/tetsu_local\nTETSU_DEMO=true\n"
+# What a person's shell may export, which would change what the script does, so the tests never inherit it.
+INHERITED = re.compile(r"DATABASE_URL|TETSU_(SMTP|MAIL)_\w+")
 
 
 class Mailpit(unittest.TestCase):
@@ -50,20 +52,27 @@ class Mailpit(unittest.TestCase):
         self.files = self.root / ".tools" / "mailpit"
         self.env = self.root / ".env"
         self.env.write_text(LOCAL)
+        self.settings = self.root / ".env.mailpit"
 
     def environment(self, **extra):
+        inherited = {name: value for name, value in clean_env().items() if not INHERITED.fullmatch(name)}
         return {
+            **inherited,
             "PATH": f"{self.root / 'bin'}:/usr/bin:/bin",
             "LOG": str(self.log),
-            "ENV_FILE": str(self.env),
+            "SETTINGS": str(self.settings),
             **extra,
         }
 
     def start(self, *addresses, exit_code=0, **extra):
-        return run(
-            ["python3", self.root / "scripts" / "mailpit.py", *addresses],
-            self.root,
-            **self.environment(MAILPIT_EXIT=str(exit_code), **extra),
+        return subprocess.run(
+            ["python3", str(self.root / "scripts" / "mailpit.py"), *addresses],
+            cwd=self.root,
+            env=self.environment(MAILPIT_EXIT=str(exit_code), **extra),
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            check=False,
         )
 
     def stopped_by(self, sent):
@@ -74,7 +83,7 @@ class Mailpit(unittest.TestCase):
         script = subprocess.Popen(
             ["python3", str(self.root / "scripts" / "mailpit.py"), "avery@example.com"],
             cwd=self.root,
-            env=clean_env(**self.environment(MAILPIT_WAIT=str(mailpit))),
+            env=self.environment(MAILPIT_WAIT=str(mailpit)),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
@@ -90,18 +99,22 @@ class Mailpit(unittest.TestCase):
         return [call[1:] for call in map(json.loads, lines) if call[0] == program]
 
     def running(self):
-        """The settings .env held while Mailpit ran, and the arguments it ran with, from its last start."""
-        env, *args = self.calls("mailpit")[-1]
-        settings = dict(line.split("=", 1) for line in env.splitlines() if line.startswith("TETSU_"))
-        return settings, args
+        """The settings file's mode and text as Mailpit started, and its arguments, from its last start."""
+        mode, text, *args = self.calls("mailpit")[-1]
+        return mode, text, args
 
-    def test_it_points_env_at_mailpit_while_it_runs(self):
+    def setting(self, text):
+        return dict(line.split("=", 1) for line in text.splitlines() if line and not line.startswith("#"))
+
+    def test_while_it_runs_tetsu_has_a_settings_file_of_its_own_that_reaches_mailpit(self):
         result = self.start("avery@example.com")
         self.assertEqual(result.returncode, 0, result.stderr)
         (made,) = self.calls("openssl")
         self.assertIn("subjectAltName=DNS:localhost", made)
         self.assertIn("basicConstraints=critical,CA:FALSE", made)
-        settings, _ = self.running()
+        _, text, _ = self.running()
+        settings = self.setting(text)
+        self.assertEqual(settings["DATABASE_URL"], "postgres://postgres@localhost:54329/tetsu_local")
         self.assertEqual(settings["TETSU_SMTP_HOST"], "localhost")
         self.assertEqual(settings["TETSU_SMTP_PORT"], "1465")
         self.assertEqual(settings["TETSU_SMTP_USERNAME"], "tetsu")
@@ -111,127 +124,69 @@ class Mailpit(unittest.TestCase):
         self.assertEqual(settings["TETSU_MAIL_ALLOW"], "avery@example.com")
         self.assertEqual((self.files / "auth").read_text(), f"tetsu:{settings['TETSU_SMTP_PASSWORD']}\n")
         self.assertEqual(stat.S_IMODE((self.files / "auth").stat().st_mode), 0o600)
-        # The password stays in .env, never on the screen.
+        # The password stays in the file, never on the screen.
         self.assertNotIn(settings["TETSU_SMTP_PASSWORD"], result.stdout)
 
-    def test_env_is_as_it_was_once_mailpit_stops(self):
+    def test_env_is_never_touched(self):
+        self.start("avery@example.com")
+        self.assertEqual(self.env.read_text(), LOCAL)
+
+    def test_its_file_is_readable_only_by_its_owner_from_the_start(self):
+        # Mailpit sees the file as it starts, the first moment anything else could read it.
+        self.start("avery@example.com")
+        mode, _, _ = self.running()
+        self.assertEqual(mode, "0o600")
+
+    def test_mail_settings_of_your_own_in_env_are_left_out_of_its_file(self):
+        self.env.write_text(LOCAL + "TETSU_SMTP_HOST=smtp.mailgun.org\nTETSU_MAIL_ALLOW=lee@example.org\n")
+        result = self.start("avery@example.com")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        _, text, _ = self.running()
+        self.assertEqual(text.count("TETSU_SMTP_HOST="), 1)
+        self.assertEqual(self.setting(text)["TETSU_MAIL_ALLOW"], "avery@example.com")
+
+    def test_its_file_goes_once_mailpit_stops(self):
         for exit_code in (0, 3):
             with self.subTest(exit_code=exit_code):
                 self.assertEqual(self.start("avery@example.com", exit_code=exit_code).returncode, exit_code)
-                self.assertEqual(self.env.read_text(), LOCAL)
+                self.assertFalse(self.settings.exists())
 
-    def test_an_edit_made_while_it_runs_is_kept(self):
-        self.start("avery@example.com", MAILPIT_APPEND="TETSU_LOG_FORMAT=json\n")
-        self.assertEqual(self.env.read_text(), LOCAL + "TETSU_LOG_FORMAT=json\n")
-
-    def test_any_way_it_is_stopped_takes_its_settings_out_and_stops_mailpit(self):
+    def test_any_way_it_is_stopped_removes_its_file_and_stops_mailpit(self):
         # Ctrl+C, a closed terminal, or kill.
         for sent in (signal.SIGINT, signal.SIGHUP, signal.SIGTERM):
             with self.subTest(sent=sent.name):
                 status, mailpit = self.stopped_by(sent)
                 self.assertEqual(status, 0)
-                self.assertEqual(self.env.read_text(), LOCAL)
+                self.assertFalse(self.settings.exists())
                 with self.assertRaises(ProcessLookupError):
                     os.kill(mailpit, 0)
 
-    def test_env_keeps_its_permissions(self):
-        self.env.chmod(0o600)
-        self.start("avery@example.com")
-        self.assertEqual(stat.S_IMODE(self.env.stat().st_mode), 0o600)
-
-    def block_for(self, pid):
-        return (
-            LOCAL
-            + f"\n# Local Mailpit for process {pid}, set by scripts/mailpit.py until it stops.\n"
-            + "TETSU_SMTP_HOST=localhost\n# End of local Mailpit.\n"
-        )
-
-    def test_a_running_mailpits_settings_are_left_alone(self):
-        # A process running scripts/mailpit.py, as another run of it would be.
-        other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", "scripts/mailpit.py"])
-        self.addCleanup(other.wait)
-        self.addCleanup(other.kill)
-        live = self.block_for(other.pid)
-        self.env.write_text(live)
-        result = self.start("lee@example.org")
+    def test_a_file_already_there_is_left_alone(self):
+        # Another run's, or one kill -9 left: either way it is the person's to remove.
+        self.settings.write_text("TETSU_SMTP_HOST=localhost\n")
+        result = self.start("avery@example.com")
         self.assertEqual(result.returncode, 1)
-        self.assertIn(f"a local Mailpit already runs, as process {other.pid}", result.stderr)
-        self.assertEqual(self.env.read_text(), live)
+        self.assertIn(".env.mailpit already exists", result.stderr)
+        self.assertEqual(self.settings.read_text(), "TETSU_SMTP_HOST=localhost\n")
         self.assertEqual(self.calls("mailpit"), [])
 
-    def test_a_block_whose_process_is_now_something_else_is_replaced(self):
-        # After kill -9 or a reboot, its process id may name an unrelated process, such as this test.
-        self.env.write_text(self.block_for(os.getpid()))
-        result = self.start("lee@example.org")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.env.read_text(), LOCAL)
-
-    def test_a_symlinked_env_stays_a_link(self):
-        shared = self.root / "shared.env"
-        shared.write_text(LOCAL)
-        self.env.unlink()
-        self.env.symlink_to(shared)
-        self.start("avery@example.com", ENV_FILE=str(shared))
-        self.assertTrue(self.env.is_symlink())
-        self.assertEqual(shared.read_text(), LOCAL)
-
-    def test_no_partial_copy_of_env_is_left_behind(self):
-        # Not even one an earlier run left when it was interrupted mid-write.
-        partial = self.root / ".env.mailpit-partial"
-        partial.write_text("TETSU_SMTP_PASSWORD=old\n")
-        self.start("avery@example.com")
-        self.assertFalse(partial.exists())
-
-    def test_an_exported_database_url_is_refused(self):
-        # serve then takes no mail setting from .env, so the block would do nothing.
-        result = self.start("avery@example.com", DATABASE_URL="postgres://elsewhere/db")
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("DATABASE_URL is exported", result.stderr)
-        self.assertEqual(self.env.read_text(), LOCAL)
-
-    def test_mail_settings_in_the_environment_are_never_overridden(self):
-        # Even an empty one, which serve still prefers to .env's.
+    def test_mail_settings_in_the_environment_are_refused(self):
+        # Even an empty one, which Tetsu still prefers to its settings file's.
         result = self.start("avery@example.com", TETSU_SMTP_HOST="smtp.mailgun.org", TETSU_MAIL_ALLOW="")
         self.assertEqual(result.returncode, 1)
         self.assertIn("the environment sets TETSU_MAIL_ALLOW, TETSU_SMTP_HOST", result.stderr)
-        self.assertEqual(self.env.read_text(), LOCAL)
+        self.assertFalse(self.settings.exists())
 
-    def test_the_rest_of_env_is_kept_while_it_runs(self):
-        self.start("avery@example.com")
-        env, *_ = self.calls("mailpit")[-1]
-        self.assertTrue(env.startswith(LOCAL))
-
-    def test_a_block_a_killed_run_left_is_replaced_not_repeated(self):
-        self.start("avery@example.com")
-        env, *_ = self.calls("mailpit")[-1]
-        self.env.write_text(env)
-        self.start("lee@example.org")
-        settings, _ = self.running()
-        again, *_ = self.calls("mailpit")[-1]
-        self.assertEqual(again.count("TETSU_SMTP_HOST="), 1)
-        self.assertEqual(settings["TETSU_MAIL_ALLOW"], "lee@example.org")
-        self.assertEqual(self.env.read_text(), LOCAL)
-
-    def test_mail_settings_of_your_own_are_never_overridden(self):
-        own = LOCAL + "TETSU_SMTP_HOST=smtp.mailgun.org\n# TETSU_MAIL_FROM=commented@example.com\n"
-        self.env.write_text(own)
-        result = self.start("avery@example.com")
+    def test_an_exported_database_url_is_refused(self):
+        # Tetsu then takes no mail setting from a file, so the file would do nothing.
+        result = self.start("avery@example.com", DATABASE_URL="postgres://elsewhere/db")
         self.assertEqual(result.returncode, 1)
-        self.assertIn(".env already sets TETSU_SMTP_HOST", result.stderr)
-        self.assertNotIn("TETSU_MAIL_FROM", result.stderr)
-        self.assertEqual(self.env.read_text(), own)
-        self.assertEqual(self.calls("mailpit"), [])
-
-    def test_without_env_it_says_to_make_one(self):
-        self.env.unlink()
-        result = self.start("avery@example.com")
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("cp .env.example .env", result.stderr)
-        self.assertFalse(self.env.exists())
+        self.assertIn("the environment sets DATABASE_URL", result.stderr)
+        self.assertFalse(self.settings.exists())
 
     def test_mailpit_answers_only_on_this_machine_and_only_over_tls_with_the_login(self):
         self.start("avery@example.com")
-        _, args = self.running()
+        _, _, args = self.running()
         given = dict(zip(args, args[1:]))
         self.assertEqual(given["--smtp"], "127.0.0.1:1465")
         self.assertEqual(given["--listen"], "127.0.0.1:8025")
@@ -243,9 +198,9 @@ class Mailpit(unittest.TestCase):
 
     def test_a_second_start_keeps_the_certificate_and_login(self):
         self.start("avery@example.com")
-        first, _ = self.running()
+        first = self.setting(self.running()[1])
         self.start("avery@example.com")
-        second, _ = self.running()
+        second = self.setting(self.running()[1])
         self.assertEqual(len(self.calls("openssl")), 1)
         self.assertEqual(first, second)
 
@@ -257,15 +212,17 @@ class Mailpit(unittest.TestCase):
 
     def test_several_addresses_all_reach_mailpit(self):
         self.start("avery@example.com", "lee@example.org")
-        settings, _ = self.running()
-        self.assertEqual(settings["TETSU_MAIL_ALLOW"], "avery@example.com,lee@example.org")
+        allowed = self.setting(self.running()[1])["TETSU_MAIL_ALLOW"]
+        self.assertEqual(allowed, "avery@example.com,lee@example.org")
 
-    def test_it_prints_the_next_steps_with_the_address(self):
+    def test_it_prints_the_next_steps_with_the_address_and_its_settings_file(self):
         result = self.start("avery@example.com")
         self.assertIn("http://localhost:8025", result.stdout)
-        self.assertIn('cargo tetsu operator create "Your Name" avery@example.com', result.stdout)
-        self.assertIn("cargo tetsu operator email <id> avery@example.com", result.stdout)
-        self.assertIn("cargo tetsu serve", result.stdout)
+        self.assertIn(
+            'cargo tetsu --env mailpit operator create "Your Name" avery@example.com', result.stdout
+        )
+        self.assertIn("cargo tetsu --env mailpit operator email <id> avery@example.com", result.stdout)
+        self.assertIn("cargo tetsu --env mailpit serve", result.stdout)
 
     def test_an_address_is_required(self):
         result = self.start()
@@ -273,13 +230,20 @@ class Mailpit(unittest.TestCase):
         self.assertIn("usage: scripts/mailpit.py", result.stderr)
         self.assertEqual(self.calls("mailpit"), [])
 
+    def test_without_env_it_says_to_make_one(self):
+        self.env.unlink()
+        result = self.start("avery@example.com")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("cp .env.example .env", result.stderr)
+        self.assertFalse(self.settings.exists())
+
     def test_without_mailpit_installed_it_says_how_to_install_it(self):
         (self.root / ".tools" / "bin" / "mailpit").unlink()
         result = self.start("avery@example.com")
         self.assertEqual(result.returncode, 1)
         self.assertIn("scripts/install-tools.sh", result.stderr)
         self.assertEqual(self.calls("openssl"), [])
-        self.assertEqual(self.env.read_text(), LOCAL)
+        self.assertFalse(self.settings.exists())
 
 
 if __name__ == "__main__":

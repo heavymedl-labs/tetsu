@@ -104,9 +104,9 @@ When a migration you have applied changes, `cargo tetsu reset <schema>` rebuilds
 sets `TETSU_DEMO`.
 
 To see the email it sends, invites included, run `scripts/mailpit.py you@example.com` in another terminal, with
-your operator's address, before `serve`. It points `.env` at a local Mailpit until it stops, shows mail at
-`http://localhost:8025`, and prints the next steps. It refuses mail settings of your own in `.env` or exported
-where it runs; unset any exported only where `serve` runs.
+your operator's address. While it runs, `.env.mailpit` holds `.env`'s settings with mail sent to a local Mailpit,
+shown at `http://localhost:8025`: run Tetsu with `cargo tetsu --env mailpit`, as the steps it prints say. `.env`
+is never touched. Mail settings exported in your shell win over any file, so unset them first.
 
 Then `cargo tetsu serve` serves `http://localhost:8080` until Ctrl+C. Settings come from `.env` for any the
 environment leaves unset ([ADR-0050](../../docs/adr/0050-local-settings-file.md)), so no command needs them typed.
@@ -126,7 +126,7 @@ Stop the server when you are done.
 | `TETSU_SMTP_HOST` | `serve`, `operator create`, `operator invite` | Optional: the SMTP server mail goes through, over implicit TLS ([ADR-0074](../../docs/adr/0074-operator-email-in-development.md)). Without it, every message is kept for the mailbox page, except an invite, which is never kept. From `.env` only when `DATABASE_URL` is too, as are the settings below |
 | `TETSU_SMTP_PORT` | as above | The server's implicit-TLS port, `465` by default |
 | `TETSU_SMTP_USERNAME`, `TETSU_SMTP_PASSWORD` | as above | The server's login, required with a host. The password is a secret, never logged |
-| `TETSU_SMTP_CA_FILE` | as above | Optional: a PEM certificate authority the server is also trusted by, besides the public ones, such as the local Mailpit's, which `scripts/mailpit.py` sets in `.env` while it runs |
+| `TETSU_SMTP_CA_FILE` | as above | Optional: a PEM certificate authority the server is also trusted by, besides the public ones, such as the local Mailpit's, which `scripts/mailpit.py` sets in `.env.mailpit` while it runs |
 | `TETSU_MAIL_FROM` | as above | The address mail comes from, required with a host, such as Mailgun's sandbox address |
 | `TETSU_MAIL_ALLOW` | as above | Optional: the addresses, separated by commas, that get real email. Every other message is kept for the mailbox page, except an invite |
 | `PORT` | `serve` | The port a host such as Render sets, listened on at every interface. Without it, `serve` listens on `127.0.0.1:8080` |
