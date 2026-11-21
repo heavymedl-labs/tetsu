@@ -10,7 +10,7 @@ mod adapters;
 mod domain;
 
 pub use adapters::postgres::{PostOffice, post_office};
-pub use adapters::smtp::{Smtp, SmtpSettings};
+pub use adapters::smtp::{Refused, Smtp, SmtpSettings};
 pub use domain::Allowlist;
 
 use tetsu_kernel::{Migration, Module, Storage};

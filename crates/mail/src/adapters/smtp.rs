@@ -28,15 +28,22 @@ pub struct SmtpSettings {
     pub limit: Duration,
 }
 
-/// Sends over SMTP with implicit TLS, trusting the web's public certificate authorities.
+/// Sends over SMTP with implicit TLS, trusting the web's public certificate authorities, and one more if given.
 pub struct Smtp {
     transport: AsyncSmtpTransport<Tokio1Executor>,
     from: Mailbox,
     limit: Duration,
 }
 
-/// Names what is wrong without repeating the host, which a mistaken setting could fill with a login.
-const REFUSED_HOST: &str = "the SMTP host is not a name TLS can check";
+/// Why an adapter cannot be made, naming the setting without repeating its value, which a mistaken setting could
+/// fill with a login.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Refused {
+    /// The host is not a name TLS can check a certificate against.
+    Host,
+    /// The certificate authority given holds no certificate.
+    Certificate,
+}
 
 type Sending<'a> = Pin<Box<dyn Future<Output = Result<(), Failed>> + Send + 'a>>;
 
@@ -46,22 +53,22 @@ impl Smtp {
     /// # Errors
     /// Fails if the host is not a name TLS can check a certificate against, which `lettre` would only find when it
     /// first connects, so a wrong setting stops Tetsu at start rather than at its first email.
-    pub fn new(settings: &SmtpSettings) -> Result<Self, String> {
+    pub fn new(settings: &SmtpSettings) -> Result<Self, Refused> {
         let tls = ServerName::try_from(settings.host.as_str())
             .ok()
             .and_then(|_| TlsParameters::new(settings.host.clone()).ok());
-        Ok(Self::with_tls(settings, tls.ok_or(REFUSED_HOST)?))
+        Ok(Self::with_tls(settings, tls.ok_or(Refused::Host)?))
     }
 
-    /// An adapter that also trusts the certificate authority in `pem`, as a test's local mail server needs.
+    /// An adapter that also trusts the certificate authority in `pem`, as a local Mailpit needs
+    /// (`TETSU_SMTP_CA_FILE`).
     ///
     /// # Errors
-    /// Fails if `pem` holds no certificate, or as [`Self::new`].
-    #[doc(hidden)]
-    pub fn trusting(settings: &SmtpSettings, pem: &[u8]) -> Result<Self, String> {
-        let tls = ServerName::try_from(settings.host.as_str())
+    /// As [`Self::new`], whose check comes first, and [`Refused::Certificate`] if `pem` holds no certificate.
+    pub fn trusting(settings: &SmtpSettings, pem: &[u8]) -> Result<Self, Refused> {
+        ServerName::try_from(settings.host.as_str()).map_err(|_| Refused::Host)?;
+        let tls = CertificateDer::from_pem_slice(pem)
             .ok()
-            .and(CertificateDer::from_pem_slice(pem).ok())
             .and_then(|_| Certificate::from_pem(pem).ok())
             .and_then(|authority| {
                 TlsParameters::builder(settings.host.clone())
@@ -69,8 +76,7 @@ impl Smtp {
                     .build_rustls()
                     .ok()
             });
-        let refused = format!("{REFUSED_HOST}, or the PEM holds no certificate");
-        Ok(Self::with_tls(settings, tls.ok_or(refused)?))
+        Ok(Self::with_tls(settings, tls.ok_or(Refused::Certificate)?))
     }
 
     /// `lettre` refuses TLS settings only for options Tetsu never sets, such as an old minimum TLS version, so a

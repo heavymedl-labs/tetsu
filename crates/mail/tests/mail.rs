@@ -11,7 +11,7 @@ use support::{
     Mailpit, PASSWORD, address, allow, as_owner, database, free_port, lapse, message, route,
 };
 use tetsu_kernel::{Delivery, MailError, Mailbox, Mailer};
-use tetsu_mail::{Allowlist, Smtp, SmtpSettings, post_office};
+use tetsu_mail::{Allowlist, Refused, Smtp, SmtpSettings, post_office};
 use tetsu_postgres::{Settings, pool};
 
 #[tokio::test]
@@ -270,16 +270,27 @@ async fn an_adapter_needs_a_host_tls_can_check_and_a_certificate_it_can_read() {
     assert!(Smtp::new(&settings("smtp.example.com")).is_ok());
     assert_eq!(
         Smtp::new(&settings("user:secret@host")).err(),
-        Some("the SMTP host is not a name TLS can check".to_string())
+        Some(Refused::Host)
     );
     assert!(Smtp::trusting(&settings("smtp.example.com"), pem).is_ok());
-    assert!(Smtp::trusting(&settings("smtp.example.com"), b"not a certificate").is_err());
+    assert_eq!(
+        Smtp::trusting(&settings("smtp.example.com"), b"not a certificate").err(),
+        Some(Refused::Certificate)
+    );
+    // A public key is PEM, but no certificate.
+    let key = b"-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n";
+    assert_eq!(
+        Smtp::trusting(&settings("smtp.example.com"), key).err(),
+        Some(Refused::Certificate)
+    );
     assert_eq!(
         Smtp::trusting(&settings("not a host"), pem).err(),
-        Some(
-            "the SMTP host is not a name TLS can check, or the PEM holds no certificate"
-                .to_string()
-        )
+        Some(Refused::Host)
+    );
+    // The host is named first, whatever the certificate.
+    assert_eq!(
+        Smtp::trusting(&settings("not a host"), b"not a certificate").err(),
+        Some(Refused::Host)
     );
 }
 

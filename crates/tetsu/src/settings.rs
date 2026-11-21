@@ -472,26 +472,30 @@ fn decoded(text: impl AsRef<str>) -> Option<String> {
 const SMTP_LIMIT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// The mail settings (ADR-0074), which go with the database, since its mail is what they send.
-pub const MAIL: [&str; 6] = [
+pub const MAIL: [&str; 7] = [
     "TETSU_SMTP_HOST",
     "TETSU_SMTP_PORT",
     "TETSU_SMTP_USERNAME",
     "TETSU_SMTP_PASSWORD",
+    "TETSU_SMTP_CA_FILE",
     "TETSU_MAIL_FROM",
     "TETSU_MAIL_ALLOW",
 ];
 
-/// Where mail goes: an SMTP server, if one is set, and the addresses it may send to; every other message is kept
-/// for the mailbox page.
+/// Where mail goes: an SMTP server, if one is set, the certificate authority it is also trusted by, if any, and the
+/// addresses it may send to; every other message is kept for the mailbox page.
 pub struct Mail {
     pub smtp: Option<tetsu_mail::SmtpSettings>,
+    pub authority: Option<std::path::PathBuf>,
     pub allow: tetsu_mail::Allowlist,
 }
 
 /// Reads the mail settings: with `TETSU_SMTP_HOST`, the server's implicit-TLS port from `TETSU_SMTP_PORT`, default
 /// 465, its login from `TETSU_SMTP_USERNAME` and `TETSU_SMTP_PASSWORD`, and the sender from `TETSU_MAIL_FROM`, each
-/// required; and the addresses that get real email, separated by commas, from `TETSU_MAIL_ALLOW`. Without a host,
-/// every message is kept. Errors name the variable and never repeat its value, since one is a password.
+/// required; a certificate authority to trust besides the public ones, such as a local Mailpit's, from
+/// `TETSU_SMTP_CA_FILE`; and the addresses that get real email, separated by commas, from `TETSU_MAIL_ALLOW`.
+/// Without a host, every message is kept. Errors name the variable and never repeat its value, since one is a
+/// password.
 pub fn mail(var: impl Fn(&str) -> Result<String, VarError>) -> Result<Mail, String> {
     let allow = value(&var, "TETSU_MAIL_ALLOW")?
         .map_or(Some(tetsu_mail::Allowlist::default()), |text| {
@@ -501,7 +505,15 @@ pub fn mail(var: impl Fn(&str) -> Result<String, VarError>) -> Result<Mail, Stri
     let smtp = value(&var, "TETSU_SMTP_HOST")?
         .map(|host| smtp_settings(&var, host))
         .transpose()?;
-    Ok(Mail { smtp, allow })
+    let authority = value(&var, "TETSU_SMTP_CA_FILE")?.map(std::path::PathBuf::from);
+    if authority.is_some() && smtp.is_none() {
+        return Err("TETSU_SMTP_CA_FILE needs TETSU_SMTP_HOST".into());
+    }
+    Ok(Mail {
+        smtp,
+        authority,
+        allow,
+    })
 }
 
 /// The SMTP server at `host`, with the settings it requires.
@@ -526,14 +538,25 @@ fn smtp_settings(
     })
 }
 
-/// The SMTP adapter the mail settings name, if they name a server. A host TLS cannot check is refused here, at
-/// start, by the variable's name and never its value.
+/// The SMTP adapter the mail settings name, if they name a server. A host TLS cannot check, or a certificate
+/// authority file that cannot be read or holds none, is refused here, at start, by the variable's name and never
+/// its value.
 pub fn smtp(mail: &Mail) -> Result<Option<tetsu_mail::Smtp>, String> {
-    mail.smtp
-        .as_ref()
-        .map(tetsu_mail::Smtp::new)
-        .transpose()
-        .map_err(|_| "TETSU_SMTP_HOST must be a host name TLS can check".to_string())
+    let Some(settings) = &mail.smtp else {
+        return Ok(None);
+    };
+    let made = match &mail.authority {
+        Some(path) => {
+            let pem =
+                std::fs::read(path).map_err(|error| format!("TETSU_SMTP_CA_FILE: {error}"))?;
+            tetsu_mail::Smtp::trusting(settings, &pem)
+        }
+        None => tetsu_mail::Smtp::new(settings),
+    };
+    made.map(Some).map_err(|refused| match refused {
+        tetsu_mail::Refused::Host => "TETSU_SMTP_HOST must be a host name TLS can check".into(),
+        tetsu_mail::Refused::Certificate => "TETSU_SMTP_CA_FILE must hold a PEM certificate".into(),
+    })
 }
 
 /// A missing or blank variable is `None`, and surrounding spaces are dropped. One that is not UTF-8 is an error,
@@ -688,6 +711,85 @@ mod tests {
             let error = mail_from(&set).err().unwrap();
             assert_eq!(error, refused);
             assert!(!error.contains("a-secret-password"));
+        }
+    }
+
+    /// A certificate authority for a local Mailpit is read with the server, and is no use without one.
+    #[test]
+    fn a_ca_file_goes_with_the_host() {
+        let mut with = SMTP.to_vec();
+        with.push(("TETSU_SMTP_CA_FILE", ".tools/mailpit/cert.pem"));
+        assert_eq!(
+            mail_from(&with).unwrap().authority,
+            Some(std::path::PathBuf::from(".tools/mailpit/cert.pem"))
+        );
+        assert_eq!(mail_from(&SMTP).unwrap().authority, None);
+        assert_eq!(
+            mail_from(&[("TETSU_SMTP_CA_FILE", "cert.pem")]).err(),
+            Some("TETSU_SMTP_CA_FILE needs TETSU_SMTP_HOST".to_string())
+        );
+    }
+
+    /// A certificate for `localhost`, made by `openssl` as the Mailpit tests make theirs, in `folder`.
+    fn certificate(folder: &Path) -> std::path::PathBuf {
+        let cert = folder.join("cert.pem");
+        let made = std::process::Command::new("openssl")
+            .args([
+                "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+            ])
+            .args([
+                "-subj",
+                "/CN=localhost",
+                "-addext",
+                "subjectAltName=DNS:localhost",
+            ])
+            .arg("-keyout")
+            .arg(folder.join("key.pem"))
+            .arg("-out")
+            .arg(&cert)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(made.success());
+        cert
+    }
+
+    /// The adapter trusts a readable certificate authority, and each setting that stops it is named.
+    #[test]
+    fn the_ca_file_is_read_and_checked_at_start() {
+        let folder = tetsu_postgres::test_support::Scratch::folder("smtp-ca").unwrap();
+        let cert = certificate(&folder);
+        let made = |host: &str, ca: Option<&Path>| {
+            let mut set: Vec<_> = SMTP
+                .into_iter()
+                .filter(|(name, _)| *name != "TETSU_SMTP_HOST")
+                .collect();
+            set.push(("TETSU_SMTP_HOST", host));
+            let ca = ca.map(|path| path.to_str().unwrap().to_string());
+            if let Some(ca) = &ca {
+                set.push(("TETSU_SMTP_CA_FILE", ca));
+            }
+            smtp(&mail_from(&set).unwrap()).map(|adapter| adapter.is_some())
+        };
+        assert_eq!(made("localhost", Some(&cert)), Ok(true));
+        assert_eq!(made("localhost", None), Ok(true));
+        assert_eq!(
+            smtp(&mail_from(&[]).unwrap()).map(|adapter| adapter.is_some()),
+            Ok(false)
+        );
+        let missing = made("localhost", Some(&folder.join("none.pem"))).unwrap_err();
+        assert!(missing.starts_with("TETSU_SMTP_CA_FILE: "), "{missing}");
+        std::fs::write(folder.join("empty.pem"), "not a certificate").unwrap();
+        assert_eq!(
+            made("localhost", Some(&folder.join("empty.pem"))),
+            Err("TETSU_SMTP_CA_FILE must hold a PEM certificate".to_string())
+        );
+        for ca in [None, Some(cert.as_path())] {
+            assert_eq!(
+                made("not a host", ca),
+                Err("TETSU_SMTP_HOST must be a host name TLS can check".to_string())
+            );
         }
     }
 
