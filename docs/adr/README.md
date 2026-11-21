@@ -80,6 +80,7 @@ number, and add a row below. Never renumber.
 | [0073](0073-settings-files-per-environment.md) | Settings files per environment | Running `tetsu` against a hosted environment, or keeping its secrets | Accepted |
 | [0074](0074-operator-email-in-development.md) | Operator email in development | Sending email, changing the mail provider, or changing how operators are invited | Accepted |
 | [0075](0075-github-secret-scanning.md) | GitHub secret scanning | Changing the secret scan, or GitHub's security settings | Accepted |
+| [0076](0076-pull-requests-from-contributors.md) | Pull requests from contributors | Taking a contributor's change, or changing who reviews what | Proposed |
 | [0068](0068-no-demo-note.md) | No demo note | Changing what marks a demo page | Proposed |
 
 ## Open decisions

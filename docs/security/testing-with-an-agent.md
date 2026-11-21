@@ -149,14 +149,14 @@ machine needs none. Tools and costs as of 2026-11-21.
 3. **Say what happened.** The commit you tested, the steps that reproduce it, what you expected, what happened, and
    the agent's explanation in your own copy. Never paste a whole transcript: it may hold your session cookie or
    invite link.
-4. **Wait for the answer.** [SECURITY.md](../../SECURITY.md#what-happens-next) says what the maintainer does, and
-   when. Keep the finding to yourself until the report is closed.
+4. **Fix it too, if you like,** as the next section says. Either way, [SECURITY.md](../../SECURITY.md#what-happens-next)
+   says what the maintainer does, and when. Keep the finding to yourself until the report is closed.
 5. **Check the fix.** When the maintainer says it is fixed, pull, repeat your steps, and reply on the report whether
    it is closed.
 
 ## Fix it, optional
 
-Once the maintainer confirms a vulnerability, you can propose its fix, privately:
+Once you have reported a finding, you can propose its fix, privately, without waiting for an answer:
 
 1. **Once per clone,** do the rest of [CONTRIBUTING.md](../../CONTRIBUTING.md#workflow)'s setup: install uv, run
    `scripts/install-tools.sh`, and run `git config core.hooksPath .githooks`. The hooks then run the linters before
@@ -168,7 +168,8 @@ Once the maintainer confirms a vulnerability, you can propose its fix, privately
    Sign-in, sessions, and tenant isolation are Tier 1: every line and branch tested, and no surviving mutants.
 4. **Push the branch to the private fork,** and open one pull request into its `main`. CI does not run there, so
    your full check is the only one: say in the pull request that it passed, and on which commit.
-5. **The maintainer reviews it,** merges it from the report, and publishes the advisory.
+5. **You and the maintainer review the report and the fix together.** The maintainer merges it from the report and
+   publishes the advisory ([ADR-0076](../adr/0076-pull-requests-from-contributors.md)).
 
 Never push the fix anywhere public, your own fork included, before the advisory is published. A hardening idea the
 maintainer moves to a public issue follows [CONTRIBUTING.md](../../CONTRIBUTING.md#workflow)'s usual workflow

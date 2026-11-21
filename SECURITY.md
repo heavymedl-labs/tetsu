@@ -14,11 +14,12 @@ report about code on `main` is the most useful kind.
 
 ## What happens next
 
-Within a week, the maintainer answers on the report with one of these:
+A report can come with a proposed fix, in a pull request in the report's temporary private fork, as [testing with
+an agent](docs/security/testing-with-an-agent.md#fix-it-optional) describes. Then the report and the fix are reviewed
+together with you. Within a week, the maintainer answers on the report with one of these:
 
-- **A vulnerability:** fixed privately in the report's own workspace, then published as an advisory, crediting you
-  if you want. You can propose the fix yourself, as [testing with an
-  agent](docs/security/testing-with-an-agent.md#fix-it-optional) describes, and are asked to check it either way.
+- **A vulnerability:** fixed privately in the report's own workspace, with your fix or the maintainer's, then
+  published as an advisory, crediting you if you want. You are asked to check the fix.
 - **A hardening idea,** with nothing to exploit, such as a missing header: moved to a public issue, with your
   agreement, and the report closed.
 - **Intended:** closed, with the reason, such as the ADR that decides it.

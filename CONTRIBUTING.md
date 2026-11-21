@@ -19,10 +19,10 @@ People and coding agents follow the same workflow and the rules in
    before each commit, and the full checks before each push.
 5. Open a pull request with the template filled in and `Closes #N`.
 
-While the maintainer is the only contributor, changes go straight to `main`
-instead: follow the duties, run the checks, commit, push, and close the issue by
-hand. Steps 2, 3, and 5 return when a second contributor joins or a real business
-adopts Tetsu ([ADR-0014](docs/adr/0014-checks-and-duties.md)).
+Only a contributor's changes take steps 2, 3, and 5, from a fork, and the maintainer reviews each one with them. A
+vulnerability's fix comes in its report's temporary private fork instead ([SECURITY.md](SECURITY.md)). The
+maintainer's own changes go straight to `main`: follow the duties, run the checks, commit, push, and close the issue
+by hand ([ADR-0076](docs/adr/0076-pull-requests-from-contributors.md)).
 
 ## Agent skills
 
