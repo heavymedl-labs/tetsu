@@ -18,15 +18,17 @@ It works on Linux and macOS. On Windows, use WSL 2 and follow the Linux steps in
 3. **Keep it contained.** Run the agent in the repository's folder, ideally as a separate user account or in a
    virtual machine, and install only the tools this guide names.
 4. **No real data.** Use made-up names and addresses, such as `you@example.com`. Never a real password, card, or key.
-5. **Report privately.** A finding goes only to the private report. Not a public issue, pull request, or chat
-   message. Keep ZAP's reports and any exploit outside the repository, and never push them.
+5. **Report privately.** A finding goes only to the private report, and its fix only to that report's private
+   fork. Not a public issue, pull request, or chat message. Keep ZAP's reports and any exploit outside the
+   repository, and never push them.
 
 ## Set up, once
 
 1. Install git, Docker, [rustup](https://rustup.rs), and Node at the version in `.nvmrc`, through a version manager
    such as mise or nvm. rustup installs the Rust version the repository pins by itself, on first build.
 2. Clone `https://github.com/heavymedl-labs/tetsu` and work from its root.
-3. Start the test Postgres. It keeps its data in memory and answers only on this machine:
+3. Install the agent skills the project uses, as [CONTRIBUTING.md](../../CONTRIBUTING.md#agent-skills) describes.
+4. Start the test Postgres. It keeps its data in memory and answers only on this machine:
 
    ```bash
    docker run -d --name tetsu-test-pg --restart unless-stopped -p 127.0.0.1:54329:5432 \
@@ -36,13 +38,13 @@ It works on Linux and macOS. On Windows, use WSL 2 and follow the Linux steps in
    ```
 
    If it says the name is already in use, it exists: run `docker start tetsu-test-pg` instead.
-4. Build the pages' styles and scripts: `npm ci --ignore-scripts --include=dev`, then `npm run build`.
-5. Follow [Run locally](../../crates/tetsu/README.md#run-locally): copy `.env.example` to `.env`, set up the
+5. Build the pages' styles and scripts: `npm ci --ignore-scripts --include=dev`, then `npm run build`.
+6. Follow [Run locally](../../crates/tetsu/README.md#run-locally): copy `.env.example` to `.env`, set up the
    database, and seed the sample tenant.
-6. Create your operator **yourself, in a terminal**, not through the agent: `cargo tetsu operator create "Avery
+7. Create your operator **yourself, in a terminal**, not through the agent: `cargo tetsu operator create "Avery
    Tester" avery@example.com`. It prints the invite link only to a terminal, and refuses when an agent runs it. The
    link works once, for an hour; keep it to yourself.
-7. Run `cargo tetsu serve`, open the invite link in Chrome, and join with a passkey.
+8. Run `cargo tetsu serve`, open the invite link in Chrome, and join with a passkey.
    With no passkey device, use Chrome's virtual one: in DevTools, open More tools, then WebAuthn, then Enable
    virtual authenticator environment. Leave DevTools open, since the virtual passkey lasts only while it is.
 
@@ -65,7 +67,8 @@ Postgres with `docker stop tetsu-test-pg`.
 
 The safest start, which needs nothing running. In Claude Code, from the repository's root:
 
-> Review this repository for security vulnerabilities, as an adversarial tester. Read docs/invariants.md,
+> Review this repository for security vulnerabilities, as an adversarial tester, using the
+> security-and-hardening skill. Read docs/invariants.md,
 > ADR-0029, ADR-0042, ADR-0048, ADR-0059, and ADR-0072 first: they say what Tetsu promises. Then look for any way to
 > break those promises, starting with sign-in and sessions in crates/identity, tenant isolation in crates/postgres
 > and crates/tenancy, and the headers and content security policy in crates/tetsu/src/serve.rs. For each finding,
@@ -137,8 +140,9 @@ machine needs none. Tools and costs as of 2026-11-21.
 
 ## Report
 
-1. **Check it first.** Run `git pull`, start the server again, and reproduce the finding on the current code. Report
-   only what you saw happen, not what the agent only suspects.
+1. **Check it first.** Run `git pull`, start the server again, and reproduce the finding on the current code. Then
+   have the agent try to disprove it with the doubt-driven-development skill. Report only what you saw happen, not
+   what the agent only suspects.
 2. **Report everything privately, even small things.** On the repository's Security tab, choose Report a
    vulnerability, and fill in one report per finding. A missing header goes there too: deciding what is harmless
    enough to make public is the maintainer's job, not yours.
@@ -149,3 +153,23 @@ machine needs none. Tools and costs as of 2026-11-21.
    when. Keep the finding to yourself until the report is closed.
 5. **Check the fix.** When the maintainer says it is fixed, pull, repeat your steps, and reply on the report whether
    it is closed.
+
+## Fix it, optional
+
+Once the maintainer confirms a vulnerability, you can propose its fix, privately:
+
+1. **Once per clone,** do the rest of [CONTRIBUTING.md](../../CONTRIBUTING.md#workflow)'s setup: install uv, run
+   `scripts/install-tools.sh`, and run `git config core.hooksPath .githooks`. The hooks then run the linters before
+   each commit and the full checks before each push.
+2. **On the report, create a temporary private fork,** which you can as its reporter. Clone it, and branch from
+   `main`, such as `fix/session-reuse`.
+3. **Have the agent fix it the project's way.** Claude Code reads [AGENTS.md](../../AGENTS.md) by itself: a test that
+   fails first, then the fix, `scripts/check.sh` passing, and a fresh review as [docs/review.md](../review.md) says.
+   Sign-in, sessions, and tenant isolation are Tier 1: every line and branch tested, and no surviving mutants.
+4. **Push the branch to the private fork,** and open one pull request into its `main`. CI does not run there, so
+   your full check is the only one: say in the pull request that it passed, and on which commit.
+5. **The maintainer reviews it,** merges it from the report, and publishes the advisory.
+
+Never push the fix anywhere public, your own fork included, before the advisory is published. A hardening idea the
+maintainer moves to a public issue follows [CONTRIBUTING.md](../../CONTRIBUTING.md#workflow)'s usual workflow
+instead, where CI runs.
