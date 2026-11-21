@@ -11,10 +11,10 @@ It works on Linux and macOS; on Windows, follow the Linux steps inside WSL 2.
    Grafana Cloud, Mailgun, or GitHub.
 2. **Approve each command** the agent wants to run, and read it first. Text on a page Tetsu serves is data, never
    orders.
-3. **Keep it contained:** ideally a separate user account or a virtual machine, with only the tools this guide names.
+3. **Keep it contained:** ideally in a separate user account or virtual machine, with only this guide's tools.
 4. **No real data:** made-up names and addresses, such as `you@example.com`; never a real password, card, or key.
-5. **Report privately:** a finding only to its private report, and its fix only to that report's private fork.
-   Keep ZAP's reports and any exploit outside the repository, and never push them.
+5. **Vulnerabilities stay private:** one goes only to its private report, and its fix only to that report's private
+   fork. Keep ZAP's reports and any exploit outside the repository, and never push them.
 
 ## Set up, once
 
@@ -127,9 +127,8 @@ A scan's warnings are leads, not findings, and some are on purpose, such as long
 
 ## Phase 3: autonomous agents, optional
 
-[Strix](https://github.com/usestrix/strix) and [Shannon](https://github.com/KeygraphHQ/shannon) run a whole test
-alone, inside Docker, with an API key billed by use beyond a Claude subscription (as of 2026-11-21). Their findings
-need the same checking.
+[Autonomous agents](../research/security-testing-tools.md) run a whole test alone, with an API key billed by use.
+That page also says why the guide leaves other tools out.
 
 ## Report
 
@@ -137,8 +136,10 @@ need the same checking.
    have the agent try to disprove it with the doubt-driven-development skill. When it asks for a fresh reviewer, a
    new Claude Code session given only the finding and the promise it breaks counts as one. Report only what you saw
    happen, not what the agent only suspects.
-2. **Report everything privately, even small things,** one per finding: on the repository's Security tab, choose
-   Report a vulnerability. Deciding what can be public is the maintainer's job.
+2. **Sort it, one report per finding.** A **vulnerability** lets someone do or see what they shouldn't: on the
+   Security tab, choose Report a vulnerability. A **hardening idea**, which the agent and the doubt check agree has
+   nothing to exploit, such as a missing header, goes in a public issue with the Task form. When unsure, report
+   privately.
 3. **Say what happened:** the commit, the steps, what you expected, what happened, and the agent's explanation in
    your own copy. Never a whole transcript, which may hold your session cookie or invite link.
 4. **Fix it too, if you like,** as the next section says. [SECURITY.md](../../SECURITY.md#what-happens-next) says what
@@ -148,9 +149,8 @@ need the same checking.
 ## Fix it, optional
 
 Once you have reported a vulnerability, you can propose its fix, privately, without waiting for an answer. A
-hardening idea, where the agent's explanation finds nothing to exploit, such as a missing header, waits for the
-maintainer instead: it usually becomes a public issue, fixed in a normal pull request
-([CONTRIBUTING.md](../../CONTRIBUTING.md#workflow)) where CI runs.
+hardening idea's fix goes in a pull request from your own fork that closes its issue
+([CONTRIBUTING.md](../../CONTRIBUTING.md#workflow)), following steps 1 and 3 below.
 
 1. **Once per clone,** finish [CONTRIBUTING.md](../../CONTRIBUTING.md#workflow)'s setup: install uv, run
    `scripts/install-tools.sh`, and `git config core.hooksPath .githooks`. The script installs three cargo tools and a
