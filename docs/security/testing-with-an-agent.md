@@ -137,6 +137,15 @@ machine needs none. Tools and costs as of 2026-11-21.
 
 ## Report
 
-For each finding, send the commit you tested, the steps that reproduce it, what you expected, what happened, and
-what the agent said about it. One finding per report. A maintainer confirms it, fixes it, and credits you if you
-want.
+1. **Check it first.** Run `git pull`, start the server again, and reproduce the finding on the current code. Report
+   only what you saw happen, not what the agent only suspects.
+2. **Report everything privately, even small things.** On the repository's Security tab, choose Report a
+   vulnerability, and fill in one report per finding. A missing header goes there too: deciding what is harmless
+   enough to make public is the maintainer's job, not yours.
+3. **Say what happened.** The commit you tested, the steps that reproduce it, what you expected, what happened, and
+   the agent's explanation in your own copy. Never paste a whole transcript: it may hold your session cookie or
+   invite link.
+4. **Wait for the answer.** [SECURITY.md](../../SECURITY.md#what-happens-next) says what the maintainer does, and
+   when. Keep the finding to yourself until the report is closed.
+5. **Check the fix.** When the maintainer says it is fixed, pull, repeat your steps, and reply on the report whether
+   it is closed.
