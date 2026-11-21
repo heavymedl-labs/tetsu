@@ -1,4 +1,5 @@
-"""Runs every test under a folder, each in its own process, as many at once as the machine has cores.
+"""Runs every test under a folder, each in its own process, as many at once as TETSU_CHECK_CORES, or else the
+machine's cores.
 
 The slowest test then sets the time, not the sum of them. Each process buffers its output, and only a failing
 test's output is printed, whole, so failures from tests running at once never interleave. Exits 1 if any
@@ -53,7 +54,8 @@ def main(argv):
     if not ids:
         print(f"error: no tests found under {start}", file=sys.stderr)
         return 1
-    with ThreadPoolExecutor(max_workers=os.cpu_count() or 1) as pool:
+    workers = int(os.environ.get("TETSU_CHECK_CORES") or os.cpu_count() or 1)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
         results = list(pool.map(lambda test_id: run(test_id, top), ids))
     failed = [(test_id, output) for test_id, (passed, output) in zip(ids, results) if not passed]
     for test_id, output in failed:

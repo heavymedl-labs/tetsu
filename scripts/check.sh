@@ -33,6 +33,26 @@ if [[ "$fast" == false ]]; then
   trap finish EXIT
 fi
 
+# On a maintainer's machine a check keeps to a budget of cores, half of them unless TETSU_CHECK_CORES says
+# otherwise, and runs at low priority, so the machine stays usable while it runs. A CI runner does nothing else, so
+# it uses every core. Each stage keeps to the budget: Cargo's build jobs and test threads, the script tests, Vitest,
+# StrykerJS, and the mutant jobs, which share it.
+all_cores="$(getconf _NPROCESSORS_ONLN)"
+if [[ -n "${CI:-}" ]]; then
+  cores="${TETSU_CHECK_CORES:-$all_cores}"
+else
+  cores="${TETSU_CHECK_CORES:-$((all_cores > 1 ? all_cores / 2 : 1))}"
+  renice -n 10 -p $$ >/dev/null 2>&1 || true
+  if command -v ionice >/dev/null; then
+    ionice -c 2 -n 7 -p $$ >/dev/null 2>&1 || true
+  fi
+fi
+if ! [[ "$cores" =~ ^[1-9][0-9]*$ ]]; then
+  echo "error: TETSU_CHECK_CORES must be a whole number of cores, at least 1" >&2
+  exit 1
+fi
+export TETSU_CHECK_CORES="$cores" CARGO_BUILD_JOBS="$cores" RUST_TEST_THREADS="$cores"
+
 wanted="$(cat .nvmrc)"
 # .nvmrc names an exact release, which fixes npm's version too, or a major version.
 right_node() {
@@ -273,8 +293,8 @@ fi
 # fails.
 web_inputs=(web package.json package-lock.json tsconfig.json .nvmrc .config/stryker.config.json scripts/check.sh)
 if changed "${web_inputs[@]}"; then
-  npx --no-install vitest run --coverage --config web/vitest.config.ts
-  npx --no-install stryker run .config/stryker.config.json
+  npx --no-install vitest run --coverage --config web/vitest.config.ts --maxWorkers="$cores"
+  npx --no-install stryker run .config/stryker.config.json --concurrency "$cores"
 else
   echo "The front end is unchanged since $base, so its tests and mutation testing are skipped" >&2
 fi
@@ -299,17 +319,24 @@ if [[ "$reuse" == false ]]; then
   if [[ -s "$work/rust.diff" ]]; then
     # Each job builds its own copy of the workspace, about five seconds, then tests a share of the mutants at
     # about five seconds each, so a job pays off from about 15 mutants: one per 15, rounded up. Never more than
-    # one per four cores, where builds start to compete, and never fewer than one. Six jobs took 90 mutants from
-    # 146 to 104 seconds on 24 cores (2026-11-11). CARGO_MUTANTS_JOBS overrides it.
+    # one per four cores of the budget, where builds start to compete, and never fewer than one. Six jobs took 90
+    # mutants from 146 to 104 seconds on 24 cores (2026-11-11). CARGO_MUTANTS_JOBS overrides it. The jobs share
+    # the budget's build jobs and test threads, rather than each taking all of them.
     count="$(cargo mutants --in-diff "$work/rust.diff" --list | wc -l)"
-    most=$(($(getconf _NPROCESSORS_ONLN) / 4))
+    most=$((cores / 4))
     jobs=$(((count + 14) / 15))
     if ((jobs > most)); then jobs=$most; fi
     if ((jobs < 1)); then jobs=1; fi
+    jobs="${CARGO_MUTANTS_JOBS:-$jobs}"
+    if ! [[ "$jobs" =~ ^[1-9][0-9]*$ ]]; then
+      echo "error: CARGO_MUTANTS_JOBS must be a whole number of jobs, at least 1" >&2
+      exit 1
+    fi
+    share=$((cores / jobs > 0 ? cores / jobs : 1))
     # The coverage runs above just passed these tests, so cargo-mutants skips its own unmutated run, which also
     # sized its timeout, so that is set here: about six times the test suite's time.
     mutants=(cargo mutants --in-diff "$work/rust.diff" --baseline skip --timeout 60)
-    if [[ -n "${CI:-}" && "${CARGO_MUTANTS_JOBS:-$jobs}" == 1 ]]; then
+    if [[ -n "${CI:-}" && "$jobs" == 1 ]]; then
       # A runner runs one job, so it mutates its checkout in place, which it throws away after, and reuses
       # target/ rather than build every dependency again in a copy, which leaves target/ out.
       "${mutants[@]}" --in-place
@@ -317,7 +344,8 @@ if [[ "$reuse" == false ]]; then
       # Its copies of the workspace go under target/, on disk, since a memory-backed /tmp may hold too few. Here
       # the checkout is the maintainer's, which a killed run in place would leave mutated.
       mkdir -p target/mutants-tmp
-      TMPDIR="$PWD/target/mutants-tmp" "${mutants[@]}" --jobs "${CARGO_MUTANTS_JOBS:-$jobs}"
+      CARGO_BUILD_JOBS="$share" RUST_TEST_THREADS="$share" TMPDIR="$PWD/target/mutants-tmp" \
+        "${mutants[@]}" --jobs "$jobs"
     fi
   elif ! git diff --quiet "${plain[@]}" "$merge" HEAD -- crates; then
     echo "error: commits since $base change crates/, but the files on disk undo that, so there is nothing to" >&2

@@ -387,11 +387,10 @@ class CheckScript(unittest.TestCase):
         self.check(CARGO_MUTANTS_JOBS="")
         self.assertIn("--jobs 1", self.log.read_text())
 
-    def test_many_mutants_run_in_parallel_up_to_the_machine(self):
+    def test_many_mutants_run_in_parallel_up_to_the_core_budget(self):
         self.mutants_listed(85)
-        self.check(CARGO_MUTANTS_JOBS="")
-        cores = os.cpu_count() or 1
-        self.assertIn(f"--jobs {max(1, min(6, cores // 4))}", self.log.read_text())
+        self.check(CARGO_MUTANTS_JOBS="", TETSU_CHECK_CORES="12")
+        self.assertIn("--jobs 3", self.log.read_text())
 
     def slow_stages_ran(self):
         log = self.log.read_text()
@@ -463,9 +462,65 @@ class CheckScript(unittest.TestCase):
 
     def test_a_job_is_added_per_fifteen_mutants(self):
         self.mutants_listed(30)
-        self.check(CARGO_MUTANTS_JOBS="")
+        self.check(CARGO_MUTANTS_JOBS="", TETSU_CHECK_CORES="24")
+        self.assertIn("--jobs 2", self.log.read_text())
+
+    def budgets(self, **env):
+        """Runs a check whose tools log the parallelism they were given, and returns the log."""
+        self.mutants_listed(85)
+        self.stub(
+            "cargo",
+            f'echo "cargo $1 build=${{CARGO_BUILD_JOBS-}} threads=${{RUST_TEST_THREADS-}}" >> "{self.log}"; '
+            'case "$*" in *--list*) for i in $(seq 85); do echo mutant; done;; esac',
+        )
+        self.stub("python3", f'echo "python $1 cores=${{TETSU_CHECK_CORES-}}" >> "{self.log}"')
+        result = self.check(CARGO_MUTANTS_JOBS="", DIFF_QUIET="1", **env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return self.log.read_text()
+
+    def test_a_machine_check_uses_half_its_cores_by_default(self):
+        # The rest stay free for whoever is using the machine while the check runs.
+        half = max(1, (os.cpu_count() or 1) // 2)
+        log = self.budgets(TETSU_CHECK_CORES="")
+        self.assertIn(f"cargo clippy build={half} threads={half}", log)
+        self.assertIn(f"python scripts/parallel_unittest.py cores={half}", log)
+
+    def test_the_core_budget_can_be_set_and_every_stage_keeps_to_it(self):
+        log = self.budgets(TETSU_CHECK_CORES="8")
+        self.assertIn("cargo clippy build=8 threads=8", log)
+        self.assertIn("cargo llvm-cov build=8 threads=8", log)
+        self.assertIn("python scripts/parallel_unittest.py cores=8", log)
+        self.assertIn("vitest run --coverage --config web/vitest.config.ts --maxWorkers=8", log)
+        self.assertIn("stryker run .config/stryker.config.json --concurrency 8", log)
+        # Two mutant jobs share the budget rather than each taking all of it.
+        self.assertIn("cargo mutants build=4 threads=4", log)
+
+    def test_ci_uses_every_core_a_runner_has(self):
         cores = os.cpu_count() or 1
-        self.assertIn(f"--jobs {max(1, min(2, cores // 4))}", self.log.read_text())
+        log = self.budgets(CI="true", TETSU_CHECK_CORES="")
+        self.assertIn(f"cargo clippy build={cores} threads={cores}", log)
+
+    def test_a_core_budget_that_is_not_a_positive_number_is_refused(self):
+        for bad in ("0", "half", "-2"):
+            with self.subTest(bad=bad):
+                result = self.check(TETSU_CHECK_CORES=bad)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("TETSU_CHECK_CORES must be a whole number of cores, at least 1", result.stderr)
+
+    def test_a_machine_check_runs_at_low_priority_and_ci_does_not(self):
+        self.stub("renice", f'echo "renice $*" >> "{self.log}"')
+        self.stub("ionice", f'echo "ionice $*" >> "{self.log}"')
+        self.check()
+        self.assertRegex(self.log.read_text(), r"renice -n 10 -p \d+")
+        self.assertRegex(self.log.read_text(), r"ionice -c 2 -n 7 -p \d+")
+        self.log.unlink()
+        self.check(CI="true")
+        self.assertNotIn("renice", self.log.read_text())
+
+    def test_a_mutant_job_count_that_is_not_a_positive_number_is_refused(self):
+        result = self.check(CARGO_MUTANTS_JOBS="0")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("CARGO_MUTANTS_JOBS must be a whole number of jobs, at least 1", result.stderr)
 
     def test_the_mutant_job_count_can_be_set(self):
         self.check(CARGO_MUTANTS_JOBS="3")

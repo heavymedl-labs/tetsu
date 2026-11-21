@@ -1,5 +1,6 @@
 """Tests for scripts/parallel_unittest.py."""
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -23,13 +24,14 @@ class ParallelUnittest(unittest.TestCase):
             )
         return root
 
-    def run_on(self, root):
+    def run_on(self, root, **env):
         return subprocess.run(
             [sys.executable, RUNNER, "pkg", "."],
             cwd=root,
             capture_output=True,
             text=True,
             check=False,
+            env={**os.environ, "TETSU_CHECK_CORES": "", **env},
         )
 
     def test_passing_tests_pass_and_are_counted(self):
@@ -52,6 +54,13 @@ class ParallelUnittest(unittest.TestCase):
         result = self.run_on(root)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertLess(time.monotonic() - started, 3.5, "four one-second tests ran one after another")
+
+    def test_no_more_run_at_once_than_the_core_budget(self):
+        root = self.folder(dict.fromkeys("abcd", "time.sleep(1)"))
+        started = time.monotonic()
+        result = self.run_on(root, TETSU_CHECK_CORES="2")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertGreaterEqual(time.monotonic() - started, 2, "more than two tests ran at a time")
 
     def test_finding_no_tests_is_an_error(self):
         result = self.run_on(self.folder({}))
