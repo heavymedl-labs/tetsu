@@ -25,6 +25,10 @@ class CheckScript(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name)
         self.log = self.root / "log"
+        # Something answers at the test Postgres's address, as a running one would.
+        self.postgres = socket.create_server(("127.0.0.1", 0))
+        self.addCleanup(self.postgres.close)
+        self.database_url = f"postgres://postgres@127.0.0.1:{self.postgres.getsockname()[1]}/postgres"
         (self.root / "scripts").mkdir()
         shutil.copy(ROOT / "scripts" / "check.sh", self.root / "scripts")
         write(self.root / ".config/nightly-toolchain", "nightly-2026-11-01\n")
@@ -106,7 +110,7 @@ class CheckScript(unittest.TestCase):
             self.root,
             PATH=f"{self.bin}:/usr/bin:/bin",
             NVM_DIR=str(nvm_dir or self.root / "no-nvm"),
-            TEST_DATABASE_URL="" if self.no_database else "postgres://test",
+            TEST_DATABASE_URL="" if self.no_database else self.database_url,
             **env,
         )
 
@@ -548,11 +552,11 @@ class CheckScript(unittest.TestCase):
     def test_a_default_address_with_nothing_listening_fails_with_a_fix(self):
         with socket.create_server(("127.0.0.1", 0)) as closed:
             port = closed.getsockname()[1]
-        url = self.default_database(port)
+        self.default_database(port)
         self.no_database = True
         result = self.check()
         self.assertEqual(result.returncode, 1)
-        self.assertIn(f"no test Postgres answers at {url}", result.stderr)
+        self.assertIn(f"no test Postgres answers at localhost:{port}", result.stderr)
         self.assertIn("docker run", result.stderr)
 
     def test_the_setup_hint_starts_postgres_at_the_default_address(self):
@@ -563,11 +567,39 @@ class CheckScript(unittest.TestCase):
         self.assertIsNotNone(default, config)
         self.assertIn(f"-p 127.0.0.1:{default.group(1)}:5432", hint)
 
-    def test_an_explicit_address_is_used_as_given(self):
+    def test_an_explicit_address_that_answers_is_used_as_given(self):
         self.default_database(1)
+        self.stub("cargo", f'echo "cargo $* url=${{TEST_DATABASE_URL-unset}}" >> "{self.log}"')
         result = self.check()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("no test Postgres", result.stderr)
+        self.assertIn(f"url={self.database_url}", self.log.read_text())
+
+    def test_an_explicit_address_with_nothing_listening_stops_before_any_test(self):
+        # Set in a shell profile, it once let a stopped Docker show up as failing tests.
+        with socket.create_server(("127.0.0.1", 0)) as closed:
+            port = closed.getsockname()[1]
+        self.database_url = f"postgres://postgres:hunter2@127.0.0.1:{port}/postgres"
+        result = self.check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(f"no test Postgres answers at 127.0.0.1:{port}", result.stderr)
+        self.assertNotIn("hunter2", result.stderr)
+        self.assertIn("Docker", result.stderr)
+        log = self.log.read_text() if self.log.exists() else ""
+        self.assertNotIn("cargo llvm-cov", log)
+
+    def test_an_explicit_address_naming_no_host_and_port_is_used_as_given(self):
+        # A Unix socket named in the query, or Postgres's own default port: nothing here to try over TCP.
+        for url in ("postgres:///postgres?host=/run/postgresql", "postgres://postgres@127.0.0.1/postgres"):
+            with self.subTest(url=url):
+                self.database_url = url
+                result = self.check()
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_a_stopped_docker_is_named_as_a_likely_cause(self):
+        self.no_database = True
+        result = self.check()
+        self.assertIn("If Docker is stopped, start it", result.stderr)
 
     def test_a_missing_test_database_fails_with_a_fix(self):
         self.no_database = True

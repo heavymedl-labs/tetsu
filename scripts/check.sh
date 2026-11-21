@@ -111,23 +111,33 @@ if [[ "$fast" == true ]]; then
   exit 0
 fi
 
-# Unset or empty, the tests use the default in .cargo/config.toml, which Cargo applies only to a variable that is
-# not set at all. An explicit address is used as given.
+no_postgres() {
+  # No password, so the port is for this machine only. The data is throwaway, so it stays in memory. TLS uses
+  # the image's self-signed certificate, which the TLS tests must refuse. CI starts the same container.
+  # The image is at least the floor in crates/postgres/src/migrate.rs (ADR-0060).
+  echo "error: no test Postgres answers at $1. If Docker is stopped, start it, and the container below starts" >&2
+  echo "with it. Otherwise start one, or set TEST_DATABASE_URL to a Postgres the tests may create databases on:" >&2
+  echo "  docker run -d --name tetsu-test-pg --restart unless-stopped -p 127.0.0.1:54329:5432 \\" >&2
+  echo "    -e POSTGRES_HOST_AUTH_METHOD=trust --tmpfs /var/lib/postgresql postgres:18.7 \\" >&2
+  echo "    -c fsync=off -c synchronous_commit=off -c full_page_writes=off -c ssl=on \\" >&2
+  echo "    -c ssl_cert_file=/etc/ssl/certs/ssl-cert-snakeoil.pem -c ssl_key_file=/etc/ssl/private/ssl-cert-snakeoil.key" >&2
+  exit 1
+}
+
+# The tests' Postgres must answer before any test runs, or a stopped Docker shows up as failing tests. Unset or
+# empty, the tests use the default in .cargo/config.toml, which Cargo applies only to a variable that is not set at
+# all. An explicit address is used as given, and tried when it names a host and port; only those are printed, since
+# it may hold a password.
+authority='^[a-z]+://([^/?]*@)?([^:/?@]+):([0-9]+)(/|$)'
 if [[ -z "${TEST_DATABASE_URL:-}" ]]; then
   unset TEST_DATABASE_URL
   url="$(sed -n 's/^TEST_DATABASE_URL *= *"\(.*\)"$/\1/p' .cargo/config.toml 2>/dev/null || true)"
-  if ! [[ "$url" =~ @([^:/]+):([0-9]+)/ ]] || ! (echo >"/dev/tcp/${BASH_REMATCH[1]}/${BASH_REMATCH[2]}") 2>/dev/null; then
-    # No password, so the port is for this machine only. The data is throwaway, so it stays in memory. TLS uses
-    # the image's self-signed certificate, which the TLS tests must refuse. CI starts the same container.
-    # The image is at least the floor in crates/postgres/src/migrate.rs (ADR-0060).
-    echo "error: no test Postgres answers at ${url:-the default in .cargo/config.toml}. Start one, or set" >&2
-    echo "TEST_DATABASE_URL to a Postgres the tests may create databases on:" >&2
-    echo "  docker run -d --name tetsu-test-pg --restart unless-stopped -p 127.0.0.1:54329:5432 \\" >&2
-    echo "    -e POSTGRES_HOST_AUTH_METHOD=trust --tmpfs /var/lib/postgresql postgres:18.7 \\" >&2
-    echo "    -c fsync=off -c synchronous_commit=off -c full_page_writes=off -c ssl=on \\" >&2
-    echo "    -c ssl_cert_file=/etc/ssl/certs/ssl-cert-snakeoil.pem -c ssl_key_file=/etc/ssl/private/ssl-cert-snakeoil.key" >&2
-    exit 1
-  fi
+  [[ "$url" =~ $authority ]] || no_postgres "the default in .cargo/config.toml"
+else
+  url="$TEST_DATABASE_URL"
+fi
+if [[ "$url" =~ $authority ]] && ! (echo >"/dev/tcp/${BASH_REMATCH[2]}/${BASH_REMATCH[3]}") 2>/dev/null; then
+  no_postgres "${BASH_REMATCH[2]}:${BASH_REMATCH[3]}"
 fi
 
 base="origin/main"
