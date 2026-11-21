@@ -3,6 +3,7 @@
 import os
 import shutil
 import signal
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -210,6 +211,41 @@ class CleanTest(unittest.TestCase):
         with mock.patch("shutil.which", return_value="/usr/bin/docker"), mock.patch("subprocess.run") as run:
             clean.docker("image", "prune", "-f")
         self.assertEqual(run.call_args.args[0], ["docker", "image", "prune", "-f"])
+
+    def systemd_says(self, socket, service):
+        """Runs the docker helper where systemd reports Docker's socket and engine as given, and returns the
+        commands it ran."""
+        mock.patch.stopall()
+        answer = subprocess.CompletedProcess([], 0, stdout=f"{socket}\n{service}\n")
+        with (
+            mock.patch("shutil.which", return_value="/usr/bin/found"),
+            mock.patch("subprocess.run", return_value=answer) as run,
+        ):
+            clean.docker("image", "prune", "-f")
+        return [call.args[0] for call in run.call_args_list]
+
+    def test_docker_is_left_stopped_when_only_its_socket_waits(self):
+        # Any docker command would start an engine waiting on its socket, and the test Postgres with it.
+        ran = self.systemd_says("active", "inactive")
+        self.assertEqual(ran, [["systemctl", "is-active", "docker.socket", "docker.service"]])
+
+    def test_docker_runs_when_its_engine_is_running(self):
+        ran = self.systemd_says("active", "active")
+        self.assertEqual(ran[-1], ["docker", "image", "prune", "-f"])
+
+    def test_docker_runs_when_nothing_waits_on_its_socket(self):
+        # Started some other way, or not at all, a docker command starts nothing and fails harmlessly.
+        ran = self.systemd_says("inactive", "inactive")
+        self.assertEqual(ran[-1], ["docker", "image", "prune", "-f"])
+
+    def test_docker_runs_without_systemd(self):
+        mock.patch.stopall()
+        with (
+            mock.patch("shutil.which", side_effect={"docker": "/usr/bin/docker"}.get),
+            mock.patch("subprocess.run") as run,
+        ):
+            clean.docker("image", "prune", "-f")
+        self.assertEqual([call.args[0] for call in run.call_args_list], [["docker", "image", "prune", "-f"]])
 
     def test_unknown_arguments_print_the_usage(self):
         with mock.patch("sys.stderr"):

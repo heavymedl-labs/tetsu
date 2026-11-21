@@ -9,7 +9,7 @@ With --routine, which scripts/check.sh runs on the way out, it removes only what
 - temporary files a test process left once that process is gone: `tetsu-<process>-*` and
   `t_<seconds>_<process>_<count>.pem`.
 - the copies and output mutation and coverage runs keep while they run (cargo-mutants', StrykerJS's, and
-  Vitest's), dangling container images, and build cache unused for 7 days.
+  Vitest's), dangling container images, and build cache unused for 7 days. A stopped Docker is left stopped.
 - superseded build artifacts under target/. Cargo names each `<unit>-<hash>` and never removes the copies a
   change replaces, so target/ only grows. Of each unit's copies it keeps the newest eight, and removes older
   ones a day after they were written; one still needed is rebuilt. One profile holds several live copies of
@@ -146,8 +146,19 @@ def stop(pids, how=signal.SIGTERM):
             os.kill(pid, how)
 
 
+def docker_waiting():
+    """Whether Docker's engine is stopped with systemd waiting on its socket. Any docker command would then
+    start it, and the test Postgres with it, which should start only when someone asks. Asking systemd starts
+    nothing."""
+    if not shutil.which("systemctl"):
+        return False
+    states = ["systemctl", "is-active", "docker.socket", "docker.service"]
+    found = subprocess.run(states, check=False, capture_output=True, text=True).stdout.split()
+    return found == ["active", "inactive"]
+
+
 def docker(*args):
-    if shutil.which("docker"):
+    if shutil.which("docker") and not docker_waiting():
         subprocess.run(["docker", *args], check=False, capture_output=True)
 
 
