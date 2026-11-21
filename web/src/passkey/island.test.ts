@@ -88,6 +88,24 @@ describe("a passkey island that joins", () => {
     expect(page.history.replaceState).toHaveBeenCalledWith(null, "", "/ops/join?from=mail");
   });
 
+  it("says a page opened without its invite link cannot join, and keeps the button off", async () => {
+    // As after going back to the page, or reloading it: the link left the address bar when it first opened.
+    for (const hash of ["", "#"]) {
+      const host = island('action="join"');
+      const page = browser();
+      page.location.hash = hash;
+      ready(host, page);
+      expect([button(host).disabled, status(host), host.dataset.state]).toEqual([
+        true,
+        "This page no longer holds its invite link, which leaves the address bar once the page opens. Open the link from your invite again.",
+        "failed",
+      ]);
+      button(host).click();
+      await new Promise((settled) => setTimeout(settled));
+      expect(run).not.toHaveBeenCalled();
+    }
+  });
+
   it("logs in on joining, with one ceremony and no second prompt (ADR-0069)", async () => {
     const host = island('action="join"');
     const page = browser();

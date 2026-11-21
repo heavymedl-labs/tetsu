@@ -85,7 +85,8 @@ function partsOf(host: HTMLElement): Parts | undefined {
 }
 
 /** Readies a `<tetsu-passkey>`, once: its button runs its action, if it has its parts and the browser can use
- * passkeys. A join's link then leaves the address bar at once. */
+ * passkeys. A join's link then leaves the address bar at once, so a join whose page opened without one, as after
+ * going back to it, says so rather than offer a join the server can only refuse. */
 export function ready(host: HTMLElement, browser: Browser): void {
   // Connected again, as when moved, an island already readied keeps its one listener.
   if (host.dataset.state !== undefined) {
@@ -106,6 +107,12 @@ export function ready(host: HTMLElement, browser: Browser): void {
     return;
   }
   const sent = sentFor(parts.action, host, browser);
+  if (parts.action === "join" && sent.link === "") {
+    parts.status.textContent =
+      "This page no longer holds its invite link, which leaves the address bar once the page opens. Open the link from your invite again.";
+    host.dataset.state = "failed";
+    return;
+  }
   const presses = new Presses({ host, parts, browser, device }, sent);
   parts.button.addEventListener("click", () => presses.press());
   parts.button.disabled = false;
