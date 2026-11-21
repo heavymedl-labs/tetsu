@@ -26,11 +26,23 @@ It works on Linux and macOS. On Windows, use WSL 2 and follow the Linux steps in
 1. Install git, Docker, [rustup](https://rustup.rs), and Node at the version in `.nvmrc`, through a version manager
    such as mise or nvm. rustup installs the Rust version the repository pins by itself, on first build.
 2. Clone `https://github.com/heavymedl-labs/tetsu` and work from its root.
-3. Start the test Postgres with the `docker run` command in `scripts/check.sh` (search it for `tetsu-test-pg`).
+3. Start the test Postgres. It keeps its data in memory and answers only on this machine:
+
+   ```bash
+   docker run -d --name tetsu-test-pg --restart unless-stopped -p 127.0.0.1:54329:5432 \
+     -e POSTGRES_HOST_AUTH_METHOD=trust --tmpfs /var/lib/postgresql postgres:18.7 \
+     -c fsync=off -c synchronous_commit=off -c full_page_writes=off -c ssl=on \
+     -c ssl_cert_file=/etc/ssl/certs/ssl-cert-snakeoil.pem -c ssl_key_file=/etc/ssl/private/ssl-cert-snakeoil.key
+   ```
+
+   If it says the name is already in use, it exists: run `docker start tetsu-test-pg` instead.
 4. Build the pages' styles and scripts: `npm ci --ignore-scripts --include=dev`, then `npm run build`.
 5. Follow [Run locally](../../crates/tetsu/README.md#run-locally): copy `.env.example` to `.env`, set up the
-   database, seed the sample tenant, and create an operator with a made-up name and address.
-6. Run `cargo tetsu serve`, open the invite link the operator command printed in Chrome, and join with a passkey.
+   database, and seed the sample tenant.
+6. Create your operator **yourself, in a terminal**, not through the agent: `cargo tetsu operator create "Avery
+   Tester" avery@example.com`. It prints the invite link only to a terminal, and refuses when an agent runs it. The
+   link works once, for an hour; keep it to yourself.
+7. Run `cargo tetsu serve`, open the invite link in Chrome, and join with a passkey.
    With no passkey device, use Chrome's virtual one: in DevTools, open More tools, then WebAuthn, then Enable
    virtual authenticator environment. Leave DevTools open, since the virtual passkey lasts only while it is.
 
@@ -41,11 +53,13 @@ Tetsu changes often, so test what is current:
 1. `git pull`.
 2. Start Docker and the test Postgres if they are stopped: `docker start tetsu-test-pg`.
 3. Rebuild the styles if `npm run build` or the server asks, then run `cargo tetsu setup`. It migrates, and creates
-   the database again after the test Postgres restarts, since that keeps its data in memory. Then seed and create
-   an operator again if they are gone.
-4. `cargo tetsu serve`. Note the commit you test: `git rev-parse --short HEAD`.
+   the database again after the test Postgres restarts, since that keeps its data in memory.
+4. Run `cargo tetsu operator list`. If it lists no operator, seed and create one again, as in set up. If yours has
+   no passkey and its link has closed, get a new link in a terminal: `cargo tetsu operator invite <id>`.
+5. `cargo tetsu serve`. Note the commit you test: `git rev-parse --short HEAD`.
 
-When you finish, stop the server with Ctrl+C, and the test Postgres with `docker stop tetsu-test-pg`.
+When you finish, stop the server with Ctrl+C, or `kill -INT <its process id>` if the agent started it, and the test
+Postgres with `docker stop tetsu-test-pg`.
 
 ## Phase 1: read the code
 
@@ -65,30 +79,47 @@ counts only once Phase 2 shows it happening.
 With the server running, ask the agent to work through these, approving each command.
 
 **1. ZAP's scans.** [ZAP](https://www.zaproxy.org) is OWASP's free web scanner. Its Docker image runs a scan and
-writes a report, here to a folder beside the repository:
+writes a report, here to a folder beside the repository. Its crawler finds little from the home page alone, so scan
+each starting point: the home page, the operator login, and the sample tenant's page.
 
 ```bash
 mkdir -p ../tetsu-zap && chmod a+w ../tetsu-zap
-docker run --rm --network host -v "$PWD/../tetsu-zap:/zap/wrk" zaproxy/zap-stable \
-  zap-baseline.py -t http://localhost:8080 -r baseline.html -J baseline.json
+for start in home=/ login=/ops/login tenant=/sample-studio; do
+  docker run --rm --name tetsu-zap --network host -v "$PWD/../tetsu-zap:/zap/wrk" zaproxy/zap-stable \
+    zap-baseline.py -t "http://localhost:8080${start#*=}" -r "baseline-${start%%=*}.html"
+done
 ```
 
-The baseline scan only looks. `zap-full-scan.py`, run the same way, also attacks, and takes longer. On macOS, drop
-`--network host` and use `http://host.docker.internal:8080` as the target. Run both scans again on `/ops` while
-logged in: the agent can copy the session cookie from Chrome's DevTools (Application, then Cookies) and pass it to
-ZAP as a header with `-z` options. The cookie is a live session, so keep it out of reports you send and log out
-afterwards.
+- **The baseline scan only looks.** The first run downloads ZAP's image, about a minute. Each scan takes a minute
+  or two.
+- **`zap-full-scan.py` also attacks.** Run it the same way, with `-m 10` to cap its crawl at ten minutes; it takes a
+  few minutes per starting point. `docker stop tetsu-zap` ends a scan early.
+- **Exit code 2 means warnings to read, not a failure.** Exit code 1 means ZAP found a failure; 3 means it broke.
+- **On macOS,** drop `--network host` and use `http://host.docker.internal:8080` as the target.
+- **Logged in:** after joining, copy the `__Host-tetsu-operator` cookie's value from Chrome's DevTools (Application,
+  then Cookies), and scan `http://localhost:8080/ops` with this added to the scan's options, with the value in place
+  of `VALUE`. The cookie is a live session, so keep it out of reports you send, and log out afterwards.
 
-**2. Checks of Tetsu's own promises.** Have the agent try each with `curl` and Chrome:
+  ```text
+  -z "-config replacer.full_list(0).description=auth -config replacer.full_list(0).enabled=true
+  -config replacer.full_list(0).matchtype=REQ_HEADER -config replacer.full_list(0).matchstr=Cookie
+  -config replacer.full_list(0).regex=false -config replacer.full_list(0).replacement=__Host-tetsu-operator=VALUE"
+  ```
+
+**2. Checks of Tetsu's own promises.** Have the agent try each with `curl` and Chrome. The operator pages are at
+`/ops`, `/ops/login`, `/ops/join`, and `/ops/mailbox`. Their requests go to `/ops/login/begin` and `/finish`,
+`/ops/join/begin` and `/finish`, `/ops/passkeys/begin` and `/finish`, `/ops/logout`, and `/ops/session`. Each of
+those takes JSON (`Content-Type: application/json`) from `Origin: http://localhost:8080`, and a logged-in one also
+carries the session cookie and the page's `form` token.
 
 | Area | Try |
 | --- | --- |
 | Sign-in | Reusing or guessing an invite link; joining twice; logging in without a passkey |
 | Sessions | Reusing a session after Log out; changing the cookie; a session past its 15 idle minutes |
 | Forged requests | A form posted from another origin, or without its token |
-| Rate limits | Many failed logins in a row |
+| Rate limits | Many failed logins in a row. Do this last: it can stop you joining or logging in for up to an hour |
 | Pages | `/ops` and `/ops/mailbox` logged out; the headers and policy on every page |
-| Tenants | With a second seed file copied from `crates/tetsu/tests/fixtures/sample.toml`, one tenant's page reaching the other's data |
+| Tenants | With a second seed file copied from `crates/tetsu/tests/fixtures/sample.toml`, one tenant's page or theme showing the other's name, locations, or colors. Tenants hold only public data so far |
 
 **3. By hand, optional.** ZAP's desktop app sits between Chrome and Tetsu, so you can watch and replay each request.
 It listens on port 8080 by default, which Tetsu uses, so set it to another, such as 8090, in its options.

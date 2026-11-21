@@ -592,6 +592,15 @@ class CheckScript(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertRegex(workflow, rf"ALTER SYSTEM SET {name} = '?{re.escape(value)}'?\"")
 
+    def test_the_security_guide_starts_the_same_test_postgres(self):
+        # The guide shows the command plainly, for people who never run the checks, so it must not drift.
+        self.no_database = True
+        hint = self.check().stderr
+        guide = (ROOT / "docs" / "security" / "testing-with-an-agent.md").read_text()
+        for part in re.findall(r"(-[cpe] \S+|--name \S+|--tmpfs \S+|postgres:[\d.]+)", hint):
+            with self.subTest(part=part):
+                self.assertIn(part, guide)
+
     def test_stops_on_a_failing_stage(self):
         self.stub("cargo", "exit 1")
         result = self.check()
