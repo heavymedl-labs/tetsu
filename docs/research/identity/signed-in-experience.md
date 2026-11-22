@@ -4,6 +4,8 @@ Research on 2026-11-18, after an operator asked, while testing sessions on the d
 see. The [lifecycle note](operator-lifecycles.md) covers a session's limits and what a page says at each one; this note
 covers the rest of being logged in: how a person knows they are, and as whom, where their account lives, and what the
 public site does meanwhile. Sources are industry patterns and Linear's app, read on a throwaway free-plan workspace.
+[Account area and dashboards](account-area-and-dashboards.md) extends it to a shared shell, account area, and home
+for every realm.
 
 ## Summary
 
