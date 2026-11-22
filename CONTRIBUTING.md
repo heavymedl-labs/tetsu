@@ -43,6 +43,17 @@ rather than skipping the step.
 We last [reviewed](docs/research/agent-skills.md) the pack at version 0.6.15. Review it again before
 relying on a newer version's changes to these skills.
 
+Database work also uses `supabase-postgres-best-practices` from
+[supabase/agent-skills](https://github.com/supabase/agent-skills) (MIT), as
+[ADR-0082](docs/adr/0082-a-postgres-skill-for-database-work.md) decides:
+
+```bash
+npx skills add supabase/agent-skills -s supabase-postgres-best-practices
+```
+
+We last [reviewed](docs/research/database-agent-skills.md) it at commit `c9be0e9`. Where its rules disagree with
+this repository, the repository wins, and its Supabase-specific notes do not apply.
+
 ## Docs audit
 
 Every change to docs, ADRs, issues, or the project board gets an audit before it

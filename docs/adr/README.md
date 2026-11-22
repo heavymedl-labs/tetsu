@@ -86,8 +86,8 @@ number, and add a row below. Never renumber.
 | [0079](0079-no-mail-provider-before-a-domain.md) | No mail provider before a domain | Choosing a mail provider, or sending the demo's email | Accepted |
 | [0080](0080-event-rows-past-their-use.md) | Event rows past their use | Removing outbox or inbox rows, or replaying a stopped event | Accepted |
 | [0081](0081-recording-refused-requests.md) | Recording refused requests | Refusing a request at a check, or changing what a refusal records | Accepted |
+| [0082](0082-a-postgres-skill-for-database-work.md) | A Postgres skill for database work | Writing or reviewing SQL, migrations, or schema | Accepted |
 | [0068](0068-no-demo-note.md) | No demo note | Changing what marks a demo page | Proposed |
-| [0082](0082-a-postgres-skill-for-database-work.md) | A Postgres skill for database work | Writing or reviewing SQL, migrations, or schema | Proposed |
 
 ## Open decisions
 

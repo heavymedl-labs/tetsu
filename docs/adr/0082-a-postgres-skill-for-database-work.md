@@ -1,6 +1,6 @@
 # 0082. A Postgres skill for database work
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-22
 
 ## Context
