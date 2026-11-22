@@ -127,7 +127,8 @@ sets its status to Todo, and to Done when it closes. Keep the rest true:
   that ended the session passed ([ADR-0023](docs/adr/0023-ci-on-demand.md)).
 - Update the project README when milestones, views, or field meanings change.
 - Before a session that filed or closed issues ends, run `scripts/check_board.py`.
-  It names each issue that breaks these rules, and says when the board is tidy.
+  It names each issue that breaks these rules, its place in All open's order included, and says when the
+  board is tidy.
 
 ## Commits
 

@@ -1,4 +1,6 @@
-"""Checking the board names each issue that breaks CONTRIBUTING.md's board rules, and passes a tidy board."""
+"""Checking the board names each issue that breaks CONTRIBUTING.md's board rules, and passes a tidy board.
+
+The board's items come in board order, so a test's list of items is that order."""
 
 import json
 import stat
@@ -14,7 +16,7 @@ SCRIPT = ROOT / "scripts" / "check_board.py"
 def issue(number, **given):
     """An issue as the query returns it: an open Task under #1 with an area, unless `given` says otherwise."""
     wanted = {"state": "OPEN", "kind": "Task", "milestone": "1. First", "labels": ("task", "area: server")}
-    wanted |= {"parent": 1} | given
+    wanted |= {"parent": 1, "blocked_by": ()} | given
     return {
         "number": number,
         "title": f"Issue {number}",
@@ -23,6 +25,7 @@ def issue(number, **given):
         "milestone": {"title": wanted["milestone"]} if wanted["milestone"] else None,
         "labels": {"nodes": [{"name": label} for label in wanted["labels"]]},
         "parent": {"number": wanted["parent"]} if wanted["parent"] else None,
+        "blockedBy": {"nodes": [{"number": number} for number in wanted["blocked_by"]]},
     }
 
 
@@ -36,9 +39,10 @@ def item(number, status="Todo", tier="2", priority="Next"):
 
 
 FEATURE = issue(1, kind="Feature", labels=(), parent=None)
+# A feature sits below its sub-issues, so the feature's item comes last.
 TIDY = {
     "issues": [FEATURE, issue(2), issue(3, state="CLOSED")],
-    "items": [item(1), item(2), item(3, status="Done")],
+    "items": [item(2), item(3, status="Done"), item(1)],
 }
 # Answers the two reads the script makes from files a test writes, and fails when GH_FAIL names one.
 STUB = """#!/usr/bin/env python3
@@ -76,7 +80,7 @@ class CheckBoard(unittest.TestCase):
         )
 
     def broken(self, issues, items):
-        result = self.check({"issues": [FEATURE, *issues], "items": [item(1), *items]})
+        result = self.check({"issues": [FEATURE, *issues], "items": [*items, item(1)]})
         self.assertEqual(result.returncode, 1, result.stdout)
         return result.stdout
 
@@ -99,7 +103,7 @@ class CheckBoard(unittest.TestCase):
 
     def test_area_none_counts_as_an_area(self):
         result = self.check(
-            {"issues": [FEATURE, issue(2, labels=("task", "area: none"))], "items": [item(1), item(2)]}
+            {"issues": [FEATURE, issue(2, labels=("task", "area: none"))], "items": [item(2), item(1)]}
         )
         self.assertEqual(result.returncode, 0, result.stdout)
 
@@ -124,6 +128,62 @@ class CheckBoard(unittest.TestCase):
         # The stub splits the issues over two pages, so a check that read one page would miss #3.
         out = self.broken([issue(2), issue(3)], [item(2)])
         self.assertIn("#3 Issue 3: not on the board", out)
+
+    def ordered(self, issues, items):
+        """The output of checking a board whose only problems, if any, are its order."""
+        return self.check({"issues": [FEATURE, *issues], "items": items})
+
+    def test_an_issue_above_what_blocks_it_is_named(self):
+        result = self.ordered([issue(2), issue(3, blocked_by=(2,))], [item(3), item(2), item(1)])
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("#3 Issue 3: above #2, which blocks it", result.stdout)
+
+    def test_a_higher_priority_puts_an_issue_above_its_blocker(self):
+        # All open sorts by priority first, so a Now issue sits above a Next blocker however they are
+        # dragged.
+        result = self.ordered(
+            [issue(2), issue(3, blocked_by=(2,))], [item(2), item(3, priority="Now"), item(1)]
+        )
+        self.assertIn("#3 Issue 3: above #2, which blocks it", result.stdout)
+
+    def test_a_feature_above_its_sub_issue_is_named(self):
+        result = self.ordered([issue(2)], [item(1), item(2)])
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("#1 Issue 1: above its sub-issue #2", result.stdout)
+
+    def test_a_feature_of_higher_priority_may_sit_above_its_sub_issue(self):
+        result = self.check(
+            {"issues": [FEATURE, issue(2)], "items": [item(1, priority="Now"), item(2, priority="Later")]}
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_a_feature_may_sit_above_what_blocks_it(self):
+        # A feature's priority is its most urgent sub-issue's, so its blockers are judged by its work items.
+        blocked = issue(1, kind="Feature", labels=(), parent=None, blocked_by=(2,))
+        result = self.check(
+            {
+                "issues": [blocked, issue(2, parent=None, labels=("task", "area: none"), kind="Feature")],
+                "items": [item(1, priority="Now"), item(2)],
+            }
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_a_board_in_order_passes(self):
+        result = self.ordered([issue(2), issue(3, blocked_by=(2,))], [item(2), item(3), item(1)])
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_order_counts_only_within_a_milestone_and_among_open_issues(self):
+        # A blocker or sub-issue in another milestone, or closed, or off the board, sits in no order to break.
+        result = self.ordered(
+            [
+                issue(2, milestone="2. Later"),
+                issue(3, blocked_by=(2, 4, 9)),
+                issue(4, state="CLOSED"),
+                issue(5, milestone="2. Later"),
+            ],
+            [item(3), item(2), item(4, status="Done"), item(5), item(1)],
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
 
     def test_a_failing_read_says_which(self):
         for which in ("graphql", "item-list"):

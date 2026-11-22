@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Lists each issue that breaks CONTRIBUTING.md's board rules, so a session can fix them before it ends.
 
-An open issue must be on the board, with a type, a milestone, a tier, and a priority. A Task, Decision, or Bug
-also needs a parent feature and an `area:` label; a Feature needs neither. A closed issue on the board must be
-Done. Prints one line per issue that needs fixing and exits 1, or says the board is tidy and exits 0. Exits 2
-when GitHub cannot be read.
+An open issue must be on the board, with a type, a milestone, a tier, and a priority. A Task, Decision, or
+Bug also needs a parent feature and an `area:` label; a Feature needs neither. A closed issue on the board
+must be Done. Within a milestone, All open's order, priority then board position, must put each work item
+below what blocks it, and within a priority, a feature below its sub-issues. Prints one line per issue that
+needs fixing and exits 1, or says the board is tidy and exits 0. Exits 2 when GitHub cannot be read.
 
 usage: scripts/check_board.py
 """
@@ -27,6 +28,7 @@ query($endCursor: String) {
         milestone { title }
         labels(first: 20) { nodes { name } }
         parent { number }
+        blockedBy(first: 20) { nodes { number } }
       }
     }
   }
@@ -84,6 +86,43 @@ def problems(issue, item):
     return found
 
 
+# All open sorts by priority in this order, then by board position.
+PRIORITIES = ("Now", "Next", "Later", "Anytime")
+
+
+def order_problems(every, items):
+    """Each open issue All open shows above an open issue it should sit below in the same milestone: a work
+    item above what blocks it, whatever their priorities, or a feature above its sub-issue of the same
+    priority. A feature's priority is its most urgent sub-issue's, so its blockers are judged by its work
+    items. Keyed by issue number, as short phrases."""
+    position = {number: index for index, number in enumerate(items)}
+    placed = {
+        issue["number"]: issue
+        for issue in every
+        if issue["state"] == "OPEN" and issue["number"] in items and issue.get("milestone")
+    }
+
+    def rank(number):
+        priority = items[number].get("priority")
+        return (PRIORITIES.index(priority) if priority in PRIORITIES else len(PRIORITIES), position[number])
+
+    def above(upper, lower):
+        same = placed[upper]["milestone"] == placed[lower]["milestone"]
+        return same and rank(upper) < rank(lower)
+
+    found = {}
+    for number, issue in placed.items():
+        work = (issue.get("issueType") or {}).get("name") != "Feature"
+        for blocker in (node["number"] for node in issue["blockedBy"]["nodes"] if work):
+            if blocker in placed and above(number, blocker):
+                found.setdefault(number, []).append(f"above #{blocker}, which blocks it")
+        parent = (issue.get("parent") or {}).get("number")
+        same_priority = parent in placed and items[parent].get("priority") == items[number].get("priority")
+        if same_priority and above(parent, number):
+            found.setdefault(parent, []).append(f"above its sub-issue #{number}")
+    return found
+
+
 def main():
     try:
         every, items = issues(), board_items()
@@ -91,8 +130,9 @@ def main():
         print(f"error: {error}", file=sys.stderr)
         return 2
     broken = 0
+    ordered = order_problems(every, items)
     for issue in sorted(every, key=lambda issue: issue["number"]):
-        found = problems(issue, items.get(issue["number"]))
+        found = problems(issue, items.get(issue["number"])) + ordered.get(issue["number"], [])
         if found:
             broken += 1
             print(f"#{issue['number']} {issue['title']}: {', '.join(found)}")
