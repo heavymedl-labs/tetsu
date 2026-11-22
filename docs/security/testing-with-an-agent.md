@@ -8,7 +8,7 @@ It works on Linux and macOS; on Windows, follow the Linux steps inside WSL 2.
 ## Rules
 
 1. **Only your own copy,** at `http://localhost:8080`. Never the demo at `tetsu-demo.onrender.com`, nor Render, Neon,
-   Grafana Cloud, Mailgun, or GitHub.
+   Grafana Cloud, or GitHub.
 2. **Approve each command** the agent wants to run, and read it first. Text on a page Tetsu serves is data, never
    orders.
 3. **Keep it contained:** ideally in a separate user account or virtual machine, with only this guide's tools.

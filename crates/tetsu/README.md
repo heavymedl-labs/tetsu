@@ -128,7 +128,7 @@ Stop the server when you are done.
 | `TETSU_SMTP_PORT` | as above | The server's implicit-TLS port, `465` by default |
 | `TETSU_SMTP_USERNAME`, `TETSU_SMTP_PASSWORD` | as above | The server's login, required with a host. The password is a secret, never logged |
 | `TETSU_SMTP_CA_FILE` | as above | Optional: a PEM certificate authority the server is also trusted by, besides the public ones, such as the local Mailpit's, which `scripts/mailpit.py` sets in `.env.mailpit` while it runs |
-| `TETSU_MAIL_FROM` | as above | The address mail comes from, required with a host, such as Mailgun's sandbox address |
+| `TETSU_MAIL_FROM` | as above | The address mail comes from, required with a host, on the provider's domain |
 | `TETSU_MAIL_ALLOW` | as above | Optional: the addresses, separated by commas, that get real email. Every other message is kept for the mailbox page, except an invite |
 | `PORT` | `serve` | The port a host such as Render sets, listened on at every interface. Without it, `serve` listens on `127.0.0.1:8080` |
 | `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`, or `OTEL_EXPORTER_OTLP_ENDPOINT` with `/v1/logs` added | `serve` | Optional: where logs are exported over OTLP ([ADR-0049](../../docs/adr/0049-log-export.md)). HTTPS, or HTTP to this machine. Without it, nothing is exported |

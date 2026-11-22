@@ -43,6 +43,9 @@ removes every limit and is what ADR-0044 already plans for.
 - **The domain is the only lasting fix,** and ADR-0044 already says the provider or domain changes in settings,
   with no code change, once [#102](https://github.com/heavymedl-labs/tetsu/issues/102) arrives.
 
+**Note, 2026-11-21.** Mailgun's signup now asks for a card before any sending, so its sandbox no longer fits as
+read above. [ADR-0079](../adr/0079-no-mail-provider-before-a-domain.md) sets no provider until Tetsu has a domain.
+
 ## What teams use
 
 Teams split email by stage, and ADR-0044 already follows the split; only the step before a domain is unusual.

@@ -227,17 +227,12 @@ Make it once, readable only by you (`chmod 600 .env.demo`), with these lines:
 ```text
 DATABASE_URL=<the Render service's DATABASE_URL, which is tetsu_app's>
 TETSU_ORIGIN=https://tetsu-demo.onrender.com
-TETSU_SMTP_HOST=smtp.mailgun.org
-TETSU_SMTP_USERNAME=<Mailgun's SMTP login for the sandbox domain>
-TETSU_SMTP_PASSWORD=<its password>
-TETSU_MAIL_FROM=<an address on the sandbox domain>
-TETSU_MAIL_ALLOW=<you, and the people who accepted Mailgun's invitation, separated by commas>
 ```
 
-The mail lines are optional: without them, notices are kept for the mailbox page rather than sent, and invites,
-which are never kept, are only printed.
-Mailgun's sandbox delivers only to up to five addresses, each of which accepts Mailgun's invitation first
-([ADR-0074](../adr/0074-operator-email-in-development.md)).
+The demo sends no email until Tetsu has a domain ([ADR-0079](../adr/0079-no-mail-provider-before-a-domain.md),
+[#151](https://github.com/heavymedl-labs/tetsu/issues/151)): notices are kept for the mailbox page, and invites,
+which are never kept, are only printed. Mail settings, when they come, go in this file and Render's environment
+alike, all of them in each ([ADR-0078](../adr/0078-mail-settings-from-one-place.md)).
 
 Then, from the commit the demo runs:
 
