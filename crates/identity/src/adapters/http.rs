@@ -16,8 +16,8 @@ use serde_json::{Value, json};
 
 use crate::browser::{Change, ForChange, Logout, Origins, return_path};
 use crate::domain::{
-    Actor, Answer, Ceremony, Device, Error, HeldPasskey, RateLimit, Realm, Session, SessionToken,
-    TimeLeft,
+    Actor, Answer, Ceremony, Device, Ending, Error, HeldPasskey, ListedSession, RateLimit, Realm,
+    Session, SessionId, SessionToken, TimeLeft,
 };
 use crate::passkeys::{RelyingParty, base64url};
 use crate::ports::OperatorStore;
@@ -34,6 +34,8 @@ const JOIN_FINISH: &str = "/ops/join/finish";
 const ADD_BEGIN: &str = "/ops/passkeys/begin";
 const ADD_FINISH: &str = "/ops/passkeys/finish";
 const LOGOUT: &str = "/ops/logout";
+/// Ending the operator's other sessions, one by its id or every one (ADR-0059).
+const END_SESSIONS: &str = "/ops/sessions/end";
 /// How long the browser's session has left (GET), and staying logged in (POST), for the session island.
 const SESSION: &str = "/ops/session";
 /// The operators' mailbox: email kept rather than sent (ADR-0074).
@@ -42,7 +44,7 @@ const MAILBOX: &str = "/ops/mailbox";
 const ELSEWHERE: &str = "/ops/{*rest}";
 
 /// Every path Identity serves, which the composition root checks each start with a name no tenant may hold.
-pub const PATHS: [&str; 13] = [
+pub const PATHS: [&str; 14] = [
     ACCOUNT,
     LOGIN,
     LOGIN_BEGIN,
@@ -53,6 +55,7 @@ pub const PATHS: [&str; 13] = [
     ADD_BEGIN,
     ADD_FINISH,
     LOGOUT,
+    END_SESSIONS,
     SESSION,
     MAILBOX,
     ELSEWHERE,
@@ -137,7 +140,33 @@ struct AccountPage {
     passkeys: Vec<&'static str>,
     can_add: bool,
     fresh: bool,
+    /// The operator's live sessions, the one asking first (ADR-0059).
+    sessions: Vec<Shown>,
     form: String,
+}
+
+/// A session as the operator's page lists it: its id, which ending it names, its device, and how long ago it
+/// started and was last used.
+struct Shown {
+    id: String,
+    device: String,
+    started: String,
+    last_seen: String,
+    presented: bool,
+}
+
+impl Shown {
+    fn of(listed: ListedSession, now: SystemTime) -> Self {
+        Self {
+            id: listed.id.as_str().to_string(),
+            device: listed
+                .device
+                .unwrap_or_else(|| "Unknown device".to_string()),
+            started: ago(listed.started_at, now),
+            last_seen: ago(listed.last_seen_at, now),
+            presented: listed.presented,
+        }
+    }
 }
 
 #[derive(Template)]
@@ -212,6 +241,7 @@ where
         .route(ADD_BEGIN, logged_in_route::<S>(LoggedIn::BeginAdding))
         .route(ADD_FINISH, logged_in_route::<S>(LoggedIn::FinishAdding))
         .route(LOGOUT, post(logout::<S>))
+        .route(END_SESSIONS, post(end_sessions::<S>))
         .route(
             SESSION,
             get(time_left::<S>).merge(logged_in_route::<S>(LoggedIn::Stay)),
@@ -406,7 +436,9 @@ async fn shown<S: OperatorStore>(
     };
     // A session found live names an enabled operator, so an account is missing only if they were disabled since.
     let account = served.operators.account(&session).await?;
+    let sessions = served.operators.sessions(&session).await?;
     let web = &served.web;
+    let now = SystemTime::now();
     Ok(account.map(|account| {
         page(&AccountPage {
             demo: web.demo,
@@ -424,8 +456,12 @@ async fn shown<S: OperatorStore>(
                 .collect::<Vec<_>>()
                 .join(" "),
             can_add: account.passkeys.len() < 2,
-            fresh: fresh(session.proven_at(), SystemTime::now()),
+            fresh: fresh(session.proven_at(), now),
             passkeys: account.passkeys.iter().map(described).collect(),
+            sessions: sessions
+                .into_iter()
+                .map(|listed| Shown::of(listed, now))
+                .collect(),
             form,
         })
     }))
@@ -607,24 +643,13 @@ async fn logout<S: OperatorStore>(
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    let form = std::str::from_utf8(&body)
-        .ok()
-        .and_then(|body| body.split('&').find_map(|pair| pair.strip_prefix("form=")))
-        .unwrap_or_default();
-    let change = change(&headers, form);
+    let change = change(&headers, field(&body, "form").unwrap_or_default());
     match served
         .operators
         .end_session(&served.web.origins, &change)
         .await
     {
-        Ok(Logout::Refused) => {
-            let web = &served.web;
-            let refused = RefusedPage {
-                demo: web.demo,
-                stylesheet: web.stylesheet,
-            };
-            (StatusCode::FORBIDDEN, page(&refused)).into_response()
-        }
+        Ok(Logout::Refused) => refused_page(&served.web),
         // The browser also drops what it cached of the pages, so Back shows none of them. Only the cache: clearing
         // cookies would end its sessions in every realm on the host.
         Ok(Logout::Ended | Logout::NothingToEnd) => (
@@ -648,6 +673,57 @@ fn unavailable_page(web: &Web, what: &str, error: &Error) -> Response {
         stylesheet: web.stylesheet,
     };
     (StatusCode::SERVICE_UNAVAILABLE, page(&unavailable)).into_response()
+}
+
+/// A field of a posted form, as sent: the fields Identity's forms carry, a form token and a session id, need no
+/// decoding, so one that would is refused where it is checked.
+fn field<'a>(body: &'a [u8], name: &str) -> Option<&'a str> {
+    std::str::from_utf8(body).ok()?.split('&').find_map(|pair| {
+        pair.split_once('=')
+            .filter(|(key, _)| *key == name)
+            .map(|(_, value)| value)
+    })
+}
+
+/// Ends one of the operator's other sessions, the one the form names, or every other one when it names none
+/// (ADR-0059, `v5.0.0-7.5.2`), then returns to their page, which lists what is left, and says there why a session
+/// not proven within ten minutes ended none. Its checks are logging out's: a request from elsewhere, without its
+/// session's form token, or naming a session in no form an id takes is refused, and one whose session has ended goes
+/// to log in.
+async fn end_sessions<S: OperatorStore>(
+    State(served): Shared<S>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let web = &served.web;
+    let only = match field(&body, "session") {
+        None => None,
+        Some(text) => match SessionId::parse(text) {
+            Some(id) => Some(id),
+            None => return refused_page(web),
+        },
+    };
+    let change = change(&headers, field(&body, "form").unwrap_or_default());
+    let device = Device::from_user_agent(text(&headers, &header::USER_AGENT));
+    match served
+        .operators
+        .end_others(&web.origins, &change, only.as_ref(), device)
+        .await
+    {
+        Ok(Ending::Ended(_) | Ending::NotFresh) => see_other(ACCOUNT),
+        Ok(Ending::NoSession) => see_other(LOGIN),
+        Ok(Ending::Refused) => refused_page(web),
+        Err(error) => unavailable_page(web, "could not end an operator's sessions", &error),
+    }
+}
+
+/// The page a refused form gets, forbidden (`v5.0.0-3.5.1`).
+fn refused_page(web: &Web) -> Response {
+    let refused = RefusedPage {
+        demo: web.demo,
+        stylesheet: web.stylesheet,
+    };
+    (StatusCode::FORBIDDEN, page(&refused)).into_response()
 }
 
 /// The live session a logged-in request acts for, or the answer it gets instead: forbidden when it comes from

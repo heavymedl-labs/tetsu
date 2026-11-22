@@ -27,14 +27,26 @@ the kernel's `Mailbox` port, which Mail implements; a message's HTML is never sh
   Requests at the same moment never end a live session or revive a spent one, and the last request never moves back.
 - **Logging out removes the session** on the server. It changes state, so it passes the origin and form-token
   checks first.
+- **An operator sees and ends their own sessions** at `/ops` (ADR-0059, `v5.0.0-7.5.2`), as Linear lists them:
+  each live one by its public id, with the coarse device it started on, such as Firefox on Linux, when it started,
+  and when it was last used, this one first. `sessions_of` finds them from the presented session alone and renews
+  none. `POST /ops/sessions/end` ends one other session, or every other one, passing logging out's checks, and only
+  from a login within ten minutes, as adding a passkey needs (ADR-0048, `v5.0.0-7.5.1`); this session is never ended
+  there. Each attempt that reaches storage is recorded as `identity.other_sessions_ended`, with the session it
+  named, if any, the operator and the asking session's public id where storage found them, and how many ended, or
+  refused with its reason: `stale` for a session no passkey proved within ten minutes, `ended` or `disabled` when
+  the session or operator went since the request was checked. One refused before, from elsewhere, without its form
+  token, or naming something that is not a session id, records nothing, as logging out does.
+  The device is named once, as login and joining start the session, from the request's own `User-Agent`, and goes
+  with it.
 - **A state-changing request gets one of three answers:** it acts for its live session, its session has ended, or
   it is refused. A refusal is told apart, so the page adapter can answer it as forbidden and record it
   (`ForChange`, `Logout`).
 - **Session tokens compare in constant time,** as form tokens do.
 - **Every table is global** ([ADR-0042](../../docs/adr/0042-tenant-isolation.md)): `identity.operators`, which
   Identity's role adds to and reads, and `identity.sessions`, `invites`, `passkeys`, and `ceremonies`, which
-  it reaches only through lookup functions that take one hash a call, so nothing can list sessions or links, and
-  no realm uses or ends another's.
+  it reaches only through lookup functions that take one hash a call, so nothing lists links, a session lists only
+  its own operator's sessions, and no realm uses or ends another's.
 - **Each operator has a random WebAuthn user handle,** which says nothing about them, and each session a random
   public id, for a list of sessions to show and end them by without the token's hash.
 - **Each realm's session cookie** is `__Host-` prefixed, `Secure`, `HttpOnly`, and `SameSite=Lax`, with path `/`

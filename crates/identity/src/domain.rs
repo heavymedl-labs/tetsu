@@ -618,7 +618,11 @@ pub struct Refusal<'a> {
 /// command, not proven: every command logs in as one database login (ADR-0061), so database access is the trust
 /// boundary, and this says which person used it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Actor(String);
+pub struct Actor {
+    text: String,
+    /// The device a browser acted from, kept whole, so a list of sessions names it no finer than it is.
+    device: Option<Device>,
+}
 
 /// The longest user or host in an actor.
 const MAX_PART: usize = 99;
@@ -686,9 +690,10 @@ impl Actor {
     /// control, invisible, or direction-changing character, and no other `@`.
     pub fn parse(text: &str) -> Result<Self, Error> {
         match text.split_once('@') {
-            Some((user, host)) if actor_part(user) && actor_part(host) => {
-                Ok(Self(text.to_string()))
-            }
+            Some((user, host)) if actor_part(user) && actor_part(host) => Ok(Self {
+                text: text.to_string(),
+                device: None,
+            }),
             _ => Err(Error::Invalid(format!(
                 "an actor is user@host, each part 1 to {MAX_PART} characters with no control, invisible, or \
                  direction-changing characters"
@@ -707,7 +712,10 @@ impl Actor {
                 .unwrap_or("unknown")
                 .to_string()
         };
-        Self(format!("{}@{}", part(user), part(host)))
+        Self {
+            text: format!("{}@{}", part(user), part(host)),
+            device: None,
+        }
     }
 
     /// Who acted from a browser, as the audit record names them: `operator-<id>@<device>` once logged in, or
@@ -718,14 +726,69 @@ impl Actor {
             || "browser".to_string(),
             |id| format!("operator-{}", id.get()),
         );
-        let device = device.map_or_else(|| "unknown".to_string(), |device| device.to_string());
-        Self(format!("{user}@{device}"))
+        let named = device.map_or_else(|| "unknown".to_string(), |device| device.to_string());
+        Self {
+            text: format!("{user}@{named}"),
+            device,
+        }
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.text
+    }
+
+    /// The device a browser's actor acted from, as [`Self::browser`] was given it: none for a command, or a request
+    /// that named none, whatever its text says.
+    #[must_use]
+    pub fn device(&self) -> Option<Device> {
+        self.device
+    }
+}
+
+/// What ending an operator's other sessions did (ADR-0059, `v5.0.0-7.5.2`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ending {
+    /// So many of the operator's other sessions were live when they ended.
+    Ended(u64),
+    /// The session had not been proven by a passkey within ten minutes, so it may end no other (ADR-0048).
+    NotFresh,
+    /// The request passed the checks, but its session had already ended or never was, or its operator was disabled.
+    NoSession,
+    /// The request came from elsewhere, or without its session's form token, or with its cookie sent twice.
+    Refused,
+}
+
+/// A session's random public id, as the list of sessions shows it and ending one names it (ADR-0059): a UUID in its
+/// lowercase form, never anything of its token. One that is not is refused before it reaches storage.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionId(pub(crate) String);
+
+impl SessionId {
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        let groups = text.split('-').map(str::len);
+        let hex = text
+            .bytes()
+            .all(|byte| byte == b'-' || matches!(byte, b'0'..=b'9' | b'a'..=b'f'));
+        (hex && groups.eq([8, 4, 4, 4, 12])).then(|| Self(text.to_string()))
     }
 
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
+}
+
+/// One of an operator's live sessions, as their page lists it (ADR-0059, `v5.0.0-7.5.2`): its random id, when it
+/// started and was last used, the device it started on, and whether it is the session asking.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListedSession {
+    pub id: SessionId,
+    pub started_at: SystemTime,
+    pub last_seen_at: SystemTime,
+    pub device: Option<String>,
+    pub presented: bool,
 }
 
 /// What disabling an operator did: whether it acted, since an operator already disabled is left as is, and how

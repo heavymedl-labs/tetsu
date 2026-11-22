@@ -2,10 +2,10 @@
 
 use crate::browser::{Change, CheckedSession, ForChange, Logout, Origins};
 use crate::domain::{
-    Account, Actor, Addition, Answer, Ceremony, CeremonyKind, CeremonyToken, Disabling, Error,
-    Fill, InviteToken, Issue, Login, NewPasskey, OperatorId, OperatorName, OperatorSummary,
-    RateLimit, Realm, Redemption, Refusal, Removal, Session, SessionStart, SessionToken, Signer,
-    TimeLeft,
+    Account, Actor, Addition, Answer, Ceremony, CeremonyKind, CeremonyToken, Device, Disabling,
+    Ending, Error, Fill, InviteToken, Issue, ListedSession, Login, NewPasskey, OperatorId,
+    OperatorName, OperatorSummary, RateLimit, Realm, Redemption, Refusal, Removal, Session,
+    SessionId, SessionStart, SessionToken, Signer, TimeLeft,
 };
 use crate::passkeys::RelyingParty;
 use crate::ports::OperatorStore;
@@ -319,6 +319,42 @@ impl<S: OperatorStore> Operators<S> {
     /// Fails if storage fails.
     pub async fn account(&self, session: &Session) -> Result<Option<Account>, Error> {
         self.store.account(&session.hash).await
+    }
+
+    /// The live sessions of the operator `session` belongs to, as their page lists them, that one first (ADR-0059,
+    /// `v5.0.0-7.5.2`). They are found from the session alone, so no request lists another operator's, and reading
+    /// them renews none.
+    ///
+    /// # Errors
+    /// Fails if storage fails.
+    pub async fn sessions(&self, session: &Session) -> Result<Vec<ListedSession>, Error> {
+        self.store.sessions_of(&session.hash).await
+    }
+
+    /// Ends one of the operator's other sessions, by its id, or every other one when `only` names none (ADR-0059,
+    /// `v5.0.0-7.5.2`), and records it. It passes the same checks as [`Self::session_for_change`], and then only a
+    /// session a passkey proved within ten minutes may, by Postgres's clock (ADR-0048, `v5.0.0-7.5.1`). The session
+    /// asking is never ended here; logging out ends it. The record names the operator and the `device` asking.
+    ///
+    /// # Errors
+    /// Fails if storage fails.
+    pub async fn end_others(
+        &self,
+        origins: &Origins,
+        change: &Change<'_>,
+        only: Option<&SessionId>,
+        device: Option<Device>,
+    ) -> Result<Ending, Error> {
+        let checked = match self.session_for_change(origins, change).await? {
+            ForChange::Acting(checked) => checked,
+            ForChange::NoSession => return Ok(Ending::NoSession),
+            ForChange::Refused => return Ok(Ending::Refused),
+        };
+        let session = checked.session();
+        let actor = Actor::browser(Some(session.operator()), device);
+        self.store
+            .end_other_sessions(&session.hash, only, &actor)
+            .await
     }
 
     /// Begins adding an operator's second passkey (ADR-0057), from a session that began with a passkey login

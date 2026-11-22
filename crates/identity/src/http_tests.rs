@@ -71,7 +71,7 @@ impl Mailbox for Kept {
 }
 
 /// The mailbox most tests serve: one notice kept five minutes ago, whose text holds markup the page must escape.
-fn sample_mailbox() -> Arc<dyn Mailbox> {
+pub(crate) fn sample_mailbox() -> Arc<dyn Mailbox> {
     Arc::new(Kept(Some(vec![Captured {
         recipient: "ada@example.com".into(),
         subject: "New login to your Tetsu account".into(),
@@ -91,7 +91,10 @@ async fn serving_with(mailbox: Arc<dyn Mailbox>) -> (SocketAddr, TestDatabase, S
     (serve(operators, mailbox).await, database, link)
 }
 
-async fn serve(operators: Operators<PostgresOperators>, mailbox: Arc<dyn Mailbox>) -> SocketAddr {
+pub(crate) async fn serve(
+    operators: Operators<PostgresOperators>,
+    mailbox: Arc<dyn Mailbox>,
+) -> SocketAddr {
     let web = Web {
         party: party(),
         origins: Origins::parse(&[ORIGIN]).expect("origins"),
@@ -134,6 +137,17 @@ pub(crate) async fn send(
     headers: &[(&str, &str)],
     body: &str,
 ) -> Reply {
+    send_bytes(address, method, path, headers, body.as_bytes()).await
+}
+
+/// Sends a request whose body may be any bytes, text or not.
+pub(crate) async fn send_bytes(
+    address: SocketAddr,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: &[u8],
+) -> Reply {
     let mut request = format!(
         "{method} {path} HTTP/1.1\r\nHost: ops.example.com\r\nConnection: close\r\nContent-Length: {}\r\n",
         body.len()
@@ -142,9 +156,9 @@ pub(crate) async fn send(
         let _ = write!(request, "{name}: {value}\r\n");
     }
     request.push_str("\r\n");
-    request.push_str(body);
     let mut stream = TcpStream::connect(address).await.expect("connects");
     stream.write_all(request.as_bytes()).await.expect("sends");
+    stream.write_all(body).await.expect("sends");
     let mut raw = String::new();
     stream.read_to_string(&mut raw).await.expect("reads");
     let (head, body) = raw.split_once("\r\n\r\n").unwrap_or((&raw, ""));
@@ -210,7 +224,7 @@ pub(crate) async fn join(address: SocketAddr, link: &str) -> (Passkey, String) {
 }
 
 /// The session cookie a response set, as the browser would send it back.
-fn cookie_in(reply: &Reply) -> String {
+pub(crate) fn cookie_in(reply: &Reply) -> String {
     let set = reply.header("set-cookie").expect("a cookie");
     set.split(';').next().unwrap_or_default().to_string()
 }

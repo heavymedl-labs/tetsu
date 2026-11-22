@@ -25,6 +25,8 @@ mod lifecycle_tests;
 mod limit_tests;
 #[cfg(test)]
 mod login_tests;
+#[cfg(test)]
+mod sessions_tests;
 
 pub use adapters::events::notices;
 pub use adapters::http::{PATHS, Web, router};
@@ -32,9 +34,10 @@ pub use adapters::postgres::postgres_store;
 pub use browser::{Change, CheckedSession, ForChange, Logout, Origins};
 pub use domain::{
     Account, Actor, Addition, Answer, Ceremony, CeremonyKind, CeremonyToken, Device, Disabling,
-    Error, HeldPasskey, InviteToken, Invitee, Issue, Limits, Login, NewPasskey, OperatorId,
-    OperatorName, OperatorSummary, RateLimit, Realm, Redemption, Refusal, Removal, Session,
-    SessionStart, SessionToken, Signer, TakenAddition, TakenCeremony, TimeLeft,
+    Ending, Error, HeldPasskey, InviteToken, Invitee, Issue, Limits, ListedSession, Login,
+    NewPasskey, OperatorId, OperatorName, OperatorSummary, RateLimit, Realm, Redemption, Refusal,
+    Removal, Session, SessionId, SessionStart, SessionToken, Signer, TakenAddition, TakenCeremony,
+    TimeLeft,
 };
 pub use mail::invite_message;
 pub use passkeys::RelyingParty;

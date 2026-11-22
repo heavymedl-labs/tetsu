@@ -11,9 +11,10 @@ use tokio_postgres::Row;
 use tokio_postgres::types::{FromSql, ToSql};
 
 use crate::domain::{
-    Account, Actor, Addition, CeremonyKind, Disabling, Error, HeldPasskey, Invitee, Issue, Login,
-    NewPasskey, OperatorId, OperatorName, OperatorSummary, RateLimit, Realm, Redemption, Refusal,
-    Removal, Session, SessionStart, Signer, TakenAddition, TakenCeremony, TimeLeft,
+    Account, Actor, Addition, CeremonyKind, Disabling, Ending, Error, HeldPasskey, Invitee, Issue,
+    ListedSession, Login, NewPasskey, OperatorId, OperatorName, OperatorSummary, RateLimit, Realm,
+    Redemption, Refusal, Removal, Session, SessionId, SessionStart, Signer, TakenAddition,
+    TakenCeremony, TimeLeft,
 };
 use crate::ports::OperatorStore;
 use crate::use_cases::Operators;
@@ -48,6 +49,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 7,
         sql: include_str!("../../migrations/0007_set_operator_email.sql"),
     },
+    Migration {
+        version: 8,
+        sql: include_str!("../../migrations/0008_session_list.sql"),
+    },
 ];
 /// Identity's schema, which names the role its transactions act as (ADR-0042).
 const SCHEMA: &str = "identity";
@@ -81,6 +86,8 @@ const RECORD: &str = include_str!("../../sql/record.sql");
 const BEGIN_JOIN: &str = include_str!("../../sql/begin_join.sql");
 const TAKE_CEREMONY: &str = include_str!("../../sql/take_ceremony.sql");
 const REDEEM_INVITE: &str = include_str!("../../sql/redeem_invite.sql");
+const SESSIONS_OF: &str = include_str!("../../sql/sessions_of.sql");
+const END_OTHER_SESSIONS: &str = include_str!("../../sql/end_other_sessions.sql");
 /// The kind of ceremony join keeps.
 const JOIN: &str = "join";
 
@@ -391,7 +398,8 @@ impl OperatorStore for PostgresOperators {
         let id = ceremony.operator.get();
         let transports = passkey.transports.join(" ");
         let replacing = session.replacing.as_ref().map(<[u8; 32]>::as_slice);
-        let parameters: [&(dyn ToSql + Sync); 7] = [
+        let device = actor.device().map(|device| device.to_string());
+        let parameters: [&(dyn ToSql + Sync); 8] = [
             &ceremony.link_hash.as_slice(),
             &id,
             &passkey.credential_id,
@@ -399,6 +407,7 @@ impl OperatorStore for PostgresOperators {
             &transports,
             &session.hash.as_slice(),
             &replacing,
+            &device,
         ];
         self.decided(REDEEM_INVITE, &parameters, |rows| {
             redemption(rows, id, &passkey.credential_id, actor)
@@ -471,13 +480,15 @@ impl OperatorStore for PostgresOperators {
         let id = signer.operator.get();
         let credential = signer.credential.as_slice();
         let replacing = session.replacing.as_ref().map(<[u8; 32]>::as_slice);
-        let parameters: [&(dyn ToSql + Sync); 6] = [
+        let device = actor.device().map(|device| device.to_string());
+        let parameters: [&(dyn ToSql + Sync); 7] = [
             &credential,
             &id,
             &signer.passkey,
             &passkey,
             &session.hash.as_slice(),
             &replacing,
+            &device,
         ];
         self.decided(LOGIN, &parameters, |rows| {
             logging_in(rows, signer, passkey, actor)
@@ -491,6 +502,30 @@ impl OperatorStore for PostgresOperators {
 
     async fn adder(&self, session: &[u8; 32]) -> Result<Option<Account>, Error> {
         account_from(&self.query(ADDER, &[&session.as_slice()]).await?)
+    }
+
+    async fn sessions_of(&self, session: &[u8; 32]) -> Result<Vec<ListedSession>, Error> {
+        self.query(SESSIONS_OF, &[&session.as_slice()])
+            .await?
+            .iter()
+            .map(listed)
+            .collect()
+    }
+
+    async fn end_other_sessions(
+        &self,
+        session: &[u8; 32],
+        only: Option<&SessionId>,
+        actor: &Actor,
+    ) -> Result<Ending, Error> {
+        let only = only.map(SessionId::as_str);
+        let parameters: [&(dyn ToSql + Sync); 2] = [&session.as_slice(), &only];
+        let ending = self
+            .decided(END_OTHER_SESSIONS, &parameters, |rows| {
+                ending(rows, only, actor)
+            })
+            .await?;
+        Ok(ending.unwrap_or(Ending::NoSession))
     }
 
     async fn begin_addition(
@@ -1086,6 +1121,46 @@ fn outcome(acted: Option<bool>) -> &'static str {
         Some(false) => "unchanged",
         None => "refused",
     }
+}
+
+/// A session as an operator's list shows it, by the id Postgres made for it.
+fn listed(row: &Row) -> Result<ListedSession, Error> {
+    Ok(ListedSession {
+        id: SessionId(column(row, "id")?),
+        started_at: column(row, "started_at")?,
+        last_seen_at: column(row, "last_seen_at")?,
+        device: column(row, "device")?,
+        presented: column(row, "presented")?,
+    })
+}
+
+/// What ending other sessions did, and its record: the operator, the session that asked by its public id, the one
+/// it named, if any, and how many ended, or the reason it ended none, as storage gave it. Ending none at all is
+/// unchanged, and any reason is refused. A reason Identity's database never writes, or none with no count, is a
+/// storage failure, never a guess.
+fn ending(rows: &[Row], only: Option<&str>, actor: &Actor) -> Decided<Ending> {
+    let row = rows.first().ok_or_else(answered_nothing)?;
+    let who: Option<i64> = column(row, "who")?;
+    let asking: Option<String> = column(row, "asking")?;
+    let reason: Option<String> = column(row, "reason")?;
+    let ended = counted(rows, "ended")?;
+    // Storage counts only an ending it made, for a session it found, and gives a reason only for none.
+    let found = who.is_some() && asking.is_some();
+    let (answer, outcome) = match (reason.as_deref(), ended, found) {
+        (None, Some(ended), true) => (Ending::Ended(ended), outcome(Some(ended > 0))),
+        (Some("stale"), None, true) => (Ending::NotFresh, "refused"),
+        (Some("ended" | "disabled"), None, false) => (Ending::NoSession, "refused"),
+        _ => {
+            return Err(Error::Storage(
+                "ending other sessions answered no outcome Identity knows".to_string(),
+            ));
+        }
+    };
+    let payload = json!({
+        "operator_id": who, "session": asking, "named": only, "ended": ended, "reason": reason,
+    });
+    let recorded = event("identity.other_sessions_ended", actor, outcome, payload);
+    Ok((Some(answer), Some(recorded)))
 }
 
 /// A stored realm Identity does not know is an error, never a session in some default realm.

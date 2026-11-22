@@ -1,9 +1,9 @@
 //! The driven port Identity calls out through.
 
 use crate::domain::{
-    Account, Actor, Addition, Disabling, Error, Invitee, Issue, Login, NewPasskey, OperatorId,
-    OperatorName, OperatorSummary, RateLimit, Realm, Redemption, Refusal, Removal, Session,
-    SessionStart, Signer, TakenAddition, TakenCeremony, TimeLeft,
+    Account, Actor, Addition, Disabling, Ending, Error, Invitee, Issue, ListedSession, Login,
+    NewPasskey, OperatorId, OperatorName, OperatorSummary, RateLimit, Realm, Redemption, Refusal,
+    Removal, Session, SessionId, SessionStart, Signer, TakenAddition, TakenCeremony, TimeLeft,
 };
 use std::future::Future;
 use std::time::Duration;
@@ -180,6 +180,24 @@ pub trait OperatorStore {
         &self,
         session: &[u8; 32],
     ) -> impl Future<Output = Result<Option<Account>, Error>> + Send;
+
+    /// The live sessions of whoever's live session this hash names, the presented one first, found from it alone.
+    /// Reading them renews nothing.
+    fn sessions_of(
+        &self,
+        session: &[u8; 32],
+    ) -> impl Future<Output = Result<Vec<ListedSession>, Error>> + Send;
+
+    /// Ends the other session `only` of the operator whose session this hash names, or every other one, if that
+    /// session is live, its operator enabled, and it was proven by a passkey within ten minutes, and records the
+    /// attempt either way. The operator comes from the session alone, never from the caller. It never ends this
+    /// session, and never answers [`Ending::Refused`], which the request's own checks decide.
+    fn end_other_sessions(
+        &self,
+        session: &[u8; 32],
+        only: Option<&SessionId>,
+        actor: &Actor,
+    ) -> impl Future<Output = Result<Ending, Error>> + Send;
 
     /// Keeps a ceremony for adding a passkey for ten minutes, if the session still allows it, replacing the
     /// operator's earlier one; says whether it did.
