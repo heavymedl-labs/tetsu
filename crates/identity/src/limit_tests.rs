@@ -227,3 +227,27 @@ async fn limits_fail_as_storage_when_refused() {
         "storage failed: permission denied for function fail"
     );
 }
+
+/// Ten refusals are recorded in fifteen minutes, one every ninety seconds after, and a network past that says so
+/// once in fifteen minutes (ADR-0081).
+#[tokio::test]
+async fn a_network_has_ten_refusals_recorded_in_fifteen_minutes() {
+    let (operators, database) = limited().await;
+    let from = network("192.0.2.1");
+    for _ in 0..10 {
+        assert_eq!(wait(&operators, RateLimit::Refusal, &from).await, None);
+    }
+    assert_eq!(
+        wait(&operators, RateLimit::Refusal, &from).await,
+        Some(Duration::from_secs(90))
+    );
+    assert_eq!(wait(&operators, RateLimit::RefusalFlood, &from).await, None);
+    assert_eq!(
+        wait(&operators, RateLimit::RefusalFlood, &from).await,
+        Some(Duration::from_mins(15))
+    );
+    later(&database, 90).await;
+    assert_eq!(wait(&operators, RateLimit::Refusal, &from).await, None);
+    later(&database, 810).await;
+    assert_eq!(wait(&operators, RateLimit::RefusalFlood, &from).await, None);
+}

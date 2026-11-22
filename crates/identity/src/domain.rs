@@ -399,6 +399,10 @@ pub enum RateLimit {
     LoginFailure,
     /// Beginning or finishing joining, each counted.
     Join,
+    /// Recording a request a check refused, each counted, so one network's flood of them is bounded (ADR-0081).
+    Refusal,
+    /// Recording, once a window, that a network's later refusals go unrecorded (ADR-0081).
+    RefusalFlood,
 }
 
 impl RateLimit {
@@ -409,6 +413,8 @@ impl RateLimit {
             Self::LoginBegin => "login_begin",
             Self::LoginFailure => "login_failure",
             Self::Join => "join",
+            Self::Refusal => "refusal",
+            Self::RefusalFlood => "refusal_flood",
         }
     }
 }
@@ -755,8 +761,34 @@ pub enum Ending {
     NotFresh,
     /// The request passed the checks, but its session had already ended or never was, or its operator was disabled.
     NoSession,
-    /// The request came from elsewhere, or without its session's form token, or with its cookie sent twice.
-    Refused,
+    /// The request failed a check before reaching storage.
+    Refused(FailedCheck),
+}
+
+/// The check a state-changing request failed before it reached storage, as the audit record names it
+/// (`v5.0.0-16.3.3`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailedCheck {
+    /// It carried no session cookie for its realm, one that is not a token, or the cookie twice.
+    Cookie,
+    /// It came from an origin the realm does not serve, or a browser said it came from another site.
+    Origin,
+    /// It carried its session's cookie but not that session's form token.
+    FormToken,
+    /// A field it sent is in no form the field takes.
+    Field,
+}
+
+impl FailedCheck {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Cookie => "cookie",
+            Self::Origin => "origin",
+            Self::FormToken => "form_token",
+            Self::Field => "field",
+        }
+    }
 }
 
 /// A session's random public id, as the list of sessions shows it and ending one names it (ADR-0059): a UUID in its

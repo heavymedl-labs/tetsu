@@ -5,8 +5,8 @@
 use std::time::Duration;
 
 use tetsu_identity::{
-    Change, Error, ForChange, Identity, Logout, OperatorId, Origins, Realm, RelyingParty,
-    SessionToken, postgres_store,
+    Change, Error, FailedCheck, ForChange, Identity, Logout, OperatorId, Origins, Realm,
+    RelyingParty, SessionToken, postgres_store,
 };
 use tetsu_kernel::Address;
 use tetsu_postgres::test_support::TestDatabase;
@@ -335,7 +335,7 @@ async fn logging_out_ends_the_session_once_its_checks_pass() {
     let from_elsewhere = logout(Some("https://evil.example"));
     assert_eq!(
         operators.end_session(&origins(), &from_elsewhere).await,
-        Ok(Logout::Refused)
+        Ok(Logout::Refused(FailedCheck::Origin))
     );
     assert!(
         operators
@@ -663,17 +663,20 @@ async fn a_change_needs_the_realms_origin_and_the_sessions_form_token() {
     );
     let jar = cookie(&session);
     let change = |origin, form_token| Change::new([jar.as_str()], origin, None, form_token);
-    for refused in [
-        change(None, &form),
-        change(Some("null"), &form),
-        change(Some("https://evil.example"), &form),
-        change(Some(ORIGIN), ""),
-        change(Some(ORIGIN), &others),
-        change(Some(ORIGIN), &session),
+    for (refused, failed) in [
+        (change(None, &form), FailedCheck::Origin),
+        (change(Some("null"), &form), FailedCheck::Origin),
+        (
+            change(Some("https://evil.example"), &form),
+            FailedCheck::Origin,
+        ),
+        (change(Some(ORIGIN), ""), FailedCheck::FormToken),
+        (change(Some(ORIGIN), &others), FailedCheck::FormToken),
+        (change(Some(ORIGIN), &session), FailedCheck::FormToken),
     ] {
         assert_eq!(
             operators.session_for_change(&origins(), &refused).await,
-            Ok(ForChange::Refused)
+            Ok(ForChange::Refused(failed))
         );
     }
     assert!(
@@ -698,11 +701,11 @@ async fn a_change_with_a_malformed_cookie_finds_no_session() {
     let malformed = Change::new([jar.as_str()], Some(ORIGIN), None, &form);
     assert_eq!(
         operators.session_for_change(&origins(), &malformed).await,
-        Ok(ForChange::Refused)
+        Ok(ForChange::Refused(FailedCheck::Cookie))
     );
     assert_eq!(
         operators.end_session(&origins(), &malformed).await,
-        Ok(Logout::Refused)
+        Ok(Logout::Refused(FailedCheck::Cookie))
     );
 }
 

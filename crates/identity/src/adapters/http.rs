@@ -16,8 +16,8 @@ use serde_json::{Value, json};
 
 use crate::browser::{Change, ForChange, Logout, Origins, return_path};
 use crate::domain::{
-    Actor, Answer, Ceremony, Device, Ending, Error, HeldPasskey, ListedSession, RateLimit, Realm,
-    Session, SessionId, SessionToken, TimeLeft,
+    Actor, Answer, Ceremony, Device, Ending, Error, FailedCheck, HeldPasskey, ListedSession,
+    RateLimit, Realm, Session, SessionId, SessionToken, TimeLeft,
 };
 use crate::passkeys::{RelyingParty, base64url};
 use crate::ports::OperatorStore;
@@ -267,9 +267,10 @@ fn logged_in_route<S: OperatorStore + Send + Sync + 'static>(
     step: LoggedIn,
 ) -> MethodRouter<Arc<Served<S>>> {
     post(
-        move |State(served): Shared<S>, headers: HeaderMap, body: Bytes| {
-            logged_in(served, headers, body, step)
-        },
+        move |State(served): Shared<S>,
+              Extension(from): Extension<Requester>,
+              headers: HeaderMap,
+              body: Bytes| { logged_in(served, from, headers, body, step) },
     )
 }
 
@@ -528,12 +529,33 @@ enum LoggedIn {
 }
 
 impl Before {
+    /// The path each step is served at, as a refusal's record names it.
+    fn path(self) -> &'static str {
+        match self {
+            Self::BeginLogin => LOGIN_BEGIN,
+            Self::FinishLogin => LOGIN_FINISH,
+            Self::BeginJoin => JOIN_BEGIN,
+            Self::FinishJoin => JOIN_FINISH,
+        }
+    }
+
     /// The rate limit each step is held to (ADR-0072).
     fn limit(self) -> RateLimit {
         match self {
             Self::BeginLogin => RateLimit::LoginBegin,
             Self::FinishLogin => RateLimit::LoginFailure,
             Self::BeginJoin | Self::FinishJoin => RateLimit::Join,
+        }
+    }
+}
+
+impl LoggedIn {
+    /// The path each step is served at, as a refusal's record names it.
+    fn path(self) -> &'static str {
+        match self {
+            Self::BeginAdding => ADD_BEGIN,
+            Self::FinishAdding => ADD_FINISH,
+            Self::Stay => SESSION,
         }
     }
 }
@@ -547,7 +569,7 @@ async fn before<S: OperatorStore>(
     body: Bytes,
     step: Before,
 ) -> Result<Response, Refused> {
-    let sent = admitted(&served.web, &headers, &body)?;
+    let sent = admitted(&served, &from, &headers, &body, step.path()).await?;
     let operators = &served.operators;
     let result = match operators.admit(step.limit(), &from).await {
         Ok(()) => stepped(&served, &headers, &sent, step).await,
@@ -604,12 +626,14 @@ async fn stepped<S: OperatorStore>(
 /// begins or finishes adding a passkey, or stays logged in.
 async fn logged_in<S: OperatorStore>(
     served: Arc<Served<S>>,
+    from: Requester,
     headers: HeaderMap,
     body: Bytes,
     step: LoggedIn,
 ) -> Result<Response, Refused> {
-    let sent = json_in(&headers, &body)?;
-    let checked = acting(&served, &headers, &sent).await?;
+    // The origin before the body, so another site's form, which a browser sends without asking, is recorded as one.
+    let sent = admitted(&served, &from, &headers, &body, step.path()).await?;
+    let checked = acting(&served, &from, &headers, &sent, step.path()).await?;
     let (web, operators) = (&served.web, &served.operators);
     let answered_with = match step {
         LoggedIn::BeginAdding => operators
@@ -639,6 +663,7 @@ async fn logged_in<S: OperatorStore>(
 /// gets a page saying so, never a bare status or JSON.
 async fn logout<S: OperatorStore>(
     State(served): Shared<S>,
+    Extension(from): Extension<Requester>,
     headers: HeaderMap,
     uri: Uri,
     body: Bytes,
@@ -649,7 +674,7 @@ async fn logout<S: OperatorStore>(
         .end_session(&served.web.origins, &change)
         .await
     {
-        Ok(Logout::Refused) => refused_page(&served.web),
+        Ok(Logout::Refused(check)) => refused_form(&served, &from, &headers, LOGOUT, check).await,
         // The browser also drops what it cached of the pages, so Back shows none of them. Only the cache: clearing
         // cookies would end its sessions in every realm on the host.
         Ok(Logout::Ended | Logout::NothingToEnd) => (
@@ -692,18 +717,27 @@ fn field<'a>(body: &'a [u8], name: &str) -> Option<&'a str> {
 /// to log in.
 async fn end_sessions<S: OperatorStore>(
     State(served): Shared<S>,
+    Extension(from): Extension<Requester>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
     let web = &served.web;
+    let change = change(&headers, field(&body, "form").unwrap_or_default());
     let only = match field(&body, "session") {
         None => None,
-        Some(text) => match SessionId::parse(text) {
-            Some(id) => Some(id),
-            None => return refused_page(web),
-        },
+        Some(text) => {
+            // A request that fails a check is recorded as failing that one, and only one that passes them all as
+            // naming no session id.
+            let Some(id) = SessionId::parse(text) else {
+                let check = change
+                    .verified(Realm::Operator, &web.origins)
+                    .err()
+                    .unwrap_or(FailedCheck::Field);
+                return refused_form(&served, &from, &headers, END_SESSIONS, check).await;
+            };
+            Some(id)
+        }
     };
-    let change = change(&headers, field(&body, "form").unwrap_or_default());
     let device = Device::from_user_agent(text(&headers, &header::USER_AGENT));
     match served
         .operators
@@ -712,8 +746,25 @@ async fn end_sessions<S: OperatorStore>(
     {
         Ok(Ending::Ended(_) | Ending::NotFresh) => see_other(ACCOUNT),
         Ok(Ending::NoSession) => see_other(LOGIN),
-        Ok(Ending::Refused) => refused_page(web),
+        Ok(Ending::Refused(check)) => {
+            refused_form(&served, &from, &headers, END_SESSIONS, check).await
+        }
         Err(error) => unavailable_page(web, "could not end an operator's sessions", &error),
+    }
+}
+
+/// Records a form a check refused (#152), then the page it gets: forbidden, or unavailable if the record could not
+/// be made.
+async fn refused_form<S: OperatorStore>(
+    served: &Served<S>,
+    from: &Requester,
+    headers: &HeaderMap,
+    route: &'static str,
+    check: FailedCheck,
+) -> Response {
+    match record_refused(served, from, headers, route, check).await {
+        Ok(()) => refused_page(&served.web),
+        Err(error) => unavailable_page(&served.web, "could not record a refused request", &error),
     }
 }
 
@@ -730,8 +781,10 @@ fn refused_page(web: &Web) -> Response {
 /// elsewhere or without its session's form token, and unauthorized when its session has ended.
 async fn acting<S: OperatorStore>(
     served: &Served<S>,
+    from: &Requester,
     headers: &HeaderMap,
     sent: &Value,
+    route: &'static str,
 ) -> Result<crate::CheckedSession, Refused> {
     let change = change(headers, sent["form"].as_str().unwrap_or_default());
     match served
@@ -743,21 +796,56 @@ async fn acting<S: OperatorStore>(
         Ok(ForChange::NoSession) => {
             Err(Refused::with(refusal(StatusCode::UNAUTHORIZED, LOGGED_OUT)))
         }
-        Ok(ForChange::Refused) => Err(Refused::with(refusal(StatusCode::FORBIDDEN, REFUSED))),
+        Ok(ForChange::Refused(check)) => {
+            Err(refused_json(served, from, headers, route, check).await)
+        }
         Err(error) => Err(Refused::with(unavailable(&served.web, &error))),
     }
 }
 
 /// A request before login, which has no session to check: its JSON, if it comes from one of the realm's
 /// origins and says so in both ways a browser can (ADR-0059), or the answer it gets instead.
-fn admitted(web: &Web, headers: &HeaderMap, body: &Bytes) -> Result<Value, Refused> {
+async fn admitted<S: OperatorStore>(
+    served: &Served<S>,
+    from: &Requester,
+    headers: &HeaderMap,
+    body: &Bytes,
+    route: &'static str,
+) -> Result<Value, Refused> {
     let origin = text(headers, &header::ORIGIN);
     let site = fetch_site(headers);
-    if web.origins.admit(origin, site) {
+    if served.web.origins.admit(origin, site) {
         json_in(headers, body)
     } else {
-        Err(Refused::with(refusal(StatusCode::FORBIDDEN, REFUSED)))
+        Err(refused_json(served, from, headers, route, FailedCheck::Origin).await)
     }
+}
+
+/// Records a request a check refused (#152), then the answer a script gets: forbidden, or unavailable if the record
+/// could not be made.
+async fn refused_json<S: OperatorStore>(
+    served: &Served<S>,
+    from: &Requester,
+    headers: &HeaderMap,
+    route: &'static str,
+    check: FailedCheck,
+) -> Refused {
+    match record_refused(served, from, headers, route, check).await {
+        Ok(()) => Refused::with(refusal(StatusCode::FORBIDDEN, REFUSED)),
+        Err(error) => Refused::with(unavailable(&served.web, &error)),
+    }
+}
+
+/// Records a request a check refused, naming the device it came from.
+async fn record_refused<S: OperatorStore>(
+    served: &Served<S>,
+    from: &Requester,
+    headers: &HeaderMap,
+    route: &'static str,
+    check: FailedCheck,
+) -> Result<(), Error> {
+    let actor = browser(headers, None);
+    served.operators.refused(from, route, check, &actor).await
 }
 
 /// The answer a request gets when a check refuses it before its use case runs. Boxed, since a response is large and

@@ -3,9 +3,9 @@
 use crate::browser::{Change, CheckedSession, ForChange, Logout, Origins};
 use crate::domain::{
     Account, Actor, Addition, Answer, Ceremony, CeremonyKind, CeremonyToken, Device, Disabling,
-    Ending, Error, Fill, InviteToken, Issue, ListedSession, Login, NewPasskey, OperatorId,
-    OperatorName, OperatorSummary, RateLimit, Realm, Redemption, Refusal, Removal, Session,
-    SessionId, SessionStart, SessionToken, Signer, TimeLeft,
+    Ending, Error, FailedCheck, Fill, InviteToken, Issue, ListedSession, Login, NewPasskey,
+    OperatorId, OperatorName, OperatorSummary, RateLimit, Realm, Redemption, Refusal, Removal,
+    Session, SessionId, SessionStart, SessionToken, Signer, TimeLeft,
 };
 use crate::passkeys::RelyingParty;
 use crate::ports::OperatorStore;
@@ -348,7 +348,7 @@ impl<S: OperatorStore> Operators<S> {
         let checked = match self.session_for_change(origins, change).await? {
             ForChange::Acting(checked) => checked,
             ForChange::NoSession => return Ok(Ending::NoSession),
-            ForChange::Refused => return Ok(Ending::Refused),
+            ForChange::Refused(check) => return Ok(Ending::Refused(check)),
         };
         let session = checked.session();
         let actor = Actor::browser(Some(session.operator()), device);
@@ -534,13 +534,32 @@ impl<S: OperatorStore> Operators<S> {
         origins: &Origins,
         change: &Change<'_>,
     ) -> Result<ForChange, Error> {
-        let Some(token) = change.verified(Realm::Operator, origins) else {
-            return Ok(ForChange::Refused);
+        let token = match change.verified(Realm::Operator, origins) {
+            Ok(token) => token,
+            Err(check) => return Ok(ForChange::Refused(check)),
         };
         Ok(match self.live(&token).await? {
             Some(session) => ForChange::Acting(CheckedSession(session)),
             None => ForChange::NoSession,
         })
+    }
+
+    /// Records that a request to `route` from `from` failed `check` before it reached storage, while its network
+    /// has room under the limit on recording refusals (ADR-0081, `v5.0.0-16.3.3`). Past that, the request is still
+    /// refused, but not recorded, except that the first such refusal each window says so (ADR-0081). The record
+    /// names the route, the check, and `actor`, never the request's token or address. A refused request proves no
+    /// session, so its actor names no operator, even when its cookie is a live session's.
+    ///
+    /// # Errors
+    /// Fails if storage fails.
+    pub async fn refused(
+        &self,
+        from: &Requester,
+        route: &'static str,
+        check: FailedCheck,
+        actor: &Actor,
+    ) -> Result<(), Error> {
+        self.store.record_refusal(from, route, check, actor).await
     }
 
     /// Logs out: ends the session on the server, so its token logs no one in again (`v5.0.0-7.4.1`). Logging out
@@ -554,8 +573,9 @@ impl<S: OperatorStore> Operators<S> {
         origins: &Origins,
         change: &Change<'_>,
     ) -> Result<Logout, Error> {
-        let Some(token) = change.verified(Realm::Operator, origins) else {
-            return Ok(Logout::Refused);
+        let token = match change.verified(Realm::Operator, origins) {
+            Ok(token) => token,
+            Err(check) => return Ok(Logout::Refused(check)),
         };
         let ended = self
             .store

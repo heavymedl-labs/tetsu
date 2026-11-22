@@ -1,9 +1,10 @@
 //! The driven port Identity calls out through.
 
 use crate::domain::{
-    Account, Actor, Addition, Disabling, Ending, Error, Invitee, Issue, ListedSession, Login,
-    NewPasskey, OperatorId, OperatorName, OperatorSummary, RateLimit, Realm, Redemption, Refusal,
-    Removal, Session, SessionId, SessionStart, Signer, TakenAddition, TakenCeremony, TimeLeft,
+    Account, Actor, Addition, Disabling, Ending, Error, FailedCheck, Invitee, Issue, ListedSession,
+    Login, NewPasskey, OperatorId, OperatorName, OperatorSummary, RateLimit, Realm, Redemption,
+    Refusal, Removal, Session, SessionId, SessionStart, Signer, TakenAddition, TakenCeremony,
+    TimeLeft,
 };
 use std::future::Future;
 use std::time::Duration;
@@ -187,6 +188,17 @@ pub trait OperatorStore {
         &self,
         session: &[u8; 32],
     ) -> impl Future<Output = Result<Vec<ListedSession>, Error>> + Send;
+
+    /// Records that a request to `route` from `from`'s network failed `check`, naming `actor`, if the network has room
+    /// under the limit on recording refusals, and counts it; past that, records once a window that later refusals go
+    /// unrecorded (ADR-0081).
+    fn record_refusal(
+        &self,
+        from: &Requester,
+        route: &'static str,
+        check: FailedCheck,
+        actor: &Actor,
+    ) -> impl Future<Output = Result<(), Error>> + Send;
 
     /// Ends the other session `only` of the operator whose session this hash names, or every other one, if that
     /// session is live, its operator enabled, and it was proven by a passkey within ten minutes, and records the

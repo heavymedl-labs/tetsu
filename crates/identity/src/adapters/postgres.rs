@@ -11,10 +11,10 @@ use tokio_postgres::Row;
 use tokio_postgres::types::{FromSql, ToSql};
 
 use crate::domain::{
-    Account, Actor, Addition, CeremonyKind, Disabling, Ending, Error, HeldPasskey, Invitee, Issue,
-    ListedSession, Login, NewPasskey, OperatorId, OperatorName, OperatorSummary, RateLimit, Realm,
-    Redemption, Refusal, Removal, Session, SessionId, SessionStart, Signer, TakenAddition,
-    TakenCeremony, TimeLeft,
+    Account, Actor, Addition, CeremonyKind, Disabling, Ending, Error, FailedCheck, HeldPasskey,
+    Invitee, Issue, ListedSession, Login, NewPasskey, OperatorId, OperatorName, OperatorSummary,
+    RateLimit, Realm, Redemption, Refusal, Removal, Session, SessionId, SessionStart, Signer,
+    TakenAddition, TakenCeremony, TimeLeft,
 };
 use crate::ports::OperatorStore;
 use crate::use_cases::Operators;
@@ -56,6 +56,14 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 9,
         sql: tetsu_postgres::INBOX_DELIVERY,
+    },
+    Migration {
+        version: 10,
+        sql: include_str!("../../migrations/0010_refusal_limit.sql"),
+    },
+    Migration {
+        version: 11,
+        sql: include_str!("../../migrations/0011_validate_refusal_limit.sql"),
     },
 ];
 /// Identity's schema, which names the role its transactions act as (ADR-0042).
@@ -430,6 +438,33 @@ impl OperatorStore for PostgresOperators {
                 wait.flatten()
                     .map(|seconds| Duration::from_secs(seconds.unsigned_abs()))
             })
+    }
+
+    async fn record_refusal(
+        &self,
+        from: &Requester,
+        route: &'static str,
+        check: FailedCheck,
+        actor: &Actor,
+    ) -> Result<(), Error> {
+        let network = from.as_bytes().as_slice();
+        let payload = json!({"route": route, "reason": check.as_str()});
+        // Recorded while the network has room; past that, the first refusal of each window says that the ones
+        // after it go unrecorded, so a stretch with no records is never silent.
+        for (limit, kind) in [
+            (RateLimit::Refusal, "identity.request_refused"),
+            (RateLimit::RefusalFlood, "identity.refusals_suppressed"),
+        ] {
+            let admitted = self
+                .decided(ADMIT, &[&limit.as_str(), &network], |rows| {
+                    admitted_to_record(rows, kind, actor, &payload)
+                })
+                .await?;
+            if admitted == Some(true) {
+                break;
+            }
+        }
+        Ok(())
     }
 
     async fn fail(&self, from: &Requester) -> Result<(), Error> {
@@ -1125,6 +1160,20 @@ fn outcome(acted: Option<bool>) -> &'static str {
         Some(false) => "unchanged",
         None => "refused",
     }
+}
+
+/// Whether a limit admitted an attempt, and, if it did, the event `kind` that records it.
+fn admitted_to_record(
+    rows: &[Row],
+    kind: &'static str,
+    actor: &Actor,
+    payload: &Value,
+) -> Decided<bool> {
+    let wait: Option<i64> = rows.first().map_or(Ok(None), |row| column(row, "wait"))?;
+    let recorded = wait
+        .is_none()
+        .then(|| event(kind, actor, "refused", payload.clone()));
+    Ok((Some(wait.is_none()), recorded))
 }
 
 /// A session as an operator's list shows it, by the id Postgres made for it.

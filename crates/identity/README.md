@@ -36,12 +36,21 @@ the kernel's `Mailbox` port, which Mail implements; a message's HTML is never sh
   named, if any, the operator and the asking session's public id where storage found them, and how many ended, or
   refused with its reason: `stale` for a session no passkey proved within ten minutes, `ended` or `disabled` when
   the session or operator went since the request was checked. One refused before, from elsewhere, without its form
-  token, or naming something that is not a session id, records nothing, as logging out does.
+  token, or naming something that is not a session id, is recorded as a refused request, below.
   The device is named once, as login and joining start the session, from the request's own `User-Agent`, and goes
   with it.
 - **A state-changing request gets one of three answers:** it acts for its live session, its session has ended, or
-  it is refused. A refusal is told apart, so the page adapter can answer it as forbidden and record it
-  (`ForChange`, `Logout`).
+  it is refused. A refusal is told apart, with the first check it failed, so the page adapter can answer it as
+  forbidden and record it (`ForChange`, `Logout`, `FailedCheck`).
+- **A refused request is recorded** as `identity.request_refused` ([ADR-0081](../../docs/adr/0081-recording-refused-requests.md),
+  `v5.0.0-16.3.2`, `v5.0.0-16.3.3`): logging out, ending sessions, adding a passkey, and staying logged in, refused at their
+  origin, cookie, form-token, or field check, in that order, and the steps before login refused at their origin.
+  The record names the route, the check, and the device, never the token, the address, or the cookie's operator,
+  since the request proved nothing. Each network has room for ten records in fifteen minutes, under the `refusal`
+  rate limit; past that its requests are still refused, and the first each window records
+  `identity.refusals_suppressed` instead. The bound is per network, as login's limits are. A refusal that cannot
+  be recorded is unavailable. Malformed input from the realm's own origin, such as a body that is not JSON, is
+  refused unrecorded.
 - **Session tokens compare in constant time,** as form tokens do.
 - **Every table is global** ([ADR-0042](../../docs/adr/0042-tenant-isolation.md)): `identity.operators`, which
   Identity's role adds to and reads, and `identity.sessions`, `invites`, `passkeys`, and `ceremonies`, which
@@ -188,7 +197,7 @@ the kernel's `Mailbox` port, which Mail implements; a message's HTML is never sh
   `identity.passkeys_removed`; joining, logging in, and adding a passkey record `identity.invite_redeemed`,
   `identity.logged_in`, and `identity.passkey_added`, as described above. Listing changes nothing and records
   nothing. A command refused before it reaches the database, such as one printing a link to a pipe, records no
-  event. Logging out records nothing yet.
+  event. Logging out records no event of its own; a refused one is recorded as above.
 - **Who ran a command** is `user@host`: the first of `SUDO_USER`, `USER`, and `LOGNAME` that is set, and the
   first real line of `/etc/hostname`, with `unknown` for a part that is missing, not UTF-8, or would not show
   safely. It is asserted, not proven: every command
@@ -226,7 +235,6 @@ front how long a session may sit idle (WCAG 2.2.6).
 ## Not yet
 
 Rate limits, with the request's address in each record; revoking a link on its own (today a new link or a
-disable ends it); the session list ([ADR-0059](../../docs/adr/0059-session-controls-and-request-checks.md));
-browser tests ([#129](https://github.com/heavymedl-labs/tetsu/issues/129)); and running the dispatcher that
+disable ends it); browser tests ([#129](https://github.com/heavymedl-labs/tetsu/issues/129)); and running the dispatcher that
 carries Identity's events to the audit record arrive in later steps of
 [#110](https://github.com/heavymedl-labs/tetsu/issues/110).

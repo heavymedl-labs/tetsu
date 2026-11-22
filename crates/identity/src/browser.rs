@@ -2,7 +2,7 @@
 //! from (ADR-0048). Plain text in and out, so no HTTP framework's types reach Identity (ADR-0007); the adapter
 //! that serves pages sets and reads the headers.
 
-use crate::domain::{Error, Realm, Session, SessionToken};
+use crate::domain::{Error, FailedCheck, Realm, Session, SessionToken};
 
 impl Realm {
     /// The cookie this realm's session token travels in. The `__Host-` prefix makes a browser refuse it unless it
@@ -85,12 +85,23 @@ impl<'a> Change<'a> {
 
     /// The realm's session token, if the request carries its cookie once, is admitted by these origins, and
     /// carries that session's own form token, compared in constant time through `subtle`, which a test cannot time
-    /// reliably (ADR-0048, `v5.0.0-3.5.1`).
-    #[must_use]
-    pub fn verified(&self, realm: Realm, origins: &Origins) -> Option<SessionToken> {
-        let token = SessionToken::parse(realm.token_in(self.cookies.iter().copied())?)?;
-        (origins.admit(self.origin, self.fetch_site) && token.form_token_matches(self.form_token))
-            .then_some(token)
+    /// reliably (ADR-0048, `v5.0.0-3.5.1`). The origin comes first: it holds no secret, and a browser sends no
+    /// `SameSite=Lax` cookie with another site's form, so a request from elsewhere is told as one.
+    ///
+    /// # Errors
+    /// Fails with the first check the request failed: its origin, its cookie, then its form token.
+    pub fn verified(&self, realm: Realm, origins: &Origins) -> Result<SessionToken, FailedCheck> {
+        if !origins.admit(self.origin, self.fetch_site) {
+            return Err(FailedCheck::Origin);
+        }
+        let token = realm
+            .token_in(self.cookies.iter().copied())
+            .and_then(SessionToken::parse)
+            .ok_or(FailedCheck::Cookie)?;
+        if !token.form_token_matches(self.form_token) {
+            return Err(FailedCheck::FormToken);
+        }
+        Ok(token)
     }
 }
 
@@ -117,8 +128,9 @@ pub enum ForChange {
     Acting(CheckedSession),
     /// The request passed the checks, but its session has ended or never was.
     NoSession,
-    /// The request came from elsewhere, or without its session's form token, or with its cookie sent twice.
-    Refused,
+    /// The request failed a check: it came from elsewhere, or without its session's form token, or with its cookie
+    /// missing or sent twice.
+    Refused(FailedCheck),
 }
 
 /// What logging out did.
@@ -128,8 +140,9 @@ pub enum Logout {
     Ended,
     /// The request passed the checks, but its session had already ended or never was.
     NothingToEnd,
-    /// The request came from elsewhere, or without its session's form token, or with its cookie sent twice.
-    Refused,
+    /// The request failed a check: it came from elsewhere, or without its session's form token, or with its cookie
+    /// missing or sent twice.
+    Refused(FailedCheck),
 }
 
 /// The origins a realm's pages are served from, such as `https://tetsu-demo-ops.onrender.com`. A state-changing
@@ -396,17 +409,41 @@ mod tests {
         let origin = Some("https://ops.example.com");
         assert_eq!(
             Change::new([cookie.as_str()], origin, None, &form).verified(Realm::Operator, &origins),
-            Some(token.clone())
+            Ok(token.clone())
         );
-        for change in [
-            Change::new([cookie.as_str(), cookie.as_str()], origin, None, &form),
-            Change::new([], origin, None, &form),
-            Change::new(["__Host-tetsu-operator=not-a-token"], origin, None, &form),
-            Change::new([cookie.as_str()], Some("https://evil.example"), None, &form),
-            Change::new([cookie.as_str()], origin, None, ""),
-            Change::new([cookie.as_str()], origin, Some("cross-site"), &form),
+        // Each names the first check it failed: the origin, then the cookie, then the form token.
+        for (change, failed) in [
+            (
+                Change::new([cookie.as_str(), cookie.as_str()], origin, None, &form),
+                FailedCheck::Cookie,
+            ),
+            (Change::new([], origin, None, &form), FailedCheck::Cookie),
+            (
+                Change::new(["__Host-tetsu-operator=not-a-token"], origin, None, &form),
+                FailedCheck::Cookie,
+            ),
+            (
+                Change::new([], Some("https://evil.example"), None, ""),
+                FailedCheck::Origin,
+            ),
+            (
+                Change::new([cookie.as_str()], Some("https://evil.example"), None, &form),
+                FailedCheck::Origin,
+            ),
+            (
+                Change::new([cookie.as_str()], Some("https://evil.example"), None, ""),
+                FailedCheck::Origin,
+            ),
+            (
+                Change::new([cookie.as_str()], origin, None, ""),
+                FailedCheck::FormToken,
+            ),
+            (
+                Change::new([cookie.as_str()], origin, Some("cross-site"), &form),
+                FailedCheck::Origin,
+            ),
         ] {
-            assert_eq!(change.verified(Realm::Operator, &origins), None);
+            assert_eq!(change.verified(Realm::Operator, &origins), Err(failed));
         }
     }
 

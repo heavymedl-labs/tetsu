@@ -265,7 +265,8 @@ async fn an_operator_never_lists_or_ends_anothers_sessions() {
 }
 
 /// A request to end sessions passes logging out's checks: one from elsewhere, without its form token, or naming no
-/// id is refused and ends nothing, and one with no live session goes to log in. None of them is recorded.
+/// id is refused and ends nothing, and one with no live session goes to log in. None records an ending; each is
+/// recorded as a refused request instead (`refusal_tests`).
 #[tokio::test]
 async fn an_ending_from_elsewhere_or_unchecked_is_refused() {
     let (address, database, cookies) = logged_in_from(2).await;
@@ -306,7 +307,7 @@ async fn an_ending_from_elsewhere_or_unchecked_is_refused() {
         (ended.status, ended.header("location")),
         (303, Some("/ops/login"))
     );
-    // None of them reached storage, so none is recorded, as for logging out.
+    // None of them reached the ending, so none records one.
     assert_eq!(recorded(&database).await, Vec::<String>::new());
 }
 
