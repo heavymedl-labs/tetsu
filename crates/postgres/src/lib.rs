@@ -1,6 +1,9 @@
 //! Postgres connections (ADR-0011, ADR-0013), sorting the driver's errors (ADR-0011), the migration runner (ADR-0007, ADR-0012), tenant isolation
 //! (ADR-0042), and domain events through each module's outbox (ADR-0043). A module that records events adds
-//! [`OUTBOX`] as one of its migrations, and one that consumes them adds [`INBOX`] and implements [`Consumer`].
+//! [`OUTBOX`] as one of its migrations, and one that consumes them adds [`INBOX`] then [`INBOX_DELIVERY`] and
+//! implements [`Consumer`]. The dispatcher removes rows past their use each hour (ADR-0080): delivered events after
+//! [`KEPT_FOR`], events that stopped retrying after [`STOPPED_KEPT_FOR`], and inbox IDs after [`APPLIED_KEPT_FOR`]
+//! once no outbox holds their event.
 
 mod connection;
 mod database;
@@ -17,7 +20,8 @@ pub use connection::{Error, Settings, Tls, connect, pool};
 pub use database::create_database;
 pub use deadpool_postgres::{Object, Pool, Transaction};
 pub use events::{
-    Applied, Consumer, Dispatcher, Event, INBOX, KEPT_FOR, MAX_ATTEMPTS, NewEvent, OUTBOX,
+    APPLIED_KEPT_FOR, Applied, Consumer, Dispatcher, Event, INBOX, INBOX_DELIVERY, KEPT_FOR,
+    MAX_ATTEMPTS, NewEvent, OUTBOX, Removed, STOPPED_KEPT_FOR,
 };
 pub use failure::{Failure, STALE, clear_if_stale, sort, sort_commit, sort_pool};
 pub use isolation::{

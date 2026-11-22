@@ -53,6 +53,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 8,
         sql: include_str!("../../migrations/0008_session_list.sql"),
     },
+    Migration {
+        version: 9,
+        sql: tetsu_postgres::INBOX_DELIVERY,
+    },
 ];
 /// Identity's schema, which names the role its transactions act as (ADR-0042).
 const SCHEMA: &str = "identity";

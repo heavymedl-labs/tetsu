@@ -113,10 +113,18 @@ pub async fn replay(
             "replayed {id} from {producer}.{outbox}; it is due now"
         )]),
         Ok(None) => Err(format!(
-            "no event {id} in {producer}'s outboxes; it may have been delivered and removed"
+            "no event {id} in {producer}'s outboxes; one delivered over {} days ago, or stopped over {} days ago, is \
+             removed",
+            days(tetsu_postgres::KEPT_FOR),
+            days(tetsu_postgres::STOPPED_KEPT_FOR)
         )),
         Err(error) => Err(crate::explain(&*error)),
     }
+}
+
+/// A lifetime in whole days, as a message names it.
+fn days(lifetime: std::time::Duration) -> u64 {
+    lifetime.as_secs() / 86_400
 }
 
 /// Moves the tenant at `address` to `slug` and its address, through Tenancy's use case.

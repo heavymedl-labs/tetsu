@@ -46,8 +46,8 @@ pub struct TenantTransaction<'a> {
     scoped: Scoped<'a>,
 }
 
-/// A transaction as the delivery role, which reads and settles every module's outboxes and reaches nothing else
-/// (ADR-0043).
+/// A transaction as the delivery role, which reads and settles every module's outboxes, reads and removes their
+/// inboxes' IDs past their use, and reaches nothing else (ADR-0043, ADR-0080).
 pub struct DeliveryTransaction<'a> {
     transaction: Transaction<'a>,
 }

@@ -10,7 +10,8 @@ use crate::connection::Error;
 
 /// The role `tetsu serve` logs in as. It holds no rights of its own and acts through module roles.
 pub const APP_ROLE: &str = "tetsu_app";
-/// The role the dispatcher acts as: it reads and settles every tenant's outbox rows, and nothing else (ADR-0043).
+/// The role the dispatcher acts as: it reads and settles every tenant's outbox rows, and reads and removes inbox IDs
+/// past their use, and nothing else (ADR-0043, ADR-0080).
 pub const DELIVERY_ROLE: &str = "tetsu_delivery";
 /// Module roles are `tetsu_<schema>` and `tetsu_<schema>_lookup`, so a schema leaves room for both in Postgres's
 /// 63-byte names.

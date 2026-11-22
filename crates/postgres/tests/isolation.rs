@@ -952,6 +952,84 @@ async fn the_shared_outbox_passes() {
     );
 }
 
+/// The shared inbox migrations, with the delivery role's right to remove IDs past their use (ADR-0080), pass.
+#[tokio::test]
+async fn the_shared_inbox_passes() {
+    let inbox = format!(
+        "{}\n{}",
+        tetsu_postgres::INBOX,
+        tetsu_postgres::INBOX_DELIVERY
+    );
+    assert_eq!(problems(inbox, "").await, Vec::<String>::new());
+}
+
+/// The delivery role only reads and removes inbox IDs, so a right to add or change one is caught.
+#[tokio::test]
+async fn the_delivery_role_never_writes_an_inbox() {
+    let inbox = format!(
+        "{}\n{}",
+        tetsu_postgres::INBOX,
+        tetsu_postgres::INBOX_DELIVERY
+    );
+    let with = |extra: &str| format!("{inbox}\n{extra}");
+    each_caught(&[
+        (
+            &with("GRANT INSERT ON inbox_global TO tetsu_delivery"),
+            "",
+            "tetsu_delivery holds INSERT on checked.inbox_global",
+        ),
+        (
+            &with("GRANT UPDATE ON inbox TO tetsu_delivery"),
+            "",
+            "tetsu_delivery holds UPDATE on checked.inbox",
+        ),
+        (
+            &with("CREATE POLICY narrow ON inbox TO tetsu_delivery USING (tenant_id > 0)"),
+            "",
+            "checked.inbox has policy narrow that is not the tenant rule",
+        ),
+    ])
+    .await;
+}
+
+/// Only the shared inbox's exact shape opens to the delivery role, so a module's own table named `inbox`, such as
+/// customers' messages, stays closed to it.
+#[tokio::test]
+async fn a_table_named_inbox_is_not_the_shared_inbox() {
+    let own = tenant_owned("inbox");
+    let shaped = |name: &str, columns: &str| {
+        format!("CREATE TABLE {name} ({columns}); GRANT SELECT, DELETE ON {name} TO tetsu_delivery")
+    };
+    let (extra, reordered, other) = (
+        shaped(
+            "inbox_global",
+            "id uuid PRIMARY KEY, applied_at timestamptz, note text",
+        ),
+        shaped(
+            "inbox_global",
+            "applied_at timestamptz, id uuid PRIMARY KEY",
+        ),
+        shaped("inbox_global", "id uuid PRIMARY KEY, note text"),
+    );
+    let global = "tetsu_delivery holds SELECT on checked.inbox_global";
+    each_caught(&[
+        (&extra, "", global),
+        (&reordered, "", global),
+        (&other, "", global),
+        (
+            &format!("{own}\nGRANT SELECT, DELETE ON inbox TO tetsu_delivery"),
+            "",
+            "tetsu_delivery holds SELECT on checked.inbox",
+        ),
+        (
+            &format!("{own}\nCREATE POLICY delivery ON inbox TO tetsu_delivery USING (true)"),
+            "",
+            "checked.inbox has policy delivery that is not the tenant rule",
+        ),
+    ])
+    .await;
+}
+
 /// The delivery role reads and settles outboxes across tenants and nothing more, so anything wider is caught.
 #[tokio::test]
 async fn the_delivery_role_reaches_outboxes_alone() {

@@ -201,15 +201,26 @@ gh workflow run deploy -f chore=rename -f target=/login -f value=new-slug
 An event that fails 10 times logs an `ERROR` line, `event stopped retrying`, with its ID, type, each failing
 consumer, and `alert` set to `event_stopped`, which raises the [alert](#logs-and-alerts) ([ADR-0043](../adr/0043-domain-event-delivery.md)). A kept event logs `event keeps failing`
 instead, with the same `alert`, and goes on retrying hourly. Once the consumer is fixed and deployed, replay a stopped
-event with the schema of the module that recorded it:
+event within 30 days of its last attempt, after which it is removed ([ADR-0080](../adr/0080-event-rows-past-their-use.md)),
+with the schema of the module that recorded it:
 
 ```bash
 gh workflow run deploy -f chore=replay -f target=identity -f value=<event ID>
 ```
 
 It makes the event due again with its attempts cleared, from the business's outbox or the global one, as the
-delivery role, and says which. Not found means the schema is wrong, or the event was delivered and removed.
+delivery role, and says which. Not found means the schema is wrong, or the event was removed: delivered over 7
+days ago, or stopped over 30.
 Consumers skip what they already applied, so a replay repeats nothing.
+
+The dispatcher removes rows past their use each hour ([ADR-0080](../adr/0080-event-rows-past-their-use.md)), and
+logs how many when it removes any. Its first cleanup after ADR-0080 shipped removes every stopped event over 30
+days old at once, and works through a backlog of old inbox IDs twenty thousand an hour. The demo holds no real
+business's data, so nothing that matters is lost; a database that did would replay or keep its stopped events
+first. An older build that runs again, through `rollback_to` or the minute two instances overlap in a deploy, does
+not mark an event kept when a consumer that must never lose it went unreached, so replay any event it stops within
+30 days. A cleanup that logs `removing event rows past their use failed` keeps running hourly, and removes nothing
+from the inboxes until its cause, such as an outbox that lost its delivery policy, is fixed.
 
 ## Hosted chores
 

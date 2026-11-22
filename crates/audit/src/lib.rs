@@ -20,6 +20,10 @@ const MIGRATIONS: &[Migration] = &[
         version: 2,
         sql: tetsu_postgres::INBOX,
     },
+    Migration {
+        version: 3,
+        sql: tetsu_postgres::INBOX_DELIVERY,
+    },
 ];
 
 /// Registers Audit with the kernel.

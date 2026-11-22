@@ -154,7 +154,9 @@ async fn replay_names_a_module_that_records_events() {
     let missing = tetsu(&app, &["replay", "identity", id], None);
     assert!(!missing.status.success());
     assert!(
-        err(&missing).contains(&format!("no event {id} in identity's outboxes")),
+        err(&missing).contains(&format!(
+            "no event {id} in identity's outboxes; one delivered over 7 days ago, or stopped over 30 days ago, is removed"
+        )),
         "{missing:?}"
     );
 }

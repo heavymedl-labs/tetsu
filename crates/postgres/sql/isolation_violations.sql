@@ -11,8 +11,9 @@
 -- granted to PUBLIC counts as the application role's own. A module's record of
 -- applied files is the runner's own, so it is left out of the table rules.
 -- The delivery role tetsu_delivery works across tenants by design (ADR-0043):
--- it may use module schemas, read, settle, and delete outbox rows, and see
--- every tenant's outbox through one policy, and nothing else.
+-- it may use module schemas, read, settle, and delete outbox rows, read and
+-- delete inbox rows (ADR-0080), and see every tenant's outbox and inbox
+-- through one policy each, and nothing else.
 WITH RECURSIVE modules AS (
     SELECT
         n.oid,
@@ -205,6 +206,33 @@ tables AS (
         AND NOT (r.relname = 'migrations' AND NOT r.relispartition)
 ),
 
+-- The shared inboxes (ADR-0080): a table named inbox or inbox_global counts
+-- only with the shared migration's exact columns, so a module's own table of
+-- that name never opens to the delivery role.
+shared_inboxes AS (
+    SELECT t.shown
+    FROM tables AS t
+    WHERE
+        NOT t.relispartition
+        AND (t.relname, (
+            SELECT
+                pg_catalog.string_agg(
+                    a.attname || ' '
+                    || pg_catalog.format_type(a.atttypid, a.atttypmod),
+                    ', ' ORDER BY a.attnum
+                )
+            FROM pg_catalog.pg_attribute AS a
+            WHERE a.attrelid = t.oid AND a.attnum > 0 AND NOT a.attisdropped
+        )) IN (
+            (
+                'inbox',
+                'tenant_id bigint, id uuid, '
+                || 'applied_at timestamp with time zone'
+            ),
+            ('inbox_global', 'id uuid, applied_at timestamp with time zone')
+        )
+),
+
 -- Every text, binary, or JSON column in a module's tables, or one of a domain
 -- over those types or of unbounded character types, and the column as a check
 -- names it, with any character a pattern could read as an operator escaped.
@@ -381,9 +409,16 @@ judged AS (
                 AND (
                     (
                         g.kind = 'table'
-                        AND g.shown IN (
-                            pg_catalog.format('%I.outbox', g.schema_name),
-                            pg_catalog.format('%I.outbox_global', g.schema_name)
+                        AND (
+                            g.shown IN (
+                                pg_catalog.format('%I.outbox', g.schema_name),
+                                pg_catalog.format(
+                                    '%I.outbox_global', g.schema_name
+                                )
+                            )
+                            OR g.shown IN (
+                                SELECT si.shown FROM shared_inboxes AS si
+                            )
                         )
                         AND g.privilege_type IN ('SELECT', 'DELETE')
                     )
@@ -504,7 +539,10 @@ WHERE
     -- A missing delivery role makes the comparison unknown, which must not
     -- hide the policy, so it counts as no match.
     NOT coalesce(
-        t.relname = 'outbox'
+        (
+            t.relname = 'outbox'
+            OR t.shown IN (SELECT si.shown FROM shared_inboxes AS si)
+        )
         AND p.polroles = ARRAY[(
             SELECT r.oid FROM pg_catalog.pg_roles AS r
             WHERE r.rolname = 'tetsu_delivery'

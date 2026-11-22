@@ -1,5 +1,6 @@
 //! Domain events through the outbox (ADR-0043): recorded with the change, delivered at least once, applied once,
-//! retried with backoff, and removed once delivered for a week. Everything runs as the application role.
+//! retried with backoff, and removed past their use: once delivered for a week, and after 30 days for an event
+//! that stopped retrying or an inbox's ID no outbox still holds (ADR-0080). Everything runs as the application role.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -8,9 +9,9 @@ use std::time::Duration;
 use tetsu_kernel::{Migration, Module, Storage};
 use tetsu_postgres::test_support::{TestDatabase, fresh_database};
 use tetsu_postgres::{
-    Applied, Consumer, DeliveryTransaction, Dispatcher, Event, INBOX, MAX_ATTEMPTS,
-    ModuleTransaction, NewEvent, OUTBOX, Pool, TenantTransaction, Transaction, connect, migrate,
-    pool,
+    Applied, Consumer, DeliveryTransaction, Dispatcher, Event, INBOX, INBOX_DELIVERY, MAX_ATTEMPTS,
+    ModuleTransaction, NewEvent, OUTBOX, Pool, Removed, TenantTransaction, Transaction, connect,
+    migrate, pool,
 };
 
 #[cfg(test)]
@@ -59,13 +60,23 @@ mod support {
             version: 3,
             sql: OUTBOX,
         },
+        Migration {
+            version: 4,
+            sql: INBOX_DELIVERY,
+        },
     ];
 
     /// A second consumer, with its own inbox and nothing else.
-    pub const JOURNAL: &[Migration] = &[Migration {
-        version: 1,
-        sql: INBOX,
-    }];
+    pub const JOURNAL: &[Migration] = &[
+        Migration {
+            version: 1,
+            sql: INBOX,
+        },
+        Migration {
+            version: 2,
+            sql: INBOX_DELIVERY,
+        },
+    ];
 
     /// Writes one row per event, and counts its calls, which a repeat its inbox skips does not reach.
     #[derive(Default)]
@@ -235,6 +246,19 @@ mod support {
         id
     }
 
+    /// How many rows of `table` the delivery role sees, every tenant's.
+    pub async fn counted_as_delivery(client: &mut tetsu_postgres::Object, table: &str) -> i64 {
+        let transaction = DeliveryTransaction::begin(client).await.expect("begins");
+        let seen = transaction
+            .query_one(&format!("SELECT count(*) FROM {table}"), &[])
+            .await
+            .expect("reads every tenant's rows")
+            .try_get(0)
+            .expect("a count");
+        transaction.commit().await.expect("commits");
+        seen
+    }
+
     /// One value from the database, read as its owner, which sees every tenant's rows.
     pub async fn read<T: for<'r> tokio_postgres::types::FromSql<'r>>(
         database: &TestDatabase,
@@ -331,7 +355,9 @@ mod support {
     }
 }
 
-use support::{JOINED, Logs, World, read, record, record_global, run_as_owner, world};
+use support::{
+    JOINED, Logs, World, counted_as_delivery, read, record, record_global, run_as_owner, world,
+};
 
 #[tokio::test]
 async fn an_event_is_delivered_only_if_its_change_commits() {
@@ -582,16 +608,485 @@ async fn delivered_events_go_after_seven_days() {
     )
     .await;
     assert_eq!(
-        dispatcher
-            .remove_delivered(tetsu_postgres::KEPT_FOR)
-            .await
-            .expect("removes"),
-        3
+        dispatcher.remove_spent().await.expect("removes"),
+        Removed {
+            delivered: 3,
+            stopped: 0,
+            applied: 0,
+        }
     );
     assert_eq!(
         read::<i64>(&database, "SELECT count(*) FROM people.outbox").await,
         2
     );
+}
+
+/// An event that stopped retrying goes 30 days after its last attempt; one still retrying, or marked never to be
+/// lost, stays however old it is.
+#[tokio::test]
+async fn stopped_events_go_after_thirty_days() {
+    let World {
+        pool,
+        dispatcher,
+        database,
+        ..
+    } = world().await;
+    let mut ids = Vec::new();
+    for _ in 0..4 {
+        ids.push(record(&pool, 1, &JOINED, true).await);
+    }
+    let global = record_global(&pool, &JOINED).await;
+    // Gone: the first, and the global one. Kept: one stopped under 30 days, one never to be lost, one retrying.
+    let changes: String = [
+        ("outbox", &ids[0], false, "30 days 1 minute", MAX_ATTEMPTS),
+        ("outbox", &ids[1], false, "29 days 23 hours", MAX_ATTEMPTS),
+        ("outbox", &ids[2], true, "60 days", MAX_ATTEMPTS),
+        ("outbox", &ids[3], false, "60 days", MAX_ATTEMPTS - 1),
+        ("outbox_global", &global, false, "31 days", MAX_ATTEMPTS),
+    ]
+    .map(|(table, id, keep, ago, attempts)| {
+        format!(
+            "UPDATE people.{table} SET attempts = {attempts}, keep = {keep}, due_at = now() - interval '{ago}'
+             WHERE id = '{id}';"
+        )
+    })
+    .concat();
+    run_as_owner(&database, &changes).await;
+    assert_eq!(
+        dispatcher.remove_spent().await.expect("removes"),
+        Removed {
+            delivered: 0,
+            stopped: 2,
+            applied: 0,
+        }
+    );
+    let left = read::<String>(
+        &database,
+        "SELECT string_agg(id::text, ' ' ORDER BY id) FROM people.outbox",
+    )
+    .await;
+    assert_eq!(
+        left,
+        [&ids[1], &ids[2], &ids[3]].map(String::as_str).join(" ")
+    );
+    assert_eq!(
+        read::<i64>(&database, "SELECT count(*) FROM people.outbox_global").await,
+        0
+    );
+}
+
+/// An inbox keeps an applied event's ID for 30 days, and after that only while an outbox of its kind still holds
+/// the event, which could then come again.
+#[tokio::test]
+async fn inbox_ids_go_once_no_outbox_holds_their_event() {
+    let World {
+        pool,
+        dispatcher,
+        database,
+        ..
+    } = world().await;
+    let mut ids = Vec::new();
+    for _ in 0..3 {
+        ids.push(record(&pool, 1, &JOINED, true).await);
+    }
+    let global = record_global(&pool, &JOINED).await;
+    dispatcher.deliver_due().await.expect("delivers");
+    // The first still has its outbox row; the others' went, and the third was applied just under 30 days ago.
+    run_as_owner(
+        &database,
+        &format!(
+            "UPDATE ledger.inbox SET applied_at = now() - interval '30 days 1 minute' WHERE id <> '{}';
+             UPDATE ledger.inbox SET applied_at = now() - interval '29 days 23 hours' WHERE id = '{}';
+             UPDATE ledger.inbox_global SET applied_at = now() - interval '31 days';
+             DELETE FROM people.outbox WHERE id <> '{}';
+             DELETE FROM people.outbox_global;",
+            ids[2], ids[2], ids[0]
+        ),
+    )
+    .await;
+    assert_eq!(
+        dispatcher.remove_spent().await.expect("removes"),
+        Removed {
+            delivered: 0,
+            stopped: 0,
+            applied: 2,
+        }
+    );
+    let left = read::<String>(
+        &database,
+        "SELECT string_agg(id::text, ' ' ORDER BY id) FROM ledger.inbox",
+    )
+    .await;
+    assert_eq!(left, [&ids[0], &ids[2]].map(String::as_str).join(" "));
+    assert_eq!(
+        read::<i64>(
+            &database,
+            &format!("SELECT count(*) FROM ledger.inbox_global WHERE id = '{global}'")
+        )
+        .await,
+        0
+    );
+}
+
+/// A global inbox's ID stays while a global outbox still holds its event, as a tenant inbox's does.
+#[tokio::test]
+async fn a_global_inbox_id_stays_while_its_event_is_held() {
+    let World {
+        pool,
+        dispatcher,
+        database,
+        ..
+    } = world().await;
+    let global = record_global(&pool, &JOINED).await;
+    dispatcher.deliver_due().await.expect("delivers");
+    run_as_owner(
+        &database,
+        "UPDATE ledger.inbox_global SET applied_at = now() - interval '31 days'",
+    )
+    .await;
+    assert_eq!(dispatcher.remove_spent().await.expect("removes").applied, 0);
+    let held = format!("SELECT count(*) FROM ledger.inbox_global WHERE id = '{global}'");
+    assert_eq!(read::<i64>(&database, &held).await, 1);
+}
+
+/// A large inbox goes a thousand IDs a statement, twenty statements a pass across every inbox, so delivery waits
+/// for no more, and what is left goes in the next.
+#[tokio::test]
+async fn inbox_ids_go_in_bounded_batches() {
+    let World {
+        dispatcher,
+        database,
+        ..
+    } = world().await;
+    run_as_owner(
+        &database,
+        "INSERT INTO ledger.inbox_global (id, applied_at)
+         SELECT gen_random_uuid(), now() - interval '31 days' FROM generate_series(1, 20005)",
+    )
+    .await;
+    assert_eq!(
+        dispatcher.remove_spent().await.expect("removes").applied,
+        20_000
+    );
+    assert_eq!(dispatcher.remove_spent().await.expect("removes").applied, 5);
+    assert_eq!(
+        read::<i64>(&database, "SELECT count(*) FROM ledger.inbox_global").await,
+        0
+    );
+}
+
+/// An ID stays while any outbox holds its event, even one in a module this dispatcher does not deliver, as an
+/// instance of a newer build might.
+#[tokio::test]
+async fn an_inbox_id_stays_while_an_outbox_this_dispatcher_does_not_know_holds_it() {
+    let World {
+        pool,
+        ledger,
+        database,
+        ..
+    } = world().await;
+    let consumers: Vec<Arc<dyn Consumer>> = vec![ledger];
+    let dispatcher = Dispatcher::new(pool, &["people"], consumers)
+        .await
+        .expect("finds the producers");
+    run_as_owner(
+        &database,
+        "INSERT INTO ledger.outbox_global (id, event_type, event_version, payload)
+           VALUES ('0190a3d2-0000-7000-8000-0000000000aa', 'ledger.noted', 1, '{}');
+         INSERT INTO ledger.inbox_global (id, applied_at)
+           VALUES ('0190a3d2-0000-7000-8000-0000000000aa', now() - interval '31 days')",
+    )
+    .await;
+    assert_eq!(dispatcher.remove_spent().await.expect("removes").applied, 0);
+}
+
+/// Only the shared outbox counts: a table of that name elsewhere, or a session's temporary one, is passed over, a
+/// shared one in a schema whose name needs quoting still holds its events' IDs, and one the delivery role can no
+/// longer read fails the cleanup rather than being passed over.
+#[tokio::test]
+async fn only_shared_outboxes_hold_inbox_ids() {
+    let World {
+        dispatcher,
+        database,
+        ..
+    } = world().await;
+    let held = "0190a3d2-0000-7000-8000-0000000000bb";
+    run_as_owner(
+        &database,
+        &format!(
+            "CREATE TABLE public.outbox (id uuid);
+             CREATE SCHEMA \"Odd Name\";
+             CREATE TABLE \"Odd Name\".outbox (tenant_id bigint, id uuid);
+             CREATE TABLE \"Odd Name\".outbox_global (id uuid);
+             CREATE POLICY delivery ON \"Odd Name\".outbox TO tetsu_delivery USING (TRUE);
+             GRANT USAGE ON SCHEMA \"Odd Name\" TO tetsu_delivery;
+             GRANT SELECT ON \"Odd Name\".outbox, \"Odd Name\".outbox_global TO tetsu_delivery;
+             INSERT INTO \"Odd Name\".outbox_global VALUES ('{held}');
+             INSERT INTO ledger.inbox_global VALUES ('{held}', now() - interval '31 days')"
+        ),
+    )
+    .await;
+    // A temporary outbox, with the delivery role's policy, in a session that stays open while the cleanup runs.
+    let session = connect(&database).await.expect("connects");
+    session
+        .batch_execute(
+            "CREATE TEMP TABLE outbox (id uuid);
+             CREATE POLICY delivery ON outbox TO tetsu_delivery USING (TRUE)",
+        )
+        .await
+        .expect("makes a temporary outbox");
+    assert_eq!(dispatcher.remove_spent().await.expect("removes").applied, 0);
+    let kept = format!("SELECT count(*) FROM ledger.inbox_global WHERE id = '{held}'");
+    assert_eq!(read::<i64>(&database, &kept).await, 1);
+    run_as_owner(
+        &database,
+        "REVOKE SELECT ON \"Odd Name\".outbox_global FROM tetsu_delivery",
+    )
+    .await;
+    assert!(dispatcher.remove_spent().await.is_err());
+    drop(session);
+}
+
+/// An outbox this dispatcher delivers that no longer holds the delivery role's policy, as when the policy is
+/// renamed, stops the cleanup with an error, rather than letting its events' IDs go.
+#[tokio::test]
+async fn a_delivered_outbox_that_lost_its_policy_stops_the_cleanup() {
+    let World {
+        pool,
+        dispatcher,
+        database,
+        ..
+    } = world().await;
+    record(&pool, 1, &JOINED, true).await;
+    dispatcher.deliver_due().await.expect("delivers");
+    run_as_owner(
+        &database,
+        "UPDATE people.outbox SET delivered_at = now() - interval '8 days';
+         ALTER POLICY delivery ON people.outbox RENAME TO deliver",
+    )
+    .await;
+    let stopped = dispatcher
+        .remove_spent()
+        .await
+        .err()
+        .map(|error| error.to_string());
+    assert_eq!(
+        stopped.as_deref(),
+        Some("people's outbox lacks the delivery role's policy")
+    );
+    // What came before stays done: the delivered event went.
+    assert_eq!(
+        read::<i64>(&database, "SELECT count(*) FROM people.outbox").await,
+        0
+    );
+}
+
+/// The cap on batches holds across every inbox in a pass, not each.
+#[tokio::test]
+async fn the_batch_cap_holds_across_inboxes() {
+    let World {
+        pool,
+        ledger,
+        database,
+        ..
+    } = world().await;
+    let journal = Arc::new(support::Journal {
+        failures_left: AtomicUsize::new(0),
+    });
+    let consumers: Vec<Arc<dyn Consumer>> = vec![ledger, journal];
+    let dispatcher = Dispatcher::new(pool, &["people"], consumers)
+        .await
+        .expect("a dispatcher");
+    run_as_owner(
+        &database,
+        "INSERT INTO ledger.inbox_global (id, applied_at)
+         SELECT gen_random_uuid(), now() - interval '31 days' FROM generate_series(1, 15000);
+         INSERT INTO journal.inbox_global (id, applied_at)
+         SELECT gen_random_uuid(), now() - interval '31 days' FROM generate_series(1, 15000)",
+    )
+    .await;
+    assert_eq!(
+        dispatcher.remove_spent().await.expect("removes").applied,
+        20_000
+    );
+    assert_eq!(
+        dispatcher.remove_spent().await.expect("removes").applied,
+        10_000
+    );
+}
+
+/// An event that runs out of attempts while the pool had no connection for a consumer that must never lose it is
+/// kept too.
+#[tokio::test]
+async fn an_event_a_starved_never_lose_consumer_needs_is_kept() {
+    let World { pool, database, .. } = world().await;
+    let held = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let hog = Arc::new(support::Hog {
+        pool: pool.clone(),
+        held: held.clone(),
+    });
+    let journal = Arc::new(support::Journal {
+        failures_left: AtomicUsize::new(0),
+    });
+    let consumers: Vec<Arc<dyn Consumer>> = vec![hog, journal];
+    let dispatcher = Dispatcher::new(pool.clone(), &["people"], consumers)
+        .await
+        .expect("a dispatcher");
+    record(&pool, 1, &JOINED, true).await;
+    run_as_owner(
+        &database,
+        &format!("UPDATE people.outbox SET attempts = {}", MAX_ATTEMPTS - 1),
+    )
+    .await;
+    // Every connection but the dispatcher's own and the one the first consumer uses.
+    let mut taken = Vec::new();
+    for _ in 2..pool.status().max_size {
+        taken.push(pool.get().await.expect("a connection"));
+    }
+    dispatcher.deliver_due().await.expect("ends quietly");
+    drop(taken);
+    held.lock().expect("unpoisoned").clear();
+    assert!(read::<bool>(&database, "SELECT keep FROM people.outbox").await);
+}
+
+/// A cleanup step that fails is logged as an error, and the steps before it stay done.
+#[tokio::test]
+async fn a_failed_cleanup_is_logged_and_keeps_what_it_did() {
+    let World {
+        pool,
+        dispatcher,
+        database,
+        ..
+    } = world().await;
+    record(&pool, 1, &JOINED, true).await;
+    dispatcher.deliver_due().await.expect("delivers");
+    run_as_owner(
+        &database,
+        "UPDATE people.outbox SET delivered_at = now() - interval '8 days';
+         REVOKE DELETE ON ledger.inbox_global FROM tetsu_delivery",
+    )
+    .await;
+    let logs = Logs::default();
+    let _guard = logs.capture();
+    dispatcher.run(Duration::from_secs(600), async {}).await;
+    let failed: Vec<String> = logs
+        .lines()
+        .into_iter()
+        .filter(|line| line.contains("removing event rows past their use failed"))
+        .collect();
+    assert_eq!(failed.len(), 1, "{:?}", logs.lines());
+    assert!(failed[0].contains("ERROR"), "{}", failed[0]);
+    assert_eq!(
+        read::<i64>(&database, "SELECT count(*) FROM people.outbox").await,
+        0
+    );
+}
+
+/// An event that runs out of attempts while a consumer that must never lose it was not yet reached is kept, as if
+/// that consumer had failed, so it is never removed undelivered.
+#[tokio::test]
+async fn an_event_a_skipped_never_lose_consumer_needs_is_kept() {
+    let World {
+        pool,
+        ledger,
+        database,
+        ..
+    } = world().await;
+    ledger.failing.store(true, Ordering::SeqCst);
+    let journal = Arc::new(support::Journal {
+        failures_left: AtomicUsize::new(0),
+    });
+    let consumers: Vec<Arc<dyn Consumer>> = vec![ledger.clone(), journal];
+    // A pass with no time left reaches only its first consumer.
+    let dispatcher = Dispatcher::new(pool.clone(), &["people"], consumers)
+        .await
+        .expect("finds the producers")
+        .with_pass_limit(Duration::ZERO);
+    record(&pool, 1, &JOINED, true).await;
+    for _ in 0..MAX_ATTEMPTS {
+        run_as_owner(&database, "UPDATE people.outbox SET due_at = now()").await;
+        dispatcher.deliver_due().await.expect("tries");
+    }
+    assert!(read::<bool>(&database, "SELECT keep FROM people.outbox").await);
+}
+
+/// A consumer whose inboxes the delivery role cannot clean is refused at start, rather than failing every hour:
+/// without its use of the schema, its right to read or delete, or its policy on the tenant inbox.
+#[tokio::test]
+async fn a_consumer_without_inbox_delivery_is_refused() {
+    let World { pool, database, .. } = world().await;
+    let journal: Arc<dyn Consumer> = Arc::new(support::Journal {
+        failures_left: AtomicUsize::new(0),
+    });
+    // Each right the cleanup uses, taken away in turn, and given back after.
+    for (taken, back) in [
+        (
+            "REVOKE DELETE ON journal.inbox FROM tetsu_delivery",
+            "GRANT DELETE ON journal.inbox TO tetsu_delivery",
+        ),
+        (
+            "REVOKE SELECT ON journal.inbox_global FROM tetsu_delivery",
+            "GRANT SELECT ON journal.inbox_global TO tetsu_delivery",
+        ),
+        (
+            "REVOKE USAGE ON SCHEMA journal FROM tetsu_delivery",
+            "GRANT USAGE ON SCHEMA journal TO tetsu_delivery",
+        ),
+        (
+            "DROP POLICY delivery ON journal.inbox",
+            "CREATE POLICY delivery ON journal.inbox TO tetsu_delivery USING (TRUE)",
+        ),
+    ] {
+        run_as_owner(&database, taken).await;
+        let refused = Dispatcher::new(pool.clone(), &["people"], vec![journal.clone()])
+            .await
+            .err()
+            .map(|error| error.to_string());
+        assert_eq!(
+            refused.as_deref(),
+            Some("journal consumes events, but its migrations lack INBOX_DELIVERY"),
+            "{taken}"
+        );
+        run_as_owner(&database, back).await;
+    }
+    assert!(
+        Dispatcher::new(pool, &["people"], vec![journal])
+            .await
+            .is_ok()
+    );
+}
+
+/// The dispatcher's cleanup logs how many rows it removed, and says nothing when it removed none.
+#[tokio::test]
+async fn the_cleanup_logs_what_it_removed() {
+    let World {
+        pool,
+        dispatcher,
+        database,
+        ..
+    } = world().await;
+    record(&pool, 1, &JOINED, true).await;
+    dispatcher.deliver_due().await.expect("delivers");
+    run_as_owner(
+        &database,
+        "UPDATE people.outbox SET delivered_at = now() - interval '8 days'",
+    )
+    .await;
+    let logs = Logs::default();
+    let _guard = logs.capture();
+    // A stop already sent ends each run after one pass, which cleans up first.
+    for _ in 0..2 {
+        dispatcher.run(Duration::from_secs(600), async {}).await;
+    }
+    let removed: Vec<String> = logs
+        .lines()
+        .into_iter()
+        .filter(|line| line.contains("removed event rows past their use"))
+        .collect();
+    assert_eq!(removed.len(), 1, "{removed:?}");
+    for field in ["\"delivered\":1", "\"stopped\":0", "\"applied\":0", "INFO"] {
+        assert!(removed[0].contains(field), "{field} in {}", removed[0]);
+    }
 }
 
 /// The dispatcher wakes when this process commits an event, rather than waiting for its next poll.
@@ -627,34 +1122,29 @@ async fn a_committed_event_wakes_the_dispatcher() {
 }
 
 #[tokio::test]
-async fn the_delivery_role_reaches_every_tenant_s_outbox_and_nothing_else() {
+async fn the_delivery_role_reaches_every_tenant_s_outbox_and_inbox_and_nothing_else() {
     let World {
         pool,
+        dispatcher,
         database: _database,
         ..
     } = world().await;
     record(&pool, 1, &JOINED, true).await;
     record(&pool, 2, &JOINED, true).await;
     let mut client = pool.get().await.expect("a connection");
-    let transaction = DeliveryTransaction::begin(&mut client)
-        .await
-        .expect("begins");
-    let seen: i64 = transaction
-        .query_one("SELECT count(*) FROM people.outbox", &[])
-        .await
-        .expect("reads every tenant's events")
-        .try_get(0)
-        .expect("a count");
-    assert_eq!(seen, 2);
-    transaction.commit().await.expect("commits");
-    // It settles events and never rewrites one, and reaches no other table.
+    assert_eq!(counted_as_delivery(&mut client, "people.outbox").await, 2);
+    // It reads every tenant's inbox too, to remove the IDs past their use (ADR-0080).
+    dispatcher.deliver_due().await.expect("delivers");
+    assert_eq!(counted_as_delivery(&mut client, "ledger.inbox").await, 2);
+    // It settles events and never rewrites one, never adds to or changes an inbox, and reaches no other table.
     for statement in [
         "UPDATE people.outbox SET payload = '{}'",
         "UPDATE people.outbox SET tenant_id = 3",
         "UPDATE people.outbox SET event_type = 'x'",
         "SELECT count(*) FROM people.people",
         "SELECT count(*) FROM people.notes",
-        "SELECT count(*) FROM ledger.inbox",
+        "INSERT INTO ledger.inbox_global (id) VALUES (gen_random_uuid())",
+        "UPDATE ledger.inbox SET applied_at = now()",
         "SELECT count(*) FROM ledger.effects",
     ] {
         let transaction = DeliveryTransaction::begin(&mut client)

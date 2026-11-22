@@ -2,6 +2,7 @@
 //! transaction that makes the change, and the dispatcher hands it to every consumer that wants it, at least once,
 //! while each consumer's inbox makes its effect happen once.
 
+use std::fmt::Write as _;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -13,12 +14,16 @@ use deadpool_postgres::{Object, Pool, Transaction};
 use tokio::sync::watch;
 
 use crate::connection::Error;
+use crate::roles::DELIVERY_ROLE;
 use crate::scope::{DeliveryTransaction, ModuleTransaction, TenantTransaction};
 
 /// A module's outboxes, as one of its migrations.
 pub const OUTBOX: &str = include_str!("../migrations/outbox.sql");
 /// A consuming module's inboxes, as one of its migrations.
 pub const INBOX: &str = include_str!("../migrations/inbox.sql");
+/// The delivery role's right to remove a consuming module's inbox IDs past their use (ADR-0080), as one of its
+/// migrations after [`INBOX`].
+pub const INBOX_DELIVERY: &str = include_str!("../migrations/inbox_delivery.sql");
 /// After this many failed attempts an event stops, unless it is kept, and its failure is logged as an error either
 /// way, so operations can alert on it (#27).
 pub const MAX_ATTEMPTS: i64 = 10;
@@ -27,7 +32,13 @@ pub const MAX_ATTEMPTS: i64 = 10;
 const APPLY_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long a delivered event stays before it is deleted. The outbox delivers; it is no history.
 pub const KEPT_FOR: Duration = Duration::from_hours(7 * 24);
-/// How often the dispatcher removes delivered events past [`KEPT_FOR`].
+/// How long an event that stopped retrying stays after its last attempt, to be found and replayed, before it is
+/// deleted (ADR-0080). One marked never to be lost is never deleted undelivered.
+pub const STOPPED_KEPT_FOR: Duration = Duration::from_hours(30 * 24);
+/// How long an inbox keeps an applied event's ID at least, and after that only while an outbox still holds the
+/// event, which could then come again (ADR-0080).
+pub const APPLIED_KEPT_FOR: Duration = Duration::from_hours(30 * 24);
+/// How often the dispatcher removes the rows past their use.
 const CLEAN_EVERY: Duration = Duration::from_hours(1);
 /// How long one pass may hand events over from one outbox before it commits what it has, so a stuck consumer
 /// cannot hold the outbox's rows and its connection for long.
@@ -169,6 +180,22 @@ impl Outbox {
         }
     }
 
+    /// Matches an outbox row `o` to the inbox row `i` its event left, by the outbox's whole key, so the lookup uses it.
+    fn holds(self) -> &'static str {
+        match self {
+            Self::Tenant => "o.tenant_id = i.tenant_id AND o.id = i.id",
+            Self::Global => "o.id = i.id",
+        }
+    }
+
+    /// The inbox that holds the IDs of the events this kind of outbox delivers.
+    fn inbox(self) -> &'static str {
+        match self {
+            Self::Tenant => "inbox",
+            Self::Global => "inbox_global",
+        }
+    }
+
     /// Finds one event by `$1`, its ID, and `$2`, its tenant, so the tenant outbox's key is used whole.
     fn row(self) -> &'static str {
         match self {
@@ -237,7 +264,10 @@ impl Dispatcher {
     /// A dispatcher for the modules in `schemas` that have outboxes, found once, here.
     ///
     /// # Errors
-    /// Fails if the database cannot be reached.
+    /// Fails if the database cannot be reached, or a consumer has inboxes that lack what [`INBOX_DELIVERY`] grants:
+    /// the delivery role's use of the schema, its rights to read and delete them, and its policy on a tenant inbox,
+    /// so the role could never remove their IDs past their use. A schema not yet migrated is left to the checks
+    /// that run before serving.
     pub async fn new(
         pool: Pool,
         schemas: &[&str],
@@ -256,6 +286,30 @@ impl Dispatcher {
             .iter()
             .map(|row| row.try_get(0))
             .collect::<Result<_, _>>()?;
+        for consumer in &consumers {
+            let schema = consumer.schema();
+            let cleanable: bool = client
+                .query_one(
+                    "SELECT coalesce(bool_and(
+                       pg_catalog.has_schema_privilege($2, n.oid, 'USAGE')
+                       AND pg_catalog.has_table_privilege($2, c.oid, 'SELECT')
+                       AND pg_catalog.has_table_privilege($2, c.oid, 'DELETE')
+                       AND (NOT c.relrowsecurity OR EXISTS (
+                         SELECT FROM pg_catalog.pg_policy p JOIN pg_catalog.pg_roles r ON r.oid = any(p.polroles)
+                         WHERE p.polrelid = c.oid AND r.rolname = $2))), true)
+                     FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+                     WHERE n.nspname = $1 AND c.relname IN ('inbox', 'inbox_global') AND c.relkind = 'r'",
+                    &[&schema, &DELIVERY_ROLE],
+                )
+                .await?
+                .try_get(0)?;
+            if !cleanable {
+                return Err(format!(
+                    "{schema} consumes events, but its migrations lack INBOX_DELIVERY"
+                )
+                .into());
+            }
+        }
         Ok(Self {
             pool,
             producers,
@@ -279,7 +333,7 @@ impl Dispatcher {
     /// it is fixed (ADR-0043). `producer` is the schema of the module that recorded it, which must be one of this
     /// dispatcher's producers, so no other name reaches the SQL. It acts as the delivery role, which may settle
     /// every tenant's events, and returns the outbox that held the event, or none if neither did, as when it was
-    /// delivered and removed.
+    /// removed past its use: delivered over [`KEPT_FOR`] ago, or stopped over [`STOPPED_KEPT_FOR`] ago (ADR-0080).
     ///
     /// # Errors
     /// Fails if `producer` records no events here, `id` is not a UUID, or the database fails.
@@ -321,8 +375,9 @@ impl Dispatcher {
         }
     }
 
-    /// Delivers until `stop` finishes: every `poll`, and at once when this process records an event. Removes
-    /// delivered events past [`KEPT_FOR`] every [`CLEAN_EVERY`]. A failed pass is logged and tried again on the next.
+    /// Delivers until `stop` finishes: every `poll`, and at once when this process records an event. Removes the
+    /// rows past their use with [`Self::remove_spent`] once an hour, logging how many when it removed any. A failed
+    /// pass is logged and tried again on the next.
     pub async fn run(&self, poll: Duration, stop: impl Future<Output = ()>) {
         tokio::pin!(stop);
         let mut woken = recorded().subscribe();
@@ -333,11 +388,18 @@ impl Dispatcher {
             // A failed removal waits for the next hour too, rather than running on every poll.
             if cleaned.is_none_or(|at| at.elapsed() >= CLEAN_EVERY) {
                 cleaned = Some(Instant::now());
-                if let Err(error) = self.remove_delivered(KEPT_FOR).await {
-                    tracing::error!(
+                match self.remove_spent().await {
+                    Ok(removed) if removed != Removed::default() => tracing::info!(
+                        delivered = removed.delivered,
+                        stopped = removed.stopped,
+                        applied = removed.applied,
+                        "removed event rows past their use"
+                    ),
+                    Ok(_) => {}
+                    Err(error) => tracing::error!(
                         error = described(&*error),
-                        "removing delivered events failed"
-                    );
+                        "removing event rows past their use failed"
+                    ),
                 }
             }
             tokio::select! {
@@ -409,9 +471,9 @@ impl Dispatcher {
         deadline: Instant,
     ) -> Result<Handed, Error> {
         let event = read_event(row, place.producer)?;
-        let (failed, starved) = self.hand_over(&event, deadline).await;
+        let (failed, starved, owed) = self.hand_over(&event, deadline).await;
         if !failed.is_empty() {
-            retry_later(transaction, place, &event, &failed).await?;
+            retry_later(transaction, place, &event, &failed, owed).await?;
         } else if !starved {
             settle(transaction, place, &event).await?;
         }
@@ -426,21 +488,27 @@ impl Dispatcher {
     /// before every consumer had it: the pool ran out of connections, or the pass reached its deadline before a
     /// later consumer. Neither is a consumer's failure, so it charges only the failures that came before it. The
     /// first consumer always runs, so every pass moves on, and no pass outlasts its deadline by more than one
-    /// consumer's time, which the delivery transaction's limits cover (ADR-0060).
-    async fn hand_over(&self, event: &Event, deadline: Instant) -> (Vec<&dyn Consumer>, bool) {
+    /// consumer's time, which the delivery transaction's limits cover (ADR-0060). It also says whether a consumer
+    /// that must never lose an event was left without it, so the event is kept as if that consumer had failed.
+    async fn hand_over(
+        &self,
+        event: &Event,
+        deadline: Instant,
+    ) -> (Vec<&dyn Consumer>, bool, bool) {
         let mut failed = Vec::new();
-        for (index, consumer) in self
+        let wanting: Vec<&Arc<dyn Consumer>> = self
             .consumers
             .iter()
             .filter(|consumer| consumer.wants(event))
-            .enumerate()
-        {
+            .collect();
+        let owed = |from: usize| wanting[from..].iter().any(|consumer| consumer.never_lose());
+        for (index, consumer) in wanting.iter().copied().enumerate() {
             if index > 0 && Instant::now() >= deadline {
                 tracing::info!(
                     event_id = event.id,
                     "the pass reached its limit; the event waits for the next"
                 );
-                return (failed, true);
+                return (failed, true, owed(index));
             }
             let mut client = match self.pool.get().await {
                 Ok(client) => client,
@@ -449,7 +517,7 @@ impl Dispatcher {
                         error = described(&error),
                         "no connection for a consumer; the pass ends here"
                     );
-                    return (failed, true);
+                    return (failed, true, owed(index));
                 }
             };
             let applied = tokio::time::timeout(
@@ -469,34 +537,163 @@ impl Dispatcher {
                 failed.push(consumer.as_ref());
             }
         }
-        (failed, false)
+        (failed, false, false)
     }
 
-    /// Deletes events delivered more than `age` ago, and returns how many.
+    /// Deletes the rows past their use (ADR-0080), and says how many of each: events delivered over [`KEPT_FOR`]
+    /// ago and events that stopped retrying over [`STOPPED_KEPT_FOR`] ago, in one transaction, then inbox IDs
+    /// applied over [`APPLIED_KEPT_FOR`] ago whose event no outbox of their kind still holds, in batches that each
+    /// commit, so a large inbox never holds the outboxes' cleanup back or outlasts a statement's limit. Every outbox
+    /// the database holds counts, not just this dispatcher's, so an instance of an older build never drops the ID
+    /// of an event a newer one still delivers.
     ///
     /// # Errors
-    /// Fails if an outbox cannot be cleaned.
-    pub async fn remove_delivered(&self, age: Duration) -> Result<u64, Error> {
-        let seconds = age.as_secs_f64();
-        let mut removed = 0;
+    /// Fails if a step cannot finish; the steps before it stay done.
+    pub async fn remove_spent(&self) -> Result<Removed, Error> {
+        let mut removed = Removed::default();
         let mut client = self.pool.get().await?;
         let transaction = DeliveryTransaction::begin(&mut client).await?;
-        for producer in &self.producers {
-            for outbox in [Outbox::Tenant, Outbox::Global] {
-                removed += transaction
-                    .execute(
-                        &format!(
-                            r#"DELETE FROM "{producer}".{} WHERE delivered_at < now() - make_interval(secs => $1)"#,
-                            outbox.table()
-                        ),
-                        &[&seconds],
-                    )
-                    .await?;
+        for outbox in [Outbox::Tenant, Outbox::Global] {
+            for producer in &self.producers {
+                let table = format!(r#""{producer}".{}"#, outbox.table());
+                let (delivered, stopped) = remove_from_outbox(&transaction, &table).await?;
+                removed.delivered += delivered;
+                removed.stopped += stopped;
             }
         }
+        let outboxes = every_outbox(&transaction).await?;
         transaction.commit().await?;
+        // An outbox this dispatcher delivers that is not found as a shared one has lost what marks it, so the
+        // cleanup stops rather than drop IDs its events still need.
+        if let Some(lost) = self
+            .producers
+            .iter()
+            .find(|producer| !outboxes.contains(producer))
+        {
+            return Err(format!("{lost}'s outbox lacks the delivery role's policy").into());
+        }
+        removed.applied = self.remove_applied(&mut client, &outboxes).await?;
         Ok(removed)
     }
+
+    /// Removes from every consumer's inboxes the IDs past their use whose event none of `outboxes` holds.
+    async fn remove_applied(&self, client: &mut Object, outboxes: &[String]) -> Result<u64, Error> {
+        let (mut removed, mut batches) = (0, APPLIED_BATCHES);
+        for outbox in [Outbox::Tenant, Outbox::Global] {
+            let held = outboxes.iter().fold(String::new(), |mut held, producer| {
+                let _ = write!(
+                    held,
+                    " AND NOT EXISTS (SELECT FROM {}.{} AS o WHERE {})",
+                    quoted(producer),
+                    outbox.table(),
+                    outbox.holds()
+                );
+                held
+            });
+            for consumer in &self.consumers {
+                let inbox = format!(r#""{}".{}"#, consumer.schema(), outbox.inbox());
+                removed += remove_from_inbox(client, &inbox, &held, &mut batches).await?;
+            }
+        }
+        Ok(removed)
+    }
+}
+
+/// How many inbox IDs one statement removes at most.
+const APPLIED_BATCH: i64 = 1000;
+/// How many batches one pass runs at most, across every inbox, so delivery, which waits for the cleanup, waits for
+/// no more than these; any left wait for the next pass.
+const APPLIED_BATCHES: usize = 20;
+
+/// A schema's name as an identifier SQL can hold whatever it is, quoted as Postgres quotes one.
+fn quoted(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
+}
+
+/// Every schema in the database with the shared outbox, whichever dispatcher knows it. The shared outbox is the one [`OUTBOX`] made: a permanent table that holds the delivery role's own
+/// policy. Any other table of that name, such as one in `public` or a session's temporary one, is no module's
+/// outbox, and a shared one the role can no longer read fails the cleanup rather than being passed over.
+async fn every_outbox(transaction: &Transaction<'_>) -> Result<Vec<String>, tokio_postgres::Error> {
+    transaction
+        .query(
+            "SELECT n.nspname::text FROM pg_catalog.pg_class c
+             JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+             WHERE c.relname = 'outbox' AND c.relkind = 'r' AND c.relpersistence = 'p'
+               AND EXISTS (
+                 SELECT FROM pg_catalog.pg_policy p JOIN pg_catalog.pg_roles r ON r.oid = any(p.polroles)
+                 WHERE p.polrelid = c.oid AND p.polname = 'delivery' AND r.rolname = current_user)
+             ORDER BY 1",
+            &[],
+        )
+        .await?
+        .iter()
+        .map(|row| row.try_get(0))
+        .collect()
+}
+
+/// Removes the IDs applied over [`APPLIED_KEPT_FOR`] ago from one inbox, unless `held` finds their event in an
+/// outbox, a batch to a transaction, while the pass has `batches` left that removed some, and says how many.
+async fn remove_from_inbox(
+    client: &mut Object,
+    inbox: &str,
+    held: &str,
+    batches: &mut usize,
+) -> Result<u64, Error> {
+    let mut removed = 0;
+    while *batches > 0 {
+        let transaction = DeliveryTransaction::begin(client).await?;
+        let batch = transaction
+            .execute(
+                &format!(
+                    "DELETE FROM {inbox} WHERE ctid = any(array(
+                       SELECT i.ctid FROM {inbox} AS i
+                       WHERE i.applied_at < now() - make_interval(secs => $1){held} LIMIT $2))"
+                ),
+                &[&APPLIED_KEPT_FOR.as_secs_f64(), &APPLIED_BATCH],
+            )
+            .await?;
+        transaction.commit().await?;
+        // A batch that found nothing means none is left, and costs the pass none of its batches: each inbox adds at
+        // most that one empty statement.
+        if batch == 0 {
+            break;
+        }
+        removed += batch;
+        *batches -= 1;
+    }
+    Ok(removed)
+}
+
+/// Removes from one outbox the events delivered over [`KEPT_FOR`] ago, and those that stopped retrying over
+/// [`STOPPED_KEPT_FOR`] ago and are not kept, and says how many of each.
+async fn remove_from_outbox(
+    transaction: &Transaction<'_>,
+    table: &str,
+) -> Result<(u64, u64), tokio_postgres::Error> {
+    let delivered = transaction
+        .execute(
+            &format!("DELETE FROM {table} WHERE delivered_at < now() - make_interval(secs => $1)"),
+            &[&KEPT_FOR.as_secs_f64()],
+        )
+        .await?;
+    let stopped = transaction
+        .execute(
+            &format!(
+                "DELETE FROM {table} WHERE delivered_at IS NULL AND NOT keep AND attempts >= $2
+                   AND due_at < now() - make_interval(secs => $1)"
+            ),
+            &[&STOPPED_KEPT_FOR.as_secs_f64(), &MAX_ATTEMPTS],
+        )
+        .await?;
+    Ok((delivered, stopped))
+}
+
+/// How many rows past their use one cleanup removed, of each kind (ADR-0080).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Removed {
+    pub delivered: u64,
+    pub stopped: u64,
+    pub applied: u64,
 }
 
 /// The outbox's due events, oldest first, locked for this transaction. Rows another instance holds are skipped,
@@ -596,17 +793,19 @@ async fn once(
 
 /// Schedules the next attempt, from the moment of the failure, with exponential backoff and jitter capped at an
 /// hour; the exponent stops growing well before the interval could overflow. Once an event has failed
-/// [`MAX_ATTEMPTS`] times, it is marked kept if a never-lose consumer is among those still failing, and an error
+/// [`MAX_ATTEMPTS`] times, it is marked kept if a never-lose consumer is among those still failing or not reached
+/// (`owed`), and an error
 /// names it and each failing consumer: one that is not kept stops there, and a kept one goes on.
 async fn retry_later(
     transaction: &Transaction<'_>,
     place: &Place<'_>,
     event: &Event,
     failed: &[&dyn Consumer],
+    owed: bool,
 ) -> Result<(), Error> {
-    // Marked kept only when a never-lose consumer is still failing as the event runs out of attempts, so one that
-    // failed once and recovered does not keep an event another consumer fails.
-    let never_lose = failed.iter().any(|consumer| consumer.never_lose());
+    // Marked kept only when a never-lose consumer is still failing, or was not reached, as the event runs out of
+    // attempts, so one that failed once and recovered does not keep an event another consumer fails.
+    let never_lose = owed || failed.iter().any(|consumer| consumer.never_lose());
     let row = transaction
         .query_one(
             &format!(
