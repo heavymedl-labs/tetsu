@@ -1,6 +1,6 @@
 # 0081. Recording refused requests
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-22
 - Adds two limits to [ADR-0072](0072-rate-limits-by-network-address.md)'s table
 

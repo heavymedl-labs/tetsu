@@ -3,6 +3,8 @@
 - Status: Accepted
 - Date: 2026-11-11
 - Log format rule superseded by [ADR-0071](0071-readable-logs-in-a-terminal.md)
+- Stopped events found and replayed without limit superseded by [ADR-0080](0080-event-rows-past-their-use.md), which
+  removes them after 30 days
 
 ## Context
 

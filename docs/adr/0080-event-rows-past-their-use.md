@@ -1,6 +1,6 @@
 # 0080. Event rows past their use
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-22
 - Supersedes [ADR-0043](0043-domain-event-delivery.md)'s "stops until a fix replays it", and
   [ADR-0045](0045-operations-baseline.md)'s stopped event logged "so it can be found and replayed", which kept it

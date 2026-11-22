@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-11-11
+- Stopped events kept until a fix replays them superseded by [ADR-0080](0080-event-rows-past-their-use.md), which
+  removes them after 30 days, and inbox IDs past their use
 
 ## Context
 

@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-17
 - Supersedes the failed passkey login row of [ADR-0048](0048-sign-in-design.md)'s rate limits
+- Two limits on recording refused requests added by [ADR-0081](0081-recording-refused-requests.md)
 
 ## Context
 
