@@ -83,7 +83,7 @@ number, and add a row below. Never renumber.
 | [0076](0076-pull-requests-from-contributors.md) | Pull requests from contributors | Taking a contributor's change, or changing who reviews what | Accepted |
 | [0077](0077-doubt-mode-in-the-fresh-review.md) | Doubt mode in the fresh review | Reviewing a risky change, or changing the fresh review | Accepted |
 | [0078](0078-mail-settings-from-one-place.md) | Mail settings from one place | Setting mail settings, or supplying them from a secret manager | Accepted |
-| [0079](0079-no-mail-provider-before-a-domain.md) | No mail provider before a domain | Choosing a mail provider, or sending the demo's email | Proposed |
+| [0079](0079-no-mail-provider-before-a-domain.md) | No mail provider before a domain | Choosing a mail provider, or sending the demo's email | Accepted |
 | [0068](0068-no-demo-note.md) | No demo note | Changing what marks a demo page | Proposed |
 
 ## Open decisions

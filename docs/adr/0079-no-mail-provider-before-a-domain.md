@@ -1,6 +1,6 @@
 # 0079. No mail provider before a domain
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-21
 - Supersedes [ADR-0074](0074-operator-email-in-development.md)'s choice of Mailgun's sandbox as the provider until
   Tetsu has a domain

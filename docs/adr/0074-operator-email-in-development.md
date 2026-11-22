@@ -1,6 +1,7 @@
 # 0074. Operator email in development
 
 - Status: Accepted
+- Choice of Mailgun's sandbox superseded by [ADR-0079](0079-no-mail-provider-before-a-domain.md)
 - Date: 2026-11-18
 - Supersedes, until Tetsu serves a real business, [ADR-0040](0040-identity-and-sign-in.md)'s rule that an operator's
   invite link prints only to the terminal, and [ADR-0044](0044-email-delivery.md)'s choice of Resend until Tetsu has
