@@ -30,8 +30,9 @@ and CONSTRAINTS.md, then the issue and the diff. Also answer:
    tailwind-plus skill's local library. Where does it fall short on spacing, type, behavior at each
    breakpoint, states, accessibility, or either color scheme? Does any of it copy Tailwind Plus
    markup? See ADR-0035.
-
-8. For a change to SQL or migrations, check it against the supabase-postgres-best-practices
+8. For a page or component, is anything a second page or realm will need built as a shared
+   component in web/templates, filled by data, rather than inside one module's templates?
+9. For a change to SQL or migrations, check it against the supabase-postgres-best-practices
    skill's rules (ADR-0082). Where a rule disagrees with this repository, the repository wins.
 
 Report only critical and required findings, with no nits, style, or optional suggestions.
