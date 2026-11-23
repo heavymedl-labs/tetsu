@@ -1,19 +1,106 @@
 {% import "art/app.html" as app %}
 {#- On a phone (scenes.css), the renewals, which tell the story, under the plans, one of them while the panel is
     narrow. #}
-{% call app::panel("Three membership plans with their members, and today's renewals paid one by one, with one declined card set to retry") %}
-{% call app::bar("Memberships", "· Northbound Yoga, all locations") %}<p class="font-mono text-xs text-muted">$96,412 a month</p>{% endcall %}
-<div class="grid grid-cols-1 @2xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
-<div class="grid divide-y divide-edge-soft @xl:grid-cols-3 @xl:divide-x @xl:divide-y-0 @2xl:grid-cols-1 @2xl:divide-x-0 @2xl:divide-y"><div class="p-4 @xl:p-5"><p class="text-muted">Unlimited</p><p class="mt-2 text-2xl font-semibold tracking-tight text-ink">$189<span class="text-sm font-normal text-muted"> per month</span></p><p class="mt-3 font-mono text-[11px] text-muted"><span class="tetsu-count [--from:409] [--to:412] [--at:0.2] [--len:0.36]"></span> active · +18 this month</p></div><div class="tetsu-off-narrow p-4 @xl:p-5"><p class="text-muted">10-class pack</p><p class="mt-2 text-2xl font-semibold tracking-tight text-ink">$220<span class="text-sm font-normal text-muted"> for 90 days</span></p><p class="mt-3 font-mono text-[11px] text-muted">138 active · +6 this month</p></div><div class="tetsu-off-narrow p-4 @xl:p-5"><p class="text-muted">Off-peak</p><p class="mt-2 text-2xl font-semibold tracking-tight text-ink">$119<span class="text-sm font-normal text-muted"> per month</span></p><p class="mt-3 font-mono text-[11px] text-muted">96 active · +3 this month</p></div></div>
-<div class="tetsu-on-phone hidden border-t border-edge bg-fill/40 p-6 @2xl:block @2xl:border-t-0 @2xl:border-l">
-{% call app::label("Renewing today · 4") %}{% endcall %}
-<ul class="mt-2 divide-y divide-edge-soft">
-<li class="flex items-center gap-3 py-2.5">{% call app::avatar("AL") %}{% endcall %}<span class="min-w-0 flex-1"><span class="block truncate text-ink">Ava Lindqvist</span><span class="block truncate font-mono text-[11px] text-muted">Unlimited · <span class="whitespace-nowrap">Visa ·· 4242</span></span></span><span class="font-mono text-xs text-ink">$189.00</span><span class="grid w-16 justify-items-end font-mono text-[11px] *:col-start-1 *:row-start-1"><span class="tetsu-out text-muted [--at:0.2]">Due</span><span class="tetsu-in flex items-center gap-1 text-ink [--at:0.2]">Paid<svg aria-hidden="true" viewBox="0 0 16 16" class="size-3.5"><path pathLength="1" d="M3 8.5l3 3 7-7" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="tetsu-draw stroke-forge [--at:0.2] [--len:0.06]"/></svg></span></span></li>
-<li class="flex items-center gap-3 py-2.5">{% call app::avatar("KS") %}{% endcall %}<span class="min-w-0 flex-1"><span class="block truncate text-ink">Kira Sato</span><span class="block truncate font-mono text-[11px] text-muted">Off-peak · <span class="whitespace-nowrap">Apple Pay</span></span></span><span class="font-mono text-xs text-ink">$119.00</span><span class="grid w-16 justify-items-end font-mono text-[11px] *:col-start-1 *:row-start-1"><span class="tetsu-out text-muted [--at:0.38]">Due</span><span class="tetsu-in flex items-center gap-1 text-ink [--at:0.38]">Paid<svg aria-hidden="true" viewBox="0 0 16 16" class="size-3.5"><path pathLength="1" d="M3 8.5l3 3 7-7" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="tetsu-draw stroke-forge [--at:0.38] [--len:0.06]"/></svg></span></span></li>
-<li class="flex items-center gap-3 py-2.5">{% call app::avatar("JP") %}{% endcall %}<span class="min-w-0 flex-1"><span class="block truncate text-ink">Jordan Pike</span><span class="block truncate font-mono text-[11px] text-muted">Unlimited · <span class="whitespace-nowrap">Mastercard ·· 0127</span></span></span><span class="font-mono text-xs text-ink">$189.00</span><span class="grid w-16 justify-items-end font-mono text-[11px] *:col-start-1 *:row-start-1"><span class="tetsu-out text-muted [--at:0.56]">Due</span><span class="tetsu-in flex items-center gap-1 text-ink [--at:0.56]">Paid<svg aria-hidden="true" viewBox="0 0 16 16" class="size-3.5"><path pathLength="1" d="M3 8.5l3 3 7-7" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="tetsu-draw stroke-forge [--at:0.56] [--len:0.06]"/></svg></span></span></li>
-<li class="flex items-center gap-3 py-2.5">{% call app::avatar("RB") %}{% endcall %}<span class="min-w-0 flex-1"><span class="block truncate text-ink">Ruth Banks</span><span class="block truncate font-mono text-[11px] text-muted">Unlimited · <span class="whitespace-nowrap">Visa ·· 8810</span></span></span><span class="font-mono text-xs text-ink">$189.00</span><span class="w-16 text-right font-mono text-[11px] whitespace-nowrap text-accent">Retry Fri</span></li>
-</ul>
-<p class="mt-3 text-xs text-muted">Declined cards retry three times, and the member gets a link to update theirs.</p>
-</div>
-</div>
+{%
+  call app::panel("Three membership plans with their members, and today's renewals paid one by one, with one declined card set to retry")
+%}
+  {% call app::bar("Memberships", "· Northbound Yoga, all locations") %}<p class="font-mono text-xs text-muted"
+    >$96,412 a month</p>{% endcall %}
+  <div class="grid grid-cols-1 @2xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+    <div
+      class="grid divide-y divide-edge-soft @xl:grid-cols-3 @xl:divide-x @xl:divide-y-0 @2xl:grid-cols-1 @2xl:divide-x-0 @2xl:divide-y"
+    ><div class="p-4 @xl:p-5"><p class="text-muted">Unlimited</p><p
+          class="mt-2 text-2xl font-semibold tracking-tight text-ink"
+        >$189<span class="text-sm font-normal text-muted"> per month</span></p><p
+          class="mt-3 font-mono text-[11px] text-muted"
+        ><span class="tetsu-count [--from:409] [--to:412] [--at:0.2] [--len:0.36]"></span> active · +18 this
+          month</p></div><div class="tetsu-off-narrow p-4 @xl:p-5"><p class="text-muted">10-class pack</p><p
+          class="mt-2 text-2xl font-semibold tracking-tight text-ink"
+        >$220<span class="text-sm font-normal text-muted"> for 90 days</span></p><p
+          class="mt-3 font-mono text-[11px] text-muted"
+        >138 active · +6 this month</p></div><div class="tetsu-off-narrow p-4 @xl:p-5"><p class="text-muted"
+        >Off-peak</p><p class="mt-2 text-2xl font-semibold tracking-tight text-ink">$119<span
+            class="text-sm font-normal text-muted"
+          >
+            per month</span></p><p class="mt-3 font-mono text-[11px] text-muted"
+        >96 active · +3 this month</p></div></div>
+    <div class="tetsu-on-phone hidden border-t border-edge bg-fill/40 p-6 @2xl:block @2xl:border-t-0 @2xl:border-l">
+      {% call app::label("Renewing today · 4") %}{% endcall %}
+      <ul class="mt-2 divide-y divide-edge-soft">
+        <li class="flex items-center gap-3 py-2.5">{% call app::avatar("AL") %}{% endcall %}<span
+            class="min-w-0 flex-1"
+          ><span class="block truncate text-ink">Ava Lindqvist</span><span
+              class="block truncate font-mono text-[11px] text-muted"
+            >Unlimited · <span class="whitespace-nowrap">Visa ·· 4242</span></span></span><span
+            class="font-mono text-xs text-ink"
+          >$189.00</span><span
+            class="grid w-16 justify-items-end font-mono text-[11px] *:col-start-1 *:row-start-1"
+          ><span class="tetsu-out text-muted [--at:0.2]">Due</span><span
+              class="tetsu-in flex items-center gap-1 text-ink [--at:0.2]"
+            >Paid<svg aria-hidden="true" viewBox="0 0 16 16" class="size-3.5">
+                <path
+                  pathLength="1"
+                  d="M3 8.5l3 3 7-7"
+                  fill="none"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  class="tetsu-draw stroke-forge [--at:0.2] [--len:0.06]"
+                />
+              </svg></span></span></li>
+        <li class="flex items-center gap-3 py-2.5">{% call app::avatar("KS") %}{% endcall %}<span
+            class="min-w-0 flex-1"
+          ><span class="block truncate text-ink">Kira Sato</span><span
+              class="block truncate font-mono text-[11px] text-muted"
+            >Off-peak · <span class="whitespace-nowrap">Apple Pay</span></span></span><span
+            class="font-mono text-xs text-ink"
+          >$119.00</span><span
+            class="grid w-16 justify-items-end font-mono text-[11px] *:col-start-1 *:row-start-1"
+          ><span class="tetsu-out text-muted [--at:0.38]">Due</span><span
+              class="tetsu-in flex items-center gap-1 text-ink [--at:0.38]"
+            >Paid<svg aria-hidden="true" viewBox="0 0 16 16" class="size-3.5">
+                <path
+                  pathLength="1"
+                  d="M3 8.5l3 3 7-7"
+                  fill="none"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  class="tetsu-draw stroke-forge [--at:0.38] [--len:0.06]"
+                />
+              </svg></span></span></li>
+        <li class="flex items-center gap-3 py-2.5">{% call app::avatar("JP") %}{% endcall %}<span
+            class="min-w-0 flex-1"
+          ><span class="block truncate text-ink">Jordan Pike</span><span
+              class="block truncate font-mono text-[11px] text-muted"
+            >Unlimited · <span class="whitespace-nowrap">Mastercard ·· 0127</span></span></span><span
+            class="font-mono text-xs text-ink"
+          >$189.00</span><span
+            class="grid w-16 justify-items-end font-mono text-[11px] *:col-start-1 *:row-start-1"
+          ><span class="tetsu-out text-muted [--at:0.56]">Due</span><span
+              class="tetsu-in flex items-center gap-1 text-ink [--at:0.56]"
+            >Paid<svg aria-hidden="true" viewBox="0 0 16 16" class="size-3.5">
+                <path
+                  pathLength="1"
+                  d="M3 8.5l3 3 7-7"
+                  fill="none"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  class="tetsu-draw stroke-forge [--at:0.56] [--len:0.06]"
+                />
+              </svg></span></span></li>
+        <li class="flex items-center gap-3 py-2.5">{% call app::avatar("RB") %}{% endcall %}<span
+            class="min-w-0 flex-1"
+          ><span class="block truncate text-ink">Ruth Banks</span><span
+              class="block truncate font-mono text-[11px] text-muted"
+            >Unlimited · <span class="whitespace-nowrap">Visa ·· 8810</span></span></span><span
+            class="font-mono text-xs text-ink"
+          >$189.00</span><span class="w-16 text-right font-mono text-[11px] whitespace-nowrap text-accent"
+          >Retry Fri</span></li>
+      </ul>
+      <p class="mt-3 text-xs text-muted"
+      >Declined cards retry three times, and the member gets a link to update theirs.</p>
+    </div>
+  </div>
 {% endcall %}

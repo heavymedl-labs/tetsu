@@ -1,46 +1,121 @@
 {% import "art/app.html" as app %}
 {% import "art/spots.html" as sp %}
-{% call app::panel("Two spot maps. In a cycling studio, a member takes their usual bike, 14, picks bike 15 for a guest, and another bike is taken. At a campground filtered for a 32 foot RV, an RV site is held while someone pays, with its details shown.") %}
-<div class="grid grid-cols-1 @xl:grid-cols-2">
-<div>
-{% call app::bar("Ride45", "· Sun, Nov 15 · 10:30 am · Studio 1") %}<p class="font-mono text-xs text-muted">Your usual: bike 14</p>{% endcall %}
-{#- While the panel is at its narrowest, wider than a phone's screen, the studio's map sits at its left at the width
+{%
+  call app::panel("Two spot maps. In a cycling studio, a member takes their usual bike, 14, picks bike 15 for a guest, and another bike is taken. At a campground filtered for a 32 foot RV, an RV site is held while someone pays, with its details shown.")
+%}
+  <div class="grid grid-cols-1 @xl:grid-cols-2">
+    <div>
+      {% call app::bar("Ride45", "· Sun, Nov 15 · 10:30 am · Studio 1") %}<p class="font-mono text-xs text-muted"
+        >Your usual: bike 14</p>{% endcall %}
+      {#- While the panel is at its narrowest, wider than a phone's screen, the studio's map sits at its left at the width
     the screen shows, so none of it runs off the screen while space stands empty beside it. -#}
-<div class="p-6 @max-[30.5rem]:pt-4"><svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 12 360 236" class="mx-auto w-full max-w-[22rem] @max-[30.5rem]:mx-0 @max-[30.5rem]:max-w-[20rem]">
-<defs><pattern id="tetsu-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" class="fill-fill"/><line x1="0" y1="0" x2="0" y2="6" stroke-width="2" class="stroke-ink/15"/></pattern></defs>
-<rect x="120" y="22" width="120" height="30" rx="6" class="fill-fill"/><text x="180" y="41" text-anchor="middle" class="fill-muted font-mono text-[9px]">Instructor</text>
+      <div class="p-6 @max-[30.5rem]:pt-4"><svg
+          aria-hidden="true"
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 12 360 236"
+          class="mx-auto w-full max-w-[22rem] @max-[30.5rem]:mx-0 @max-[30.5rem]:max-w-[20rem]"
+        >
+          <defs><pattern
+              id="tetsu-hatch"
+              width="6"
+              height="6"
+              patternUnits="userSpaceOnUse"
+              patternTransform="rotate(45)"
+            ><rect width="6" height="6" class="fill-fill" /><line
+                x1="0"
+                y1="0"
+                x2="0"
+                y2="6"
+                stroke-width="2"
+                class="stroke-ink/15"
+              /></pattern></defs>
+          <rect x="120" y="22" width="120" height="30" rx="6" class="fill-fill" />
+          <text x="180" y="41" text-anchor="middle" class="fill-muted font-mono text-[9px]">Instructor</text>
 
-{%- for (r, (letter, first, row)) in [("A", 0, "tttot"), ("B", 5, "tbttot"), ("C", 11, "toygott"), ("D", 18, "atotta")].iter().enumerate() %}
-<text x="14" y="{{ 97 + r * 42 }}" class="fill-muted font-mono text-[9px]">{{ letter }}</text>
-{%- for (k, state) in row.chars().enumerate() %}{% call sp::spot(185 - row.len() * 20 + k * 40, 78 + r * 42, 30, 30, first + k + 1, state.clone(), false, state == 'a') %}{% endcall %}{% endfor %}
-{%- endfor %}
-</svg>
-<div class="mt-3 flex items-center justify-between gap-3 rounded-lg bg-fill p-3 text-xs">
-<p class="grid *:col-start-1 *:row-start-1"><span class="tetsu-out text-muted [--at:0.4]">Choose up to 2 bikes</span><span class="tetsu-in text-ink [--at:0.4]">Bike 14 for you, 15 for Sam <span class="text-muted">· 2 credits</span></span></p>
-<p class="grid shrink-0 font-medium *:col-start-1 *:row-start-1"><span class="tetsu-out rounded-md border border-edge px-3 py-1.5 text-muted [--at:0.66]">Reserve</span><span class="tetsu-in rounded-md bg-ink px-3 py-1.5 text-canvas [--at:0.66]">Reserved</span></p>
-</div></div>
-</div>
-<div class="hidden border-t border-edge @xl:block @xl:border-t-0 @xl:border-l">
-{% call app::bar("Pinewake Campground", "· Fri, Nov 13 to Sun, Nov 15") %}<p class="grid font-mono text-xs *:col-start-1 *:row-start-1"><span class="tetsu-out text-muted [--at:0.6]">3 RV sites fit</span><span class="tetsu-in text-ink [--at:0.6]">B3 held · 9:58 left</span></p>{% endcall %}
-<div class="p-6"><div class="flex flex-wrap gap-1.5 font-mono text-[11px]"><span class="rounded-full border border-edge px-2 py-0.5 text-muted">Tent</span><span class="rounded-full border border-ink bg-ink px-2 py-0.5 text-canvas">RV · fits 32 ft</span><span class="rounded-full border border-edge px-2 py-0.5 text-muted">Cabin</span></div><svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 260" class="mx-auto w-full max-w-[22rem]"><rect x="60" y="62" width="240" height="136" rx="60" fill="none" stroke-width="18" class="stroke-fill"/><text x="20" y="140" class="fill-muted font-mono text-[9px]">Entrance</text>
-{%- for (x, y, w, h, label, state, dim, accessible) in [
-  (70, 22, 34, 26, "A1", 't', true, false),
-  (118, 22, 34, 26, "A2", 'o', true, false),
-  (166, 22, 34, 26, "A3", 't', true, false),
-  (214, 22, 34, 26, "A4", 'o', true, false),
-  (262, 22, 34, 26, "A5", 't', true, false),
-  (314, 74, 34, 38, "B1", 't', false, false),
-  (314, 120, 34, 38, "B2", 'o', false, true),
-  (314, 166, 34, 38, "B3", 'h', false, false),
-  (92, 214, 42, 32, "C1", 't', true, false),
-  (162, 214, 42, 32, "C2", 'o', true, false),
-  (232, 214, 42, 32, "C3", 't', true, false),
-  (118, 104, 34, 26, "T1", 'o', true, false),
-  (162, 104, 34, 26, "T2", 'B', true, false),
-  (206, 104, 34, 26, "T3", 't', true, false),
-] %}{% call sp::spot(*x, *y, *w, *h, label, *state, *dim, *accessible) %}{% endcall %}{% endfor %}
-</svg><ul class="mt-3 divide-y divide-edge-soft text-xs"><li class="relative flex items-center gap-3 py-2"><span class="w-6 font-mono text-ink">B1</span><span class="min-w-0 flex-1 truncate text-muted">Back-in · up to 35 ft · 30 amp</span><span class="font-mono text-muted">Taken</span></li><li class="relative flex items-center gap-3 py-2"><span class="w-6 font-mono text-ink">B2</span><span class="min-w-0 flex-1 truncate text-muted">Back-in · up to 38 ft · 50 amp · accessible</span><span class="font-mono text-ink">$54 a night</span></li><li class="relative flex items-center gap-3 py-2"><span class="w-6 font-mono text-ink">B3</span><span class="min-w-0 flex-1 truncate text-muted">Pull-through · up to 40 ft · 50 amp · sewer</span><span class="grid font-mono *:col-start-1 *:row-start-1"><span class="tetsu-out text-ink [--at:0.6]">$58 a night</span><span class="tetsu-in text-accent [--at:0.6]">Held · 9:58</span></span></li></ul></div>
-</div>
-</div>
-<div class="border-t border-edge px-4 py-3 @xl:px-6"><div class="flex flex-wrap gap-x-4 gap-y-2 font-mono text-[11px] text-muted"><span class="flex items-center gap-1.5"><span class="size-3 rounded-sm border border-ink/40 bg-surface"></span>Open</span><span class="flex items-center gap-1.5"><span class="size-3 rounded-sm bg-[repeating-linear-gradient(135deg,var(--tetsu-color-line)_0_2px,var(--tetsu-color-fill)_2px_4px)]"></span>Taken</span><span class="flex items-center gap-1.5"><span class="size-3 rounded-sm bg-forge"></span>Yours</span><span class="flex items-center gap-1.5"><span class="size-3 rounded-sm border border-forge bg-forge/30"></span>Your guest</span><span class="flex items-center gap-1.5"><span class="size-3 rounded-sm border border-forge bg-forge/15"></span>Held</span><span class="flex items-center gap-1.5"><span class="grid size-3 place-items-center rounded-full border border-ink"><span class="size-1 rounded-full bg-ink"></span></span>Accessible</span></div></div>
+          {%-
+            for (r, (letter, first, row)) in [("A", 0, "tttot"), ("B", 5, "tbttot"), ("C", 11, "toygott"), ("D", 18, "atotta")].iter().enumerate()
+          %}
+            <text x="14" y="{{ 97 + r * 42 }}" class="fill-muted font-mono text-[9px]">{{ letter }}</text>
+            {%- for (k, state) in row.chars().enumerate() %}{%
+                call sp::spot(185 - row.len() * 20 + k * 40, 78 + r * 42, 30, 30, first + k + 1, state.clone(), false, state == 'a')
+              %}{% endcall %}{% endfor %}
+          {%- endfor %}
+        </svg>
+        <div class="mt-3 flex items-center justify-between gap-3 rounded-lg bg-fill p-3 text-xs">
+          <p class="grid *:col-start-1 *:row-start-1"><span class="tetsu-out text-muted [--at:0.4]"
+            >Choose up to 2 bikes</span><span class="tetsu-in text-ink [--at:0.4]">Bike 14 for you, 15 for Sam <span
+                class="text-muted"
+              >· 2 credits</span></span></p>
+          <p class="grid shrink-0 font-medium *:col-start-1 *:row-start-1"><span
+              class="tetsu-out rounded-md border border-edge px-3 py-1.5 text-muted [--at:0.66]"
+            >Reserve</span><span class="tetsu-in rounded-md bg-ink px-3 py-1.5 text-canvas [--at:0.66]"
+            >Reserved</span></p>
+        </div></div>
+    </div>
+    <div class="hidden border-t border-edge @xl:block @xl:border-t-0 @xl:border-l">
+      {% call app::bar("Pinewake Campground", "· Fri, Nov 13 to Sun, Nov 15") %}<p
+          class="grid font-mono text-xs *:col-start-1 *:row-start-1"
+        ><span class="tetsu-out text-muted [--at:0.6]">3 RV sites fit</span><span class="tetsu-in text-ink [--at:0.6]"
+          >B3 held · 9:58 left</span></p>{% endcall %}
+      <div class="p-6"><div class="flex flex-wrap gap-1.5 font-mono text-[11px]"><span
+            class="rounded-full border border-edge px-2 py-0.5 text-muted"
+          >Tent</span><span class="rounded-full border border-ink bg-ink px-2 py-0.5 text-canvas"
+          >RV · fits 32 ft</span><span class="rounded-full border border-edge px-2 py-0.5 text-muted"
+          >Cabin</span></div><svg
+          aria-hidden="true"
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 360 260"
+          class="mx-auto w-full max-w-[22rem]"
+        >
+          <rect x="60" y="62" width="240" height="136" rx="60" fill="none" stroke-width="18" class="stroke-fill" />
+          <text x="20" y="140" class="fill-muted font-mono text-[9px]">Entrance</text>
+          {%-
+            for (x, y, w, h, label, state, dim, accessible) in [
+              (70, 22, 34, 26, "A1", 't', true, false),
+              (118, 22, 34, 26, "A2", 'o', true, false),
+              (166, 22, 34, 26, "A3", 't', true, false),
+              (214, 22, 34, 26, "A4", 'o', true, false),
+              (262, 22, 34, 26, "A5", 't', true, false),
+              (314, 74, 34, 38, "B1", 't', false, false),
+              (314, 120, 34, 38, "B2", 'o', false, true),
+              (314, 166, 34, 38, "B3", 'h', false, false),
+              (92, 214, 42, 32, "C1", 't', true, false),
+              (162, 214, 42, 32, "C2", 'o', true, false),
+              (232, 214, 42, 32, "C3", 't', true, false),
+              (118, 104, 34, 26, "T1", 'o', true, false),
+              (162, 104, 34, 26, "T2", 'B', true, false),
+              (206, 104, 34, 26, "T3", 't', true, false),
+            ]
+          %}{% call sp::spot(*x, *y, *w, *h, label, *state, *dim, *accessible) %}{% endcall %}{% endfor %}
+        </svg><ul class="mt-3 divide-y divide-edge-soft text-xs"><li class="relative flex items-center gap-3 py-2"><span
+              class="w-6 font-mono text-ink"
+            >B1</span><span class="min-w-0 flex-1 truncate text-muted">Back-in · up to 35 ft · 30 amp</span><span
+              class="font-mono text-muted"
+            >Taken</span></li><li class="relative flex items-center gap-3 py-2"><span class="w-6 font-mono text-ink"
+            >B2</span><span class="min-w-0 flex-1 truncate text-muted"
+            >Back-in · up to 38 ft · 50 amp · accessible</span><span class="font-mono text-ink"
+            >$54 a night</span></li><li class="relative flex items-center gap-3 py-2"><span
+              class="w-6 font-mono text-ink"
+            >B3</span><span class="min-w-0 flex-1 truncate text-muted"
+            >Pull-through · up to 40 ft · 50 amp · sewer</span><span
+              class="grid font-mono *:col-start-1 *:row-start-1"
+            ><span class="tetsu-out text-ink [--at:0.6]">$58 a night</span><span class="tetsu-in text-accent [--at:0.6]"
+              >Held · 9:58</span></span></li></ul></div>
+    </div>
+  </div>
+  <div class="border-t border-edge px-4 py-3 @xl:px-6"><div
+      class="flex flex-wrap gap-x-4 gap-y-2 font-mono text-[11px] text-muted"
+    ><span class="flex items-center gap-1.5"><span
+          class="size-3 rounded-sm border border-ink/40 bg-surface"
+        ></span>Open</span><span class="flex items-center gap-1.5"><span
+          class="size-3 rounded-sm bg-[repeating-linear-gradient(135deg,var(--tetsu-color-line)_0_2px,var(--tetsu-color-fill)_2px_4px)]"
+        ></span>Taken</span><span class="flex items-center gap-1.5"><span
+          class="size-3 rounded-sm bg-forge"
+        ></span>Yours</span><span class="flex items-center gap-1.5"><span
+          class="size-3 rounded-sm border border-forge bg-forge/30"
+        ></span>Your guest</span><span class="flex items-center gap-1.5"><span
+          class="size-3 rounded-sm border border-forge bg-forge/15"
+        ></span>Held</span><span class="flex items-center gap-1.5"><span
+          class="grid size-3 place-items-center rounded-full border border-ink"
+        ><span class="size-1 rounded-full bg-ink"></span></span>Accessible</span></div></div>
 {% endcall %}

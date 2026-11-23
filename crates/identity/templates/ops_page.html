@@ -7,18 +7,28 @@
 {% extends "../../../web/templates/page.html" %}
 {% block data_scheme %}{{ scheme }}{% endblock %}
 {% block color_scheme %}{% include "../../../web/templates/color_scheme.html" %}{% endblock %}
-{% block head %}<script type="module" src="{{ script }}"></script><script type="module" src="{{ scheme_script }}"></script>{% endblock %}
+{% block head %}<script type="module" src="{{ script }}"></script><script
+    type="module"
+    src="{{ scheme_script }}"
+  ></script>{% endblock %}
 {#- An operator page is Tetsu's own, so its footer holds only the color scheme control (ADR-0070), not "Runs on
     Tetsu". #}
-{% block footer %}<footer class="flex justify-center px-6 pb-8">{% include "../../../web/templates/scheme.html" %}</footer>{% endblock %}
+{% block footer %}<footer class="flex justify-center px-6 pb-8">{%
+      include "../../../web/templates/scheme.html"
+    %}</footer>{% endblock %}
 {% block body %}
-{% block before %}{% endblock %}
-<main id="main" class="flex flex-1 justify-center px-6 {% block main %}items-center py-16{% endblock %}">
-<div class="tetsu-settle w-full {% block width %}max-w-72 text-center{% endblock %}">
-{% block wordmark %}<a href="/" aria-label="Tetsu home" class="mx-auto block h-8 w-fit text-ink focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent">{% include "../../../web/templates/wordmark.html" %}</a>{% endblock %}
-{% block card %}{% endblock %}
-{% block noscript %}<noscript><p class="mt-4 text-mini text-muted">Passkeys need JavaScript, which this browser has turned off.</p></noscript>{% endblock %}
-</div>
-</main>
-{% block after %}{% endblock %}
+  {% block before %}{% endblock %}
+  <main id="main" class="flex flex-1 justify-center px-6 {% block main %}items-center py-16{% endblock %}">
+    <div class="tetsu-settle w-full {% block width %}max-w-72 text-center{% endblock %}">
+      {% block wordmark %}<a
+          href="/"
+          aria-label="Tetsu home"
+          class="mx-auto block h-8 w-fit text-ink focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
+        >{% include "../../../web/templates/wordmark.html" %}</a>{% endblock %}
+      {% block card %}{% endblock %}
+      {% block noscript %}<noscript><p class="mt-4 text-mini text-muted"
+          >Passkeys need JavaScript, which this browser has turned off.</p></noscript>{% endblock %}
+    </div>
+  </main>
+  {% block after %}{% endblock %}
 {% endblock %}

@@ -1,19 +1,32 @@
 {% import "../../../web/templates/components.html" as ui %}
 {% import "art/figures.html" as fig %}
 {% call ui::section("", "changes") %}
-{% call fig::separator(false) %}{% endcall %}
-{% call ui::head("changes", "Changelog.", "What shipped lately.", joined = true) %}{% endcall %}
-{#- A timeline: a line through the dots, down the entries stacked on smaller screens, and across them from laptops,
+  {% call fig::separator(false) %}{% endcall %}
+  {% call ui::head("changes", "Changelog.", "What shipped lately.", joined = true) %}{% endcall %}
+  {#- A timeline: a line through the dots, down the entries stacked on smaller screens, and across them from laptops,
     where they sit in a row. Each stacked entry draws the line from its dot to the next; the dots' ring hides the
     joins. An entry is its title, a line on what shipped, and its date. -#}
-<ol class="tetsu-reveal relative grid gap-8 lg:grid-cols-4 lg:gap-10 lg:before:absolute lg:before:inset-x-0 lg:before:top-1 lg:before:h-px lg:before:bg-line">
-{%- for (k, (title, line, datetime, date)) in [
-  ("Waitlists that fill themselves", "When a spot opens, the next person in line gets it and a text, with no one at the desk.", "2026-11-04", "Nov 4, 2026"),
-  ("Shared memberships", "One membership books at every location, each with its own hours and rules.", "2026-10-21", "Oct 21, 2026"),
-  ("Deposits for long services", "Take a deposit on services over an hour at booking, and apply it at checkout.", "2026-10-07", "Oct 7, 2026"),
-  ("An API sandbox", "Build against sample data with keys you make and revoke yourself.", "2026-09-23", "Sep 23, 2026"),
-].iter().enumerate() %}
-<li class="relative pl-8 not-last:before:absolute not-last:before:top-3 not-last:before:-bottom-10 not-last:before:left-[4.5px] not-last:before:w-px not-last:before:bg-line lg:pl-0 lg:before:hidden"><span aria-hidden="true" class="absolute top-1.5 left-0 z-10 block size-2.5 rounded-full {% if k == 0 %}bg-forge{% else %}bg-muted{% endif %} ring-4 ring-canvas lg:static"></span><h3 class="text-base font-medium text-ink lg:mt-16">{{ title }}</h3><p class="mt-1 text-base text-pretty text-muted">{{ line }}</p><p class="mt-5 font-mono text-xs text-faint uppercase"><time datetime="{{ datetime }}">{{ date }}</time></p></li>
-{%- endfor %}
-</ol>
+  <ol
+    class="tetsu-reveal relative grid gap-8 lg:grid-cols-4 lg:gap-10 lg:before:absolute lg:before:inset-x-0 lg:before:top-1 lg:before:h-px lg:before:bg-line"
+  >
+    {%-
+      for (k, (title, line, datetime, date)) in [
+        ("Waitlists that fill themselves", "When a spot opens, the next person in line gets it and a text, with no one at the desk.", "2026-11-04", "Nov 4, 2026"),
+        ("Shared memberships", "One membership books at every location, each with its own hours and rules.", "2026-10-21", "Oct 21, 2026"),
+        ("Deposits for long services", "Take a deposit on services over an hour at booking, and apply it at checkout.", "2026-10-07", "Oct 7, 2026"),
+        ("An API sandbox", "Build against sample data with keys you make and revoke yourself.", "2026-09-23", "Sep 23, 2026"),
+      ].iter().enumerate()
+    %}
+      <li
+        class="relative pl-8 not-last:before:absolute not-last:before:top-3 not-last:before:-bottom-10 not-last:before:left-[4.5px] not-last:before:w-px not-last:before:bg-line lg:pl-0 lg:before:hidden"
+      ><span
+          aria-hidden="true"
+          class="absolute top-1.5 left-0 z-10 block size-2.5 rounded-full {% if k == 0 %}bg-forge{% else %}bg-muted{% endif %} ring-4 ring-canvas lg:static"
+        ></span><h3 class="text-base font-medium text-ink lg:mt-16">{{ title }}</h3><p
+          class="mt-1 text-base text-pretty text-muted"
+        >{{ line }}</p><p class="mt-5 font-mono text-xs text-faint uppercase"><time datetime="{{ datetime }}">{{
+            date
+          }}</time></p></li>
+    {%- endfor %}
+  </ol>
 {% endcall %}

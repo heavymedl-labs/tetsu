@@ -4,93 +4,209 @@
 {#- Built for the rush: the morning's slots, a column at a time, book as a playhead crosses them. Each column is
     a line of five: t is taken already, o books, and h books in forge orange. -#}
 {% macro rush() %}
-{%- let columns = ["ootoo", "ttoto", "ttoot", "tottt", "otott", "ottoo", "ooooo", "oooto", "ootoo", "oohoo", "toooo", "ootto"] %}
-<svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" class="w-full overflow-visible">
-<text x="28" y="26" class="fill-muted font-mono text-[10px]">6:00 am</text>
-<g class="font-mono text-[10px]"><text x="286" y="26" text-anchor="end" class="fill-muted motion-safe:transition-all motion-safe:ease-tetsu motion-safe:delay-300 motion-safe:duration-300 group-on:opacity-0 group-on:motion-safe:delay-0">186 open</text><text x="286" y="26" text-anchor="end" class="fill-forge opacity-0 motion-safe:transition-all motion-safe:ease-tetsu motion-safe:duration-300 group-on:opacity-100 group-on:motion-safe:delay-1000">Full · 6:01 am</text></g>
-<g class="tetsu-sweep" transform="translate(28 44)">
-{%- for (c, column) in columns.iter().enumerate() %}<g>{% for (r, k) in column.chars().enumerate() %}{% if k == 't' %}<rect x="{{ c * 22 }}" y="{{ r * 22 }}" width="16" height="16" rx="3" class="fill-ink/20"/>{% else %}<rect x="{{ c * 22 }}.6" y="{{ r * 22 }}.6" width="14.8" height="14.8" rx="3" stroke-width="1.2" class="tetsu-booking{% if k == 'h' %} tetsu-booking-hot{% endif %}"/>{% endif %}{% endfor %}</g>{% endfor %}
-</g>
-<g class="motion-safe:transition-all motion-safe:duration-[1000ms] motion-safe:ease-linear group-on:translate-x-[264px]"><line x1="24" y1="36" x2="24" y2="156" stroke-width="1.5" class="stroke-forge"/><circle cx="24" cy="36" r="3" class="fill-forge"/></g>
-</svg>
+  {%-
+    let columns = ["ootoo", "ttoto", "ttoot", "tottt", "otott", "ottoo", "ooooo", "oooto", "ootoo", "oohoo", "toooo", "ootto"]
+  %}
+  <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" class="w-full overflow-visible">
+    <text x="28" y="26" class="fill-muted font-mono text-[10px]">6:00 am</text>
+    <g class="font-mono text-[10px]"><text
+        x="286"
+        y="26"
+        text-anchor="end"
+        class="fill-muted motion-safe:transition-all motion-safe:ease-tetsu motion-safe:delay-300 motion-safe:duration-300 group-on:opacity-0 group-on:motion-safe:delay-0"
+      >186 open</text><text
+        x="286"
+        y="26"
+        text-anchor="end"
+        class="fill-forge opacity-0 motion-safe:transition-all motion-safe:ease-tetsu motion-safe:duration-300 group-on:opacity-100 group-on:motion-safe:delay-1000"
+      >Full · 6:01 am</text></g>
+    <g class="tetsu-sweep" transform="translate(28 44)">
+      {%- for (c, column) in columns.iter().enumerate() %}<g>{% for (r, k) in column.chars().enumerate() %}{%
+              if k == 't'
+            %}<rect x="{{ c * 22 }}" y="{{ r * 22 }}" width="16" height="16" rx="3" class="fill-ink/20" />{%
+              else
+            %}<rect
+                x="{{ c * 22 }}.6"
+                y="{{ r * 22 }}.6"
+                width="14.8"
+                height="14.8"
+                rx="3"
+                stroke-width="1.2"
+                class="tetsu-booking{% if k == 'h' %} tetsu-booking-hot{% endif %}"
+              />{% endif %}{% endfor %}</g>{% endfor %}
+    </g>
+    <g
+      class="motion-safe:transition-all motion-safe:duration-[1000ms] motion-safe:ease-linear group-on:translate-x-[264px]"
+    ><line x1="24" y1="36" x2="24" y2="156" stroke-width="1.5" class="stroke-forge" /><circle
+        cx="24"
+        cy="36"
+        r="3"
+        class="fill-forge"
+      /></g>
+  </svg>
 {% endmacro %}
 {#- Every location on one schedule: three stacked layers of a site's slots, which spread apart to show a member
     booking across them. Each layer is (top, cells), its cells four rows of four: . is open, b booked, h hot, and
     1 or 2 books in forge orange as the layers spread. -#}
 {% macro locations() %}
-{%- let layers = [(112, ".b.....b.1.....b"), (82, "....bb...2...bb."), (52, "...b.bbbbh......")] %}
-<svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200" class="w-full overflow-visible">
-{%- for (k, layer) in layers.iter().enumerate() %}
-<g class="motion-safe:transition-all motion-safe:ease-tetsu motion-safe:duration-700{% if k == 0 %} group-on:translate-y-7{% else if k == 2 %} group-on:-translate-y-7{% endif %}">
-<polygon points="160,{{ layer.0 }} 240,{{ layer.0 + 40 }} 160,{{ layer.0 + 80 }} 80,{{ layer.0 + 40 }}" stroke-width="1.2" class="fill-surface stroke-ink/35"/>
-{%- for (n, cell) in layer.1.chars().enumerate() %}
-{%- let x = 160 + 20 * (n / 4) - 20 * (n % 4) %}{% let y = layer.0 + 3 + 10 * (n / 4 + n % 4) %}
-<polygon points="{{ x }},{{ y }}.2 {{ x + 13 }}.6,{{ y + 7 }} {{ x }},{{ y + 13 }}.8 {{ x - 14 }}.4,{{ y + 7 }}" stroke-width="1" class="{% if cell.eq(&'.') %}fill-transparent stroke-ink/20{% else if cell.eq(&'b') %}fill-ink/25{% else if cell.eq(&'h') %}fill-forge{% else %}fill-ink/25 motion-safe:transition-all motion-safe:ease-tetsu motion-safe:duration-300 {% if cell.eq(&'1') %}motion-safe:delay-[550ms]{% else %}motion-safe:delay-[400ms]{% endif %} group-on:fill-forge{% endif %}"/>
-{%- endfor %}
-</g>
-{%- endfor %}
-<line x1="180" y1="92" x2="180" y2="152" stroke-width="1.5" stroke-dasharray="3 3" class="stroke-forge opacity-0 origin-center [transform-box:fill-box] motion-safe:transition-all motion-safe:ease-tetsu motion-safe:duration-700 group-on:opacity-100 group-on:scale-y-[1.93]"/>
-</svg>
+  {%- let layers = [(112, ".b.....b.1.....b"), (82, "....bb...2...bb."), (52, "...b.bbbbh......")] %}
+  <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200" class="w-full overflow-visible">
+    {%- for (k, layer) in layers.iter().enumerate() %}
+      <g
+        class="motion-safe:transition-all motion-safe:ease-tetsu motion-safe:duration-700{% if k == 0 %} group-on:translate-y-7{% else if k == 2 %} group-on:-translate-y-7{% endif %}"
+      >
+        <polygon
+          points="160,{{ layer.0 }} 240,{{ layer.0 + 40 }} 160,{{ layer.0 + 80 }} 80,{{ layer.0 + 40 }}"
+          stroke-width="1.2"
+          class="fill-surface stroke-ink/35"
+        />
+        {%- for (n, cell) in layer.1.chars().enumerate() %}
+          {%- let x = 160 + 20 * (n / 4) - 20 * (n % 4) %}{% let y = layer.0 + 3 + 10 * (n / 4 + n % 4) %}
+          <polygon
+            points="{{ x }},{{ y }}.2 {{ x + 13 }}.6,{{ y + 7 }} {{ x }},{{ y + 13 }}.8 {{ x - 14 }}.4,{{ y + 7 }}"
+            stroke-width="1"
+            class="{% if cell.eq(&'.') %}fill-transparent stroke-ink/20{% else if cell.eq(&'b') %}fill-ink/25{% else if cell.eq(&'h') %}fill-forge{% else %}fill-ink/25 motion-safe:transition-all motion-safe:ease-tetsu motion-safe:duration-300 {% if cell.eq(&'1') %}motion-safe:delay-[550ms]{% else %}motion-safe:delay-[400ms]{% endif %} group-on:fill-forge{% endif %}"
+          />
+        {%- endfor %}
+      </g>
+    {%- endfor %}
+    <line
+      x1="180"
+      y1="92"
+      x2="180"
+      y2="152"
+      stroke-width="1.5"
+      stroke-dasharray="3 3"
+      class="stroke-forge opacity-0 origin-center [transform-box:fill-box] motion-safe:transition-all motion-safe:ease-tetsu motion-safe:duration-700 group-on:opacity-100 group-on:scale-y-[1.93]"
+    />
+  </svg>
 {% endmacro %}
 {#- One cancellation, filled before anyone asks: the spot passes down the chain from the waitlist to a text to a
     booking, each step (title, line) lighting up after the one before. -#}
 {% macro chain() %}
-{%- let steps = [("Waitlist", "moves up"), ("Texted", "Maya, 5:47"), ("Spot", "filled")] %}
-<svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" class="w-full overflow-visible">
-<text x="28" y="40" class="fill-muted font-mono text-[10px]">Hot flow · 6:00 am</text>
-{%- for k in 0..3 %}
-<line x1="{{ 60 + 80 * k }}" y1="92" x2="{{ 100 + 80 * k }}" y2="92" stroke-width="1.5" class="stroke-ink/15"/>
-<line x1="{{ 60 + 80 * k }}" y1="92" x2="{{ 100 + 80 * k }}" y2="92" stroke-width="1.5" pathLength="1" class="stroke-forge [stroke-dasharray:1] [stroke-dashoffset:1] motion-safe:transition-all motion-safe:duration-300 motion-safe:ease-linear group-on:[stroke-dashoffset:0] {% if k == 0 %}group-on:motion-safe:delay-[250ms]{% else if k == 1 %}group-on:motion-safe:delay-[700ms]{% else %}group-on:motion-safe:delay-[1150ms]{% endif %}"/>
-{%- endfor %}
-<rect x="26" y="78" width="28" height="28" rx="4" stroke-width="1.5" class="fill-ink/80 stroke-ink/80 motion-safe:transition-all motion-safe:ease-tetsu motion-safe:duration-300 group-on:fill-transparent group-on:stroke-ink/30"/>
-<text x="40" y="126" text-anchor="middle" class="fill-muted font-mono text-[10px] motion-safe:transition-all motion-safe:ease-tetsu motion-safe:duration-300 group-on:fill-ink">Cancelled</text>
-<text x="40" y="139" text-anchor="middle" class="fill-muted font-mono text-[10px]">Lena, 5:47</text>
-{%- for (k, step) in steps.iter().enumerate() %}
-<rect x="{{ 106 + 80 * k }}" y="78" width="28" height="28" rx="4" stroke-width="1.5" class="fill-transparent stroke-ink/30 motion-safe:transition-all motion-safe:ease-tetsu motion-safe:duration-300 {% if k == 2 %}group-on:fill-forge group-on:stroke-forge{% else %}group-on:fill-ink/80 group-on:stroke-ink/80{% endif %} {% if k == 0 %}group-on:motion-safe:delay-[550ms]{% else if k == 1 %}group-on:motion-safe:delay-[1000ms]{% else %}group-on:motion-safe:delay-[1600ms]{% endif %}"/>
-<text x="{{ 120 + 80 * k }}" y="126" text-anchor="middle" class="fill-muted font-mono text-[10px] motion-safe:transition-all motion-safe:ease-tetsu motion-safe:duration-300 group-on:fill-ink {% if k == 0 %}group-on:motion-safe:delay-[550ms]{% else if k == 1 %}group-on:motion-safe:delay-[1000ms]{% else %}group-on:motion-safe:delay-[1600ms]{% endif %}">{{ step.0 }}</text>
-<text x="{{ 120 + 80 * k }}" y="139" text-anchor="middle" class="fill-muted font-mono text-[10px]">{{ step.1 }}</text>
-{%- endfor %}
-</svg>
+  {%- let steps = [("Waitlist", "moves up"), ("Texted", "Maya, 5:47"), ("Spot", "filled")] %}
+  <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" class="w-full overflow-visible">
+    <text x="28" y="40" class="fill-muted font-mono text-[10px]">Hot flow · 6:00 am</text>
+    {%- for k in 0..3 %}
+      <line x1="{{ 60 + 80 * k }}" y1="92" x2="{{ 100 + 80 * k }}" y2="92" stroke-width="1.5" class="stroke-ink/15" />
+      <line
+        x1="{{ 60 + 80 * k }}"
+        y1="92"
+        x2="{{ 100 + 80 * k }}"
+        y2="92"
+        stroke-width="1.5"
+        pathLength="1"
+        class="stroke-forge [stroke-dasharray:1] [stroke-dashoffset:1] motion-safe:transition-all motion-safe:duration-300 motion-safe:ease-linear group-on:[stroke-dashoffset:0] {% if k == 0 %}group-on:motion-safe:delay-[250ms]{% else if k == 1 %}group-on:motion-safe:delay-[700ms]{% else %}group-on:motion-safe:delay-[1150ms]{% endif %}"
+      />
+    {%- endfor %}
+    <rect
+      x="26"
+      y="78"
+      width="28"
+      height="28"
+      rx="4"
+      stroke-width="1.5"
+      class="fill-ink/80 stroke-ink/80 motion-safe:transition-all motion-safe:ease-tetsu motion-safe:duration-300 group-on:fill-transparent group-on:stroke-ink/30"
+    />
+    <text
+      x="40"
+      y="126"
+      text-anchor="middle"
+      class="fill-muted font-mono text-[10px] motion-safe:transition-all motion-safe:ease-tetsu motion-safe:duration-300 group-on:fill-ink"
+    >Cancelled</text>
+    <text x="40" y="139" text-anchor="middle" class="fill-muted font-mono text-[10px]">Lena, 5:47</text>
+    {%- for (k, step) in steps.iter().enumerate() %}
+      <rect
+        x="{{ 106 + 80 * k }}"
+        y="78"
+        width="28"
+        height="28"
+        rx="4"
+        stroke-width="1.5"
+        class="fill-transparent stroke-ink/30 motion-safe:transition-all motion-safe:ease-tetsu motion-safe:duration-300 {% if k == 2 %}group-on:fill-forge group-on:stroke-forge{% else %}group-on:fill-ink/80 group-on:stroke-ink/80{% endif %} {% if k == 0 %}group-on:motion-safe:delay-[550ms]{% else if k == 1 %}group-on:motion-safe:delay-[1000ms]{% else %}group-on:motion-safe:delay-[1600ms]{% endif %}"
+      />
+      <text
+        x="{{ 120 + 80 * k }}"
+        y="126"
+        text-anchor="middle"
+        class="fill-muted font-mono text-[10px] motion-safe:transition-all motion-safe:ease-tetsu motion-safe:duration-300 group-on:fill-ink {% if k == 0 %}group-on:motion-safe:delay-[550ms]{% else if k == 1 %}group-on:motion-safe:delay-[1000ms]{% else %}group-on:motion-safe:delay-[1600ms]{% endif %}"
+      >{{ step.0 }}</text>
+      <text x="{{ 120 + 80 * k }}" y="139" text-anchor="middle" class="fill-muted font-mono text-[10px]">{{
+        step.1
+      }}</text>
+    {%- endfor %}
+  </svg>
 {% endmacro %}
 {#- The slots of one kind in a grid drawn as rows of characters, on the board's 30 pixel pitch: o is open, b
     booked, h hot, and anything else empty. The caller's group gives them color. -#}
 {% macro cells(rows, kind, size) %}
-{%- for (r, row) in rows.iter().enumerate() %}{% for (c, k) in row.chars().enumerate() %}{% if k == kind %}<rect x="{{ c * 30 }}" y="{{ r * 30 }}" width="{{ size }}" height="{{ size }}" rx="3"/>{% endif %}{% endfor %}{% endfor %}
+  {%- for (r, row) in rows.iter().enumerate() %}{% for (c, k) in row.chars().enumerate() %}{% if k == kind %}<rect
+          x="{{ c * 30 }}"
+          y="{{ r * 30 }}"
+          width="{{ size }}"
+          height="{{ size }}"
+          rx="3"
+        />{% endif %}{% endfor %}{% endfor %}
 {%- endmacro %}
 
 {#- A band of open slots for a section's top, wider than any screen: denser toward its ends and its top, with a few
     booked. A section shows a window of it from `shift`, sometimes mirrored, so neighbors differ. -#}
 {% macro band(shift, flip) %}
-{%- let band = [
-  "oooob..oooobo...o..ob.ooo......................o....o..o......oo.......o....ooo..oo....bobo.o.o.",
-  ".o.boo.o.bo.o..oo.o....b..bo.....o.............oo..............oo.o..oo...oooo.o..ooo...o.oob...",
-  "..o.....o..ooooo.o..o.....o.o......o.............o..........................oo..................",
-  ".o.o.o....o.ooo......o..o..........o.o..........o.......................o.........o.oob...o...o.",
-] %}
-<svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="{{ shift }} 0 1914 114" class="h-full w-auto max-w-none shrink-0">
-<g{% if flip %} transform="scale(-1 1) translate(-2874 0)"{% endif %}>
-<g fill="none" stroke-width="1.5" transform="translate(.75 .75)" class="stroke-ink/8">{% call cells(band, 'o', "22.5") %}{% endcall %}</g>
-<g class="fill-ink/8">{% call cells(band, 'b', "24") %}{% endcall %}</g>
-</g>
-</svg>
+  {%-
+    let band = [
+      "oooob..oooobo...o..ob.ooo......................o....o..o......oo.......o....ooo..oo....bobo.o.o.",
+      ".o.boo.o.bo.o..oo.o....b..bo.....o.............oo..............oo.o..oo...oooo.o..ooo...o.oob...",
+      "..o.....o..ooooo.o..o.....o.o......o.............o..........................oo..................",
+      ".o.o.o....o.ooo......o..o..........o.o..........o.......................o.........o.oob...o...o.",
+    ]
+  %}
+  <svg
+    aria-hidden="true"
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="{{ shift }} 0 1914 114"
+    class="h-full w-auto max-w-none shrink-0"
+  >
+    <g {% if flip %}transform="scale(-1 1) translate(-2874 0)"{% endif %}>
+      <g fill="none" stroke-width="1.5" transform="translate(.75 .75)" class="stroke-ink/8">{%
+          call cells(band, 'o', "22.5")
+        %}{% endcall %}</g>
+      <g class="fill-ink/8">{% call cells(band, 'b', "24") %}{% endcall %}</g>
+    </g>
+  </svg>
 {% endmacro %}
 {#- The close's strip of the board, along its foot. -#}
 {% macro strip() %}
-{%- let strip = [
-  "oooboooobooooooooooooobboooobhoobooooooooooo",
-  "ooboooooboooooooooooooboooooooooobooooobobbb",
-  "oooboooooooobobobooooooooooooooooooooooooooo",
-  "obooooooboboobooooooooooooooooboooooooooooob",
-] %}
-<svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1314 114" class="h-full w-auto max-w-none shrink-0">
-<g fill="none" stroke-width="1.5" transform="translate(.75 .75)" class="stroke-ink/10">{% call cells(strip, 'o', "22.5") %}{% endcall %}</g>
-<g class="fill-ink/10">{% call cells(strip, 'b', "24") %}{% endcall %}</g>
-<g class="fill-forge/45">{% call cells(strip, 'h', "24") %}{% endcall %}</g>
-</svg>
+  {%-
+    let strip = [
+      "oooboooobooooooooooooobboooobhoobooooooooooo",
+      "ooboooooboooooooooooooboooooooooobooooobobbb",
+      "oooboooooooobobobooooooooooooooooooooooooooo",
+      "obooooooboboobooooooooooooooooboooooooooooob",
+    ]
+  %}
+  <svg
+    aria-hidden="true"
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 1314 114"
+    class="h-full w-auto max-w-none shrink-0"
+  >
+    <g fill="none" stroke-width="1.5" transform="translate(.75 .75)" class="stroke-ink/10">{%
+        call cells(strip, 'o', "22.5")
+      %}{% endcall %}</g>
+    <g class="fill-ink/10">{% call cells(strip, 'b', "24") %}{% endcall %}</g>
+    <g class="fill-forge/45">{% call cells(strip, 'h', "24") %}{% endcall %}</g>
+  </svg>
 {% endmacro %}
 
 {#- A section's separator: the band's dense ends gathered at both edges of the screen, fading toward the middle
     and down. `flip` mirrors both halves. Phones leave it out, as their sections sit too close for it to read. -#}
 {% macro separator(flip) %}
-<div aria-hidden="true" class="pointer-events-none absolute inset-x-0 top-0 -z-10 hidden h-16 sm:flex lg:h-20 [mask-image:linear-gradient(to_bottom,black,transparent)]"><div class="flex w-1/2 justify-start overflow-hidden [mask-image:linear-gradient(to_right,black_35%,transparent_90%)]">{% call band(0, flip) %}{% endcall %}</div><div class="flex w-1/2 justify-end overflow-hidden [mask-image:linear-gradient(to_left,black_35%,transparent_90%)]">{% call band(960, !flip) %}{% endcall %}</div></div>
+  <div
+    aria-hidden="true"
+    class="pointer-events-none absolute inset-x-0 top-0 -z-10 hidden h-16 sm:flex lg:h-20 [mask-image:linear-gradient(to_bottom,black,transparent)]"
+  ><div
+      class="flex w-1/2 justify-start overflow-hidden [mask-image:linear-gradient(to_right,black_35%,transparent_90%)]"
+    >{% call band(0, flip) %}{% endcall %}</div><div
+      class="flex w-1/2 justify-end overflow-hidden [mask-image:linear-gradient(to_left,black_35%,transparent_90%)]"
+    >{% call band(960, !flip) %}{% endcall %}</div></div>
 {% endmacro %}

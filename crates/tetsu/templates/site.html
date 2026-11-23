@@ -8,27 +8,33 @@
 {% block data_scheme %}{{ scheme }}{% endblock %}
 {% block color_scheme %}{% include "../../../web/templates/color_scheme.html" %}{% endblock %}
 {% block head %}
-<script type="module" src="{{ crate::assets::SCHEME_SCRIPT }}"></script>
-<meta name="description" content="{% block description %}Scheduling, memberships, rentals, and payments for studios, salons, courts, and campgrounds, on published prices, with the payment processor you choose.{% endblock %}">
-<meta property="og:type" content="website">
-<meta property="og:site_name" content="Tetsu">
-<meta property="og:title" content="{% block og_title %}Tetsu{% endblock %}">
-<meta property="og:description" content="{% block og_description %}Scheduling, memberships, rentals, and payments for any business people book.{% endblock %}">
-<link rel="icon" href="{{ crate::assets::ICON }}" type="image/svg+xml">
-<link rel="apple-touch-icon" href="{{ crate::assets::TOUCH_ICON }}">
-{%- if scheme == "light" %}
-<meta name="theme-color" content="#f3f1f1">
-{%- else if scheme == "dark" %}
-<meta name="theme-color" content="#111110">
-{%- else %}
-<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f3f1f1">
-<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#111110">
-{%- endif %}
+  <script type="module" src="{{ crate::assets::SCHEME_SCRIPT }}"></script>
+  <meta
+    name="description"
+    content="{% block description %}Scheduling, memberships, rentals, and payments for studios, salons, courts, and campgrounds, on published prices, with the payment processor you choose.{% endblock %}"
+  >
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Tetsu">
+  <meta property="og:title" content="{% block og_title %}Tetsu{% endblock %}">
+  <meta
+    property="og:description"
+    content="{% block og_description %}Scheduling, memberships, rentals, and payments for any business people book.{% endblock %}"
+  >
+  <link rel="icon" href="{{ crate::assets::ICON }}" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="{{ crate::assets::TOUCH_ICON }}">
+  {%- if scheme == "light" %}
+    <meta name="theme-color" content="#f3f1f1">
+  {%- else if scheme == "dark" %}
+    <meta name="theme-color" content="#111110">
+  {%- else %}
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f3f1f1">
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#111110">
+  {%- endif %}
 {% endblock %}
 {% block body %}
-{% include "../../../web/templates/site_header.html" %}
-{% block page %}{% endblock %}
+  {% include "../../../web/templates/site_header.html" %}
+  {% block page %}{% endblock %}
 {% endblock %}
 {% block footer %}
-{% include "../../../web/templates/site_footer.html" %}
+  {% include "../../../web/templates/site_footer.html" %}
 {% endblock %}

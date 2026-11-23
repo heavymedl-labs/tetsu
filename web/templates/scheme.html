@@ -3,10 +3,21 @@
     `<tetsu-scheme>` keeps a new choice in that cookie. -#}
 {% import "../../../web/templates/components.html" as ui %}
 <tetsu-scheme class="contents">
-<fieldset class="flex rounded-full border border-edge p-0.5 text-muted [&_svg]:size-4">
-<legend class="sr-only">Color scheme</legend>
-{%- for (key, name) in [("system", "System"), ("light", "Light"), ("dark", "Dark")] %}
-<label class="cursor-pointer rounded-full p-1 hover:text-ink has-checked:bg-line has-checked:text-ink has-focus-visible:outline-2 has-focus-visible:outline-accent"><input type="radio" name="scheme" value="{{ key }}" id="tetsu-scheme-{{ key }}" class="sr-only"{% if *key == scheme %} checked{% endif %}><span class="sr-only">{{ name }}</span>{% if *key == "system" %}{% call ui::icon("system") %}{% endcall %}{% else if *key == "light" %}{% call ui::icon("sun") %}{% endcall %}{% else %}{% call ui::icon("moon") %}{% endcall %}{% endif %}</label>
-{%- endfor %}
-</fieldset>
+  <fieldset class="flex rounded-full border border-edge p-0.5 text-muted [&_svg]:size-4">
+    <legend class="sr-only">Color scheme</legend>
+    {%- for (key, name) in [("system", "System"), ("light", "Light"), ("dark", "Dark")] %}
+      <label
+        class="cursor-pointer rounded-full p-1 hover:text-ink has-checked:bg-line has-checked:text-ink has-focus-visible:outline-2 has-focus-visible:outline-accent"
+      ><input
+          type="radio"
+          name="scheme"
+          value="{{ key }}"
+          id="tetsu-scheme-{{ key }}"
+          class="sr-only"
+          {% if *key == scheme %}checked{% endif %}
+        ><span class="sr-only">{{ name }}</span>{% if *key == "system" %}{% call ui::icon("system") %}{% endcall %}{%
+          else if *key == "light"
+        %}{% call ui::icon("sun") %}{% endcall %}{% else %}{% call ui::icon("moon") %}{% endcall %}{% endif %}</label>
+    {%- endfor %}
+  </fieldset>
 </tetsu-scheme>

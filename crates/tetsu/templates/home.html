@@ -1,26 +1,28 @@
 {% extends "site.html" %}
 {% block title %}Tetsu – booking software, built like iron{% endblock %}
 {% block og_title %}Tetsu – booking software, built like iron{% endblock %}
-{% block og_description %}Built to carry every booking, membership, and payment, and built so you're never locked in.{% endblock %}
+{% block og_description %}Built to carry every booking, membership, and payment, and built so you're never locked in.{%
+  endblock
+%}
 {% block page %}
-<main class="relative isolate flex-1 overflow-x-clip">
-{% include "home/hero.html" %}
-{%- if demo %}
-{% include "home/week.html" %}
-{% include "home/customers.html" %}
-{% include "home/statement.html" %}
-{% include "home/fill.html" %}
-{% include "home/spots.html" %}
-{% include "home/book.html" %}
-{% include "home/paid.html" %}
-{% include "home/voices.html" %}
-{% include "home/why.html" %}
-{% include "home/pricing.html" %}
-{#- Phones leave the changelog out. #}
-<div class="hidden sm:block">{% include "home/changelog.html" %}</div>
-{% include "home/close.html" %}
-{%- else %}
-<div class="pb-32"></div>
-{%- endif %}
-</main>
+  <main class="relative isolate flex-1 overflow-x-clip">
+    {% include "home/hero.html" %}
+    {%- if demo %}
+      {% include "home/week.html" %}
+      {% include "home/customers.html" %}
+      {% include "home/statement.html" %}
+      {% include "home/fill.html" %}
+      {% include "home/spots.html" %}
+      {% include "home/book.html" %}
+      {% include "home/paid.html" %}
+      {% include "home/voices.html" %}
+      {% include "home/why.html" %}
+      {% include "home/pricing.html" %}
+      {#- Phones leave the changelog out. #}
+      <div class="hidden sm:block">{% include "home/changelog.html" %}</div>
+      {% include "home/close.html" %}
+    {%- else %}
+      <div class="pb-32"></div>
+    {%- endif %}
+  </main>
 {% endblock %}

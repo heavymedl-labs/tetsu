@@ -2,21 +2,31 @@
     `demo` and `scheme`. -#}
 {% import "../../../web/templates/components.html" as ui %}
 <footer>
-<div class="mx-auto grid max-w-page grid-cols-2 gap-10 px-(--tetsu-gutter) py-16 text-mini sm:grid-cols-5">
-<div class="col-span-2">
-<div class="h-4 text-ink">{% include "../../../web/templates/wordmark.html" %}</div>
-<p class="mt-4 max-w-xs text-muted">Scheduling, memberships, and payments for the businesses people book with.</p>
-</div>
-{% if demo %}
-{% call ui::footer_column("Product", [("/#fill", "Classes and waitlists"), ("/#spots", "Spot maps"), ("/#book", "Appointments and rentals"), ("/#paid", "Memberships and payments")]) %}{% endcall %}
-{% call ui::footer_column("Built for", [("", "Gyms and studios"), ("", "Salons and spas"), ("", "Courts and rentals"), ("", "Campgrounds and stays"), ("", "Multi-location brands")]) %}{% endcall %}
-{% call ui::footer_column("Company", [("/#customers", "Customers"), ("/#why", "Why Tetsu"), ("/#pricing", "Pricing")]) %}{% endcall %}
-{%- endif %}
-</div>
-<div class="border-t border-edge">
-<div class="mx-auto flex max-w-page items-center justify-between gap-6 px-(--tetsu-gutter) py-6 font-mono text-xs text-faint">
-<p>© 2026 Tetsu</p>
-<div class="flex items-center gap-6"><p class="hidden sm:block">鉄 · iron</p>{% include "../../../web/templates/scheme.html" %}</div>
-</div>
-</div>
+  <div class="mx-auto grid max-w-page grid-cols-2 gap-10 px-(--tetsu-gutter) py-16 text-mini sm:grid-cols-5">
+    <div class="col-span-2">
+      <div class="h-4 text-ink">{% include "../../../web/templates/wordmark.html" %}</div>
+      <p class="mt-4 max-w-xs text-muted">Scheduling, memberships, and payments for the businesses people book with.</p>
+    </div>
+    {% if demo %}
+      {%
+        call ui::footer_column("Product", [("/#fill", "Classes and waitlists"), ("/#spots", "Spot maps"), ("/#book", "Appointments and rentals"), ("/#paid", "Memberships and payments")])
+      %}{% endcall %}
+      {%
+        call ui::footer_column("Built for", [("", "Gyms and studios"), ("", "Salons and spas"), ("", "Courts and rentals"), ("", "Campgrounds and stays"), ("", "Multi-location brands")])
+      %}{% endcall %}
+      {%
+        call ui::footer_column("Company", [("/#customers", "Customers"), ("/#why", "Why Tetsu"), ("/#pricing", "Pricing")])
+      %}{% endcall %}
+    {%- endif %}
+  </div>
+  <div class="border-t border-edge">
+    <div
+      class="mx-auto flex max-w-page items-center justify-between gap-6 px-(--tetsu-gutter) py-6 font-mono text-xs text-faint"
+    >
+      <p>© 2026 Tetsu</p>
+      <div class="flex items-center gap-6"><p class="hidden sm:block">鉄 · iron</p>{%
+          include "../../../web/templates/scheme.html"
+        %}</div>
+    </div>
+  </div>
 </footer>

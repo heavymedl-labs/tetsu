@@ -145,6 +145,8 @@ lint() {
   local templates=()
   while IFS= read -r file; do templates+=("$file"); done < <(find crates web -path '*/templates/*.html' | sort)
   python3 scripts/check_templates.py crates/tetsu/assets/build/assets/tetsu-*.css ${templates[@]+"${templates[@]}"}
+  # And each is formatted (ADR-0083).
+  cargo run --quiet --package tetsu-format-templates -- --check
 }
 
 lint

@@ -2,22 +2,26 @@
 {% block title %}{{ name }}{% endblock %}
 {% block head %}<link rel="stylesheet" href="{{ theme }}">{% endblock %}
 {% block body %}
-{#- The business's own colors lead; Tetsu appears only in the footer (ADR-0035). After HyperUI's banner 2 (MIT),
+  {#- The business's own colors lead; Tetsu appears only in the footer (ADR-0035). After HyperUI's banner 2 (MIT),
     aligned with the page's sections below. #}
-<header class="bg-primary">
-<div class="mx-auto max-w-6xl px-6 py-16 sm:py-24 lg:py-32">
-<div class="max-w-prose text-display font-medium text-balance text-on-primary sm:text-6xl lg:text-7xl"><h1>{{ name }}</h1></div>
-</div>
-</header>
-<main class="flex-1 py-20 sm:py-24">
-<section aria-labelledby="locations" class="mx-auto max-w-6xl px-6">
-{#- Neutral text: a tenant's accent is not yet chosen for contrast as text (#96), so it marks only the cards. #}
-<p class="font-mono text-xs tracking-widest text-muted uppercase">Visit us</p>
-<div id="locations" class="mt-2 text-3xl font-medium text-ink sm:text-4xl"><h2>Locations</h2></div>
-{#- After HyperUI's feature grid 1 (MIT): one card per location. #}
-<ul class="mt-10 grid grid-cols-1 gap-4 text-base font-medium text-ink sm:grid-cols-2 lg:grid-cols-4 *:rounded-xl *:border *:border-edge *:border-l-2 *:border-l-accent *:bg-surface *:px-6 *:py-5">
-{% for location in locations %}<li>{{ location }}</li>
-{% endfor %}</ul>
-</section>
-</main>
+  <header class="bg-primary">
+    <div class="mx-auto max-w-6xl px-6 py-16 sm:py-24 lg:py-32">
+      <div class="max-w-prose text-display font-medium text-balance text-on-primary sm:text-6xl lg:text-7xl"><h1>{{
+          name
+        }}</h1></div>
+    </div>
+  </header>
+  <main class="flex-1 py-20 sm:py-24">
+    <section aria-labelledby="locations" class="mx-auto max-w-6xl px-6">
+      {#- Neutral text: a tenant's accent is not yet chosen for contrast as text (#96), so it marks only the cards. #}
+      <p class="font-mono text-xs tracking-widest text-muted uppercase">Visit us</p>
+      <div id="locations" class="mt-2 text-3xl font-medium text-ink sm:text-4xl"><h2>Locations</h2></div>
+      {#- After HyperUI's feature grid 1 (MIT): one card per location. #}
+      <ul
+        class="mt-10 grid grid-cols-1 gap-4 text-base font-medium text-ink sm:grid-cols-2 lg:grid-cols-4 *:rounded-xl *:border *:border-edge *:border-l-2 *:border-l-accent *:bg-surface *:px-6 *:py-5"
+      >
+        {% for location in locations %}<li>{{ location }}</li>
+        {% endfor %}</ul>
+    </section>
+  </main>
 {% endblock %}

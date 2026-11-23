@@ -1,16 +1,29 @@
 {% import "../../../web/templates/components.html" as ui %}
 {% import "art/figures.html" as fig %}
 {% call ui::section("", "statement", opening = true) %}
-{% call ui::head("statement", "The schedule is the business.", "Tetsu runs it,<br class='hidden lg:block'> from the first booking to the last payout.", joined = true) %}{% endcall %}
-{#- Three figures (art/figures.html), each with its title and line, as open columns (components.html). The row
+  {%
+    call ui::head("statement", "The schedule is the business.", "Tetsu runs it,<br class='hidden lg:block'> from the first booking to the last payout.", joined = true)
+  %}{% endcall %}
+  {#- Three figures (art/figures.html), each with its title and line, as open columns (components.html). The row
     reveals and plays as one, since a column's own scroll timeline would follow the row, which never scrolls down. -#}
-<div role="region" aria-label="What Tetsu does" tabindex="0" class="tetsu-reveal tetsu-play pt-8 lg:pt-0 {% call ui::columns_style() %}{% endcall %}">
-{%- for (k, (title, text)) in [("Built for the rush", "Thousands of bookings in the first minute, each in its slot."), ("One schedule, every site", "Shared members and plans, each site's own hours."), ("Runs on its own", "Waitlists, reminders, and renewals, with no one at the desk.")].iter().enumerate() %}
-<div class="group {% call ui::column_style() %}{% endcall %}">
-<div class="mb-10 flex h-44 items-center justify-center text-ink lg:aspect-[3/2] lg:h-auto">{% if k == 0 %}{% call fig::rush() %}{% endcall %}{% else if k == 1 %}{% call fig::locations() %}{% endcall %}{% else %}{% call fig::chain() %}{% endcall %}{% endif %}</div>
-<h3 class="text-base font-medium text-ink">{{ title }}</h3>
-<p class="mt-2 text-base text-pretty text-muted">{{ text }}</p>
-</div>
-{%- endfor %}
-</div>
+  <div
+    role="region"
+    aria-label="What Tetsu does"
+    tabindex="0"
+    class="tetsu-reveal tetsu-play pt-8 lg:pt-0 {% call ui::columns_style() %}{% endcall %}"
+  >
+    {%-
+      for (k, (title, text)) in [("Built for the rush", "Thousands of bookings in the first minute, each in its slot."), ("One schedule, every site", "Shared members and plans, each site's own hours."), ("Runs on its own", "Waitlists, reminders, and renewals, with no one at the desk.")].iter().enumerate()
+    %}
+      <div class="group {% call ui::column_style() %}{% endcall %}">
+        <div class="mb-10 flex h-44 items-center justify-center text-ink lg:aspect-[3/2] lg:h-auto">{% if k == 0 %}{%
+              call fig::rush()
+            %}{% endcall %}{% else if k == 1 %}{% call fig::locations() %}{% endcall %}{% else %}{%
+              call fig::chain()
+            %}{% endcall %}{% endif %}</div>
+        <h3 class="text-base font-medium text-ink">{{ title }}</h3>
+        <p class="mt-2 text-base text-pretty text-muted">{{ text }}</p>
+      </div>
+    {%- endfor %}
+  </div>
 {% endcall %}

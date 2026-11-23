@@ -2,11 +2,15 @@
 {% import "art/figures.html" as fig %}
 {#- Book people and places: a salon's day by stylist in front of the courts and campsites, and what it covers. #}
 {% call ui::section("book", "book-title") %}
-{% call fig::separator(false) %}{% endcall %}
-{% call ui::head("book-title", "Book people and places", "Appointments with your staff, and rentals of your courts, rooms, and sites, on one calendar.") %}{% endcall %}
-<div class="tetsu-scene tetsu-scene-card">
-<div class="tetsu-scene-back">{% include "panels/rentals.html" %}</div>
-<div class="tetsu-scene-front tetsu-stories">{% include "panels/appointments.html" %}</div>
-</div>
-{% call ui::features(["Services and add-ons", "Staff hours", "Cleanup buffers", "Deposits", "Hourly rentals", "Nightly stays", "Minimum stays", "Equipment"]) %}{% endcall %}
+  {% call fig::separator(false) %}{% endcall %}
+  {%
+    call ui::head("book-title", "Book people and places", "Appointments with your staff, and rentals of your courts, rooms, and sites, on one calendar.")
+  %}{% endcall %}
+  <div class="tetsu-scene tetsu-scene-card">
+    <div class="tetsu-scene-back">{% include "panels/rentals.html" %}</div>
+    <div class="tetsu-scene-front tetsu-stories">{% include "panels/appointments.html" %}</div>
+  </div>
+  {%
+    call ui::features(["Services and add-ons", "Staff hours", "Cleanup buffers", "Deposits", "Hourly rentals", "Nightly stays", "Minimum stays", "Equipment"])
+  %}{% endcall %}
 {% endcall %}

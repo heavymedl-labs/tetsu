@@ -3,41 +3,56 @@
 {% import "../../../web/templates/components.html" as shared %}
 {% block title %}{{ name }} – Tetsu{% endblock %}
 {% block card %}
-<h1 class="text-lg font-medium text-balance text-ink">{{ name }}</h1>
-<p class="mt-1 text-mini text-muted">Operator</p>
-{#- The passkeys island tells the operator's devices every passkey listed here, so a device can hide one Tetsu
+  <h1 class="text-lg font-medium text-balance text-ink">{{ name }}</h1>
+  <p class="mt-1 text-mini text-muted">Operator</p>
+  {#- The passkeys island tells the operator's devices every passkey listed here, so a device can hide one Tetsu
     removed. #}
-<tetsu-passkeys user="{{ user }}" credentials="{{ credentials }}" class="mt-8 block">
-<ul role="list" aria-label="Passkeys" class="divide-y divide-edge-soft rounded-xl border border-edge bg-surface text-left text-mini text-ink">
-{% for passkey in passkeys %}<li class="px-4 py-3">{{ passkey }}</li>
-{% endfor %}</ul>
-</tetsu-passkeys>
-{% if can_add && fresh %}{% call ui::passkey("add", form, true) %}Add a second passkey{% endcall %}
-{% else if can_add %}<p class="mt-8 text-mini text-pretty text-muted">To add a second passkey, log out and log in
-again: adding one needs a login from the last ten minutes.</p>
-{% endif %}
-{#- The operator's live sessions, this one first, as Linear lists them, each other one with its own log out, and
+  <tetsu-passkeys user="{{ user }}" credentials="{{ credentials }}" class="mt-8 block">
+    <ul
+      role="list"
+      aria-label="Passkeys"
+      class="divide-y divide-edge-soft rounded-xl border border-edge bg-surface text-left text-mini text-ink"
+    >
+      {% for passkey in passkeys %}<li class="px-4 py-3">{{ passkey }}</li>
+      {% endfor %}</ul>
+  </tetsu-passkeys>
+  {% if can_add && fresh %}{% call ui::passkey("add", form, true) %}Add a second passkey{% endcall %}
+  {% else if can_add %}<p class="mt-8 text-mini text-pretty text-muted"
+    >To add a second passkey, log out and log in again: adding one needs a login from the last ten minutes.</p>
+  {% endif %}
+  {#- The operator's live sessions, this one first, as Linear lists them, each other one with its own log out, and
     one for all the others (ADR-0059). Ending any needs a login from the last ten minutes, like adding a passkey. #}
-<h2 class="mt-10 text-left text-mini font-medium text-ink">Sessions</h2>
-<ul role="list" aria-label="Sessions" class="mt-3 divide-y divide-edge-soft rounded-xl border border-edge bg-surface text-left text-mini text-ink">
-{% for shown in sessions %}<li class="flex items-center justify-between gap-3 px-4 py-3">
-<div class="min-w-0">
-<p class="font-medium">{{ shown.device }}{% if shown.presented %} <span class="ml-1 rounded-full bg-ink/5 px-2 py-0.5 font-normal text-muted">This device</span>{% endif %}</p>
-<p class="mt-0.5 text-muted">Started {{ shown.started }} · Active {{ shown.last_seen }}</p>
-</div>
-{% if !shown.presented && fresh %}<form method="post" action="/ops/sessions/end">
-<input type="hidden" name="form" value="{{ form }}">
-<input type="hidden" name="session" value="{{ shown.id }}">
-<button type="submit" class="{% call shared::button_style(true, true, false) %}{% endcall %}">Log out<span class="sr-only"> session {{ loop.index }}, {{ shown.device }}, started {{ shown.started }}</span></button>
-</form>{% endif %}
-</li>
-{% endfor %}</ul>
-{% if sessions.len() > 1 && fresh %}<form method="post" action="/ops/sessions/end" class="mt-3">
-<input type="hidden" name="form" value="{{ form }}">
-<button type="submit" class="{% call shared::button_style(true, false, true) %}{% endcall %}">Log out of all other sessions</button>
-</form>
-{% else if sessions.len() > 1 %}<p class="mt-3 text-left text-mini text-pretty text-muted">To log out your other
-sessions, log out and log in again: it needs a login from the last ten minutes.</p>
-{% endif %}
-<p class="mt-8 text-mini"><a href="/ops/mailbox" class="text-ink underline underline-offset-2">Mailbox</a></p>
+  <h2 class="mt-10 text-left text-mini font-medium text-ink">Sessions</h2>
+  <ul
+    role="list"
+    aria-label="Sessions"
+    class="mt-3 divide-y divide-edge-soft rounded-xl border border-edge bg-surface text-left text-mini text-ink"
+  >
+    {% for shown in sessions %}<li class="flex items-center justify-between gap-3 px-4 py-3">
+        <div class="min-w-0">
+          <p class="font-medium">{{ shown.device }}{% if shown.presented %}
+              <span class="ml-1 rounded-full bg-ink/5 px-2 py-0.5 font-normal text-muted">This device</span>{%
+              endif
+            %}</p>
+          <p class="mt-0.5 text-muted">Started {{ shown.started }} · Active {{ shown.last_seen }}</p>
+        </div>
+        {% if !shown.presented && fresh %}<form method="post" action="/ops/sessions/end">
+            <input type="hidden" name="form" value="{{ form }}">
+            <input type="hidden" name="session" value="{{ shown.id }}">
+            <button type="submit" class="{% call shared::button_style(true, true, false) %}{% endcall %}">Log out<span
+                class="sr-only"
+              >
+                session {{ loop.index }}, {{ shown.device }}, started {{ shown.started }}</span></button>
+          </form>{% endif %}
+      </li>
+    {% endfor %}</ul>
+  {% if sessions.len() > 1 && fresh %}<form method="post" action="/ops/sessions/end" class="mt-3">
+      <input type="hidden" name="form" value="{{ form }}">
+      <button type="submit" class="{% call shared::button_style(true, false, true) %}{% endcall %}"
+      >Log out of all other sessions</button>
+    </form>
+  {% else if sessions.len() > 1 %}<p class="mt-3 text-left text-mini text-pretty text-muted"
+    >To log out your other sessions, log out and log in again: it needs a login from the last ten minutes.</p>
+  {% endif %}
+  <p class="mt-8 text-mini"><a href="/ops/mailbox" class="text-ink underline underline-offset-2">Mailbox</a></p>
 {% endblock %}

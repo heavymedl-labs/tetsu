@@ -2,11 +2,15 @@
 {% import "art/figures.html" as fig %}
 {#- Fill every class: a class's roster and waitlist in front of the week's classes, and what it covers. #}
 {% call ui::section("fill", "fill-title") %}
-{% call fig::separator(false) %}{% endcall %}
-{% call ui::head("fill-title", "Fill every class", "Classes and waitlists keep every session full, with no one working the desk.") %}{% endcall %}
-<div class="tetsu-scene tetsu-scene-card">
-<div class="tetsu-scene-back">{% include "panels/schedule.html" %}</div>
-<div class="tetsu-scene-front tetsu-stories">{% include "panels/classes.html" %}</div>
-</div>
-{% call ui::features(["Waitlists", "Late-cancel rules", "Recurring classes", "Check-in", "Booking windows", "Attendance reports"]) %}{% endcall %}
+  {% call fig::separator(false) %}{% endcall %}
+  {%
+    call ui::head("fill-title", "Fill every class", "Classes and waitlists keep every session full, with no one working the desk.")
+  %}{% endcall %}
+  <div class="tetsu-scene tetsu-scene-card">
+    <div class="tetsu-scene-back">{% include "panels/schedule.html" %}</div>
+    <div class="tetsu-scene-front tetsu-stories">{% include "panels/classes.html" %}</div>
+  </div>
+  {%
+    call ui::features(["Waitlists", "Late-cancel rules", "Recurring classes", "Check-in", "Booking windows", "Attendance reports"])
+  %}{% endcall %}
 {% endcall %}

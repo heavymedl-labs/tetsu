@@ -2,11 +2,15 @@
 {% import "art/figures.html" as fig %}
 {#- Get paid: today's payments behind, the membership plans over their right part, and what it covers. #}
 {% call ui::section("paid", "paid-title") %}
-{% call fig::separator(true) %}{% endcall %}
-{% call ui::head("paid-title", "Get paid", "Memberships, packs, and payments on the processor you choose, reconciled line by line.") %}{% endcall %}
-<div class="tetsu-scene tetsu-scene-layer">
-<div class="tetsu-scene-back">{% include "panels/payments.html" %}</div>
-<div class="tetsu-scene-front tetsu-stories">{% include "panels/memberships.html" %}</div>
-</div>
-{% call ui::features(["Monthly plans", "Class packs", "Freezes", "Shared across locations", "Your choice of processor", "Cards and wallets", "Refunds and credits", "Payout reports"]) %}{% endcall %}
+  {% call fig::separator(true) %}{% endcall %}
+  {%
+    call ui::head("paid-title", "Get paid", "Memberships, packs, and payments on the processor you choose, reconciled line by line.")
+  %}{% endcall %}
+  <div class="tetsu-scene tetsu-scene-layer">
+    <div class="tetsu-scene-back">{% include "panels/payments.html" %}</div>
+    <div class="tetsu-scene-front tetsu-stories">{% include "panels/memberships.html" %}</div>
+  </div>
+  {%
+    call ui::features(["Monthly plans", "Class packs", "Freezes", "Shared across locations", "Your choice of processor", "Cards and wallets", "Refunds and credits", "Payout reports"])
+  %}{% endcall %}
 {% endcall %}

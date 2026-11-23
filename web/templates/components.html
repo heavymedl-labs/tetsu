@@ -3,28 +3,58 @@
 
 {#- An outline icon from Heroicons (MIT), drawn in the current text color. -#}
 {% macro icon(name) %}
-<svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-5">
-{%- if name == "system" %}
-<path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 12V5.25"/>
-{%- else if name == "sun" %}
-<path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z"/>
-{%- else if name == "moon" %}
-<path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z"/>
-{%- else if name == "check" %}
-<path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/>
-{%- else if name == "menu" %}
-<path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/>
-{%- else %}
-<path stroke-linecap="round" stroke-linejoin="round" d="M15.182 16.318A4.486 4.486 0 0 0 12.016 15a4.486 4.486 0 0 0-3.198 1.318M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM9.75 9.75c0 .414-.168.75-.375.75S9 10.164 9 9.75 9.168 9 9.375 9s.375.336.375.75Zm-.375 0h.008v.015h-.008V9.75Zm5.625 0c0 .414-.168.75-.375.75s-.375-.336-.375-.75.168-.75.375-.75.375.336.375.75Zm-.375 0h.008v.015h-.008V9.75Z"/>
-{%- endif %}
-</svg>
+  <svg
+    aria-hidden="true"
+    xmlns="http://www.w3.org/2000/svg"
+    fill="none"
+    viewBox="0 0 24 24"
+    stroke-width="1.5"
+    stroke="currentColor"
+    class="size-5"
+  >
+    {%- if name == "system" %}
+      <path
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        d="M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 12V5.25"
+      />
+    {%- else if name == "sun" %}
+      <path
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z"
+      />
+    {%- else if name == "moon" %}
+      <path
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        d="M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z"
+      />
+    {%- else if name == "check" %}
+      <path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+    {%- else if name == "menu" %}
+      <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+    {%- else %}
+      <path
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        d="M15.182 16.318A4.486 4.486 0 0 0 12.016 15a4.486 4.486 0 0 0-3.198 1.318M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM9.75 9.75c0 .414-.168.75-.375.75S9 10.164 9 9.75 9.168 9 9.375 9s.375.336.375.75Zm-.375 0h.008v.015h-.008V9.75Zm5.625 0c0 .414-.168.75-.375.75s-.375-.336-.375-.75.168-.75.375-.75.375.336.375.75Zm-.375 0h.008v.015h-.008V9.75Z"
+      />
+    {%- endif %}
+  </svg>
 {% endmacro %}
 
 {#- A button's look, for a link or a button element: solid, or a faint fill when `secondary`. A pill 44px tall at
     16px, 32px tall at the small step when `small`, as the header's, or a full-width row 44px tall when `full`, as a
     column of login choices stacks them. It sets no margin, so the caller places it. -#}
 {% macro button_style(secondary = false, small = false, full = false) -%}
-rounded-full font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent {% if secondary %}bg-ink/5 text-ink transition-colors hover:bg-ink/10{% else %}bg-ink text-canvas transition-opacity hover:opacity-85{% endif %} {% if full %}flex h-11 w-full items-center justify-center gap-2 text-mini{% else if small %}inline-flex h-8 items-center gap-1.5 px-3 text-mini whitespace-nowrap{% else %}inline-flex h-11 items-center gap-1.5 px-5 text-[1rem]{% endif %}
+  rounded-full font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent {%
+    if secondary
+  %}bg-ink/5 text-ink transition-colors hover:bg-ink/10{% else %}bg-ink text-canvas transition-opacity
+    hover:opacity-85{% endif %}
+  {% if full %}flex h-11 w-full items-center justify-center gap-2 text-mini{% else if small %}inline-flex h-8
+    items-center gap-1.5 px-3 text-mini whitespace-nowrap{% else %}inline-flex h-11 items-center gap-1.5 px-5
+    text-[1rem]{% endif %}
 {%- endmacro %}
 
 {#- Three open columns, with a hairline between each and no frame, for a row's element (`columns_style`) and each
@@ -33,30 +63,33 @@ rounded-full font-medium focus-visible:outline-2 focus-visible:outline-offset-2 
     A column pads its text 24px, so the row starts 24px inside the gutter and its first text, and each column it
     snaps to, lines up with the page's. From a laptop, three columns, their text on the page's edges. -#}
 {% macro columns_style() -%}
--mx-(--tetsu-gutter) flex snap-x snap-mandatory scroll-px-[calc(var(--tetsu-gutter)-1.5rem)] overflow-x-auto px-[calc(var(--tetsu-gutter)-1.5rem)] scrollbar-none lg:-mx-8 lg:grid lg:grid-cols-3 lg:overflow-visible lg:px-0
+  -mx-(--tetsu-gutter) flex snap-x snap-mandatory scroll-px-[calc(var(--tetsu-gutter)-1.5rem)] overflow-x-auto
+  px-[calc(var(--tetsu-gutter)-1.5rem)] scrollbar-none lg:-mx-8 lg:grid lg:grid-cols-3 lg:overflow-visible lg:px-0
 {%- endmacro %}
 
 {% macro column_style() -%}
-w-82 shrink-0 snap-start border-r border-edge px-6 last:border-r-0 lg:w-auto lg:px-8
+  w-82 shrink-0 snap-start border-r border-edge px-6 last:border-r-0 lg:w-auto lg:px-8
 {%- endmacro %}
 
 {#- A link drawn as a solid button, around what the caller writes, as `button_style` draws it, or its small step
     when `small`. It sets no margin, so a wrapper places it. -#}
 {% macro button(href, small = false) %}
-<a href="{{ href }}" class="{% call button_style(false, small) %}{% endcall %}">{{ caller() }}</a>
+  <a href="{{ href }}" class="{% call button_style(false, small) %}{% endcall %}">{{ caller() }}</a>
 {% endmacro %}
 
 {#- A page that says why there is nothing to show, after HyperUI's empty content 1 (MIT). -#}
 {% macro empty(code, title, text) %}
-<main class="flex flex-1 items-center justify-center p-6">
-<div class="max-w-md text-center">
-<div class="mx-auto inline-flex rounded-full border border-edge bg-surface p-3 text-muted">{% call icon("frown") %}{% endcall %}</div>
-<p class="mt-6 font-mono text-xs tracking-widest text-accent uppercase">{{ code }}</p>
-<div class="mt-2 text-3xl font-medium text-balance text-ink sm:text-4xl"><h1>{{ title }}</h1></div>
-<div class="mt-4 text-pretty text-muted"><p>{{ text }}</p></div>
-<div class="mt-8">{% call button("/") %}Go to Tetsu{% endcall %}</div>
-</div>
-</main>
+  <main class="flex flex-1 items-center justify-center p-6">
+    <div class="max-w-md text-center">
+      <div class="mx-auto inline-flex rounded-full border border-edge bg-surface p-3 text-muted">{%
+          call icon("frown")
+        %}{% endcall %}</div>
+      <p class="mt-6 font-mono text-xs tracking-widest text-accent uppercase">{{ code }}</p>
+      <div class="mt-2 text-3xl font-medium text-balance text-ink sm:text-4xl"><h1>{{ title }}</h1></div>
+      <div class="mt-4 text-pretty text-muted"><p>{{ text }}</p></div>
+      <div class="mt-8">{% call button("/") %}Go to Tetsu{% endcall %}</div>
+    </div>
+  </main>
 {% endmacro %}
 
 {#- A section of a page, at the page's width. A band or other backdrop the caller draws absolutely sits behind it,
@@ -68,63 +101,83 @@ w-82 shrink-0 snap-start border-r border-edge px-6 last:border-r-0 lg:w-auto lg:
     then and at its own height once drawn, so a page's load draws only its top; what a section draws stays inside
     it. -#}
 {% macro section(id, labelledby, opening = false) %}
-<section{% if !id.is_empty() %} id="{{ id }}"{% endif %} aria-labelledby="{{ labelledby }}" class="relative [contain-intrinsic-size:auto_40rem] [content-visibility:auto] {% if opening %}pt-12 sm:pt-16 xl:pt-24{% else %}pt-7 sm:pt-22 lg:pt-26{% endif %} pb-7 sm:pb-16 lg:pb-40">
-<div class="mx-auto max-w-page px-(--tetsu-gutter)">
-{{ caller() }}
-</div>
-</section>
+  <section
+    {% if !id.is_empty() %}id="{{ id }}"{% endif %}
+    aria-labelledby="{{ labelledby }}"
+    class="relative [contain-intrinsic-size:auto_40rem] [content-visibility:auto] {% if opening %}pt-12 sm:pt-16 xl:pt-24{% else %}pt-7 sm:pt-22 lg:pt-26{% endif %} pb-7 sm:pb-16 lg:pb-40"
+  >
+    <div class="mx-auto max-w-page px-(--tetsu-gutter)">
+      {{ caller() }}
+    </div>
+  </section>
 {% endmacro %}
 
 {#- A section's heading beside its line, or `joined` to it in two tones: the claim in ink, the rest muted, at one
     size. Left-aligned, with the space every section leaves under its heading. The
     title, and a joined line, are trusted markup written in the template, never data, and may hold a line break. -#}
 {% macro head(id, title, text, joined = false) %}
-<div class="tetsu-reveal mb-8 sm:mb-16 xl:mb-24 {% if joined %}max-w-6xl{% else %}grid gap-6 sm:gap-8 lg:grid-cols-2 lg:gap-16{% endif %}">
-<h2 id="{{ id }}" class="text-2xl font-medium text-balance text-ink {% if joined %}sm:text-3xl{% else %}sm:text-4xl{% endif %} lg:text-5xl">{{ title|safe }}{% if joined %} <span class="text-muted">{{ text|safe }}</span>{% endif %}</h2>
-{%- if !joined %}
-<p class="max-w-[38rem] text-base text-pretty text-soft sm:text-xl lg:text-2xl">{{ text }}</p>
-{%- endif %}
-</div>
+  <div
+    class="tetsu-reveal mb-8 sm:mb-16 xl:mb-24 {% if joined %}max-w-6xl{% else %}grid gap-6 sm:gap-8 lg:grid-cols-2 lg:gap-16{% endif %}"
+  >
+    <h2
+      id="{{ id }}"
+      class="text-2xl font-medium text-balance text-ink {% if joined %}sm:text-3xl{% else %}sm:text-4xl{% endif %} lg:text-5xl"
+    >{{ title|safe }}{% if joined %} <span class="text-muted">{{ text|safe }}</span>{% endif %}</h2>
+    {%- if !joined %}
+      <p class="max-w-[38rem] text-base text-pretty text-soft sm:text-xl lg:text-2xl">{{ text }}</p>
+    {%- endif %}
+  </div>
 {% endmacro %}
 
 {#- What a feature section covers, under its picture: a label beside two columns of items. Phones
     leave it out, so a section is its claim and its picture. -#}
 {% macro features(items) %}
-<div class="tetsu-reveal mt-8 hidden gap-6 text-mini sm:grid lg:grid-cols-2 lg:gap-16">
-<p class="text-faint">Features</p>
-<ul class="grid grid-cols-2 gap-x-8 gap-y-2 text-muted">{% for item in items %}<li class="flex"><span aria-hidden="true" class="mr-2 text-faint">+</span>{{ item }}</li>{% endfor %}</ul>
-</div>
+  <div class="tetsu-reveal mt-8 hidden gap-6 text-mini sm:grid lg:grid-cols-2 lg:gap-16">
+    <p class="text-faint">Features</p>
+    <ul class="grid grid-cols-2 gap-x-8 gap-y-2 text-muted">{% for item in items %}<li class="flex"><span
+            aria-hidden="true"
+            class="mr-2 text-faint"
+          >+</span>{{ item }}</li>{% endfor %}</ul>
+  </div>
 {% endmacro %}
 
 {#- A column of the footer: its heading and items, each (link, text), a link only if it has one. -#}
 {% macro footer_column(heading, items) %}
-<div>
-<h2 class="font-medium text-ink">{{ heading }}</h2>
-<ul class="mt-4 space-y-2.5 text-muted lg:mt-6">
-{%- for (href, text) in items %}
-<li>{% if href.is_empty() %}{{ text }}{% else %}<a href="{{ href }}" class="hover:text-ink">{{ text }}</a>{% endif %}</li>
-{%- endfor %}
-</ul>
-</div>
+  <div>
+    <h2 class="font-medium text-ink">{{ heading }}</h2>
+    <ul class="mt-4 space-y-2.5 text-muted lg:mt-6">
+      {%- for (href, text) in items %}
+        <li>{% if href.is_empty() %}{{ text }}{% else %}<a href="{{ href }}" class="hover:text-ink">{{ text }}</a>{%
+            endif
+          %}</li>
+      {%- endfor %}
+    </ul>
+  </div>
 {% endmacro %}
 
 {#- The header every Tetsu page with one shares (ADR-0035, #148): sticky, over a blur of the page, with Tetsu's
     wordmark home at its left. What fills the rest of its row is the caller's: the site's sections, or a person's
     account menu. -#}
 {% macro header_bar() %}
-<header class="sticky top-0 z-40 border-b border-edge/70 bg-canvas/75 backdrop-blur-md">
-<nav aria-label="Tetsu" class="mx-auto flex h-14 max-w-page items-center justify-between gap-6 px-(--tetsu-gutter)">
-<a href="/" aria-label="Tetsu home" class="flex h-4 items-center text-ink focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent">{% include "../../../web/templates/wordmark.html" %}</a>
-{{ caller() }}
-</nav>
-</header>
+  <header class="sticky top-0 z-40 border-b border-edge/70 bg-canvas/75 backdrop-blur-md">
+    <nav aria-label="Tetsu" class="mx-auto flex h-14 max-w-page items-center justify-between gap-6 px-(--tetsu-gutter)">
+      <a
+        href="/"
+        aria-label="Tetsu home"
+        class="flex h-4 items-center text-ink focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
+      >{% include "../../../web/templates/wordmark.html" %}</a>
+      {{ caller() }}
+    </nav>
+  </header>
 {% endmacro %}
 
 {#- A header menu's look: a native popover under the button that opens it, which anchors itself as
     `[anchor-name:--tetsu-menu]` where the browser can anchor it, and sits under the header's corner where it cannot.
     No page has two, so they share the anchor's name. The caller adds its width. -#}
 {% macro menu_style() -%}
-inset-auto top-16 right-6 m-0 mt-2 rounded-xl border border-edge bg-surface p-2 text-ink shadow-lg [position-anchor:--tetsu-menu] supports-[top:anchor(bottom)]:top-[anchor(bottom)] supports-[top:anchor(bottom)]:right-[anchor(right)]
+  inset-auto top-16 right-6 m-0 mt-2 rounded-xl border border-edge bg-surface p-2 text-ink shadow-lg
+  [position-anchor:--tetsu-menu] supports-[top:anchor(bottom)]:top-[anchor(bottom)]
+  supports-[top:anchor(bottom)]:right-[anchor(right)]
 {%- endmacro %}
 
 {#- A signed-in person's account menu (#148), for any realm: their initials, which open a menu with their name, their
@@ -133,16 +186,27 @@ inset-auto top-16 right-6 m-0 mt-2 rounded-xl border border-edge bg-surface p-2 
     The button names its visible initials first, so speech input can say them, and the button and rows grow to 44px
     under a coarse pointer. -#}
 {% macro account_menu(name, initials, role, account, logout, form, here) %}
-<button type="button" popovertarget="tetsu-account-menu" class="flex size-8 cursor-pointer items-center justify-center rounded-full bg-ink/8 text-xs font-medium tracking-wide text-ink ring-1 ring-edge transition-colors [anchor-name:--tetsu-menu] hover:bg-ink/12 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent pointer-coarse:size-11">{{ initials }}<span class="sr-only">, account menu, {{ name }}</span></button>
-<div id="tetsu-account-menu" popover class="w-60 {% call menu_style() %}{% endcall %}">
-<div class="px-3 pt-1.5 pb-2.5">
-<p class="text-mini font-medium break-words text-ink">{{ name }}</p>
-<p class="text-xs text-muted">{{ role }}</p>
-</div>
-<div class="mx-1 border-t border-edge-soft"></div>
-<ul role="list" class="mt-1.5 text-mini">
-<li><a href="{{ account }}"{% if here == account %} aria-current="page"{% endif %} class="flex rounded-lg px-3 py-2 text-ink hover:bg-ink/5 focus-visible:outline-2 focus-visible:outline-accent aria-[current=page]:font-medium pointer-coarse:py-3">Account</a></li>
-<li><form method="post" action="{{ logout }}"><input type="hidden" name="form" value="{{ form }}"><button type="submit" class="flex w-full cursor-pointer rounded-lg px-3 py-2 text-left text-ink hover:bg-ink/5 focus-visible:outline-2 focus-visible:outline-accent pointer-coarse:py-3">Log out</button></form></li>
-</ul>
-</div>
+  <button
+    type="button"
+    popovertarget="tetsu-account-menu"
+    class="flex size-8 cursor-pointer items-center justify-center rounded-full bg-ink/8 text-xs font-medium tracking-wide text-ink ring-1 ring-edge transition-colors [anchor-name:--tetsu-menu] hover:bg-ink/12 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent pointer-coarse:size-11"
+  >{{ initials }}<span class="sr-only">, account menu, {{ name }}</span></button>
+  <div id="tetsu-account-menu" popover class="w-60 {% call menu_style() %}{% endcall %}">
+    <div class="px-3 pt-1.5 pb-2.5">
+      <p class="text-mini font-medium break-words text-ink">{{ name }}</p>
+      <p class="text-xs text-muted">{{ role }}</p>
+    </div>
+    <div class="mx-1 border-t border-edge-soft"></div>
+    <ul role="list" class="mt-1.5 text-mini">
+      <li><a
+          href="{{ account }}"
+          {% if here == account %}aria-current="page"{% endif %}
+          class="flex rounded-lg px-3 py-2 text-ink hover:bg-ink/5 focus-visible:outline-2 focus-visible:outline-accent aria-[current=page]:font-medium pointer-coarse:py-3"
+        >Account</a></li>
+      <li><form method="post" action="{{ logout }}"><input type="hidden" name="form" value="{{ form }}"><button
+            type="submit"
+            class="flex w-full cursor-pointer rounded-lg px-3 py-2 text-left text-ink hover:bg-ink/5 focus-visible:outline-2 focus-visible:outline-accent pointer-coarse:py-3"
+          >Log out</button></form></li>
+    </ul>
+  </div>
 {% endmacro %}

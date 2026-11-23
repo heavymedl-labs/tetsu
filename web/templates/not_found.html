@@ -3,13 +3,19 @@
 {% import "../../../web/templates/components.html" as ui %}
 {% import "../../../web/templates/brand.html" as brand %}
 <main class="flex flex-1 items-center justify-center px-6 py-24 sm:py-32">
-<div class="tetsu-settle text-center">
-<svg role="img" aria-label="404" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 144" class="mx-auto h-16 w-auto overflow-visible text-ink sm:h-20">
-{% call brand::lost_ghosts() %}{% endcall %}
-{% call brand::lost_slots() %}{% endcall %}
-</svg>
-<h1 class="mt-12 text-2xl font-medium text-ink sm:text-3xl">Page not found</h1>
-<p class="mt-3 text-pretty text-muted">There is nothing booked at this address.</p>
-<div class="mt-8">{% call ui::button("/") %}Back to Tetsu{% endcall %}</div>
-</div>
+  <div class="tetsu-settle text-center">
+    <svg
+      role="img"
+      aria-label="404"
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 384 144"
+      class="mx-auto h-16 w-auto overflow-visible text-ink sm:h-20"
+    >
+      {% call brand::lost_ghosts() %}{% endcall %}
+      {% call brand::lost_slots() %}{% endcall %}
+    </svg>
+    <h1 class="mt-12 text-2xl font-medium text-ink sm:text-3xl">Page not found</h1>
+    <p class="mt-3 text-pretty text-muted">There is nothing booked at this address.</p>
+    <div class="mt-8">{% call ui::button("/") %}Back to Tetsu{% endcall %}</div>
+  </div>
 </main>
