@@ -16,7 +16,8 @@ People and coding agents follow the same workflow and the rules in
    do a [docs audit](#docs-audit) if you changed docs or issues. Once per clone, install
    [uv](https://docs.astral.sh/uv/) and [rustup](https://rustup.rs/), run `scripts/install-tools.sh`, copy
    `.env.example` to `.env`, and run `git config core.hooksPath .githooks`, so formatters and linters run before
-   each commit, and the full checks before each push. Most formatters fix what they find; for templates, run
+   each commit, and the full checks before each push, and `git config blame.ignoreRevsFile .git-blame-ignore-revs`,
+   so `git blame` skips commits that only reformat. Most formatters fix what they find; for templates, run
    `cargo run -p tetsu-format-templates` ([ADR-0083](docs/adr/0083-formatting-templates-and-minifying-pages.md)).
 5. Open a pull request with the template filled in and `Closes #N`.
 
