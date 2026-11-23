@@ -37,19 +37,18 @@ pub fn files(json: &str) -> Result<Vec<(String, String)>, String> {
         .collect()
 }
 
-/// The files a page links to by name, the brand files (docs/brand), the operator pages' scripts, and the font
-/// Tetsu's own pages preload, by source and by the constant that names each one's URL.
-const LINKED: [(&str, &str); 6] = [
+/// The files a page links to by name, the brand files (docs/brand) and the operator pages' scripts, by source and
+/// by the constant that names each one's URL.
+const LINKED: [(&str, &str); 5] = [
     ("../docs/brand/tetsu-avatar.svg", "ICON"),
     ("../docs/brand/tetsu-avatar.png", "TOUCH_ICON"),
     ("src/passkey/ops.ts", "PASSKEY_SCRIPT"),
     ("src/session/ops.ts", "SESSION_SCRIPT"),
     ("src/scheme/ops.ts", "SCHEME_SCRIPT"),
-    (
-        "../node_modules/@fontsource-variable/inter/files/inter-latin-opsz-normal.woff2",
-        "FONT",
-    ),
 ];
+
+/// The text's font, Latin only, which every page preloads.
+const FONT: &str = "../node_modules/@fontsource-variable/inter/files/inter-latin-opsz-normal.woff2";
 
 /// The Rust source of the asset table: each built file's URL, content type, and bytes, read from `root` with
 /// `include_bytes!`, a constant for each linked file the build has, and the shared stylesheet's URL as
@@ -86,8 +85,18 @@ pub fn table(root: &str, files: &[(String, String)]) -> Result<String, String> {
             ))
         })
         .collect();
+    // The font, as the `Link` header every page sends to preload it.
+    let preload = files
+        .iter()
+        .find(|(source, _)| source == FONT)
+        .map(|(_, file)| {
+            let value =
+                format!("</{file}>; rel=preload; as=font; type=\"font/woff2\"; crossorigin");
+            format!("pub const FONT_PRELOAD: &str = {value:?};\n")
+        })
+        .unwrap_or_default();
     Ok(format!(
-        "pub const ASSETS: &[Asset] = &[\n{entries}];\n{linked}pub const STYLESHEET: &str = {stylesheet:?};\n"
+        "pub const ASSETS: &[Asset] = &[\n{entries}];\n{linked}{preload}pub const STYLESHEET: &str = {stylesheet:?};\n"
     ))
 }
 
@@ -200,7 +209,8 @@ mod tests {
         let table = table("/build", &files).unwrap();
         assert!(
             table.contains(
-                "pub const FONT: &str = \"/assets/inter-latin-opsz-normal-Kl6.woff2\";\n"
+                "pub const FONT_PRELOAD: &str = \"</assets/inter-latin-opsz-normal-Kl6.woff2>; rel=preload; as=font; \
+                 type=\\\"font/woff2\\\"; crossorigin\";\n"
             ),
             "{table}"
         );

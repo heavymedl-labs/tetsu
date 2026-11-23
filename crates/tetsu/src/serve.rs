@@ -249,6 +249,14 @@ async fn secure(State(demo): State<bool>, mut response: Response) -> Response {
             headers.insert(name, HeaderValue::from_static(value));
         }
     }
+    // Every page asks for its text's font as it starts, rather than once the stylesheet has arrived, so text paints
+    // in it rather than switching to it, whichever module renders the page.
+    let page = headers
+        .get(header::CONTENT_TYPE)
+        .is_some_and(|kind| kind.as_bytes().starts_with(b"text/html"));
+    if page {
+        headers.insert(header::LINK, HeaderValue::from_static(assets::FONT_PRELOAD));
+    }
     if demo {
         headers.insert(
             HeaderName::from_static("x-robots-tag"),
@@ -758,16 +766,32 @@ mod tests {
         }
     }
 
-    /// The root page asks for its text's font as it starts, rather than once the stylesheet has arrived, so the
-    /// headline paints in it rather than switching to it; and it is the font the stylesheet uses.
-    #[test]
-    fn the_root_page_preloads_the_font_its_stylesheet_uses() {
-        let preload = format!(
-            r#"<link rel="preload" href="{}" as="font" type="font/woff2" crossorigin>"#,
-            assets::FONT
+    /// Every page asks for its text's font as it starts, rather than once the stylesheet has arrived, so text paints
+    /// in it rather than switching to it, through a `Link` header the whole site shares, whichever module renders
+    /// the page; and it is the font the stylesheet uses. A file that is not a page, such as the stylesheet, asks
+    /// for nothing.
+    #[tokio::test]
+    async fn every_page_preloads_the_font_its_stylesheet_uses() {
+        let font = assets::FONT_PRELOAD
+            .strip_prefix('<')
+            .and_then(|rest| rest.split_once('>'))
+            .map(|(font, _)| font)
+            .unwrap();
+        assert!(
+            font.starts_with("/assets/inter-latin-opsz-normal-"),
+            "{font}"
         );
-        assert!(home_page(true).contains(&preload));
-        assert!(stylesheet().contains(assets::FONT));
+        assert_eq!(
+            header_of(&get_path("/").await, "link"),
+            Some(assets::FONT_PRELOAD)
+        );
+        // An answer that is not a page, here the test module's text and its not-found text, and a built file ask
+        // for nothing.
+        for path in ["/studio", "/elsewhere", assets::STYLESHEET] {
+            assert_eq!(header_of(&get_path(path).await, "link"), None, "{path}");
+        }
+        assert!(!home_page(true).contains("rel=\"preload\""));
+        assert!(stylesheet().contains(font));
     }
 
     /// The page tells the browser its scheme before any stylesheet arrives, so a page kept light never flashes dark

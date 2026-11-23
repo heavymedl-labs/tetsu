@@ -341,8 +341,8 @@ use support::{
 };
 use tetsu_postgres::test_support::fresh_database;
 
-/// The operator's login page is served, under a policy that lets it run Tetsu's own script, and the script it
-/// names is served as JavaScript.
+/// The operator's login page is served, under a policy that lets it run Tetsu's own script, preloading the text's
+/// font as every page does whichever module renders it, and the script it names is served as JavaScript.
 #[tokio::test]
 async fn the_login_page_loads_its_script() {
     let database = fresh_database().await.expect("a test database");
@@ -351,6 +351,11 @@ async fn the_login_page_loads_its_script() {
     let page = get(&server, "/ops/login");
     assert!(page.starts_with("HTTP/1.1 200"), "{page}");
     assert!(page.contains("script-src 'self'"), "{page}");
+    assert!(
+        page.to_ascii_lowercase()
+            .contains("\r\nlink: </assets/inter-latin-opsz-normal-"),
+        "{page}"
+    );
     let (_, after) = page
         .split_once("<script type=\"module\" src=\"")
         .expect("a script");
