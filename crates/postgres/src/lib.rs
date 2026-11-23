@@ -29,7 +29,8 @@ pub use isolation::{
     module_schemas, rows_seen_without_a_tenant,
 };
 pub use migrate::{
-    MIGRATION_LOCK, MIN_SERVER_VERSION, migrate, migrate_with_wait, require_supported_server,
+    Behind, MIGRATION_LOCK, MIN_SERVER_VERSION, behind_code, migrate, migrate_with_wait,
+    require_supported_server,
 };
 pub use roles::{APP_ROLE, DELIVERY_ROLE, MAX_SCHEMA, lookup_role, module_role};
 pub use scope::{

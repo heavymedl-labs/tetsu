@@ -277,8 +277,8 @@ fn until(mut stopped: tokio::sync::watch::Receiver<bool>) -> Stopped {
     })
 }
 
-/// Reads the settings, reaches the database, and binds the port: everything serving needs before it listens,
-/// with the dispatcher that delivers events to the audit record and the operators' notices.
+/// Reads the settings, reaches the database, checks it is migrated, and binds the port: everything serving needs
+/// before it listens, with the dispatcher that delivers events to the audit record and the operators' notices.
 async fn ready(
     local: &settings::Local,
 ) -> Result<
@@ -293,7 +293,7 @@ async fn ready(
     let proxies = settings::proxies(|name| local.var(name))?;
     let address = settings::listen(|name| local.var(name))?;
     let (smtp, allow) = mail(local)?;
-    let pool = connect(local).await?;
+    let pool = migrated(local).await?;
     let office = std::sync::Arc::new(tetsu_mail::post_office(pool.clone(), smtp, allow));
     let dispatcher = delivery(&pool, &office).await?;
     let operators = operator_pages(local, demo, office)?;
@@ -304,6 +304,33 @@ async fn ready(
     );
     let app = serve::app(modules, demo, proxies, serve::not_found);
     Ok((bind(address).await?, app, dispatcher))
+}
+
+/// A pool to the database once no module's database is behind its code (#164).
+async fn migrated(local: &settings::Local) -> Result<tetsu_postgres::Pool, String> {
+    let pool = connect(local).await?;
+    let storages: Vec<_> = MODULES
+        .iter()
+        .filter_map(|module| module.storage())
+        .collect();
+    match tetsu_postgres::behind_code(&pool, &storages).await {
+        Ok(None) => Ok(pool),
+        Ok(Some(behind)) => Err(refusal(behind)),
+        Err(error) => Err(explain(&*error)),
+    }
+}
+
+/// Why serving cannot start on a database behind its code, and what fixes it.
+fn refusal(behind: tetsu_postgres::Behind) -> String {
+    match behind {
+        tetsu_postgres::Behind::Unapplied { .. } => format!(
+            "{behind}. Apply new migrations with `tetsu migrate`, or `cargo tetsu setup` locally"
+        ),
+        tetsu_postgres::Behind::Changed { schema, .. } => format!(
+            "{behind}. An applied migration must stay as it was; locally, `cargo tetsu reset {schema}` rebuilds its \
+             schema"
+        ),
+    }
 }
 
 /// Binds `address`, and says where serving listens.
@@ -478,6 +505,28 @@ fn summary(modules: &[&dyn Module]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Each way a database is behind its code gets the fix for it.
+    #[test]
+    fn a_database_behind_its_code_is_told_what_fixes_it() {
+        let unapplied = tetsu_postgres::Behind::Unapplied {
+            schema: "audit",
+            version: 3,
+        };
+        assert_eq!(
+            refusal(unapplied),
+            "audit version 3 is not applied. Apply new migrations with `tetsu migrate`, or `cargo tetsu setup` locally"
+        );
+        let changed = tetsu_postgres::Behind::Changed {
+            schema: "identity",
+            version: 8,
+        };
+        assert_eq!(
+            refusal(changed),
+            "identity version 8 changed after it was applied. An applied migration must stay as it was; locally, \
+             `cargo tetsu reset identity` rebuilds its schema"
+        );
+    }
 
     async fn listener() -> tokio::net::TcpListener {
         tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap()

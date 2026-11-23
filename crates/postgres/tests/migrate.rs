@@ -3,7 +3,8 @@
 use tetsu_kernel::{Migration, Module, Storage};
 use tetsu_postgres::test_support::{fresh_database, fresh_database_encoded};
 use tetsu_postgres::{
-    MAX_SCHEMA, MIGRATION_LOCK, connect, migrate, migrate_with_wait, require_supported_server,
+    Behind, MAX_SCHEMA, MIGRATION_LOCK, behind_code, connect, migrate, migrate_with_wait, pool,
+    require_supported_server,
 };
 
 struct Fake(&'static [Migration]);
@@ -131,6 +132,121 @@ async fn refuses_an_applied_file_that_changed() {
         .await
         .expect_err("must refuse");
     assert!(error.to_string().contains("version 1"), "{error}");
+}
+
+/// The fake module's storage, with `migrations`.
+fn storage(migrations: &'static [Migration]) -> Storage {
+    Storage {
+        schema: "fake",
+        migrations,
+    }
+}
+
+/// What serving checks before it reads a module's tables, as the application role and writing nothing: a module
+/// never migrated has its first file unapplied.
+#[tokio::test]
+async fn a_module_never_migrated_is_behind_its_code() {
+    let database = fresh_database().await.expect("a test database");
+    let app = pool(&database.as_app()).expect("a pool");
+    let unmigrated = behind_code(&app, &[storage(&[FIRST])])
+        .await
+        .expect("checks");
+    assert_eq!(
+        unmigrated,
+        Some(Behind::Unapplied {
+            schema: "fake",
+            version: 1
+        })
+    );
+    let schemas = connect(&database)
+        .await
+        .expect("connects")
+        .query_one(
+            "SELECT count(*) FROM pg_catalog.pg_namespace WHERE nspname = 'fake'",
+            &[],
+        )
+        .await
+        .expect("counts")
+        .try_get::<_, i64>(0)
+        .expect("a count");
+    assert_eq!(schemas, 0, "the check creates nothing");
+}
+
+/// Once migrated, the first module behind its code, by a file not yet applied or one changed since; none when the
+/// database is up to date or ahead of the code, as after a rollback (ADR-0033).
+#[tokio::test]
+async fn serving_finds_a_database_behind_its_code() {
+    let database = fresh_database().await.expect("a test database");
+    let app = pool(&database.as_app()).expect("a pool");
+    migrate(&database, &[&Fake(&[FIRST, SECOND])])
+        .await
+        .expect("migrates");
+    for (code, found) in [
+        (&[FIRST, SECOND][..], None),
+        (&[FIRST], None),
+        (
+            &[FIRST, SECOND, UNIQUE],
+            Some(Behind::Unapplied {
+                schema: "fake",
+                version: 3,
+            }),
+        ),
+        (
+            &[CHANGED],
+            Some(Behind::Changed {
+                schema: "fake",
+                version: 1,
+            }),
+        ),
+    ] {
+        let checked = behind_code(&app, &[storage(code)]).await.expect("checks");
+        assert_eq!(checked, found, "{code:?}");
+    }
+}
+
+#[test]
+fn being_behind_names_the_module_and_the_file() {
+    assert_eq!(
+        Behind::Unapplied {
+            schema: "fake",
+            version: 3
+        }
+        .to_string(),
+        "fake version 3 is not applied"
+    );
+    assert_eq!(
+        Behind::Changed {
+            schema: "fake",
+            version: 1
+        }
+        .to_string(),
+        "fake version 1 changed after it was applied"
+    );
+}
+
+/// A record the module's role cannot read is an error that names the module, not a module behind its code.
+#[tokio::test]
+async fn a_record_that_cannot_be_read_names_its_module() {
+    let database = fresh_database().await.expect("a test database");
+    migrate(&database, &[&Fake(&[FIRST])])
+        .await
+        .expect("migrates");
+    connect(&database)
+        .await
+        .expect("connects")
+        .batch_execute("REVOKE SELECT ON fake.migrations FROM tetsu_fake")
+        .await
+        .expect("revokes");
+    let app = pool(&database.as_app()).expect("a pool");
+    let error = behind_code(&app, &[storage(&[FIRST])])
+        .await
+        .expect_err("cannot read");
+    let said = error.to_string();
+    assert!(
+        said.starts_with("could not read fake's applied migrations: ")
+            && said.contains("permission denied"),
+        "{said}"
+    );
 }
 
 #[tokio::test]

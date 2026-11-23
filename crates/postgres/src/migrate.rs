@@ -8,6 +8,7 @@ use tokio_postgres::Client;
 
 use crate::connection::{Error, Settings, connect};
 use crate::roles::{APP_ROLE, MAX_SCHEMA, prepare_module, require_bound_runner, require_role};
+use crate::scope::ModuleTransaction;
 
 /// Taken by polling, never by blocking, which can deadlock with
 /// `CREATE INDEX CONCURRENTLY` (ADR-0011).
@@ -147,6 +148,100 @@ pub async fn require_supported_server(settings: &Settings) -> Result<(), Error> 
     check_server(&connect(settings).await?).await
 }
 
+/// How a module's database is behind its code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Behind {
+    /// A file the code has that the database has not applied.
+    Unapplied { schema: &'static str, version: i32 },
+    /// A file the database applied that the code has since changed.
+    Changed { schema: &'static str, version: i32 },
+}
+
+impl std::fmt::Display for Behind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unapplied { schema, version } => {
+                write!(f, "{schema} version {version} is not applied")
+            }
+            Self::Changed { schema, version } => {
+                write!(f, "{schema} version {version} changed after it was applied")
+            }
+        }
+    }
+}
+
+/// The first module whose database is behind its code, by a file not yet applied or one changed since, or `None`:
+/// what serving checks before it reads a module's tables. A database ahead of the code, holding files it does not
+/// know, is not behind, so an older binary still serves after a rollback (ADR-0033); only migrating refuses one. It
+/// reads each record as the module's role, as the application role may, and writes nothing. A module never migrated
+/// has nothing applied.
+///
+/// # Errors
+/// Fails if a module's record cannot be read, naming the module.
+pub async fn behind_code(
+    pool: &deadpool_postgres::Pool,
+    storages: &[Storage],
+) -> Result<Option<Behind>, Error> {
+    let mut client = pool.get().await?;
+    for &Storage { schema, migrations } in storages {
+        let applied = recorded(&mut client, schema).await.map_err(|error| {
+            let causes: Vec<String> =
+                std::iter::successors(Some(&*error as &dyn std::error::Error), |error| {
+                    error.source()
+                })
+                .map(ToString::to_string)
+                .collect();
+            format!(
+                "could not read {schema}'s applied migrations: {}",
+                causes.join(": ")
+            )
+        })?;
+        if let Some(changed) = changed(migrations, &applied) {
+            return Ok(Some(Behind::Changed {
+                schema,
+                version: changed.version,
+            }));
+        }
+        if let Some(waiting) = migrations
+            .iter()
+            .find(|m| !applied.contains_key(&m.version))
+        {
+            return Ok(Some(Behind::Unapplied {
+                schema,
+                version: waiting.version,
+            }));
+        }
+    }
+    Ok(None)
+}
+
+/// A module's record of applied files, read as its module role, or none if it was never migrated.
+async fn recorded(
+    client: &mut deadpool_postgres::Object,
+    schema: &str,
+) -> Result<HashMap<i32, String>, Error> {
+    let exists: bool = client
+        .query_one(
+            "SELECT EXISTS (SELECT FROM pg_catalog.pg_class c
+               JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+               WHERE n.nspname = $1 AND c.relname = 'migrations' AND c.relkind = 'r')",
+            &[&schema],
+        )
+        .await?
+        .try_get(0)?;
+    if !exists {
+        return Ok(HashMap::new());
+    }
+    let transaction = ModuleTransaction::begin(client, schema).await?;
+    let rows = transaction
+        .query(
+            &format!(r#"SELECT version, sql FROM "{schema}".migrations"#),
+            &[],
+        )
+        .await?;
+    Ok(applied_in(&rows)?)
+}
+
 /// The test server runs 18.7, so no test reaches the refusal itself; `supported` is tested alone.
 async fn check_server(client: &Client) -> Result<(), Error> {
     let row = client
@@ -222,16 +317,22 @@ async fn pending(client: &Client, storage: Storage) -> Result<Vec<&'static Migra
             read_only_record(schema)
         ))
         .await?;
-    let applied = client
-        .query(
-            &format!(r#"SELECT version, sql FROM "{schema}".migrations"#),
-            &[],
-        )
-        .await?
-        .iter()
-        .map(|row| Ok((row.try_get("version")?, row.try_get("sql")?)))
-        .collect::<Result<HashMap<i32, String>, tokio_postgres::Error>>()?;
+    let applied = applied_in(
+        &client
+            .query(
+                &format!(r#"SELECT version, sql FROM "{schema}".migrations"#),
+                &[],
+            )
+            .await?,
+    )?;
     new_files(schema, migrations, &applied)
+}
+
+/// Each applied file's SQL by its version, from a module's record.
+fn applied_in(rows: &[tokio_postgres::Row]) -> Result<HashMap<i32, String>, tokio_postgres::Error> {
+    rows.iter()
+        .map(|row| Ok((row.try_get("version")?, row.try_get("sql")?)))
+        .collect()
 }
 
 /// Only the runner writes a module's record of applied files. A role given rights on every new table, as the app's
@@ -264,6 +365,16 @@ fn read_only_record(schema: &str) -> String {
     )
 }
 
+/// The first applied file whose code has changed since.
+fn changed<'a>(
+    migrations: &'a [Migration],
+    applied: &HashMap<i32, String>,
+) -> Option<&'a Migration> {
+    migrations
+        .iter()
+        .find(|m| applied.get(&m.version).is_some_and(|sql| sql != m.sql))
+}
+
 /// The files not yet applied. Fails if an applied file changed or is missing from the code, or a new file comes
 /// before an applied one.
 fn new_files<'a>(
@@ -271,10 +382,7 @@ fn new_files<'a>(
     migrations: &'a [Migration],
     applied: &HashMap<i32, String>,
 ) -> Result<Vec<&'a Migration>, Error> {
-    if let Some(changed) = migrations
-        .iter()
-        .find(|m| applied.get(&m.version).is_some_and(|sql| sql != m.sql))
-    {
+    if let Some(changed) = changed(migrations, applied) {
         return Err(format!(
             "{schema} version {} changed after it was applied",
             changed.version

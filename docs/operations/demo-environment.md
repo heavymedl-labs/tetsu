@@ -196,6 +196,12 @@ address too, then deploy again:
 gh workflow run deploy -f chore=rename -f target=/login -f value=new-slug
 ```
 
+It also will not start on a database behind its code: a migration not applied, or one changed since it was
+applied, which its log names ([#164](https://github.com/heavymedl-labs/tetsu/issues/164)). The deploy migrates before
+it serves, so this means the migrate step was skipped or failed; run the deploy again. A database ahead of the code,
+as after a rollback, still serves. A changed migration needs the change undone in code, since an applied file must
+stay as it was.
+
 ## When an event stops retrying
 
 An event that fails 10 times logs an `ERROR` line, `event stopped retrying`, with its ID, type, each failing

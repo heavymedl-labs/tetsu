@@ -102,7 +102,8 @@ cargo tetsu operator create "Your Name" you@example.com   # prints your invite l
 
 The test Postgres keeps its data in memory, so after it restarts the database is gone: run `cargo tetsu setup` again.
 When a migration you have applied changes, `cargo tetsu reset <schema>` rebuilds that module's schema, since `.env`
-sets `TETSU_DEMO`.
+sets `TETSU_DEMO`. `serve` refuses to start while a migration is unapplied or changed, and names it, but serves a database ahead of
+its code, as after a rollback.
 
 To see the email it sends, invites included, run `scripts/mailpit.py you@example.com` in another terminal, with
 your operator's address. While it runs, `.env.mailpit` holds `.env`'s settings with mail sent to a local Mailpit,

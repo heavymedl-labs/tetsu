@@ -512,7 +512,8 @@ async fn it_stops_cleanly_when_the_host_sends_sigterm() {
     assert_eq!(message(rest.trim()), Some("stopped".into()), "{rest}");
 }
 
-/// Serving checks tenants' addresses before it listens, so a database never migrated stops it at start.
+/// Serving checks every module's migrations before anything reads their tables, so a database never migrated, or
+/// one behind the code, stops it at start with the module and what to run (#164).
 #[tokio::test]
 async fn it_refuses_to_start_before_migrating() {
     let database = fresh_database().await.expect("a test database");
@@ -520,7 +521,9 @@ async fn it_refuses_to_start_before_migrating() {
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("could not check tenants' addresses"),
+        stderr.contains(
+            "error: tenancy version 1 is not applied. Apply new migrations with `tetsu migrate`"
+        ),
         "{stderr}"
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -653,6 +656,7 @@ async fn it_refuses_to_start_without_its_proxy_count() {
 #[tokio::test]
 async fn it_refuses_to_start_without_its_origin() {
     let database = fresh_database().await.expect("a test database");
+    ready(&database);
     let output = tetsu(&database, &["serve"])
         .env_remove("TETSU_ORIGIN")
         .output()

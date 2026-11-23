@@ -82,7 +82,8 @@ async fn ensure_member(client: &Client, role: &str, member: &str) -> Result<(), 
 
 /// Makes a module's roles, lets the application role and the runner act as its module role one transaction at a
 /// time, and lets the runner hand functions to its lookup role. A grant that already exists is kept. It also makes
-/// the delivery role, which a module's outbox file grants to.
+/// the delivery role, which a module's outbox file grants to. The module role may read its schema's record of
+/// applied files, which predates the schema's default rights, so serving can check it as that role.
 pub(crate) async fn prepare_module(client: &Client, schema: &str) -> Result<(), Error> {
     let (module, lookup) = (module_role(schema), lookup_role(schema));
     for role in [&module, &lookup, &DELIVERY_ROLE.to_string()] {
@@ -101,6 +102,7 @@ pub(crate) async fn prepare_module(client: &Client, schema: &str) -> Result<(), 
     client
         .batch_execute(&format!(
             r#"GRANT USAGE ON SCHEMA "{schema}" TO {module}, {lookup};
+             GRANT SELECT ON "{schema}".migrations TO {module};
              ALTER DEFAULT PRIVILEGES IN SCHEMA "{schema}" GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {module};
              ALTER DEFAULT PRIVILEGES IN SCHEMA "{schema}" GRANT USAGE, SELECT ON SEQUENCES TO {module};
              ALTER DEFAULT PRIVILEGES REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC"#
