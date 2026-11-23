@@ -37,7 +37,7 @@ on every push.
 | SQL | SQLFluff, and Squawk on migrations | Module tests against Postgres | E4 | E4 | E4 | [#25](https://github.com/heavymedl-labs/tetsu/issues/25) |
 | Bash | shfmt, ShellCheck | `unittest`, from Python | E2 | E2 | E2 | E2 |
 | Python | Ruff | `unittest` | E2 | E2 | Ruff | E2 |
-| Askama templates | `scripts/check_templates.py`: classes the built stylesheet defines, no inline styles ([ADR-0032](docs/adr/0032-styling-engine.md)) | The Rust tests that render each page | Gap | jscpd | Gap | Gap |
+| Askama templates | markup_fmt, through `tools/format-templates` ([ADR-0083](docs/adr/0083-formatting-templates-and-minifying-pages.md)), and `scripts/check_templates.py`: classes the built stylesheet defines, no inline styles ([ADR-0032](docs/adr/0032-styling-engine.md)) | The Rust tests that render each page | Gap | jscpd | Gap | Gap |
 | TypeScript | Biome, and `tsc --noEmit` for types ([ADR-0034](docs/adr/0034-front-end-build.md)) | StrykerJS ([ADR-0056](docs/adr/0056-typescript-tests.md)) | Vitest's V8 provider: 100% at Tier 1, 90% elsewhere | jscpd | lizard | Biome's import rules |
 | CSS | Biome | E5 | Gap | jscpd | Gap | Gap |
 

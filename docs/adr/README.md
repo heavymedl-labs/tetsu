@@ -87,6 +87,7 @@ number, and add a row below. Never renumber.
 | [0080](0080-event-rows-past-their-use.md) | Event rows past their use | Removing outbox or inbox rows, or replaying a stopped event | Accepted |
 | [0081](0081-recording-refused-requests.md) | Recording refused requests | Refusing a request at a check, or changing what a refusal records | Accepted |
 | [0082](0082-a-postgres-skill-for-database-work.md) | A Postgres skill for database work | Writing or reviewing SQL, migrations, or schema | Accepted |
+| [0083](0083-formatting-templates-and-minifying-pages.md) | Formatting templates and minifying pages | Writing a template, testing a page's HTML, or changing how pages are sent | Accepted |
 | [0068](0068-no-demo-note.md) | No demo note | Changing what marks a demo page | Proposed |
 
 ## Open decisions

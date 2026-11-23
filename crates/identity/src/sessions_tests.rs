@@ -18,7 +18,7 @@ use crate::{Actor, Ending, OperatorName, SessionId};
 const FIREFOX: &str = "Mozilla/5.0 (X11; Linux x86_64) Firefox/140.0";
 const LISTED: &str = "Started ";
 const PRESENTED: &str = "This device";
-const STALE: &str = "To log out your other\nsessions, log out and log in again";
+const STALE: &str = "To log out your other sessions, log out and log in again";
 
 /// Kurt, joined, then logged in from `count` browsers: the server, the database, and each browser's cookie, oldest
 /// first. Joining's own session ends with the first login, which presents it.

@@ -1,0 +1,13 @@
+[package]
+name = "tetsu-format-templates"
+description = "Formats Tetsu's HTML templates (ADR-0083). A development tool, never part of the binary."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+markup-fmt.workspace = true
+
+[lints]
+workspace = true

@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 askama.workspace = true
 axum.workspace = true
+html-minifier.workspace = true
 opentelemetry.workspace = true
 opentelemetry-appender-tracing.workspace = true
 opentelemetry-otlp.workspace = true
@@ -38,6 +39,8 @@ serde_json.workspace = true
 [dev-dependencies]
 # Captures exported log records in memory, to check what leaves the host.
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
+# A page body that fails as it is read, already in the graph through axum.
+http-body = "1"
 # Reading and writing sockets in its tests.
 tokio = { workspace = true, features = ["io-util"] }
 

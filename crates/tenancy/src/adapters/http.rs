@@ -382,11 +382,21 @@ mod tests {
         stream.read_to_string(&mut raw).await.unwrap();
         let (head, body) = raw.split_once("\r\n\r\n").unwrap();
         let code = head.split(' ').nth(1).unwrap().parse().unwrap();
-        (
-            StatusCode::from_u16(code).unwrap(),
-            head.to_string(),
-            body.to_string(),
-        )
+        // A page is read with each run of whitespace as one space, and none before a tag's closing `>`, as a
+        // browser reads markup, so tests do not depend on how a template is formatted (ADR-0083).
+        let body = if head
+            .to_ascii_lowercase()
+            .contains("content-type: text/html")
+        {
+            body.split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .replace(" >", ">")
+                .replace(" />", "/>")
+        } else {
+            body.to_string()
+        };
+        (StatusCode::from_u16(code).unwrap(), head.to_string(), body)
     }
 
     /// The theme is data: its own small sheet, after the shared one, kept only briefly (ADR-0032).

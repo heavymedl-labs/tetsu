@@ -122,6 +122,7 @@ fi
 lint() {
   cargo fmt --all --check
   cargo clippy --all-targets -- -D warnings
+  cargo clippy --package tetsu-format-templates --all-targets -- -D warnings
   .tools/bin/ruff check
   .tools/bin/ruff format --check
   local shell_files=(scripts/*.sh benchmarks/run.sh .githooks/*)
@@ -258,7 +259,7 @@ fi
 # fingerprint of every input they read: the Rust and its build settings, and the checks themselves. A later run
 # outside CI that finds the same fingerprint skips both and says so. The base is left out: a push moves it, but the
 # mutants drawn against the new base are changes the last pass already tested, so a docs-only push after it skips.
-rust_inputs=(crates Cargo.toml Cargo.lock rust-toolchain.toml .config/nightly-toolchain .cargo scripts/check.sh
+rust_inputs=(crates tools Cargo.toml Cargo.lock rust-toolchain.toml .config/nightly-toolchain .cargo scripts/check.sh
   scripts/check_coverage.py)
 fingerprint="$({
   { find "${rust_inputs[@]}" -type f 2>/dev/null || true; } | LC_ALL=C sort | while IFS= read -r file; do
@@ -280,6 +281,9 @@ if [[ "$reuse" == false ]]; then
   # (ADR-0021). Stable proves the examples on the toolchain we ship; only nightly's rustdoc checks the error code
   # a compile_fail test names, so a test cannot pass for an unrelated error.
   cargo test --doc
+  # The development tools are outside the default members, so they are covered on their own, at Tier 2 and 3's
+  # limits (ADR-0016).
+  cargo llvm-cov --package tetsu-format-templates --summary-only --fail-under-regions 90 --fail-under-lines 90
   CARGO_TARGET_DIR=target/nightly cargo +"$nightly" test --doc
   cargo metadata --no-deps --format-version 1 >"$work/metadata.json"
   python3 scripts/check_coverage.py "$work/metadata.json" "$work/coverage.json"
@@ -298,9 +302,9 @@ if changed "${web_inputs[@]}"; then
 else
   echo "The front end is unchanged since $base, so its tests and mutation testing are skipped" >&2
 fi
-.tools/bin/lizard -l rust -C 10 -L 50 -a 5 -w crates
+.tools/bin/lizard -l rust -C 10 -L 50 -a 5 -w crates tools
 .tools/bin/lizard -l typescript -C 10 -L 50 -a 5 -w web
-npx --no-install jscpd crates web --threshold 0 --ignore "**/tests/**,**/assets/build/**" --reporters console
+npx --no-install jscpd crates tools web --threshold 0 --ignore "**/tests/**,**/assets/build/**" --reporters console
 # The image's front-end stage, from the image's own build context, so a file Vite reads that the Dockerfile or
 # .dockerignore leaves out fails here rather than in CI. CI builds the whole image in another job (ADR-0023), so it
 # skips this, and so does a machine without a running Docker, with a warning.
@@ -351,6 +355,16 @@ if [[ "$reuse" == false ]]; then
     echo "error: commits since $base change crates/, but the files on disk undo that, so there is nothing to" >&2
     echo "mutate. Commit or restore those files first." >&2
     exit 1
+  fi
+fi
+
+if [[ "$reuse" == false ]]; then
+  # cargo-mutants mutates only the default members, so the development tools are named, in a copy under target/.
+  git diff "${plain[@]}" "$merge" -- tools >"$work/tools.diff"
+  if [[ -s "$work/tools.diff" ]]; then
+    mkdir -p target/mutants-tmp
+    TMPDIR="$PWD/target/mutants-tmp" cargo mutants --package tetsu-format-templates --in-diff "$work/tools.diff" \
+      --timeout 60
   fi
 fi
 

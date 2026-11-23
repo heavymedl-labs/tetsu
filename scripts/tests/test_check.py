@@ -451,7 +451,7 @@ class CheckScript(unittest.TestCase):
         ):
             self.assertIn(said, result.stderr)
         # The Rust group asks about exactly the inputs the fingerprint reads.
-        self.assertIn("diff --quiet abc -- crates Cargo.toml Cargo.lock rust-toolchain.toml", log)
+        self.assertIn("diff --quiet abc -- crates tools Cargo.toml Cargo.lock rust-toolchain.toml", log)
 
     def test_ci_runs_a_group_whose_inputs_changed(self):
         result = self.check("--base", "abc123", CI="true", DIFF_QUIET="1")
@@ -579,7 +579,8 @@ class CheckScript(unittest.TestCase):
         self.assertNotIn("clean.py", self.log.read_text())
 
     def test_fails_when_the_final_sweep_cannot_drop_the_test_databases(self):
-        self.stub("cargo", f'echo "cargo $*" >> "{self.log}"; [ "$1" != run ]')
+        # Only the sweep's run fails, not the template format check's.
+        self.stub("cargo", f'echo "cargo $*" >> "{self.log}"; [[ "$*" != *drop_test_databases* ]]')
         result = self.check()
         self.assertEqual(result.returncode, 1)
         self.assertIn("test databases were not dropped", result.stderr)

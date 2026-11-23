@@ -178,6 +178,7 @@ optional field, and the binary keeps reading the previous format until the demos
 
 None yet. These commands run once per deploy or demo change.
 
-`serve` sends responses in brotli or gzip when the browser accepts them, and fonts as they are. The root page may
+`serve` minifies every page, whichever module renders it, and sends responses in brotli or gzip when the browser
+accepts them, and fonts as they are ([ADR-0083](../../docs/adr/0083-formatting-templates-and-minifying-pages.md)). The root page may
 take at most 40 KB that way and its stylesheet 20 KB, which a test checks
 ([ADR-0039](../../docs/adr/0039-response-compression-and-page-budget.md)).

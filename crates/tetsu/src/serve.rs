@@ -86,6 +86,7 @@ pub fn app(
         .fallback(move |headers: HeaderMap| {
             std::future::ready(not_found(demo, scheme_of(&headers)))
         })
+        .layer(axum::middleware::map_response(minify))
         .layer(axum::middleware::map_response_with_state(demo, secure))
         .layer(axum::middleware::from_fn_with_state(proxies, requester))
         .layer(compression())
@@ -236,6 +237,42 @@ fn site_routes(demo: bool) -> Vec<(&'static str, MethodRouter)> {
     ]
 }
 
+/// Whether a response is a page, by its content type.
+fn is_page(headers: &HeaderMap) -> bool {
+    headers
+        .get(header::CONTENT_TYPE)
+        .is_some_and(|kind| kind.as_bytes().starts_with(b"text/html"))
+}
+
+/// Sends every page minified, whichever module renders it, so the whitespace formatted templates add costs visitors
+/// nothing (ADR-0083). A page whose body fails as it is read is an error, as it would be if sent.
+async fn minify(response: Response) -> Response {
+    if !is_page(response.headers()) {
+        return response;
+    }
+    let (mut parts, body) = response.into_parts();
+    let Ok(page) = axum::body::to_bytes(body, usize::MAX).await else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    parts.headers.remove(header::CONTENT_LENGTH);
+    Response::from_parts(parts, axum::body::Body::from(minified(page)))
+}
+
+/// `page` with each run of whitespace collapsed to one character by html-minifier, which keeps a newline where the
+/// run had one, keeps attribute values, and leaves `pre`, `code`, `textarea`, and inline SVG as they are. Inline
+/// scripts and styles, which no page has, stay as written. A page the minifier cannot finish, one that ends inside a
+/// tag, goes as rendered.
+fn minified(page: Bytes) -> Bytes {
+    let mut minifier = html_minifier::HTMLMinifier::new();
+    minifier.set_minify_code(false);
+    minifier.set_minify_js(false);
+    minifier.set_minify_css(false);
+    if minifier.digest(&page).is_err() {
+        return page;
+    }
+    minifier.into_html().map_or(page, Bytes::from)
+}
+
 async fn secure(State(demo): State<bool>, mut response: Response) -> Response {
     let headers = response.headers_mut();
     for (name, value) in HEADERS {
@@ -251,10 +288,7 @@ async fn secure(State(demo): State<bool>, mut response: Response) -> Response {
     }
     // Every page asks for its text's font as it starts, rather than once the stylesheet has arrived, so text paints
     // in it rather than switching to it, whichever module renders the page.
-    let page = headers
-        .get(header::CONTENT_TYPE)
-        .is_some_and(|kind| kind.as_bytes().starts_with(b"text/html"));
-    if page {
+    if is_page(headers) {
         headers.insert(header::LINK, HeaderValue::from_static(assets::FONT_PRELOAD));
     }
     if demo {
@@ -525,7 +559,10 @@ mod tests {
             let body = axum::body::to_bytes(response.into_body(), usize::MAX)
                 .await
                 .unwrap();
-            let body = String::from_utf8(body.to_vec()).unwrap();
+            // As sent, read with each run of whitespace as one space, since the minifier leaves inline SVG as
+            // formatted.
+            let body = String::from_utf8(minified(body).to_vec()).unwrap();
+            let body = body.split_whitespace().collect::<Vec<_>>().join(" ");
             // The site's own header and footer around "404" in the brand's slots (ADR-0035).
             for shown in [
                 "<title>Page not found – Tetsu</title>",
@@ -726,16 +763,19 @@ mod tests {
     }
 
     /// The root page as it renders, in a demo or not.
+    /// The root page as it is sent, minified.
     fn home_page(demo: bool) -> String {
-        HomePage {
+        let page = HomePage {
             demo,
             stylesheet: "",
             scheme: "system",
         }
         .render()
-        .unwrap()
+        .unwrap();
+        String::from_utf8(minified(Bytes::from(page)).to_vec()).unwrap()
     }
 
+    /// The root page is sent as it renders, minified (ADR-0083), in each color scheme.
     #[tokio::test]
     async fn the_root_page_served_is_the_page_as_it_renders() {
         // The page is rendered once per process and scheme (site_routes), so what goes out must match a fresh render.
@@ -756,6 +796,7 @@ mod tests {
                 }
                 .render()
                 .unwrap();
+                let fresh = String::from_utf8(minified(Bytes::from(fresh)).to_vec()).unwrap();
                 assert_eq!(
                     raw.split_once("\r\n\r\n").unwrap().1,
                     fresh,
@@ -764,6 +805,77 @@ mod tests {
                 assert_eq!(header_of(&raw, "vary"), Some("Cookie"), "{cookie}");
             }
         }
+    }
+
+    #[test]
+    fn minifying_collapses_each_run_of_whitespace_to_one_character() {
+        let page = Bytes::from_static(b"<ul>\n  <li>\n    One  two\n  </li>\n</ul>\n");
+        assert_eq!(&minified(page)[..], b"<ul>\n<li>\nOne two\n</li>\n</ul>");
+    }
+
+    /// Whitespace a browser shows as written stays as written, and an attribute keeps its value.
+    #[test]
+    fn minifying_leaves_preformatted_text_and_attribute_values_alone() {
+        let page = Bytes::from_static(
+            b"<pre>a   b\n   c</pre> <code>a   b\n   c</code> <textarea>a   b</textarea> <p title=\"x   y\">z</p>",
+        );
+        assert_eq!(minified(page.clone()), page);
+    }
+
+    /// A page that ends inside a tag cannot be minified safely, so it goes as rendered.
+    #[test]
+    fn a_page_the_minifier_cannot_finish_goes_as_rendered() {
+        let page = Bytes::from_static(b"<p>\n  Hello <a href=\"/x");
+        assert_eq!(minified(page.clone()), page);
+    }
+
+    /// Only HTML is minified; the length a page was rendered with no longer holds, so it goes.
+    #[tokio::test]
+    async fn only_html_is_minified_and_its_old_length_goes() {
+        let text = ([(header::CONTENT_TYPE, "text/plain")], "a\n  b").into_response();
+        let text = minify(text).await;
+        assert_eq!(
+            &axum::body::to_bytes(text.into_body(), 64).await.unwrap()[..],
+            b"a\n  b"
+        );
+        let page = (
+            [
+                (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+                (header::CONTENT_LENGTH, "11"),
+            ],
+            "<p>\n  a</p>",
+        )
+            .into_response();
+        let page = minify(page).await;
+        assert_eq!(page.headers().get(header::CONTENT_LENGTH), None);
+        assert_eq!(
+            &axum::body::to_bytes(page.into_body(), 64).await.unwrap()[..],
+            b"<p>\na</p>"
+        );
+    }
+
+    /// A page whose body fails as it is read cannot be sent, so the visitor gets an error rather than part of it.
+    #[tokio::test]
+    async fn a_page_whose_body_fails_is_an_error() {
+        struct Failing;
+        impl axum::body::HttpBody for Failing {
+            type Data = Bytes;
+            type Error = std::io::Error;
+            fn poll_frame(
+                self: std::pin::Pin<&mut Self>,
+                _: &mut std::task::Context<'_>,
+            ) -> std::task::Poll<Option<Result<http_body::Frame<Bytes>, std::io::Error>>>
+            {
+                std::task::Poll::Ready(Some(Err(std::io::Error::other("broken"))))
+            }
+        }
+        let mut page = Response::new(axum::body::Body::new(Failing));
+        page.headers_mut()
+            .insert(header::CONTENT_TYPE, HeaderValue::from_static("text/html"));
+        assert_eq!(
+            minify(page).await.status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
     }
 
     /// Every page asks for its text's font as it starts, rather than once the stylesheet has arrived, so text paints
@@ -863,7 +975,8 @@ mod tests {
         );
     }
 
-    /// A heading's text as a search engine or a screen reader reads it: tags dropped, a line break adding nothing.
+    /// A heading's text as a search engine or a screen reader reads it: tags dropped, a line break adding nothing,
+    /// and each run of whitespace one space.
     fn heading_texts(page: &str, level: &str) -> Vec<String> {
         page.split(&format!("<{level}"))
             .skip(1)
@@ -880,7 +993,7 @@ mod tests {
                         _ => {}
                     }
                 }
-                text
+                text.split_whitespace().collect::<Vec<_>>().join(" ")
             })
             .collect()
     }

@@ -1,7 +1,8 @@
 [workspace]
 resolver = "3"
-members = ["benchmarks", "crates/*"]
-# Cargo commands skip the benchmark harness unless asked, because it is slow to build.
+members = ["benchmarks", "crates/*", "tools/*"]
+# Cargo commands skip the benchmark harness unless asked, because it is slow to build, and the development tools,
+# which scripts/check.sh runs by name.
 default-members = ["crates/*"]
 
 [workspace.package]
@@ -19,9 +20,13 @@ axum = { version = "0.8", default-features = false, features = ["http1", "matche
 deadpool-postgres = "0.14"
 # Random session tokens, and codes later, from the operating system (ADR-0047).
 getrandom = "0.4"
+# Minifies every HTML page as it is sent (ADR-0083).
+html-minifier = "6.0.1"
 # Sending email over SMTP (ADR-0074): implicit TLS through rustls with the same crypto provider and roots as the
 # rest of Tetsu, on Tokio, with no native TLS. At least 0.11.24, which fixed six advisories.
 lettre = { version = "0.11.24", default-features = false, features = ["builder", "smtp-transport", "tokio1", "tokio1-rustls", "aws-lc-rs", "webpki-roots"] }
+# Formats the HTML templates, in tools/format-templates only (ADR-0083).
+markup-fmt = { package = "markup_fmt", version = "0.28" }
 # Log export over OTLP (ADR-0049): HTTP with protobuf and optional gzip, through a blocking client on the batch
 # thread, with rustls. Span fields are copied onto a record only from an allowlist. Internal logs put export
 # failures on standard output.

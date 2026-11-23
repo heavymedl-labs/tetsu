@@ -167,11 +167,30 @@ pub(crate) async fn send_bytes(
         .nth(1)
         .and_then(|code| code.parse().ok())
         .unwrap_or_default();
+    let body = if head
+        .to_ascii_lowercase()
+        .contains("content-type: text/html")
+    {
+        as_read(body)
+    } else {
+        body.to_string()
+    };
     Reply {
         status,
         head: head.to_string(),
-        body: body.to_string(),
+        body,
     }
+}
+
+/// A page with each run of whitespace read as one space, and none before a tag's closing `>`, as a browser reads
+/// markup, so tests do not depend on how a template is formatted (ADR-0083). It collapses whitespace inside `pre`
+/// too, which no test checks.
+fn as_read(page: &str) -> String {
+    page.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace(" >", ">")
+        .replace(" />", "/>")
 }
 
 /// What the passkey script sends: JSON, from the site itself, with the browser's cookie if it has one.

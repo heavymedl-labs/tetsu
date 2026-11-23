@@ -388,7 +388,11 @@ async fn a_visitor_sees_a_tenants_page_and_tetsus_page() {
     );
     assert!(lower.contains("x-robots-tag: noindex"), "{tenant}");
 
-    let home = get(&server, "/");
+    // Read with each run of whitespace as one space, as a browser reads markup (ADR-0083).
+    let home = get(&server, "/")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     assert!(home.starts_with("HTTP/1.1 200"), "{home}");
     assert!(
         home.contains("<span class=\"sr-only\">Tetsu: </span>Booking software,"),
