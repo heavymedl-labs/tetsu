@@ -16,8 +16,8 @@ use serde_json::{Value, json};
 
 use crate::browser::{Change, ForChange, Logout, Origins, return_path};
 use crate::domain::{
-    Actor, Answer, Ceremony, Device, Ending, Error, FailedCheck, HeldPasskey, ListedSession,
-    RateLimit, Realm, Session, SessionId, SessionToken, TimeLeft,
+    Account, Actor, Answer, Ceremony, Device, Ending, Error, FailedCheck, HeldPasskey,
+    ListedSession, RateLimit, Realm, Session, SessionId, SessionToken, TimeLeft,
 };
 use crate::passkeys::{RelyingParty, base64url};
 use crate::ports::OperatorStore;
@@ -127,6 +127,20 @@ struct JoinPage {
 #[derive(Template)]
 #[template(path = "account.html")]
 struct AccountPage {
+    shell: Shell,
+    user: String,
+    credentials: String,
+    passkeys: Vec<&'static str>,
+    can_add: bool,
+    fresh: bool,
+    /// The operator's live sessions, the one asking first (ADR-0059).
+    sessions: Vec<Shown>,
+}
+
+/// What every logged-in operator page holds (#148): the shared page's, and the operator the header names with the
+/// form token its Log out posts. Each page's struct holds one and reads through it, so templates name its fields
+/// directly.
+struct Shell {
     demo: bool,
     stylesheet: &'static str,
     script: &'static str,
@@ -135,15 +149,43 @@ struct AccountPage {
     scheme: &'static str,
     session_script: &'static str,
     name: String,
-    user: String,
-    credentials: String,
-    passkeys: Vec<&'static str>,
-    can_add: bool,
-    fresh: bool,
-    /// The operator's live sessions, the one asking first (ADR-0059).
-    sessions: Vec<Shown>,
+    /// The operator's initials, which the header's menu button shows.
+    initials: String,
     form: String,
+    /// The page's own path, which the menu marks as current when it is the account's.
+    here: &'static str,
 }
+
+impl Shell {
+    fn of(web: &Web, headers: &HeaderMap, name: String, form: String, here: &'static str) -> Self {
+        Self {
+            demo: web.demo,
+            stylesheet: web.stylesheet,
+            script: web.script,
+            scheme_script: web.scheme_script,
+            scheme: scheme_of(headers).as_str(),
+            session_script: web.session_script,
+            initials: initials(&name),
+            name,
+            form,
+            here,
+        }
+    }
+}
+
+/// Lets a page's template read its shell's fields as its own.
+macro_rules! through_shell {
+    ($($page:ty),+) => {$(
+        impl std::ops::Deref for $page {
+            type Target = Shell;
+            fn deref(&self) -> &Shell {
+                &self.shell
+            }
+        }
+    )+};
+}
+
+through_shell!(AccountPage, MailboxPage, NotFoundPage);
 
 /// A session as the operator's page lists it: its id, which ending it names, its device, and how long ago it
 /// started and was last used.
@@ -172,15 +214,8 @@ impl Shown {
 #[derive(Template)]
 #[template(path = "mailbox.html")]
 struct MailboxPage {
-    demo: bool,
-    stylesheet: &'static str,
-    script: &'static str,
-    scheme_script: &'static str,
-    /// The radio the color scheme control checks, from the visitor's cookie (ADR-0070).
-    scheme: &'static str,
-    session_script: &'static str,
+    shell: Shell,
     messages: Vec<Kept>,
-    form: String,
 }
 
 /// A kept message as the mailbox lists it.
@@ -194,14 +229,7 @@ struct Kept {
 #[derive(Template)]
 #[template(path = "not_found.html")]
 struct NotFoundPage {
-    demo: bool,
-    stylesheet: &'static str,
-    script: &'static str,
-    scheme_script: &'static str,
-    /// The radio the color scheme control checks, from the visitor's cookie (ADR-0070).
-    scheme: &'static str,
-    session_script: &'static str,
-    form: String,
+    shell: Shell,
 }
 
 #[derive(Template)]
@@ -339,9 +367,9 @@ async fn mailbox<S: OperatorStore>(
     uri: Uri,
 ) -> Response {
     let web = &served.web;
-    // A disabled operator's session is refused when it is used, so a live one is an enabled operator's.
-    let viewer = match viewing(&served, &headers).await {
-        Ok(Some((_, form))) => form,
+    // A session found live names an enabled operator, so an account is missing only if they were disabled since.
+    let (account, viewer) = match viewer(&served, &headers).await {
+        Ok(Some(viewer)) => viewer,
         Ok(None) => return see_other(&return_to(uri.path())),
         Err(error) => return unavailable_page(web, "could not show the mailbox", &error),
     };
@@ -351,12 +379,7 @@ async fn mailbox<S: OperatorStore>(
     };
     let now = SystemTime::now();
     page(&MailboxPage {
-        demo: web.demo,
-        stylesheet: web.stylesheet,
-        script: web.script,
-        scheme_script: web.scheme_script,
-        scheme: scheme_of(&headers).as_str(),
-        session_script: web.session_script,
+        shell: Shell::of(web, &headers, account.name, viewer, MAILBOX),
         messages: captured
             .into_iter()
             .map(|message| Kept {
@@ -366,8 +389,34 @@ async fn mailbox<S: OperatorStore>(
                 text: message.text,
             })
             .collect(),
-        form: viewer,
     })
+}
+
+/// The account of the live session a page's request comes with, and a form token for the page to carry; none for a
+/// request with no live session, or whose operator was disabled since it was checked.
+async fn viewer<S: OperatorStore>(
+    served: &Served<S>,
+    headers: &HeaderMap,
+) -> Result<Option<(Account, String)>, Error> {
+    let Some((session, form)) = viewing(served, headers).await? else {
+        return Ok(None);
+    };
+    let account = served.operators.account(&session).await?;
+    Ok(account.map(|account| (account, form)))
+}
+
+/// A name's initials as the header's menu button shows them: the first letters of its first and last words, in
+/// capitals, or one letter for a one-word name (#148).
+pub(crate) fn initials(name: &str) -> String {
+    let mut words = name.split_whitespace();
+    let first = words.next();
+    let last = words.next_back();
+    first
+        .into_iter()
+        .chain(last)
+        .filter_map(|word| word.chars().next())
+        .flat_map(char::to_uppercase)
+        .collect()
 }
 
 /// How long ago `at` was, in the largest whole unit: just now, minutes, hours, or days.
@@ -390,17 +439,11 @@ async fn elsewhere<S: OperatorStore>(
     uri: Uri,
 ) -> Response {
     let web = &served.web;
-    match viewing(&served, &headers).await {
-        Ok(Some((_, form))) => (
+    match viewer(&served, &headers).await {
+        Ok(Some((account, form))) => (
             StatusCode::NOT_FOUND,
             page(&NotFoundPage {
-                demo: web.demo,
-                stylesheet: web.stylesheet,
-                script: web.script,
-                scheme_script: web.scheme_script,
-                scheme: scheme_of(&headers).as_str(),
-                session_script: web.session_script,
-                form,
+                shell: Shell::of(web, &headers, account.name, form, ""),
             }),
         )
             .into_response(),
@@ -442,13 +485,6 @@ async fn shown<S: OperatorStore>(
     let now = SystemTime::now();
     Ok(account.map(|account| {
         page(&AccountPage {
-            demo: web.demo,
-            stylesheet: web.stylesheet,
-            script: web.script,
-            scheme_script: web.scheme_script,
-            scheme: scheme_of(headers).as_str(),
-            session_script: web.session_script,
-            name: account.name,
             user: base64url(&account.user_handle),
             credentials: account
                 .passkeys
@@ -463,7 +499,7 @@ async fn shown<S: OperatorStore>(
                 .into_iter()
                 .map(|listed| Shown::of(listed, now))
                 .collect(),
-            form,
+            shell: Shell::of(web, headers, account.name, form, ACCOUNT),
         })
     }))
 }

@@ -1,9 +1,7 @@
 {#- Tetsu's own header (ADR-0035): the wordmark home, and in a demo the site's sections and plans. Tetsu's pages and the site's not-found page share it. It reads `demo`. -#}
 {% import "../../../web/templates/components.html" as ui %}
 {%- let nav = [("/#product", "Product"), ("/#customers", "Customers"), ("/#why", "Why Tetsu"), ("/#pricing", "Pricing")] %}
-<header class="sticky top-0 z-40 border-b border-edge/70 bg-canvas/75 backdrop-blur-md">
-<nav aria-label="Tetsu" class="mx-auto flex h-14 max-w-page items-center justify-between gap-6 px-(--tetsu-gutter)">
-<a href="/" aria-label="Tetsu home" class="flex h-4 items-center text-ink focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent">{% include "../../../web/templates/wordmark.html" %}</a>
+{% call ui::header_bar() %}
 {% if demo %}<div class="hidden flex-1 items-center gap-8 pl-6 text-mini text-muted md:flex">
 {%- for (href, text) in nav %}
 <a href="{{ href }}" class="transition-colors hover:text-ink">{{ text }}</a>
@@ -15,11 +13,10 @@
     link is chosen needs a script, so it waits for islands (#88). It sits under its button where the browser can
     anchor it, and under the header's corner where it cannot. #}
 <button type="button" popovertarget="tetsu-menu" class="flex cursor-pointer rounded-lg p-1.5 text-muted [anchor-name:--tetsu-menu] hover:text-ink focus-visible:outline-2 focus-visible:outline-accent md:hidden"><span class="sr-only">Menu</span>{% call ui::icon("menu") %}{% endcall %}</button>
-<div id="tetsu-menu" popover class="inset-auto top-16 right-6 m-0 mt-2 w-48 rounded-xl border border-edge bg-surface p-2 text-ink shadow-lg [position-anchor:--tetsu-menu] supports-[top:anchor(bottom)]:top-[anchor(bottom)] supports-[top:anchor(bottom)]:right-[anchor(right)]">
+<div id="tetsu-menu" popover class="w-48 {% call ui::menu_style() %}{% endcall %}">
 {%- for (href, text) in nav %}
 <a href="{{ href }}" class="block rounded-lg px-3 py-2 text-ink hover:bg-canvas">{{ text }}</a>
 {%- endfor %}
 </div>{% endif %}
 </div>
-</nav>
-</header>
+{% endcall %}

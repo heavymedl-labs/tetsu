@@ -16,6 +16,8 @@ mod use_cases;
 #[cfg(test)]
 mod adding_tests;
 #[cfg(test)]
+mod header_tests;
+#[cfg(test)]
 mod http_tests;
 #[cfg(test)]
 mod join_tests;

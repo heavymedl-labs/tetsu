@@ -12,9 +12,10 @@
     Tetsu". #}
 {% block footer %}<footer class="flex justify-center px-6 pb-8">{% include "../../../web/templates/scheme.html" %}</footer>{% endblock %}
 {% block body %}
-<main class="flex flex-1 items-center justify-center px-6 py-16">
+{% block before %}{% endblock %}
+<main id="main" class="flex flex-1 justify-center px-6 {% block main %}items-center py-16{% endblock %}">
 <div class="tetsu-settle w-full {% block width %}max-w-72 text-center{% endblock %}">
-<a href="/" aria-label="Tetsu home" class="mx-auto block h-8 w-fit text-ink focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent">{% include "../../../web/templates/wordmark.html" %}</a>
+{% block wordmark %}<a href="/" aria-label="Tetsu home" class="mx-auto block h-8 w-fit text-ink focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent">{% include "../../../web/templates/wordmark.html" %}</a>{% endblock %}
 {% block card %}{% endblock %}
 {% block noscript %}<noscript><p class="mt-4 text-mini text-muted">Passkeys need JavaScript, which this browser has turned off.</p></noscript>{% endblock %}
 </div>

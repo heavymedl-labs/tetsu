@@ -2,9 +2,9 @@
     HTML is never shown, so nothing in an email runs or loads on an operator page. -#}
 {% extends "logged_in.html" %}
 {% block title %}Mailbox – Tetsu{% endblock %}
-{% block width %}max-w-2xl text-left{% endblock %}
+{% block width %}max-w-2xl{% endblock %}
 {% block card %}
-<h1 class="mt-6 text-lg font-medium text-balance text-ink">Mailbox</h1>
+<h1 class="text-lg font-medium text-balance text-ink">Mailbox</h1>
 <p class="mt-1 text-mini text-pretty text-muted">Email from the past week that went to no inbox, newest first. Every
 operator sees it, and invites are never kept here.</p>
 {% if messages.is_empty() %}<p class="mt-8 text-mini text-muted">Nothing kept yet.</p>

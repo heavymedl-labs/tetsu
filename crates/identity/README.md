@@ -216,7 +216,12 @@ pages, in a layout of Tetsu's own, load only Tetsu's own script, under a policy 
 Logging in is by passkey alone, as ADR-0040 sets for operators. Endpoints read only a JSON object sent as
 `application/json`, answer `no-store`, and give each ceremony's one refusal; a failure of the server is `503` to
 the browser and reported to the operator. Logging in ends the session the browser presented, in the transaction
-that starts the new one. Logging out is a plain form that clears the cookie and the browser's cache of the pages. The
+that starts the new one. Logging out is a plain form that clears the cookie and the browser's cache of the pages. Every
+logged-in page shares one header (#148, `v5.0.0-7.4.4`): a skip link, Tetsu's wordmark home, and the operator's
+initials opening a menu, a native popover that works without script, with their name, "Operator", Account, and the
+Log out form. The header and menu are shared components in `web/templates/components.html`, which the public site's
+header uses too, so other realms can fill them. Pages before login and the refused and unavailable pages have none.
+The
 operator's page offers a second passkey only within ten minutes of logging in, as the database allows, and its
 `<tetsu-passkeys>` tells the operator's devices every passkey Tetsu holds, through the Signal API.
 

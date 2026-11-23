@@ -107,3 +107,42 @@ w-82 shrink-0 snap-start border-r border-edge px-6 last:border-r-0 lg:w-auto lg:
 </ul>
 </div>
 {% endmacro %}
+
+{#- The header every Tetsu page with one shares (ADR-0035, #148): sticky, over a blur of the page, with Tetsu's
+    wordmark home at its left. What fills the rest of its row is the caller's: the site's sections, or a person's
+    account menu. -#}
+{% macro header_bar() %}
+<header class="sticky top-0 z-40 border-b border-edge/70 bg-canvas/75 backdrop-blur-md">
+<nav aria-label="Tetsu" class="mx-auto flex h-14 max-w-page items-center justify-between gap-6 px-(--tetsu-gutter)">
+<a href="/" aria-label="Tetsu home" class="flex h-4 items-center text-ink focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent">{% include "../../../web/templates/wordmark.html" %}</a>
+{{ caller() }}
+</nav>
+</header>
+{% endmacro %}
+
+{#- A header menu's look: a native popover under the button that opens it, which anchors itself as
+    `[anchor-name:--tetsu-menu]` where the browser can anchor it, and sits under the header's corner where it cannot.
+    No page has two, so they share the anchor's name. The caller adds its width. -#}
+{% macro menu_style() -%}
+inset-auto top-16 right-6 m-0 mt-2 rounded-xl border border-edge bg-surface p-2 text-ink shadow-lg [position-anchor:--tetsu-menu] supports-[top:anchor(bottom)]:top-[anchor(bottom)] supports-[top:anchor(bottom)]:right-[anchor(right)]
+{%- endmacro %}
+
+{#- A signed-in person's account menu (#148), for any realm: their initials, which open a menu with their name, their
+    role in this realm (`role`), Account (`account`, marked current when `here` is it), and Log out, which posts
+    `form`, the session's form token, to `logout`. It works without script, and Escape or a tap outside closes it.
+    The button names its visible initials first, so speech input can say them, and the button and rows grow to 44px
+    under a coarse pointer. -#}
+{% macro account_menu(name, initials, role, account, logout, form, here) %}
+<button type="button" popovertarget="tetsu-account-menu" class="flex size-8 cursor-pointer items-center justify-center rounded-full bg-ink/8 text-xs font-medium tracking-wide text-ink ring-1 ring-edge transition-colors [anchor-name:--tetsu-menu] hover:bg-ink/12 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent pointer-coarse:size-11">{{ initials }}<span class="sr-only">, account menu, {{ name }}</span></button>
+<div id="tetsu-account-menu" popover class="w-60 {% call menu_style() %}{% endcall %}">
+<div class="px-3 pt-1.5 pb-2.5">
+<p class="text-mini font-medium break-words text-ink">{{ name }}</p>
+<p class="text-xs text-muted">{{ role }}</p>
+</div>
+<div class="mx-1 border-t border-edge-soft"></div>
+<ul role="list" class="mt-1.5 text-mini">
+<li><a href="{{ account }}"{% if here == account %} aria-current="page"{% endif %} class="flex rounded-lg px-3 py-2 text-ink hover:bg-ink/5 focus-visible:outline-2 focus-visible:outline-accent aria-[current=page]:font-medium pointer-coarse:py-3">Account</a></li>
+<li><form method="post" action="{{ logout }}"><input type="hidden" name="form" value="{{ form }}"><button type="submit" class="flex w-full cursor-pointer rounded-lg px-3 py-2 text-left text-ink hover:bg-ink/5 focus-visible:outline-2 focus-visible:outline-accent pointer-coarse:py-3">Log out</button></form></li>
+</ul>
+</div>
+{% endmacro %}
