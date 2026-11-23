@@ -3,45 +3,15 @@
 {#- A spot: o open or t taken, or one the story changes at its own point: y becomes yours, g your guest's, h held,
     and b or B booked. `dim` fades a spot a filter rules out, and `accessible` marks it. -#}
 {% macro spot(x, y, w, h, label, state, dim, accessible) %}
-  <g class="{% if dim %}opacity-35{% endif %}">{% if state.eq(&'t') %}{% call shape(x, y, w, h, label, 't') %}{%
-        endcall
-      %}{% else %}{% call shape(x, y, w, h, label, 'o') %}{% endcall %}{% endif %}</g>
-  {%- if state.eq(&'y') || state.eq(&'g') || state.eq(&'h') || state.eq(&'b') || state.eq(&'B') %}<g
-      class="tetsu-in {% if state.eq(&'y') %}[--at:0.25]{% else if state.eq(&'g') %}[--at:0.38]{% else if state.eq(&'h') %}[--at:0.6]{% else if state.eq(&'b') %}[--at:0.55]{% else %}[--at:0.78]{% endif %}"
-    >
-      {%- if state.eq(&'b') || state.eq(&'B') %}{% call shape(x, y, w, h, label, 't') %}{% endcall %}{% else %}{%
-          call shape(x, y, w, h, label, state)
-        %}{% endcall %}{% endif %}</g>
-  {%- endif %}
-  {%- if accessible %}<circle
-      cx="{{ x + w - 2 }}"
-      cy="{{ y + 2 }}"
-      r="4.5"
-      class="fill-surface stroke-ink"
-      stroke-width="1.25"
-    /><circle cx="{{ x + w - 2 }}" cy="{{ y + 2 }}" r="1.5" class="fill-ink" />{% endif %}
+<g class="{% if dim %}opacity-35{% endif %}">{% if state.eq(&'t') %}{% call shape(x, y, w, h, label, 't') %}{% endcall %}{% else %}{% call shape(x, y, w, h, label, 'o') %}{% endcall %}{% endif %}</g>
+{%- if state.eq(&'y') || state.eq(&'g') || state.eq(&'h') || state.eq(&'b') || state.eq(&'B') %}<g class="tetsu-in {% if state.eq(&'y') %}[--at:0.25]{% else if state.eq(&'g') %}[--at:0.38]{% else if state.eq(&'h') %}[--at:0.6]{% else if state.eq(&'b') %}[--at:0.55]{% else %}[--at:0.78]{% endif %}">
+{%- if state.eq(&'b') || state.eq(&'B') %}{% call shape(x, y, w, h, label, 't') %}{% endcall %}{% else %}{% call shape(x, y, w, h, label, state) %}{% endcall %}{% endif %}</g>
+{%- endif %}
+{%- if accessible %}<circle cx="{{ x + w - 2 }}" cy="{{ y + 2 }}" r="4.5" class="fill-surface stroke-ink" stroke-width="1.25"/><circle cx="{{ x + w - 2 }}" cy="{{ y + 2 }}" r="1.5" class="fill-ink"/>{% endif %}
 {% endmacro %}
 
 {#- A spot's shape and label, in a look: t taken, o open, y yours, g your guest's, or h held. -#}
 {% macro shape(x, y, w, h, label, look) -%}
-  <rect
-    x="{{ x }}"
-    y="{{ y }}"
-    width="{{ w }}"
-    height="{{ h }}"
-    rx="5"
-    class="{% if look.eq(&'t') %}fill-[url(#tetsu-hatch)] stroke-ink/20{% else if look.eq(&'o') %}fill-surface stroke-ink/40{% else if look.eq(&'y') %}fill-forge{% else if look.eq(&'g') %}fill-forge/30 stroke-forge{% else %}fill-forge/15 stroke-forge{% endif %}"
-    {%- if look.eq(&'t') %}
-      stroke-width="1"
-    {% else if look.eq(&'o') %}
-      stroke-width="1.25"
-    {% else if !look.eq(&'y') %}
-      stroke-width="1.5"
-    {% endif %}
-  /><text
-    x="{{ x + w / 2 }}"
-    y="{{ y + h / 2 + 3 }}"
-    text-anchor="middle"
-    class="font-mono text-[9px] {% if look.eq(&'t') %}fill-muted/70{% else if look.eq(&'y') %}fill-white{% else %}fill-ink{% endif %}"
-  >{{ label }}</text>
+<rect x="{{ x }}" y="{{ y }}" width="{{ w }}" height="{{ h }}" rx="5" class="{% if look.eq(&'t') %}fill-[url(#tetsu-hatch)] stroke-ink/20{% else if look.eq(&'o') %}fill-surface stroke-ink/40{% else if look.eq(&'y') %}fill-forge{% else if look.eq(&'g') %}fill-forge/30 stroke-forge{% else %}fill-forge/15 stroke-forge{% endif %}"
+{%- if look.eq(&'t') %} stroke-width="1"{% else if look.eq(&'o') %} stroke-width="1.25"{% else if !look.eq(&'y') %} stroke-width="1.5"{% endif %}/><text x="{{ x + w / 2 }}" y="{{ y + h / 2 + 3 }}" text-anchor="middle" class="font-mono text-[9px] {% if look.eq(&'t') %}fill-muted/70{% else if look.eq(&'y') %}fill-white{% else %}fill-ink{% endif %}">{{ label }}</text>
 {%- endmacro %}

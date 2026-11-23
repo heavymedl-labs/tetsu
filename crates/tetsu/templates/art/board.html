@@ -3,94 +3,72 @@
     at x 780, which the hero sets at the text's left edge (figures.css), and other bookings filling in around it. It fades in from the header as it fades out at its
     foot, and at the sides. A test in serve.rs checks its wordmark against the brand file. The bookings happen
     once, each on its own beat, unless motion is reduced. -#}
-<svg
-  aria-hidden="true"
-  xmlns="http://www.w3.org/2000/svg"
-  viewBox="0 0 2124 384"
-  preserveAspectRatio="xMidYMid slice"
-  class="size-full overflow-visible"
->
-  <defs>
-    <pattern id="tetsu-board-slot" width="30" height="30" patternUnits="userSpaceOnUse"><rect
-        x="0.75"
-        y="0.75"
-        width="22.5"
-        height="22.5"
-        rx="3"
-        fill="none"
-        stroke-width="1.5"
-        class="stroke-ink/12"
-      /></pattern>
-    <linearGradient id="tetsu-board-x"><stop offset="0" stop-color="#fff" stop-opacity="0" /><stop
-        offset="0.22"
-        stop-color="#fff"
-      /><stop offset="0.78" stop-color="#fff" /><stop offset="1" stop-color="#fff" stop-opacity="0" /></linearGradient>
-    <linearGradient id="tetsu-board-y" x1="0" y1="0" x2="0" y2="1"><stop
-        offset="0"
-        stop-color="#fff"
-        stop-opacity="0"
-      /><stop offset="0.5" stop-color="#fff" /><stop offset="1" stop-color="#fff" stop-opacity="0" /></linearGradient>
-    <mask id="tetsu-board-mask-x"><rect width="2124" height="384" fill="url(#tetsu-board-x)" /></mask>
-    <mask id="tetsu-board-mask-y"><rect width="2124" height="384" fill="url(#tetsu-board-y)" /></mask>
-  </defs>
-  <g mask="url(#tetsu-board-mask-x)"><g mask="url(#tetsu-board-mask-y)">
-      <rect width="2124" height="384" fill="url(#tetsu-board-slot)" />
-      <rect x="360" y="60" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:900ms]" />
-      <rect x="1440" y="0" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:945ms]" />
-      <rect x="420" y="330" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:990ms]" />
-      <rect x="360" y="240" width="24" height="24" rx="3" class="tetsu-slot fill-forge/45 [animation-delay:1035ms]" />
-      <rect x="1230" y="30" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1080ms]" />
-      <rect x="840" y="360" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1125ms]" />
-      <rect x="540" y="330" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1170ms]" />
-      <rect x="1800" y="30" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1215ms]" />
-      <rect x="1470" y="0" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1260ms]" />
-      <rect x="210" y="180" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1305ms]" />
-      <rect x="1530" y="30" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1350ms]" />
-      <rect x="900" y="30" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1395ms]" />
-      <rect x="1230" y="60" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1440ms]" />
-      <rect x="1260" y="330" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1485ms]" />
-      <rect x="1260" y="60" width="24" height="24" rx="3" class="tetsu-slot fill-forge/45 [animation-delay:1530ms]" />
-      <rect x="1530" y="270" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1575ms]" />
-      <rect x="1080" y="0" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1620ms]" />
-      <rect x="1200" y="360" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1665ms]" />
-      <rect x="1920" y="270" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1710ms]" />
-      <rect x="660" y="30" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1755ms]" />
-      <rect x="1170" y="360" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1800ms]" />
-      <rect x="780" y="330" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1845ms]" />
-      <rect x="810" y="60" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1890ms]" />
-      <rect x="1920" y="60" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1935ms]" />
-      <rect x="1290" y="0" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1980ms]" />
-      <rect x="360" y="30" width="24" height="24" rx="3" class="tetsu-slot fill-forge/45 [animation-delay:2025ms]" />
-      <rect x="1620" y="180" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2070ms]" />
-      <rect x="1650" y="60" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2115ms]" />
-      <rect x="630" y="360" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2160ms]" />
-      <rect x="780" y="30" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2205ms]" />
-      <rect x="1650" y="300" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2250ms]" />
-      <rect x="420" y="360" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2295ms]" />
-      <rect x="1140" y="30" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2340ms]" />
-      <rect x="150" y="270" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2385ms]" />
-      <rect x="1140" y="300" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2430ms]" />
-      <rect x="210" y="210" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2475ms]" />
-      <rect x="1500" y="0" width="24" height="24" rx="3" class="tetsu-slot fill-forge/45 [animation-delay:2520ms]" />
-      <rect x="810" y="330" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2565ms]" />
-      <rect x="1410" y="180" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2610ms]" />
-      <rect x="1260" y="360" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2655ms]" />
-      <rect x="750" y="30" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2700ms]" />
-      <rect x="120" y="210" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2745ms]" />
-      <rect x="1980" y="180" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2790ms]" />
-      <rect x="330" y="30" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2835ms]" />
-      <rect x="1530" y="0" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2880ms]" />
-      <rect x="300" y="240" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2925ms]" />
-      <rect x="720" y="270" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2970ms]" />
-      <rect x="1320" y="0" width="24" height="24" rx="3" class="tetsu-slot fill-forge/45 [animation-delay:3015ms]" />
-      <rect x="450" y="150" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:3060ms]" />
-      <rect x="1830" y="180" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:3105ms]" />
-      <rect x="1800" y="120" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:3150ms]" />
-      <rect x="570" y="180" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:3195ms]" />
-      <rect x="840" y="60" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:3240ms]" />
-      <rect x="1830" y="60" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:3285ms]" />
-      <rect x="270" y="150" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:3330ms]" />
-      <rect x="1920" y="300" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:3375ms]" />
-    </g></g>
-  <g transform="translate(780 120)">{% call brand::slots() %}{% endcall %}</g>
+<svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2124 384" preserveAspectRatio="xMidYMid slice" class="size-full overflow-visible">
+<defs>
+<pattern id="tetsu-board-slot" width="30" height="30" patternUnits="userSpaceOnUse"><rect x="0.75" y="0.75" width="22.5" height="22.5" rx="3" fill="none" stroke-width="1.5" class="stroke-ink/12"/></pattern>
+<linearGradient id="tetsu-board-x"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset="0.22" stop-color="#fff"/><stop offset="0.78" stop-color="#fff"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+<linearGradient id="tetsu-board-y" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset="0.5" stop-color="#fff"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+<mask id="tetsu-board-mask-x"><rect width="2124" height="384" fill="url(#tetsu-board-x)"/></mask>
+<mask id="tetsu-board-mask-y"><rect width="2124" height="384" fill="url(#tetsu-board-y)"/></mask>
+</defs>
+<g mask="url(#tetsu-board-mask-x)"><g mask="url(#tetsu-board-mask-y)">
+<rect width="2124" height="384" fill="url(#tetsu-board-slot)"/>
+<rect x="360" y="60" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:900ms]"/>
+<rect x="1440" y="0" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:945ms]"/>
+<rect x="420" y="330" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:990ms]"/>
+<rect x="360" y="240" width="24" height="24" rx="3" class="tetsu-slot fill-forge/45 [animation-delay:1035ms]"/>
+<rect x="1230" y="30" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1080ms]"/>
+<rect x="840" y="360" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1125ms]"/>
+<rect x="540" y="330" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1170ms]"/>
+<rect x="1800" y="30" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1215ms]"/>
+<rect x="1470" y="0" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1260ms]"/>
+<rect x="210" y="180" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1305ms]"/>
+<rect x="1530" y="30" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1350ms]"/>
+<rect x="900" y="30" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1395ms]"/>
+<rect x="1230" y="60" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1440ms]"/>
+<rect x="1260" y="330" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1485ms]"/>
+<rect x="1260" y="60" width="24" height="24" rx="3" class="tetsu-slot fill-forge/45 [animation-delay:1530ms]"/>
+<rect x="1530" y="270" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1575ms]"/>
+<rect x="1080" y="0" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1620ms]"/>
+<rect x="1200" y="360" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1665ms]"/>
+<rect x="1920" y="270" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1710ms]"/>
+<rect x="660" y="30" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1755ms]"/>
+<rect x="1170" y="360" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1800ms]"/>
+<rect x="780" y="330" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1845ms]"/>
+<rect x="810" y="60" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1890ms]"/>
+<rect x="1920" y="60" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1935ms]"/>
+<rect x="1290" y="0" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:1980ms]"/>
+<rect x="360" y="30" width="24" height="24" rx="3" class="tetsu-slot fill-forge/45 [animation-delay:2025ms]"/>
+<rect x="1620" y="180" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2070ms]"/>
+<rect x="1650" y="60" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2115ms]"/>
+<rect x="630" y="360" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2160ms]"/>
+<rect x="780" y="30" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2205ms]"/>
+<rect x="1650" y="300" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2250ms]"/>
+<rect x="420" y="360" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2295ms]"/>
+<rect x="1140" y="30" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2340ms]"/>
+<rect x="150" y="270" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2385ms]"/>
+<rect x="1140" y="300" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2430ms]"/>
+<rect x="210" y="210" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2475ms]"/>
+<rect x="1500" y="0" width="24" height="24" rx="3" class="tetsu-slot fill-forge/45 [animation-delay:2520ms]"/>
+<rect x="810" y="330" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2565ms]"/>
+<rect x="1410" y="180" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2610ms]"/>
+<rect x="1260" y="360" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2655ms]"/>
+<rect x="750" y="30" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2700ms]"/>
+<rect x="120" y="210" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2745ms]"/>
+<rect x="1980" y="180" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2790ms]"/>
+<rect x="330" y="30" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2835ms]"/>
+<rect x="1530" y="0" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2880ms]"/>
+<rect x="300" y="240" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2925ms]"/>
+<rect x="720" y="270" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:2970ms]"/>
+<rect x="1320" y="0" width="24" height="24" rx="3" class="tetsu-slot fill-forge/45 [animation-delay:3015ms]"/>
+<rect x="450" y="150" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:3060ms]"/>
+<rect x="1830" y="180" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:3105ms]"/>
+<rect x="1800" y="120" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:3150ms]"/>
+<rect x="570" y="180" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:3195ms]"/>
+<rect x="840" y="60" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:3240ms]"/>
+<rect x="1830" y="60" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:3285ms]"/>
+<rect x="270" y="150" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:3330ms]"/>
+<rect x="1920" y="300" width="24" height="24" rx="3" class="tetsu-slot fill-ink/15 [animation-delay:3375ms]"/>
+</g></g>
+<g transform="translate(780 120)">{% call brand::slots() %}{% endcall %}</g>
 </svg>

@@ -1,82 +1,41 @@
 {% import "art/app.html" as app %}
 {#- The courts' day, and the weekend's sites, each booking (column, row, span, name, line). A narrow card shows three
     courts, so names stay readable, and the sites only beside a wide one. -#}
-{%-
-  let courts = [(2, 2, 2, "Open play", "Pickleball · 8 of 8"), (3, 2, 1, "Chris Ogden", "Singles"), (4, 2, 2, "Junior clinic", "Coach Rita"), (5, 3, 1, "Pat Rivera", "Doubles"), (2, 4, 2, "League", "Saturday ladder"), (3, 4, 1, "Alex Moore", "Lesson"), (5, 4, 2, "Open play", "Tennis · 6 of 8"), (3, 6, 1, "Jo Kimura", "Ball machine"), (2, 6, 2, "Lunch league", "Pickleball · 12 of 12"), (4, 6, 1, "Luis Ortega", "Singles"), (5, 7, 2, "Private lesson", "Coach Rita"), (3, 7, 2, "Cardio tennis", "6 of 8"), (4, 8, 1, "Kim Tran", "Doubles")]
-%}
-{%-
-  let sites = [(2, 2, 3, "Abara family", "3 nights"), (2, 3, 1, "Luis Ortega", "1 night"), (3, 4, 2, "Marta Silva", "2 nights"), (2, 5, 2, "Reyes", "2 nights · 30 amp"), (2, 6, 1, "Dean Foster", "1 night"), (2, 7, 3, "Haines", "cabin · 3 nights"), (3, 8, 2, "Park family", "cabin · 2 nights")]
-%}
-{%
-  call app::panel("Courts booked by the hour at a tennis and pickleball club, where an open hour is booked online, and campsites booked by the night, where an open site is booked for a weekend", small = true)
-%}
-  <div class="grid grid-cols-1 @3xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
-    <div class="flex flex-col">
-      {% call app::bar("Linden Courts", "· Saturday, November 14") %}{% endcall %}
-      <div class="flex flex-1 flex-col p-6"><div
-          class="grid flex-1 grid-cols-[2.25rem_repeat(3,minmax(0,1fr))] @md:grid-cols-[2.25rem_repeat(4,minmax(0,1fr))] grid-rows-[auto_repeat(7,minmax(2.75rem,1fr))] gap-x-1.5 @xl:gap-x-2"
-        >
-          {%- for (k, head) in ["Court 1", "Court 2", "Court 3", "Court 4"].iter().enumerate() %}<p
-              class="{% call app::at(k + 2, 1) %}{% endcall %} {% if k == 3 %}hidden @md:block {% endif %}pb-2 font-medium text-ink"
-            >{{ head }}</p>{% endfor %}
-          {%- for (k, hour) in ["8 am", "9", "10", "11", "12 pm", "1", "2"].iter().enumerate() %}
-            <p class="{% call app::at(1, k + 2) %}{% endcall %} -mt-1.5 font-mono text-muted">{{ hour }}</p><div
-              class="col-span-3 @md:col-span-4 {% call app::at(2, k + 2) %}{% endcall %} border-t border-edge/60"
-            ></div>
-          {%- endfor %}
-          {%- for (c, r, span, name, line) in courts %}
-            <div
-              class="{% call app::at(*c, *r) %}{% endcall %} {% if *span == 2 %}row-span-2{% else %}row-span-1{% endif %}{% if *c == 5 %} hidden @md:block{% endif %} mb-1 overflow-hidden rounded-md border-l-2 border-ink/25 bg-fill p-1.5"
-            ><p class="truncate font-medium text-ink">{{ name }}</p><p class="truncate text-muted">{{ line }}</p></div>
-          {%- endfor %}
-          <div class="relative col-start-4 row-start-5 mb-1">
-            <div
-              class="tetsu-out absolute inset-0 rounded-md border border-dashed border-edge p-1.5 text-muted [--at:0.3]"
-            >Open<br>$32 / hour</div>
-            <div
-              class="tetsu-in absolute inset-0 overflow-hidden rounded-md border-l-2 border-forge bg-forge/10 p-1.5 [--at:0.32] [--len:0.06]"
-            ><p class="truncate font-medium text-ink">Dev Mehta</p><p class="truncate text-muted"
-              >Booked online · paid</p></div>
-          </div>
-        </div></div>
-    </div>
-    <div class="hidden flex-col border-t border-edge @3xl:flex @3xl:border-t-0 @3xl:border-l">
-      {% call app::bar("Pinewake Campground", "· This weekend") %}{% endcall %}
-      <div class="flex flex-1 flex-col p-6"><div
-          class="grid flex-1 grid-cols-[4.5rem_repeat(3,minmax(0,1fr))] grid-rows-[auto_repeat(7,minmax(2.25rem,1fr))] gap-x-1.5"
-        >
-          {%- for (k, day) in ["Fri 13", "Sat 14", "Sun 15"].iter().enumerate() %}<p
-              class="{% call app::at(k + 2, 1) %}{% endcall %} pb-2 font-medium text-ink"
-            >{{ day }}</p>{% endfor %}
-          {%-
-            for (k, site) in ["A1 · tent", "A2 · tent", "A3 · tent", "B1 · RV", "B2 · RV", "C1 · cabin", "C2 · cabin"].iter().enumerate()
-          %}<p class="{% call app::at(1, k + 2) %}{% endcall %} self-center font-mono text-muted">{{ site }}</p>{%
-            endfor
-          %}
-          {%- for (c, r, span, name, line) in sites %}
-            <div
-              class="{% call app::at(*c, *r) %}{% endcall %} {% if *span == 3 %}col-span-3{% else if *span == 2 %}col-span-2{% else %}col-span-1{% endif %} my-0.5 overflow-hidden rounded-md border-l-2 border-ink/25 bg-fill px-2 py-1"
-            ><p class="truncate text-ink">{{ name }} <span class="text-muted">· {{ line }}</span></p></div>
-          {%- endfor %}
-          <div class="relative col-span-2 col-start-3 row-start-6 my-0.5">
-            <div
-              class="tetsu-out absolute inset-0 rounded-md border border-dashed border-edge px-2 py-1 text-muted [--at:0.55]"
-            >Open · 2-night minimum</div>
-            <div
-              class="tetsu-in absolute inset-0 overflow-hidden rounded-md border-l-2 border-forge bg-forge/10 px-2 py-1 [--at:0.57] [--len:0.06]"
-            ><p class="truncate text-ink">June Okoro <span class="text-muted"
-                >· 2 nights · booked online</span></p></div>
-          </div>
-        </div>
-        <p class="mt-4 text-xs text-muted">Check-in 3 pm, check-out 11 am. Weekends hold for two nights.</p></div>
-    </div>
-  </div>
-  <div
-    class="grid gap-x-6 gap-y-1 border-t border-edge px-4 py-3 font-mono text-[11px] text-muted @xl:px-6 @3xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]"
-  ><p class="grid *:col-start-1 *:row-start-1"><span class="tetsu-out [--at:0.32]"
-      >30 of 40 court hours booked today</span><span class="tetsu-in text-ink [--at:0.32]"
-      >31 of 40 court hours booked today</span></p><p class="hidden *:col-start-1 *:row-start-1 @3xl:grid"><span
-        class="tetsu-out [--at:0.57]"
-      >13 of 14 sites this weekend</span><span class="tetsu-in text-ink [--at:0.57]"
-      >14 of 14 sites this weekend</span></p></div>
+{%- let courts = [(2, 2, 2, "Open play", "Pickleball · 8 of 8"), (3, 2, 1, "Chris Ogden", "Singles"), (4, 2, 2, "Junior clinic", "Coach Rita"), (5, 3, 1, "Pat Rivera", "Doubles"), (2, 4, 2, "League", "Saturday ladder"), (3, 4, 1, "Alex Moore", "Lesson"), (5, 4, 2, "Open play", "Tennis · 6 of 8"), (3, 6, 1, "Jo Kimura", "Ball machine"), (2, 6, 2, "Lunch league", "Pickleball · 12 of 12"), (4, 6, 1, "Luis Ortega", "Singles"), (5, 7, 2, "Private lesson", "Coach Rita"), (3, 7, 2, "Cardio tennis", "6 of 8"), (4, 8, 1, "Kim Tran", "Doubles")] %}
+{%- let sites = [(2, 2, 3, "Abara family", "3 nights"), (2, 3, 1, "Luis Ortega", "1 night"), (3, 4, 2, "Marta Silva", "2 nights"), (2, 5, 2, "Reyes", "2 nights · 30 amp"), (2, 6, 1, "Dean Foster", "1 night"), (2, 7, 3, "Haines", "cabin · 3 nights"), (3, 8, 2, "Park family", "cabin · 2 nights")] %}
+{% call app::panel("Courts booked by the hour at a tennis and pickleball club, where an open hour is booked online, and campsites booked by the night, where an open site is booked for a weekend", small = true) %}
+<div class="grid grid-cols-1 @3xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
+<div class="flex flex-col">
+{% call app::bar("Linden Courts", "· Saturday, November 14") %}{% endcall %}
+<div class="flex flex-1 flex-col p-6"><div class="grid flex-1 grid-cols-[2.25rem_repeat(3,minmax(0,1fr))] @md:grid-cols-[2.25rem_repeat(4,minmax(0,1fr))] grid-rows-[auto_repeat(7,minmax(2.75rem,1fr))] gap-x-1.5 @xl:gap-x-2">
+{%- for (k, head) in ["Court 1", "Court 2", "Court 3", "Court 4"].iter().enumerate() %}<p class="{% call app::at(k + 2, 1) %}{% endcall %} {% if k == 3 %}hidden @md:block {% endif %}pb-2 font-medium text-ink">{{ head }}</p>{% endfor %}
+{%- for (k, hour) in ["8 am", "9", "10", "11", "12 pm", "1", "2"].iter().enumerate() %}
+<p class="{% call app::at(1, k + 2) %}{% endcall %} -mt-1.5 font-mono text-muted">{{ hour }}</p><div class="col-span-3 @md:col-span-4 {% call app::at(2, k + 2) %}{% endcall %} border-t border-edge/60"></div>
+{%- endfor %}
+{%- for (c, r, span, name, line) in courts %}
+<div class="{% call app::at(*c, *r) %}{% endcall %} {% if *span == 2 %}row-span-2{% else %}row-span-1{% endif %}{% if *c == 5 %} hidden @md:block{% endif %} mb-1 overflow-hidden rounded-md border-l-2 border-ink/25 bg-fill p-1.5"><p class="truncate font-medium text-ink">{{ name }}</p><p class="truncate text-muted">{{ line }}</p></div>
+{%- endfor %}
+<div class="relative col-start-4 row-start-5 mb-1">
+<div class="tetsu-out absolute inset-0 rounded-md border border-dashed border-edge p-1.5 text-muted [--at:0.3]">Open<br>$32 / hour</div>
+<div class="tetsu-in absolute inset-0 overflow-hidden rounded-md border-l-2 border-forge bg-forge/10 p-1.5 [--at:0.32] [--len:0.06]"><p class="truncate font-medium text-ink">Dev Mehta</p><p class="truncate text-muted">Booked online · paid</p></div>
+</div>
+</div></div>
+</div>
+<div class="hidden flex-col border-t border-edge @3xl:flex @3xl:border-t-0 @3xl:border-l">
+{% call app::bar("Pinewake Campground", "· This weekend") %}{% endcall %}
+<div class="flex flex-1 flex-col p-6"><div class="grid flex-1 grid-cols-[4.5rem_repeat(3,minmax(0,1fr))] grid-rows-[auto_repeat(7,minmax(2.25rem,1fr))] gap-x-1.5">
+{%- for (k, day) in ["Fri 13", "Sat 14", "Sun 15"].iter().enumerate() %}<p class="{% call app::at(k + 2, 1) %}{% endcall %} pb-2 font-medium text-ink">{{ day }}</p>{% endfor %}
+{%- for (k, site) in ["A1 · tent", "A2 · tent", "A3 · tent", "B1 · RV", "B2 · RV", "C1 · cabin", "C2 · cabin"].iter().enumerate() %}<p class="{% call app::at(1, k + 2) %}{% endcall %} self-center font-mono text-muted">{{ site }}</p>{% endfor %}
+{%- for (c, r, span, name, line) in sites %}
+<div class="{% call app::at(*c, *r) %}{% endcall %} {% if *span == 3 %}col-span-3{% else if *span == 2 %}col-span-2{% else %}col-span-1{% endif %} my-0.5 overflow-hidden rounded-md border-l-2 border-ink/25 bg-fill px-2 py-1"><p class="truncate text-ink">{{ name }} <span class="text-muted">· {{ line }}</span></p></div>
+{%- endfor %}
+<div class="relative col-span-2 col-start-3 row-start-6 my-0.5">
+<div class="tetsu-out absolute inset-0 rounded-md border border-dashed border-edge px-2 py-1 text-muted [--at:0.55]">Open · 2-night minimum</div>
+<div class="tetsu-in absolute inset-0 overflow-hidden rounded-md border-l-2 border-forge bg-forge/10 px-2 py-1 [--at:0.57] [--len:0.06]"><p class="truncate text-ink">June Okoro <span class="text-muted">· 2 nights · booked online</span></p></div>
+</div>
+</div>
+<p class="mt-4 text-xs text-muted">Check-in 3 pm, check-out 11 am. Weekends hold for two nights.</p></div>
+</div>
+</div>
+<div class="grid gap-x-6 gap-y-1 border-t border-edge px-4 py-3 font-mono text-[11px] text-muted @xl:px-6 @3xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]"><p class="grid *:col-start-1 *:row-start-1"><span class="tetsu-out [--at:0.32]">30 of 40 court hours booked today</span><span class="tetsu-in text-ink [--at:0.32]">31 of 40 court hours booked today</span></p><p class="hidden *:col-start-1 *:row-start-1 @3xl:grid"><span class="tetsu-out [--at:0.57]">13 of 14 sites this weekend</span><span class="tetsu-in text-ink [--at:0.57]">14 of 14 sites this weekend</span></p></div>
 {% endcall %}

@@ -15,7 +15,9 @@ indentation every page carries: 13% on the root page and 7% on operator pages af
 
 - **markup_fmt formats every HTML template,** as Jinja, in strict whitespace mode, 120 columns wide, indented by
   two spaces. Strict mode never adds or removes whitespace a browser would show, and markup_fmt leaves a tag's
-  Rust as written. A generated template, whose first line says so, stays as its generator writes it.
+  Rust as written. A generated template, whose first line says so, stays as its generator writes it. So do the
+  drawings in `crates/tetsu/templates/art` and `home/panels`: inline SVG, which the minifier sends as written, so
+  formatting them grew the root page from 286 KB to 424 KB before compression.
 - **A Cargo tool runs it:** `cargo run -p tetsu-format-templates` formats in place, and with `--check` fails on a
   template that is not formatted. It lives in `tools/format-templates`, outside the default members like the
   benchmarks, so markup_fmt never reaches the binary. `scripts/check.sh` runs the check, its lint, and its tests,
@@ -42,7 +44,7 @@ indentation every page carries: 13% on the root page and 7% on operator pages af
 ## Consequences
 
 Templates read consistently, and a formatting change is one command. Pages ship within about 2% of their old
-size after brotli, and 5.5% on the root page, whose SVG art stays formatted; the page budget
+size after brotli, and the root page within 0.5%, since its drawings keep their compact source; the page budget
 ([ADR-0039](0039-response-compression-and-page-budget.md)) still holds. Minifying costs 33 to 56 µs per operator
 page and about 1 ms on the root page. Pages that do not vary by visitor could be rendered and minified once
 ([#163](https://github.com/heavymedl-labs/tetsu/issues/163)).

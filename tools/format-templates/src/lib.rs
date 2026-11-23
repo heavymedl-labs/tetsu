@@ -68,8 +68,15 @@ fn tidy(path: &Path, check: bool) -> Result<(), String> {
     }
 }
 
+/// The folders of drawings: inline SVG, which the minifier sends as written, so formatting would spread each shape
+/// over several lines and grow every page that shows them. They stay as written (ADR-0083).
+const DRAWINGS: [&str; 2] = [
+    "crates/tetsu/templates/art",
+    "crates/tetsu/templates/home/panels",
+];
+
 /// Every HTML template under `root`'s `crates` and `web` folders, in a folder named `templates` at any depth,
-/// sorted.
+/// sorted, except the drawings.
 ///
 /// # Errors
 /// Fails if a folder cannot be read.
@@ -78,6 +85,11 @@ pub fn templates(root: &Path) -> std::io::Result<Vec<PathBuf>> {
     for top in ["crates", "web"] {
         walk(&root.join(top), false, &mut found)?;
     }
+    found.retain(|path| {
+        !DRAWINGS
+            .iter()
+            .any(|drawings| path.starts_with(root.join(drawings)))
+    });
     found.sort();
     Ok(found)
 }
@@ -216,6 +228,9 @@ mod tests {
         let named = |path: &str| found.contains(&root.join(path));
         assert!(named("web/templates/page.html"));
         assert!(named("crates/identity/templates/mail/invite.html"));
+        assert!(named("crates/tetsu/templates/home/week.html"));
+        assert!(!named("crates/tetsu/templates/art/board.html"));
+        assert!(!named("crates/tetsu/templates/home/panels/layouts.html"));
         assert!(!named("crates/tenancy/templates/theme.css"));
         assert!(
             found
