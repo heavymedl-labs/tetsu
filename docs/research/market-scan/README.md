@@ -14,7 +14,7 @@ This is research, not a decision. Where it disagrees with an ADR, the ADR wins.
 
 Racquet club booking platforms, scanned as a reference for court and facility booking. Started 2026-11-23 with one player.
 
-- [CourtReserve](tennis-courts/players.md#courtreserve): tennis, pickleball and padel club software priced by court count, with a documented API and no webhooks found.
+- [CourtReserve](tennis-courts/players.md#courtreserve): tennis, pickleball and padel club software priced by court count, with a public API and webhooks.
 
 ## Boutique fitness
 

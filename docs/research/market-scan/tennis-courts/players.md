@@ -1,65 +1,60 @@
 # Players
 
-Racquet club booking platforms, read 2026-11-23. One player so far. Prices, ownership and features change quickly, so recheck a figure before relying on it. "Not found" means the research did not confirm it, not that the product lacks it. This is research, not a decision. Where it disagrees with an ADR, the ADR wins.
+Racquet club booking platforms, read 2026-11-23. One player so far. Prices, ownership and features change quickly, so recheck a figure before relying on it. "Not found" means the research did not confirm it, not that the product lacks it. Figures that come from reviewers or review sites are marked as reported. This is research, not a decision. Where it disagrees with an ADR, the ADR wins.
 
 ## CourtReserve
 
-CourtReserve is club management software for tennis, pickleball and padel facilities. It prices by court count, publishes its three plan prices, and has a documented API. It looks strong for racquet clubs and has no campground product, so it is a reference for court and facility booking rather than a direct competitor for a campground vertical.
-
-Takeaways for us:
-
-- Its published per-court tiers and public API docs make a detailed comparison possible, which few competitors in the fitness scan allow.
-- It lets the club's own merchant account take the money (Stripe or SafeSave), which fits our plan for a choice of payment processor.
-- No webhooks in its public docs, and a customer request for them sits unbuilt on its feedback forum. A webhook-first API is an opening.
+CourtReserve is club management software for tennis, pickleball and padel facilities. It prices by court count, publishes its three plan prices, and offers an API with documented webhooks. No campground product was found.
 
 At a glance:
 
 | Field | Value |
 | --- | --- |
-| Founded | Not found |
-| Ownership | Founders Tim and Ashley Owens; $54M growth investment from Mainsail Partners, announced 22 October 2025. Mainsail's ownership share: Not found |
+| Founded | 2016, by Tim and Ashley Owens (its about page); location Not found |
+| Ownership | Founder-led; $54M growth investment from Mainsail Partners, announced 22 October 2025. Mainsail's ownership share: Not found |
 | Focus | Tennis, pickleball and padel clubs and facilities |
-| Customers | 2,400+ clubs and 7M+ players (vendor claim) |
-| Ratings | Capterra 4.7 of 5 from 53 reviews, most from 2018 and 2021, so stale. Apple App Store 2.9 of 5 from 302 ratings (read 2026-11-23) |
+| Customers | 2,400+ clubs, 7M+ players, 105M+ bookings (vendor claim) |
+| Ratings | Apple App Store 2.9 of 5 from 366 ratings. Capterra: Not confirmed, see Complaints |
 
 Pricing and business model:
 
 - **Three plans, priced by court count:** Launch $199 a month for 8 courts, Advance $369 for 16, Momentum $549 for 32. Billed annually they fall to $159, $329 and $499 a month. Beyond 32 courts, several locations or multi-club memberships: custom pricing.
-- **Add-ons:** Stringing, Access Control, DUPR and World Padel Rating are $25 a month each. Ask Pulse is $59 a month on Launch and included on Advance and Momentum. The full add-on list was not read, because the pricing page was cut off when fetched.
-- **Branded mobile app:** listed as a Momentum feature. A separate $499 setup fee and a one-year contract were reported by an earlier research pass but not confirmed on the pricing page. Recheck.
-- **Payments:** Stripe (preferred) or SafeSave, on the club's own merchant account. Older Stripe connections carry an extra 0.2% CourtReserve fee until the club updates the integration.
+- **Add-ons:** Stringing, Access Control, DUPR and World Padel Rating are $25 a month each. Ask Pulse is a $59 a month add-on on Launch, with a 30-day trial, and is included on Advance and Momentum. The pricing page was cut off when read, so its add-on list may be longer.
+- **Branded mobile app:** listed as a Momentum feature. Any setup fee or contract terms for it: Not found.
+- **Payments:** Stripe (its preferred partner) or SafeSave, on the club's own merchant account. SafeSave serves the US and Canada only. A club still on an older Stripe connection pays an extra 0.2% a transaction on top of Stripe's fees until it updates the integration. Clubs that connect Stripe for the first time from 18 February 2025 do not pay it.
 - **Guest fees:** a club may add a convenience fee, capped at 4% of the transaction, with lower caps in some jurisdictions.
 - **Contract terms, cancellation and data export:** Not found.
 
 Strengths:
 
-- Wide club feature set: court and public booking, memberships, batch billing, lessons, events, leagues, point of sale, access control, a branded mobile app and Reserve with Google.
+- Wide club feature set on its home page: court reservations, public booking, lessons, events and programming, memberships, leagues and ladders, invoicing and batch billing, pro shop and point of sale, access control, a branded mobile app, reporting, Reserve with Google, and a player network.
 - Named partners for door access (Brivo, RemoteLock) and rating or tournament systems (DUPR, USTA Connect).
-- Reviewers on Capterra praise responsive support, deep admin tools and easy member booking (reported).
 
 Complaints:
 
-- Capterra reviewers report a learning curve, awkward refunds and fee splitting, and no QuickBooks link (reported, mostly 2018 and 2021).
-- The iOS app rates 2.9 of 5. The complaint text was not read.
+- Apple App Store reviews, visible ones only: a member could not turn off club marketing notifications (December 2024), the find-players feature is weak (November 2022), and waitlist spots are not filled automatically (March 2023). Each appeared once, so this is not a ranking.
+- Capterra scored 4.7 of 5 from 53 reviews, mostly from 2018 and 2021, with complaints of a learning curve, awkward refunds and fee splitting, and no QuickBooks link (reported by an earlier research pass). Capterra refused direct reading on 2026-11-23 (HTTP 403), so this was not re-read.
 
 API:
 
-- **Access:** scoped API keys, limited to 60 calls a minute per key, with public docs at api.courtreserve.com.
-- **Plan gating conflicts:** the pricing page lists API access on Advance and Momentum. The help article adds Enterprise, and also names a "Start" plan that is not on the pricing page. The integrations page says "Scale and Enterprise", and "Scale" is not a plan name on the pricing page. Which plans get the API is not settled by its own pages.
-- **Webhooks:** Not found. A request for Zapier or webhooks is open on its feedback forum.
-- **OpenAPI spec and sandbox:** Not found.
+- **Access:** scoped API keys, limited to 60 requests a minute per key. Swagger documentation is public at api.courtreserve.com.
+- **Plan gating conflicts:** the pricing page lists API access on Advance and Momentum. The help article and the API page say Advance, Momentum and Enterprise, and the help article also names a "Start" plan that is not on the pricing page. The integrations page says "Scale and Enterprise", and "Scale" is not a plan name on the pricing page. Its own pages do not settle which plans get the API.
+- **Webhooks:** its API page says webhooks need the "API and Webhook Access" add-on, switched on in the club's settings. What they send and how they are signed: Not found. A customer request for Zapier or webhooks, posted about four years ago, is still marked "Waiting on Votes" on its feedback forum, with 29 votes.
+- **OpenAPI spec:** Swagger documentation only, and its page does not say OpenAPI.
+- **Sandbox:** Not found.
 
 Sources, all read 2026-11-23:
 
 1. [CourtReserve home](https://courtreserve.com/)
-2. [Pricing](https://courtreserve.com/pricing/)
-3. [Mainsail announcement](https://courtreserve.com/scaling-courtreserve-with-mainsail-partners/)
-4. [Integrations](https://courtreserve.com/integrations/)
-5. [Convenience fees](https://intercom.help/courtreserve/en/articles/7172928-convenience-fees)
-6. [API access setup](https://intercom.help/courtreserve/en/articles/10414722-set-up-api-access-integration)
-7. [Payment partners](https://intercom.help/courtreserve/en/articles/5772805-integrated-payment-partners-in-courtreserve)
-8. [Update Stripe integration](https://intercom.help/courtreserve/en/articles/11124180-update-stripe-integration)
-9. [API docs](https://api.courtreserve.com/apihelp/index)
-10. [Feedback forum: webhooks request](https://feedback.courtreserve.com/communities/1/topics/808-allow-for-integrations-with-mailchimp-zapier-or-webhooks)
-11. [Capterra reviews](https://www.capterra.com/p/152562/CourtReserve/reviews/)
+2. [About](https://courtreserve.com/about/)
+3. [Pricing](https://courtreserve.com/pricing/)
+4. [Mainsail announcement](https://courtreserve.com/scaling-courtreserve-with-mainsail-partners/)
+5. [Integrations](https://courtreserve.com/integrations/)
+6. [Convenience fees](https://intercom.help/courtreserve/en/articles/7172928-convenience-fees)
+7. [API access setup](https://intercom.help/courtreserve/en/articles/10414722-set-up-api-access-integration)
+8. [Payment partners](https://intercom.help/courtreserve/en/articles/5772805-integrated-payment-partners-in-courtreserve)
+9. [Update Stripe integration](https://intercom.help/courtreserve/en/articles/11124180-update-stripe-integration)
+10. [API docs](https://api.courtreserve.com/apihelp/index)
+11. [Feedback forum: webhooks request](https://feedback.courtreserve.com/communities/1/topics/808-allow-for-integrations-with-mailchimp-zapier-or-webhooks)
 12. [Apple App Store listing](https://apps.apple.com/app/id1392556575)
+13. [Capterra reviews](https://www.capterra.com/p/152562/CourtReserve/reviews/), not re-read (HTTP 403)
