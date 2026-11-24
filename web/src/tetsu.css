@@ -98,6 +98,14 @@
   --color-success: var(--tetsu-color-success);
 }
 
+/* Where the browser has popovers, whether one is open or closing: a drawer keeps its shape there as it slides out, which
+   `open:` would drop the moment it starts closing. A browser without popovers shows the menu in place, unstyled by it. */
+@custom-variant popovers {
+  @supports selector(:popover-open) {
+    @slot;
+  }
+}
+
 /* Tailwind's dark variant, for the tokens below and any dark: utility: the system's scheme, unless the visitor picks
    one (ADR-0070). The pick is the footer control's checked radio once the browser has read it, and before then the
    scheme the server wrote on <html> (data-scheme), so the top of a long page, drawn before its footer is read, is
