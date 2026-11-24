@@ -59,9 +59,10 @@ fn generated(source: &str) -> bool {
 /// The most SVG shapes a template outside an `art` folder may hold: an icon or two, never a drawing.
 const MOST_SHAPES: usize = 12;
 
-/// The shapes SVG draws, by their tag names.
-const SHAPES: [&str; 8] = [
-    "rect", "circle", "ellipse", "line", "path", "polygon", "polyline", "text",
+/// The shapes a drawing is made of, by their tag names. A path is left out: every icon is drawn with one, and an
+/// icon set is not a drawing.
+const SHAPES: [&str; 7] = [
+    "rect", "circle", "ellipse", "line", "polygon", "polyline", "text",
 ];
 
 /// How many SVG shapes `source` holds, counting each opening tag once.
@@ -214,11 +215,12 @@ mod tests {
         assert_eq!(run(&root.0, true), Vec::<String>::new());
     }
 
-    /// Every shape SVG draws counts, and a word that merely starts like one does not.
+    /// Every shape a drawing is made of counts, and a word that merely starts like one does not; a path, which every
+    /// icon is drawn with, does not, so an icon set is not a drawing.
     #[test]
     fn shapes_are_counted_by_their_tags() {
         let source = "<rect/><circle r=\"1\"/><ellipse>\n<line\n/><path d=\"\"/><polygon/><polyline/><text>x</text><linear><rectangle>";
-        assert_eq!(shapes(source), 8);
+        assert_eq!(shapes(source), 7);
     }
 
     /// A template that does not parse, or a root with nothing to list, is reported rather than skipped.
