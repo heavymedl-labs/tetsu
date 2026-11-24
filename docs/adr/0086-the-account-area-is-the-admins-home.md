@@ -1,6 +1,6 @@
 # 0086. The account area is the admins' home
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-24
 - Supersedes [ADR-0084](0084-realm-routes.md)'s admin home, which waited on
   [#157](https://github.com/heavymedl-labs/tetsu/issues/157)
