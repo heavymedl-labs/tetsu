@@ -12,7 +12,7 @@ const ENDPOINTS: Record<Action, string> = {
   add: "/admin/passkeys",
 };
 
-/** Runs one ceremony on `device`, sending `sent` with both halves: the invite link, or the operator's form
+/** Runs one ceremony on `device`, sending `sent` with both halves: the invite link, or the admin's form
  * token. `signal` ends it, its requests and the device's prompt alike, as when the person presses again, until
  * `finishing` is called, just before the last request: from then the server may have kept what it sent, so the
  * caller lets nothing end it. Returns where the page goes once it is done. */

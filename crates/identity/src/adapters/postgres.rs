@@ -11,20 +11,20 @@ use tokio_postgres::Row;
 use tokio_postgres::types::{FromSql, ToSql};
 
 use crate::domain::{
-    Account, Actor, Addition, CeremonyKind, Disabling, Ending, Error, FailedCheck, HeldPasskey,
-    Invitee, Issue, ListedSession, Login, NewPasskey, OperatorId, OperatorName, OperatorSummary,
-    RateLimit, Realm, Redemption, Refusal, Removal, Session, SessionId, SessionStart, Signer,
-    TakenAddition, TakenCeremony, TimeLeft,
+    Account, Actor, Addition, AdminId, AdminName, AdminSummary, CeremonyKind, Disabling, Ending,
+    Error, FailedCheck, HeldPasskey, Invitee, Issue, ListedSession, Login, NewPasskey, RateLimit,
+    Realm, Redemption, Refusal, Removal, Session, SessionId, SessionStart, Signer, TakenAddition,
+    TakenCeremony, TimeLeft,
 };
-use crate::ports::OperatorStore;
-use crate::use_cases::Operators;
+use crate::ports::AdminStore;
+use crate::use_cases::Admins;
 
 pub const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 1,
-        sql: include_str!("../../migrations/0001_operators.sql"),
+        sql: include_str!("../../migrations/0001_admins.sql"),
     },
-    // Identity records what the operator command does, for the audit record (ADR-0043, ADR-0045).
+    // Identity records what the admin command does, for the audit record (ADR-0043, ADR-0045).
     Migration {
         version: 2,
         sql: tetsu_postgres::OUTBOX,
@@ -39,7 +39,7 @@ pub const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 5,
-        sql: include_str!("../../migrations/0005_operator_email.sql"),
+        sql: include_str!("../../migrations/0005_admin_email.sql"),
     },
     Migration {
         version: 6,
@@ -47,7 +47,7 @@ pub const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 7,
-        sql: include_str!("../../migrations/0007_set_operator_email.sql"),
+        sql: include_str!("../../migrations/0007_set_admin_email.sql"),
     },
     Migration {
         version: 8,
@@ -69,18 +69,18 @@ pub const MIGRATIONS: &[Migration] = &[
 /// Identity's schema, which names the role its transactions act as (ADR-0042).
 const SCHEMA: &str = "identity";
 
-const INSERT_OPERATOR: &str = include_str!("../../sql/insert_operator.sql");
-const OPERATOR_EMAIL: &str = include_str!("../../sql/operator_email.sql");
-const SET_OPERATOR_EMAIL: &str = include_str!("../../sql/set_operator_email.sql");
+const INSERT_ADMIN: &str = include_str!("../../sql/insert_admin.sql");
+const ADMIN_EMAIL: &str = include_str!("../../sql/admin_email.sql");
+const SET_ADMIN_EMAIL: &str = include_str!("../../sql/set_admin_email.sql");
 const USE_SESSION: &str = include_str!("../../sql/use_session.sql");
 const SESSION_LEFT: &str = include_str!("../../sql/session_left.sql");
 const END_SESSION: &str = include_str!("../../sql/end_session.sql");
 const ISSUE_INVITE: &str = include_str!("../../sql/issue_invite.sql");
-const DISABLE_OPERATOR: &str = include_str!("../../sql/disable_operator.sql");
-const END_OPERATOR_SESSIONS: &str = include_str!("../../sql/end_operator_sessions.sql");
+const DISABLE_ADMIN: &str = include_str!("../../sql/disable_admin.sql");
+const END_ADMIN_SESSIONS: &str = include_str!("../../sql/end_admin_sessions.sql");
 const END_REALM_SESSIONS: &str = include_str!("../../sql/end_realm_sessions.sql");
-const LIST_OPERATORS: &str = include_str!("../../sql/list_operators.sql");
-const ENABLE_OPERATOR: &str = include_str!("../../sql/enable_operator.sql");
+const LIST_ADMINS: &str = include_str!("../../sql/list_admins.sql");
+const ENABLE_ADMIN: &str = include_str!("../../sql/enable_admin.sql");
 const INVITEE: &str = include_str!("../../sql/invitee.sql");
 const REMOVE_PASSKEYS: &str = include_str!("../../sql/remove_passkeys.sql");
 const BEGIN_LOGIN: &str = include_str!("../../sql/begin_login.sql");
@@ -110,7 +110,7 @@ type Decided<T> = Result<(Option<T>, Recorded), Error>;
 /// What makes a statement's event of the rows it returned.
 type MakesEvent<'a> = &'a (dyn Fn(&[Row]) -> Result<Recorded, Error> + Sync);
 
-/// Identity's operator realm over Postgres, for the composition root. It returns the use cases, never the store
+/// Identity's admin realm over Postgres, for the composition root. It returns the use cases, never the store
 /// itself (ADR-0021).
 ///
 /// The use cases are there:
@@ -125,7 +125,7 @@ type MakesEvent<'a> = &'a (dyn Fn(&[Row]) -> Result<Recorded, Error> + Sync);
 ///
 /// ```compile_fail,E0277
 /// # fn bypass(pool: tetsu_postgres::Pool) {
-/// fn store(_: &impl tetsu_identity::OperatorStore) {}
+/// fn store(_: &impl tetsu_identity::AdminStore) {}
 /// store(&tetsu_identity::postgres_store(pool));
 /// # }
 /// ```
@@ -147,17 +147,17 @@ type MakesEvent<'a> = &'a (dyn Fn(&[Row]) -> Result<Recorded, Error> + Sync);
 /// # }
 /// ```
 #[must_use]
-pub fn postgres_store(pool: Pool) -> Operators<impl OperatorStore> {
-    Operators::new(PostgresOperators { pool })
+pub fn postgres_store(pool: Pool) -> Admins<impl AdminStore> {
+    Admins::new(PostgresAdmins { pool })
 }
 
-pub(crate) struct PostgresOperators {
+pub(crate) struct PostgresAdmins {
     pub(crate) pool: Pool,
 }
 
 /// Every statement runs alone in a transaction as Identity's role, which reaches sessions only through its lookup
 /// functions (ADR-0042).
-impl PostgresOperators {
+impl PostgresAdmins {
     async fn query(
         &self,
         statement: &str,
@@ -182,7 +182,7 @@ impl PostgresOperators {
         .await
     }
 
-    /// Runs a lookup function that ends sessions and counts them, or answers nothing for an unknown operator, and
+    /// Runs a lookup function that ends sessions and counts them, or answers nothing for an unknown admin, and
     /// records the event `event` makes of the count.
     async fn ended(
         &self,
@@ -198,7 +198,7 @@ impl PostgresOperators {
     }
 
     /// Runs a statement whose answer `read` makes of the rows it returned, with the event it records, in the same
-    /// transaction, and returns the answer: none for an operator or passkey that does not exist.
+    /// transaction, and returns the answer: none for an admin or passkey that does not exist.
     async fn decided<T: Copy + Send + Sync>(
         &self,
         statement: &str,
@@ -264,8 +264,8 @@ async fn run(
 }
 
 /// How a statement failed. Identity's own functions raise three codes of their own, and each is a fault of the code
-/// that called them, so storage: TD001, a session started for an operator not enabled, which only a login that
-/// holds an enabled operator's row ever starts; TD002, an isolation level other than read committed; and TD003, a
+/// that called them, so storage: TD001, a session started for an admin not enabled, which only a login that
+/// holds an enabled admin's row ever starts; TD002, an isolation level other than read committed; and TD003, a
 /// login that would change more of a passkey than its counter and backup flags.
 fn sorted(error: &tokio_postgres::Error) -> Error {
     failed(tetsu_postgres::sort(error))
@@ -291,42 +291,42 @@ fn column<'a, T: FromSql<'a>>(row: &'a Row, name: &str) -> Result<T, Error> {
     row.try_get(name).map_err(|e| sorted(&e))
 }
 
-impl OperatorStore for PostgresOperators {
-    async fn insert_operator(
+impl AdminStore for PostgresAdmins {
+    async fn insert_admin(
         &self,
-        name: &OperatorName,
+        name: &AdminName,
         email: Option<&Address>,
         actor: &Actor,
-    ) -> Result<OperatorId, Error> {
+    ) -> Result<AdminId, Error> {
         let parameters: [&(dyn ToSql + Sync); 2] = [&name.as_str(), &email.map(Address::as_str)];
         created(
-            self.decided(INSERT_OPERATOR, &parameters, |rows| creation(rows, actor))
+            self.decided(INSERT_ADMIN, &parameters, |rows| creation(rows, actor))
                 .await?,
         )
     }
 
-    async fn operator_email(&self, operator: OperatorId) -> Result<Option<Address>, Error> {
-        self.query(OPERATOR_EMAIL, &[&operator.get()])
+    async fn admin_email(&self, admin: AdminId) -> Result<Option<Address>, Error> {
+        self.query(ADMIN_EMAIL, &[&admin.get()])
             .await?
             .first()
             .map_or(Ok(None), |row| column::<Option<String>>(row, "email"))
             .and_then(|email| email.as_deref().map(address_from).transpose())
     }
 
-    async fn set_operator_email(
+    async fn set_admin_email(
         &self,
-        operator: OperatorId,
+        admin: AdminId,
         email: &Address,
         actor: &Actor,
     ) -> Result<Option<bool>, Error> {
-        let id = operator.get();
-        // The event names the operator, never the address, as creating one does.
-        self.change(SET_OPERATOR_EMAIL, &[&id, &email.as_str()], |changed| {
+        let id = admin.get();
+        // The event names the admin, never the address, as creating one does.
+        self.change(SET_ADMIN_EMAIL, &[&id, &email.as_str()], |changed| {
             event(
-                "identity.operator_email_set",
+                "identity.admin_email_set",
                 actor,
                 outcome(changed),
-                json!({"operator_id": id}),
+                json!({"admin_id": id}),
             )
         })
         .await
@@ -363,10 +363,10 @@ impl OperatorStore for PostgresOperators {
     async fn issue_invite(
         &self,
         hash: &[u8; 32],
-        operator: OperatorId,
+        admin: AdminId,
         actor: &Actor,
     ) -> Result<Option<Issue>, Error> {
-        let id = operator.get();
+        let id = admin.get();
         let parameters: [&(dyn ToSql + Sync); 2] = [&hash.as_slice(), &id];
         self.decided(ISSUE_INVITE, &parameters, |rows| issuance(rows, id, actor))
             .await
@@ -383,12 +383,12 @@ impl OperatorStore for PostgresOperators {
     async fn begin_join(
         &self,
         token: &[u8; 32],
-        operator: OperatorId,
+        admin: AdminId,
         link: &[u8; 32],
         state: &str,
     ) -> Result<bool, Error> {
         let parameters: [&(dyn ToSql + Sync); 4] =
-            [&token.as_slice(), &operator.get(), &link.as_slice(), &state];
+            [&token.as_slice(), &admin.get(), &link.as_slice(), &state];
         begun(&self.query(BEGIN_JOIN, &parameters).await?)
     }
 
@@ -407,7 +407,7 @@ impl OperatorStore for PostgresOperators {
         session: &SessionStart,
         actor: &Actor,
     ) -> Result<Option<Redemption>, Error> {
-        let id = ceremony.operator.get();
+        let id = ceremony.admin.get();
         let transports = passkey.transports.join(" ");
         let replacing = session.replacing.as_ref().map(<[u8; 32]>::as_slice);
         let device = actor.device().map(|device| device.to_string());
@@ -482,7 +482,7 @@ impl OperatorStore for PostgresOperators {
 
     async fn refuse(&self, refusal: &Refusal<'_>, actor: &Actor) -> Result<(), Error> {
         let payload = json!({
-            "operator_id": refusal.operator.map(OperatorId::get),
+            "admin_id": refusal.admin.map(AdminId::get),
             "credential": refusal.credential.map(hex),
         });
         self.query_recording(RECORD, &[], &|_| {
@@ -516,7 +516,7 @@ impl OperatorStore for PostgresOperators {
         session: &SessionStart,
         actor: &Actor,
     ) -> Result<Option<Login>, Error> {
-        let id = signer.operator.get();
+        let id = signer.admin.get();
         let credential = signer.credential.as_slice();
         let replacing = session.replacing.as_ref().map(<[u8; 32]>::as_slice);
         let device = actor.device().map(|device| device.to_string());
@@ -571,15 +571,11 @@ impl OperatorStore for PostgresOperators {
         &self,
         token: &[u8; 32],
         session: &[u8; 32],
-        operator: OperatorId,
+        admin: AdminId,
         state: &str,
     ) -> Result<bool, Error> {
-        let parameters: [&(dyn ToSql + Sync); 4] = [
-            &token.as_slice(),
-            &session.as_slice(),
-            &operator.get(),
-            &state,
-        ];
+        let parameters: [&(dyn ToSql + Sync); 4] =
+            [&token.as_slice(), &session.as_slice(), &admin.get(), &state];
         begun(&self.query(BEGIN_ADDITION, &parameters).await?)
     }
 
@@ -605,40 +601,40 @@ impl OperatorStore for PostgresOperators {
         let parameters: [&(dyn ToSql + Sync); 6] = [
             &addition.token.as_slice(),
             &addition.session.as_slice(),
-            &addition.operator.get(),
+            &addition.admin.get(),
             &passkey.credential_id,
             &passkey.passkey,
             &transports,
         ];
         self.decided(ADD_PASSKEY, &parameters, |rows| {
-            adding(rows, addition.operator.get(), passkey, actor)
+            adding(rows, addition.admin.get(), passkey, actor)
         })
         .await
     }
 
     async fn remove_passkeys(
         &self,
-        operator: OperatorId,
+        admin: AdminId,
         actor: &Actor,
     ) -> Result<Option<Removal>, Error> {
-        let id = operator.get();
+        let id = admin.get();
         self.decided(REMOVE_PASSKEYS, &[&id], |rows| removing(rows, id, actor))
             .await
     }
 
-    async fn disable_operator(
+    async fn disable_admin(
         &self,
-        operator: OperatorId,
+        admin: AdminId,
         actor: &Actor,
     ) -> Result<Option<Disabling>, Error> {
-        let id = operator.get();
-        self.decided(DISABLE_OPERATOR, &[&id], |rows| {
+        let id = admin.get();
+        self.decided(DISABLE_ADMIN, &[&id], |rows| {
             let found = rows.first().map(disabling_from).transpose()?.flatten();
             let payload = found.map_or_else(
-                || json!({"operator_id": id}),
+                || json!({"admin_id": id}),
                 |done| {
                     json!({
-                        "operator_id": id,
+                        "admin_id": id,
                         "sessions_ended": done.sessions_ended,
                         "links_ended": done.links_ended,
                     })
@@ -647,40 +643,31 @@ impl OperatorStore for PostgresOperators {
             let outcome = outcome(found.map(|done| done.done));
             Ok((
                 found,
-                Some(event("identity.operator_disabled", actor, outcome, payload)),
+                Some(event("identity.admin_disabled", actor, outcome, payload)),
             ))
         })
         .await
     }
 
-    async fn enable_operator(
-        &self,
-        operator: OperatorId,
-        actor: &Actor,
-    ) -> Result<Option<bool>, Error> {
-        let id = operator.get();
-        self.change(ENABLE_OPERATOR, &[&id], |enabled| {
-            let payload = json!({"operator_id": id});
-            event(
-                "identity.operator_enabled",
-                actor,
-                outcome(enabled),
-                payload,
-            )
+    async fn enable_admin(&self, admin: AdminId, actor: &Actor) -> Result<Option<bool>, Error> {
+        let id = admin.get();
+        self.change(ENABLE_ADMIN, &[&id], |enabled| {
+            let payload = json!({"admin_id": id});
+            event("identity.admin_enabled", actor, outcome(enabled), payload)
         })
         .await
     }
 
-    async fn end_operator_sessions(
+    async fn end_admin_sessions(
         &self,
-        operator: OperatorId,
+        admin: AdminId,
         realm: Realm,
         actor: &Actor,
     ) -> Result<Option<u64>, Error> {
-        let (id, name) = (operator.get(), realm.as_str());
+        let (id, name) = (admin.get(), realm.as_str());
         let parameters: [&(dyn ToSql + Sync); 2] = [&id, &name];
-        self.ended(END_OPERATOR_SESSIONS, &parameters, |ended| {
-            let payload = json!({"operator_id": id, "realm": name, "ended": ended});
+        self.ended(END_ADMIN_SESSIONS, &parameters, |ended| {
+            let payload = json!({"admin_id": id, "realm": name, "ended": ended});
             event(
                 "identity.sessions_ended",
                 actor,
@@ -707,8 +694,8 @@ impl OperatorStore for PostgresOperators {
         ended.ok_or_else(answered_nothing)
     }
 
-    async fn list_operators(&self) -> Result<Vec<OperatorSummary>, Error> {
-        self.query(LIST_OPERATORS, &[])
+    async fn list_admins(&self) -> Result<Vec<AdminSummary>, Error> {
+        self.query(LIST_ADMINS, &[])
             .await?
             .iter()
             .map(summary_from)
@@ -754,7 +741,7 @@ fn answered(rows: &[Row], name: &str) -> Result<Option<bool>, Error> {
     rows.first().map_or(Ok(None), |row| column(row, name))
 }
 
-/// The count a lookup function answers, or nothing for an operator who does not exist.
+/// The count a lookup function answers, or nothing for an admin who does not exist.
 fn counted(rows: &[Row], name: &str) -> Result<Option<u64>, Error> {
     let ended: Option<i64> = rows.first().map_or(Ok(None), |row| column(row, name))?;
     ended.map(nonnegative).transpose()
@@ -772,7 +759,7 @@ fn nonnegative(count: i64) -> Result<u64, Error> {
 }
 
 /// Reads what a create found, and makes the event it records: changed when it added the
-/// operator, and refused when the name was taken, naming
+/// admin, and refused when the name was taken, naming
 /// who holds it if the statement could see them.
 fn creation(rows: &[Row], actor: &Actor) -> Decided<(i64, bool)> {
     let found = rows.first().map(added_from).transpose()?;
@@ -787,22 +774,20 @@ fn creation_event(found: Option<(i64, bool)>, actor: &Actor) -> (&'static str, S
         "refused"
     };
     event(
-        "identity.operator_created",
+        "identity.admin_created",
         actor,
         outcome,
-        json!({"operator_id": found.map(|(id, _)| id)}),
+        json!({"admin_id": found.map(|(id, _)| id)}),
     )
 }
 
-/// What a create returns: the new operator, or why there is none.
-fn created(found: Option<(i64, bool)>) -> Result<OperatorId, Error> {
+/// What a create returns: the new admin, or why there is none.
+fn created(found: Option<(i64, bool)>) -> Result<AdminId, Error> {
     match found {
-        Some((id, true)) => Ok(OperatorId::new(id)),
-        Some((id, false)) => Err(Error::Invalid(format!(
-            "operator {id} already has that name"
-        ))),
+        Some((id, true)) => Ok(AdminId::new(id)),
+        Some((id, false)) => Err(Error::Invalid(format!("admin {id} already has that name"))),
         None => Err(Error::Invalid(
-            "another operator already has that name".to_string(),
+            "another admin already has that name".to_string(),
         )),
     }
 }
@@ -840,11 +825,11 @@ fn issuance_event(issue: Option<Issue>, id: i64, actor: &Actor) -> (&'static str
         "identity.invite_issued",
         actor,
         reason,
-        json!({"operator_id": id}),
+        json!({"admin_id": id}),
     )
 }
 
-/// Whether a ceremony was kept: the link may have ended, or its operator changed, since it was read. The function
+/// Whether a ceremony was kept: the link may have ended, or its admin changed, since it was read. The function
 /// always answers one row, so none is a storage failure.
 fn begun(rows: &[Row]) -> Result<bool, Error> {
     rows.first()
@@ -852,10 +837,10 @@ fn begun(rows: &[Row]) -> Result<bool, Error> {
         .and_then(|row| column(row, "begun"))
 }
 
-/// The operator a link names, with the user handle and name a registration needs.
+/// The admin a link names, with the user handle and name a registration needs.
 fn invitee_from(row: &Row) -> Result<Invitee, Error> {
     Ok(Invitee {
-        operator: OperatorId::new(column(row, "operator_id")?),
+        admin: AdminId::new(column(row, "admin_id")?),
         user_handle: user_handle(row)?,
         name: column(row, "name")?,
     })
@@ -865,7 +850,7 @@ fn invitee_from(row: &Row) -> Result<Invitee, Error> {
 fn ceremony_from(row: &Row) -> Result<TakenCeremony, Error> {
     let link: Option<Vec<u8>> = column(row, "link_hash")?;
     Ok(TakenCeremony {
-        operator: OperatorId::new(column(row, "operator_id")?),
+        admin: AdminId::new(column(row, "admin_id")?),
         link_hash: link
             .and_then(|link| link.try_into().ok())
             .ok_or_else(|| Error::Storage("a join ceremony has no link".to_string()))?,
@@ -913,17 +898,17 @@ fn redemption_event(
         "identity.invite_redeemed",
         actor,
         reason,
-        json!({"operator_id": id, "credential": hex(credential)}),
+        json!({"admin_id": id, "credential": hex(credential)}),
     )
 }
 
-/// An operator as listed, with their passkeys and open link.
-fn summary_from(row: &Row) -> Result<OperatorSummary, Error> {
+/// An admin as listed, with their passkeys and open link.
+fn summary_from(row: &Row) -> Result<AdminSummary, Error> {
     let passkeys = count(row, "passkeys")?;
     let link_minutes = column(row, "link_minutes")
         .and_then(|minutes: Option<i64>| minutes.map(nonnegative).transpose())?;
-    Ok(OperatorSummary {
-        id: OperatorId::new(column(row, "id")?),
+    Ok(AdminSummary {
+        id: AdminId::new(column(row, "id")?),
         name: column(row, "name")?,
         created_at: column(row, "created_at")?,
         disabled_at: column(row, "disabled_at")?,
@@ -932,12 +917,12 @@ fn summary_from(row: &Row) -> Result<OperatorSummary, Error> {
     })
 }
 
-/// The operator a create added, or the one already holding its name.
+/// The admin a create added, or the one already holding its name.
 fn added_from(row: &Row) -> Result<(i64, bool), Error> {
     column(row, "id").and_then(|id| column(row, "created").map(|created| (id, created)))
 }
 
-/// What a disable did, or nothing for an operator who does not exist.
+/// What a disable did, or nothing for an admin who does not exist.
 fn disabling_from(row: &Row) -> Result<Option<Disabling>, Error> {
     let done: Option<bool> = column(row, "done")?;
     let (sessions_ended, links_ended) = (count(row, "sessions_ended")?, count(row, "links_ended")?);
@@ -949,7 +934,7 @@ fn disabling_from(row: &Row) -> Result<Option<Disabling>, Error> {
 }
 
 /// Reads what removing passkeys did, and makes the event it records: changed when it removed
-/// any, unchanged when there were none, and refused for an operator who does not exist.
+/// any, unchanged when there were none, and refused for an admin who does not exist.
 fn removing(rows: &[Row], id: i64, actor: &Actor) -> Decided<Removal> {
     let removal = rows.first().map(removal_from).transpose()?;
     Ok((
@@ -959,7 +944,7 @@ fn removing(rows: &[Row], id: i64, actor: &Actor) -> Decided<Removal> {
             actor,
             outcome(removal.map(|removal| removal.passkeys_removed > 0)),
             json!({
-                "operator_id": id,
+                "admin_id": id,
                 "passkeys_removed": removal.map(|removal| removal.passkeys_removed),
                 "sessions_ended": removal.map(|removal| removal.sessions_ended),
             }),
@@ -972,11 +957,11 @@ fn taken_state(rows: &[Row]) -> Result<Option<String>, Error> {
     rows.first().map(|row| column(row, "state")).transpose()
 }
 
-/// The passkey a credential names, with its operator and their user handle, which must be 16 bytes.
+/// The passkey a credential names, with its admin and their user handle, which must be 16 bytes.
 fn signer_from(row: &Row, credential: &[u8]) -> Result<Signer, Error> {
     Ok(Signer {
         credential: credential.to_vec(),
-        operator: OperatorId::new(column(row, "operator_id")?),
+        admin: AdminId::new(column(row, "admin_id")?),
         user_handle: user_handle(row)?,
         passkey: column(row, "passkey")?,
         disabled: column(row, "disabled")?,
@@ -1004,7 +989,7 @@ fn logging_in(rows: &[Row], signer: &Signer, passkey: &str, actor: &Actor) -> De
             actor,
             reason,
             json!({
-                "operator_id": signer.operator.get(),
+                "admin_id": signer.admin.get(),
                 "credential": hex(&signer.credential),
                 "session": session,
                 "flags": flags(passkey),
@@ -1065,7 +1050,7 @@ fn account_from(rows: &[Row]) -> Result<Option<Account>, Error> {
         }
     }
     Ok(Some(Account {
-        operator: invitee.operator,
+        admin: invitee.admin,
         user_handle: invitee.user_handle,
         name: invitee.name,
         passkeys,
@@ -1081,13 +1066,13 @@ fn user_handle(row: &Row) -> Result<[u8; 16], Error> {
         .map_err(|_| Error::Storage("a user handle is not 16 bytes".to_string()))
 }
 
-/// An addition taken for a session: its operator and state, with the hashes it was taken by.
+/// An addition taken for a session: its admin and state, with the hashes it was taken by.
 fn taken_addition(row: &Row, token: &[u8; 32], session: &[u8; 32]) -> Result<TakenAddition, Error> {
-    let operator: i64 = column(row, "operator_id")?;
+    let admin: i64 = column(row, "admin_id")?;
     Ok(TakenAddition {
         token: *token,
         session: *session,
-        operator: OperatorId::new(operator),
+        admin: AdminId::new(admin),
         state: column(row, "state")?,
     })
 }
@@ -1110,7 +1095,7 @@ fn adding(rows: &[Row], id: i64, passkey: &NewPasskey, actor: &Actor) -> Decided
             actor,
             reason,
             json!({
-                "operator_id": id,
+                "admin_id": id,
                 "credential": hex(&passkey.credential_id),
                 "sessions_ended": ended,
                 "session": session,
@@ -1120,7 +1105,7 @@ fn adding(rows: &[Row], id: i64, passkey: &NewPasskey, actor: &Actor) -> Decided
     ))
 }
 
-/// What adding a passkey answered, and how many of the operator's other live sessions it ended.
+/// What adding a passkey answered, and how many of the admin's other live sessions it ended.
 fn added_and_ended(row: &Row) -> Result<(Option<Addition>, u64), Error> {
     let answer: Option<String> = column(row, "added")?;
     let ended = nonnegative(column(row, "sessions_ended")?)?;
@@ -1153,7 +1138,7 @@ fn removal_from(row: &Row) -> Result<Removal, Error> {
     })
 }
 
-/// The outcome of a change: it acted, it found nothing to do, or there was no such operator.
+/// The outcome of a change: it acted, it found nothing to do, or there was no such admin.
 fn outcome(acted: Option<bool>) -> &'static str {
     match acted {
         Some(true) => "changed",
@@ -1176,7 +1161,7 @@ fn admitted_to_record(
     Ok((Some(wait.is_none()), recorded))
 }
 
-/// A session as an operator's list shows it, by the id Postgres made for it.
+/// A session as an admin's list shows it, by the id Postgres made for it.
 fn listed(row: &Row) -> Result<ListedSession, Error> {
     Ok(ListedSession {
         id: SessionId(column(row, "id")?),
@@ -1187,7 +1172,7 @@ fn listed(row: &Row) -> Result<ListedSession, Error> {
     })
 }
 
-/// What ending other sessions did, and its record: the operator, the session that asked by its public id, the one
+/// What ending other sessions did, and its record: the admin, the session that asked by its public id, the one
 /// it named, if any, and how many ended, or the reason it ended none, as storage gave it. Ending none at all is
 /// unchanged, and any reason is refused. A reason Identity's database never writes, or none with no count, is a
 /// storage failure, never a guess.
@@ -1210,7 +1195,7 @@ fn ending(rows: &[Row], only: Option<&str>, actor: &Actor) -> Decided<Ending> {
         }
     };
     let payload = json!({
-        "operator_id": who, "session": asking, "named": only, "ended": ended, "reason": reason,
+        "admin_id": who, "session": asking, "named": only, "ended": ended, "reason": reason,
     });
     let recorded = event("identity.other_sessions_ended", actor, outcome, payload);
     Ok((Some(answer), Some(recorded)))
@@ -1225,7 +1210,7 @@ fn session_from(row: &Row, hash: &[u8; 32]) -> Result<Session, Error> {
     Ok(Session {
         hash: *hash,
         realm: known,
-        operator: OperatorId::new(column(row, "operator_id")?),
+        admin: AdminId::new(column(row, "admin_id")?),
         started_at: column(row, "started_at")?,
         proven_at: column(row, "proven_at")?,
         last_seen_at: column(row, "last_seen_at")?,
@@ -1252,7 +1237,7 @@ mod tests {
             (pool, database)
         }
 
-        /// Who runs the operator command in these tests.
+        /// Who runs the admin command in these tests.
         pub fn actor() -> crate::Actor {
             crate::Actor::parse("kurt@workstation").expect("an actor")
         }
@@ -1326,20 +1311,18 @@ mod tests {
     }
 
     /// A create says what it found and records it, in this one build, which llvm-cov scores on its own: an
-    /// operator added, a name another holds, or a name taken by one it cannot yet see.
+    /// admin added, a name another holds, or a name taken by one it cannot yet see.
     #[test]
     fn a_create_reports_and_records_what_it_found() {
-        assert_eq!(created(Some((1, true))), Ok(OperatorId::new(1)));
+        assert_eq!(created(Some((1, true))), Ok(AdminId::new(1)));
         assert_eq!(
             created(Some((1, false))),
-            Err(Error::Invalid(
-                "operator 1 already has that name".to_string()
-            ))
+            Err(Error::Invalid("admin 1 already has that name".to_string()))
         );
         assert_eq!(
             created(None),
             Err(Error::Invalid(
-                "another operator already has that name".to_string()
+                "another admin already has that name".to_string()
             ))
         );
         let recorded = |found| {
@@ -1348,20 +1331,20 @@ mod tests {
             (
                 kind,
                 payload["outcome"].clone(),
-                payload["operator_id"].clone(),
+                payload["admin_id"].clone(),
             )
         };
         assert_eq!(
             recorded(Some((1, true))),
-            ("identity.operator_created", json!("changed"), json!(1))
+            ("identity.admin_created", json!("changed"), json!(1))
         );
         assert_eq!(
             recorded(Some((1, false))),
-            ("identity.operator_created", json!("refused"), json!(1))
+            ("identity.admin_created", json!("refused"), json!(1))
         );
         assert_eq!(
             recorded(None),
-            ("identity.operator_created", json!("refused"), json!(null))
+            ("identity.admin_created", json!("refused"), json!(null))
         );
     }
 
@@ -1386,19 +1369,19 @@ mod tests {
     }
 
     /// A create whose answer cannot be read is a storage failure, in this one build, which llvm-cov scores on its
-    /// own, and the operator it added is undone.
+    /// own, and the admin it added is undone.
     #[tokio::test]
     async fn a_create_answer_that_cannot_be_read_is_a_storage_failure() {
         let (pool, database) = support::migrated().await;
         let admin = tetsu_postgres::connect(&database).await.expect("connects");
         admin
-            .batch_execute("ALTER TABLE identity.operators ALTER COLUMN id TYPE integer")
+            .batch_execute("ALTER TABLE identity.admins ALTER COLUMN id TYPE integer")
             .await
             .expect("alters");
-        let operators = Operators::new(PostgresOperators { pool });
-        let failed = operators
+        let admins = Admins::new(PostgresAdmins { pool });
+        let failed = admins
             .create(
-                &OperatorName::parse("Kurt Medley").expect("a name"),
+                &AdminName::parse("Kurt Medley").expect("a name"),
                 None,
                 &support::actor(),
             )
@@ -1412,47 +1395,44 @@ mod tests {
             ))
         );
         let left = admin
-            .query_one("SELECT count(*) FROM identity.operators", &[])
+            .query_one("SELECT count(*) FROM identity.admins", &[])
             .await
             .expect("counts");
         assert_eq!(left.try_get::<_, i64>(0).expect("a count"), 0);
     }
 
-    /// A disabled operator is issued no link, and told apart from one who does not exist.
+    /// A disabled admin is issued no link, and told apart from one who does not exist.
     #[tokio::test]
-    async fn a_disabled_operator_is_issued_no_link() {
+    async fn a_disabled_admin_is_issued_no_link() {
         let (pool, _database) = support::migrated().await;
-        let operators = Operators::new(PostgresOperators { pool });
-        let kurt = operators
+        let admins = Admins::new(PostgresAdmins { pool });
+        let kurt = admins
             .create(
-                &OperatorName::parse("Kurt Medley").expect("a name"),
+                &AdminName::parse("Kurt Medley").expect("a name"),
                 None,
                 &support::actor(),
             )
             .await
             .expect("creates");
-        operators
+        admins
             .disable(kurt, &support::actor())
             .await
             .expect("disables");
         assert_eq!(
-            operators.invite(kurt, &support::actor()).await.map(drop),
-            Err(Error::Invalid(format!(
-                "no enabled operator {}",
-                kurt.get()
-            )))
+            admins.invite(kurt, &support::actor()).await.map(drop),
+            Err(Error::Invalid(format!("no enabled admin {}", kurt.get())))
         );
     }
 
-    /// An operator who holds a passkey is issued no link, in this one build, which llvm-cov scores on its own, and
+    /// An admin who holds a passkey is issued no link, in this one build, which llvm-cov scores on its own, and
     /// an answer the database never writes is a storage failure.
     #[tokio::test]
-    async fn a_joined_operator_is_issued_no_link() {
+    async fn a_joined_admin_is_issued_no_link() {
         let (pool, database) = support::migrated().await;
-        let operators = Operators::new(PostgresOperators { pool });
-        let lee = operators
+        let admins = Admins::new(PostgresAdmins { pool });
+        let lee = admins
             .create(
-                &OperatorName::parse("Lee Park").expect("a name"),
+                &AdminName::parse("Lee Park").expect("a name"),
                 None,
                 &support::actor(),
             )
@@ -1461,16 +1441,16 @@ mod tests {
         let admin = tetsu_postgres::connect(&database).await.expect("connects");
         admin
             .execute(
-                "INSERT INTO identity.passkeys (credential_id, operator_id, passkey, created_at)
+                "INSERT INTO identity.passkeys (credential_id, admin_id, passkey, created_at)
                  VALUES (sha256('lee'::bytea), $1, '{}', now())",
                 &[&lee.get()],
             )
             .await
             .expect("stores a passkey");
         assert_eq!(
-            operators.invite(lee, &support::actor()).await.map(drop),
+            admins.invite(lee, &support::actor()).await.map(drop),
             Err(Error::Invalid(format!(
-                "operator {} has a passkey already, and adds another after logging in",
+                "admin {} has a passkey already, and adds another after logging in",
                 lee.get()
             )))
         );
@@ -1484,7 +1464,7 @@ mod tests {
             .await
             .expect("replaces");
         assert_eq!(
-            operators.invite(lee, &support::actor()).await.map(drop),
+            admins.invite(lee, &support::actor()).await.map(drop),
             Err(Error::Storage(
                 "issuing a link answered \"maybe\"".to_string()
             ))
@@ -1492,16 +1472,16 @@ mod tests {
     }
 
     /// Every path through issuing a link, in this one build, which llvm-cov scores on its own: no random source,
-    /// a link issued, an unknown operator, and a database that refuses.
+    /// a link issued, an unknown admin, and a database that refuses.
     #[tokio::test]
     async fn every_path_through_issuing_a_link() {
         let (pool, database) = support::migrated().await;
-        let failing = Operators::with_fill(PostgresOperators { pool: pool.clone() }, |_| {
+        let failing = Admins::with_fill(PostgresAdmins { pool: pool.clone() }, |_| {
             Err(getrandom::Error::UNSUPPORTED)
         });
         let kurt = failing
             .create(
-                &OperatorName::parse("Kurt Medley").expect("a name"),
+                &AdminName::parse("Kurt Medley").expect("a name"),
                 None,
                 &support::actor(),
             )
@@ -1514,14 +1494,14 @@ mod tests {
                 getrandom::Error::UNSUPPORTED
             )))
         );
-        let working = Operators::with_fill(PostgresOperators { pool }, getrandom::fill);
+        let working = Admins::with_fill(PostgresAdmins { pool }, getrandom::fill);
         assert!(working.invite(kurt, &support::actor()).await.is_ok());
         assert_eq!(
             working
-                .invite(OperatorId::new(i64::MAX), &support::actor())
+                .invite(AdminId::new(i64::MAX), &support::actor())
                 .await
                 .map(drop),
-            Err(Error::Invalid(format!("no operator {}", i64::MAX)))
+            Err(Error::Invalid(format!("no admin {}", i64::MAX)))
         );
         tetsu_postgres::connect(&database)
             .await

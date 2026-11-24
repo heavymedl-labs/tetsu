@@ -1,4 +1,4 @@
-{#- The operator's Profile (#156): who they are, their name, their email address or that they have none, and their
+{#- The admin's Profile (#156): who they are, their name, their email address or that they have none, and their
     role. Changing them comes with re-authentication, later. -#}
 {% extends "account_shell.html" %}
 {% import "../../../web/templates/components.html" as shared %}
@@ -12,6 +12,6 @@
     {% call shared::settings_row("Email", "Where invites and security notices go.") %}{% if let Some(email) = email %}<p
           class="text-mini text-ink"
         >{{ email }}</p>{% else %}<p class="text-mini text-muted">No email address</p>{% endif %}{% endcall %}
-    {% call shared::settings_row("Role", "") %}<p class="text-mini text-ink">Operator</p>{% endcall %}
+    {% call shared::settings_row("Role", "") %}<p class="text-mini text-ink">Admin</p>{% endcall %}
   </div>
 {% endblock %}

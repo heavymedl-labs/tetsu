@@ -19,7 +19,7 @@ function browser(passkeys: Partial<typeof PublicKeyCredential> = {}): Browser {
       hash: "#L1",
       pathname: "/admin/join",
       search: "?from=mail",
-      hostname: "ops.example.com",
+      hostname: "admin.example.com",
       assign: vi.fn(),
     },
     history: { replaceState: vi.fn() },
@@ -165,7 +165,7 @@ describe("a passkey island and what it sends", () => {
     }
   });
 
-  it("sends the operator's form token when adding a passkey, or none the page lacks", async () => {
+  it("sends the admin's form token when adding a passkey, or none the page lacks", async () => {
     for (const [attributes, form] of [
       ['action="add" form-token="F1"', "F1"],
       ['action="add"', ""],
@@ -235,10 +235,10 @@ describe("a passkey island whose join the server refuses or a later press ends",
   it("says the server's refusal of a join in its words", async () => {
     const host = island('action="join"');
     ready(host, browser());
-    run.mockRejectedValueOnce(new Refused("this invite has ended. Log in, or ask an operator for a new one"));
+    run.mockRejectedValueOnce(new Refused("this invite has ended. Log in, or ask an admin for a new one"));
     await press(host);
     await vi.waitFor(() => expect(host.dataset.state).toBe("failed"));
-    expect(status(host)).toBe("This invite has ended. Log in, or ask an operator for a new one.");
+    expect(status(host)).toBe("This invite has ended. Log in, or ask an admin for a new one.");
     expect(run).toHaveBeenCalledTimes(1);
   });
 
@@ -445,7 +445,7 @@ describe("a passkey island finishing", () => {
     await vi.waitFor(() => expect(button(host).disabled).toBe(true));
     button(host).click();
     expect(run).toHaveBeenCalledTimes(1);
-    answer(new Refused("this invite has ended. Log in, or ask an operator for a new one"));
+    answer(new Refused("this invite has ended. Log in, or ask an admin for a new one"));
     await vi.waitFor(() => expect(host.dataset.state).toBe("failed"));
     expect(button(host).disabled).toBe(false);
   });
@@ -517,11 +517,11 @@ describe("the passkeys island", () => {
     return document.querySelector("tetsu-passkeys") as HTMLElement;
   }
 
-  it("tells the operator's devices every passkey Tetsu holds", () => {
+  it("tells the admin's devices every passkey Tetsu holds", () => {
     const told = vi.fn().mockResolvedValue(undefined);
     signal(list('user="U1" credentials="A1 B2"'), browser({ signalAllAcceptedCredentials: told }));
     expect(told).toHaveBeenCalledWith({
-      rpId: "ops.example.com",
+      rpId: "admin.example.com",
       userId: "U1",
       allAcceptedCredentialIds: ["A1", "B2"],
     });
@@ -530,7 +530,11 @@ describe("the passkeys island", () => {
   it("tells them none when the page lists none", () => {
     const told = vi.fn().mockResolvedValue(undefined);
     signal(list(""), browser({ signalAllAcceptedCredentials: told }));
-    expect(told).toHaveBeenCalledWith({ rpId: "ops.example.com", userId: "", allAcceptedCredentialIds: [] });
+    expect(told).toHaveBeenCalledWith({
+      rpId: "admin.example.com",
+      userId: "",
+      allAcceptedCredentialIds: [],
+    });
   });
 
   it("changes nothing when a device refuses to hear it", async () => {
@@ -565,7 +569,7 @@ describe("define", () => {
       '<test-passkeys user="U1" credentials="A1"></test-passkeys>';
     expect((document.querySelector("test-passkey") as HTMLElement).dataset.state).toBe("ready");
     expect(told).toHaveBeenCalledWith({
-      rpId: "ops.example.com",
+      rpId: "admin.example.com",
       userId: "U1",
       allAcceptedCredentialIds: ["A1"],
     });

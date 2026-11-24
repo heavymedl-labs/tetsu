@@ -1,5 +1,5 @@
 //! Mail: the `Mailer` port's adapters (ADR-0044, ADR-0074). A message to an address on the allowlist goes out by
-//! SMTP when a server is set; every other message is kept for the operators' mailbox page. Either way it goes once
+//! SMTP when a server is set; every other message is kept for the admins' mailbox page. Either way it goes once
 //! per key.
 //!
 //! The public surface (ADR-0021): the module's registration, [`Mail`]; the adapter constructor, [`post_office`],

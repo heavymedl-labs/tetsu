@@ -1,4 +1,4 @@
--- Removes every passkey an operator holds, ending their sessions and
+-- Removes every passkey an admin holds, ending their sessions and
 -- ceremonies.
 SELECT
     r.passkeys_removed,

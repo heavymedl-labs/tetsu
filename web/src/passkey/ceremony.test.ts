@@ -62,7 +62,7 @@ describe("ceremony", () => {
     expect(await ceremony("login", {}, phone, live(), vi.fn())).toBe("/admin");
     const asked = phone.get.mock.calls[0]?.[0] as CredentialRequestOptions;
     expect(asked.signal).toBeInstanceOf(AbortSignal);
-    expect(asked.publicKey?.rpId).toBe("ops.example.com");
+    expect(asked.publicKey?.rpId).toBe("admin.example.com");
     expect(phone.create).not.toHaveBeenCalled();
     expect(sent(fetch)).toEqual([
       ["/admin/login/begin", {}],

@@ -1,7 +1,7 @@
-{#- The operator's Security (#156): their live sessions first, this one marked, each other with its own log out and
+{#- The admin's Security (#156): their live sessions first, this one marked, each other with its own log out and
     one for all the others (ADR-0059), then their passkeys, one row each, with adding one. Ending a session or adding
     a passkey needs a login from the last ten minutes, which the page says when it is older. The passkeys island
-    tells the operator's devices every passkey listed here, so a device can hide one Tetsu removed. -#}
+    tells the admin's devices every passkey listed here, so a device can hide one Tetsu removed. -#}
 {% extends "account_shell.html" %}
 {% import "button.html" as ui %}
 {% import "../../../web/templates/components.html" as shared %}

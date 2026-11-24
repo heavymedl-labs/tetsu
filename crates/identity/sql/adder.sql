@@ -1,7 +1,7 @@
--- The operator a fresh session names, if they may add a passkey, a row for each
+-- The admin a fresh session names, if they may add a passkey, a row for each
 -- passkey they hold.
 SELECT
-    a.operator_id,
+    a.admin_id,
     a.user_handle,
     a.name,
     a.credential_id,

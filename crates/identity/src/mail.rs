@@ -19,9 +19,9 @@ struct InviteHtml<'a> {
     link: &'a str,
 }
 
-/// An operator's invite to `to`, carrying `link`, keyed on the link's token, so the same link is sent once
+/// An admin's invite to `to`, carrying `link`, keyed on the link's token, so the same link is sent once
 /// however often it is handed over. The key holds the token's hash, never the token, and the invite is never kept
-/// for the mailbox, where another operator could read the live link (ADR-0074).
+/// for the mailbox, where another admin could read the live link (ADR-0074).
 #[must_use]
 pub fn invite_message(to: Address, link: &str, token: &InviteToken) -> Option<Message> {
     let key = format!("invite:{}", to_hex(&token.hash()));
@@ -33,7 +33,7 @@ pub fn invite_message(to: Address, link: &str, token: &InviteToken) -> Option<Me
         .map(Message::never_kept)
 }
 
-/// What a notice tells an operator of, by the event that records it (ADR-0074).
+/// What a notice tells an admin of, by the event that records it (ADR-0074).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Notice {
     Login,
@@ -45,7 +45,7 @@ impl Notice {
     pub(crate) fn of(kind: &str) -> Option<Self> {
         match kind {
             "identity.logged_in" => Some(Self::Login),
-            // Joining stores the operator's first passkey, so it is told like any other.
+            // Joining stores the admin's first passkey, so it is told like any other.
             "identity.passkey_added" | "identity.invite_redeemed" => Some(Self::Passkey),
             _ => None,
         }

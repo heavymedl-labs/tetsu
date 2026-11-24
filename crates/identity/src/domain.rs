@@ -14,17 +14,17 @@ const HEX: &[u8; 16] = b"0123456789abcdef";
 const FORM_TOKEN: &[u8] = b"tetsu form token\0";
 
 /// Which kind of person logs in. Each realm has its own host, passkeys, cookie, and session limits (ADR-0040,
-/// ADR-0048); operators come first, in slice 5.
+/// ADR-0048); admins come first, in slice 5.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Realm {
-    Operator,
+    Admin,
 }
 
 impl Realm {
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Operator => "operator",
+            Self::Admin => "admin",
         }
     }
 
@@ -32,7 +32,7 @@ impl Realm {
     #[must_use]
     pub fn parse(name: &str) -> Option<Self> {
         match name {
-            "operator" => Some(Self::Operator),
+            "admin" => Some(Self::Admin),
             _ => None,
         }
     }
@@ -41,7 +41,7 @@ impl Realm {
     #[must_use]
     pub fn limits(self) -> Limits {
         match self {
-            Self::Operator => Limits {
+            Self::Admin => Limits {
                 absolute: Duration::from_hours(8),
                 idle: Duration::from_mins(15),
             },
@@ -56,11 +56,11 @@ pub struct Limits {
     pub idle: Duration,
 }
 
-/// An operator, as Postgres numbers them.
+/// An admin, as Postgres numbers them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct OperatorId(i64);
+pub struct AdminId(i64);
 
-impl OperatorId {
+impl AdminId {
     pub(crate) fn new(id: i64) -> Self {
         Self(id)
     }
@@ -70,7 +70,7 @@ impl OperatorId {
         self.0
     }
 
-    /// An ID as the operator command takes one: a positive whole number, written plainly, and nothing else.
+    /// An ID as the admin command takes one: a positive whole number, written plainly, and nothing else.
     #[must_use]
     pub fn parse(text: &str) -> Option<Self> {
         let plain =
@@ -79,14 +79,14 @@ impl OperatorId {
     }
 }
 
-/// What an operator is called in Tetsu's own tools and the audit record.
+/// What an admin is called in Tetsu's own tools and the audit record.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OperatorName(String);
+pub struct AdminName(String);
 
-impl OperatorName {
+impl AdminName {
     /// A name of 1 to 100 characters, trimmed of whitespace at its ends, with no control, invisible,
     /// direction-changing, or blank-looking characters, which could hide or reorder what the name shows, and no
-    /// two spaces together, which the operator command's list puts between columns.
+    /// two spaces together, which the admin command's list puts between columns.
     ///
     /// # Errors
     /// Fails with [`Error::Invalid`] for an empty or overlong name, or one holding such a character.
@@ -278,7 +278,7 @@ macro_rules! secret_token {
 // The doc text is a literal, not attributes the macro repeats, which lizard reads as one long function.
 secret_token!(
     InviteToken,
-    "What an invite link carries, good once and for an hour. The operator command prints it only to the \
+    "What an invite link carries, good once and for an hour. The admin command prints it only to the \
      terminal that ran it (ADR-0040)."
 );
 
@@ -296,11 +296,11 @@ pub struct Ceremony {
     pub options: String,
 }
 
-/// An operator whose open invite link a browser presented: enabled, and holding no passkey yet.
+/// An admin whose open invite link a browser presented: enabled, and holding no passkey yet.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Invitee {
-    pub operator: OperatorId,
-    /// The user handle `WebAuthn` names them by: random, so it says nothing about the operator (ADR-0040).
+    pub admin: AdminId,
+    /// The user handle `WebAuthn` names them by: random, so it says nothing about the admin (ADR-0040).
     pub user_handle: [u8; 16],
     pub name: String,
 }
@@ -309,7 +309,7 @@ pub struct Invitee {
 /// Printing it leaves out the link's hash.
 #[derive(Clone, PartialEq, Eq)]
 pub struct TakenCeremony {
-    pub operator: OperatorId,
+    pub admin: AdminId,
     pub link_hash: [u8; 32],
     pub state: String,
 }
@@ -317,7 +317,7 @@ pub struct TakenCeremony {
 impl std::fmt::Debug for TakenCeremony {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TakenCeremony")
-            .field("operator", &self.operator)
+            .field("admin", &self.admin)
             .finish_non_exhaustive()
     }
 }
@@ -331,7 +331,7 @@ pub struct NewPasskey {
     pub transports: Vec<String>,
 }
 
-/// A passkey an operator holds, as their account lists it: its credential ID, how the browser said it can reach
+/// A passkey an admin holds, as their account lists it: its credential ID, how the browser said it can reach
 /// it, and whether it may be, and is, synced to other devices, as the authenticator last signed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeldPasskey {
@@ -341,12 +341,12 @@ pub struct HeldPasskey {
     pub backup_state: bool,
 }
 
-/// A passkey found by the credential ID a login names, with its operator, their user handle, the passkey as
-/// `webauthn-rs` keeps it, and whether the operator is disabled, so a refused login names whose it was.
+/// A passkey found by the credential ID a login names, with its admin, their user handle, the passkey as
+/// `webauthn-rs` keeps it, and whether the admin is disabled, so a refused login names whose it was.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Signer {
     pub credential: Vec<u8>,
-    pub operator: OperatorId,
+    pub admin: AdminId,
     pub user_handle: [u8; 16],
     pub passkey: String,
     pub disabled: bool,
@@ -372,7 +372,7 @@ impl std::fmt::Debug for SessionStart {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Login {
     SignedIn,
-    /// The operator was disabled after the passkey was read.
+    /// The admin was disabled after the passkey was read.
     Disabled,
     /// Another login changed the passkey meanwhile, so this one's counter must not be stored.
     Raced,
@@ -435,45 +435,45 @@ impl std::fmt::Debug for Answer<'_> {
     }
 }
 
-/// The account a live session names: the operator, their user handle and name, and the passkeys they hold, as
-/// the operator's page, the browser's list of their passkeys, and a registration that must make no second passkey
+/// The account a live session names: the admin, their user handle and name, and the passkeys they hold, as
+/// the admin's page, the browser's list of their passkeys, and a registration that must make no second passkey
 /// on a device that has one all need.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Account {
-    pub operator: OperatorId,
+    pub admin: AdminId,
     pub user_handle: [u8; 16],
     pub name: String,
     pub passkeys: Vec<HeldPasskey>,
 }
 
 /// An addition taken to be finished: its token's and session's hashes, which storing its passkey uses it up by, its
-/// operator, and the state `webauthn-rs` needs. Printing it leaves out both hashes.
+/// admin, and the state `webauthn-rs` needs. Printing it leaves out both hashes.
 #[derive(Clone, PartialEq, Eq)]
 pub struct TakenAddition {
     pub token: [u8; 32],
     pub session: [u8; 32],
-    pub operator: OperatorId,
+    pub admin: AdminId,
     pub state: String,
 }
 
 impl std::fmt::Debug for TakenAddition {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TakenAddition")
-            .field("operator", &self.operator)
+            .field("admin", &self.admin)
             .finish_non_exhaustive()
     }
 }
 
-/// What adding a passkey came to for an operator who exists.
+/// What adding a passkey came to for an admin who exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Addition {
     Added,
     Disabled,
-    /// The session ended, or names another operator.
+    /// The session ended, or names another admin.
     SignedOut,
     /// The addition was not taken by this session, or has ended.
     Ended,
-    /// The operator holds two passkeys already (ADR-0057).
+    /// The admin holds two passkeys already (ADR-0057).
     Full,
     Oversized,
     Taken,
@@ -508,17 +508,17 @@ impl Addition {
     }
 }
 
-/// What redeeming an invite link came to for an operator who exists.
+/// What redeeming an invite link came to for an admin who exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Redemption {
     /// The passkey is stored and the link used up.
     Redeemed,
     Disabled,
-    /// The operator holds a passkey already, as when two tabs finish the same link.
+    /// The admin holds a passkey already, as when two tabs finish the same link.
     Joined,
     /// The link ended, or was replaced, before the ceremony finished.
     Expired,
-    /// Another operator's passkey has this credential ID.
+    /// Another admin's passkey has this credential ID.
     Taken,
     /// The credential ID or passkey is larger, or the credential ID smaller, than the store keeps.
     Oversized,
@@ -611,16 +611,16 @@ pub enum CeremonyKind {
 }
 
 /// A ceremony refused after it was taken but before storage was asked to store its outcome: its kind, its reason as
-/// the audit record names it, and, where known, the operator and credential.
+/// the audit record names it, and, where known, the admin and credential.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Refusal<'a> {
     pub kind: CeremonyKind,
-    pub operator: Option<OperatorId>,
+    pub admin: Option<AdminId>,
     pub credential: Option<&'a [u8]>,
     pub reason: &'a str,
 }
 
-/// Who ran an operator command, as the audit record names them, such as `kurt@workstation`. It is asserted by the
+/// Who ran an admin command, as the audit record names them, such as `kurt@workstation`. It is asserted by the
 /// command, not proven: every command logs in as one database login (ADR-0061), so database access is the trust
 /// boundary, and this says which person used it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -724,14 +724,11 @@ impl Actor {
         }
     }
 
-    /// Who acted from a browser, as the audit record names them: `operator-<id>@<device>` once logged in, or
+    /// Who acted from a browser, as the audit record names them: `admin-<id>@<device>` once logged in, or
     /// `browser@<device>` before, where a device the request did not name reads `unknown`, as for a command.
     #[must_use]
-    pub fn browser(operator: Option<OperatorId>, device: Option<Device>) -> Self {
-        let user = operator.map_or_else(
-            || "browser".to_string(),
-            |id| format!("operator-{}", id.get()),
-        );
+    pub fn browser(admin: Option<AdminId>, device: Option<Device>) -> Self {
+        let user = admin.map_or_else(|| "browser".to_string(), |id| format!("admin-{}", id.get()));
         let named = device.map_or_else(|| "unknown".to_string(), |device| device.to_string());
         Self {
             text: format!("{user}@{named}"),
@@ -752,14 +749,14 @@ impl Actor {
     }
 }
 
-/// What ending an operator's other sessions did (ADR-0059, `v5.0.0-7.5.2`).
+/// What ending an admin's other sessions did (ADR-0059, `v5.0.0-7.5.2`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ending {
-    /// So many of the operator's other sessions were live when they ended.
+    /// So many of the admin's other sessions were live when they ended.
     Ended(u64),
     /// The session had not been proven by a passkey within ten minutes, so it may end no other (ADR-0048).
     NotFresh,
-    /// The request passed the checks, but its session had already ended or never was, or its operator was disabled.
+    /// The request passed the checks, but its session had already ended or never was, or its admin was disabled.
     NoSession,
     /// The request failed a check before reaching storage.
     Refused(FailedCheck),
@@ -812,7 +809,7 @@ impl SessionId {
     }
 }
 
-/// One of an operator's live sessions, as their page lists it (ADR-0059, `v5.0.0-7.5.2`): its random id, when it
+/// One of an admin's live sessions, as their page lists it (ADR-0059, `v5.0.0-7.5.2`): its random id, when it
 /// started and was last used, the device it started on, and whether it is the session asking.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListedSession {
@@ -823,7 +820,7 @@ pub struct ListedSession {
     pub presented: bool,
 }
 
-/// What disabling an operator did: whether it acted, since an operator already disabled is left as is, and how
+/// What disabling an admin did: whether it acted, since an admin already disabled is left as is, and how
 /// many sessions and invite links it ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Disabling {
@@ -832,20 +829,20 @@ pub struct Disabling {
     pub links_ended: u64,
 }
 
-/// What removing an operator's passkeys did: how many it removed, and how many live sessions it ended with them.
+/// What removing an admin's passkeys did: how many it removed, and how many live sessions it ended with them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Removal {
     pub passkeys_removed: u64,
     pub sessions_ended: u64,
 }
 
-/// An operator as the operator command lists them.
+/// An admin as the admin command lists them.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OperatorSummary {
-    pub id: OperatorId,
+pub struct AdminSummary {
+    pub id: AdminId,
     pub name: String,
     pub created_at: SystemTime,
-    /// When the operator was disabled, if they were.
+    /// When the admin was disabled, if they were.
     pub disabled_at: Option<SystemTime>,
     /// How many passkeys they hold.
     pub passkeys: u64,
@@ -853,13 +850,13 @@ pub struct OperatorSummary {
     pub link_minutes: Option<u64>,
 }
 
-/// What issuing an invite link came to for an operator who exists.
+/// What issuing an invite link came to for an admin who exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Issue {
     Issued,
-    /// The operator is disabled, and is issued no link.
+    /// The admin is disabled, and is issued no link.
     Disabled,
-    /// The operator holds a passkey already, and adds another only after logging in (`v5.0.0-6.4.1`).
+    /// The admin holds a passkey already, and adds another only after logging in (`v5.0.0-6.4.1`).
     Joined,
 }
 
@@ -899,13 +896,13 @@ pub struct TimeLeft {
     pub absolute: i64,
 }
 
-/// A logged-in operator's session, as stored. Printing it leaves out the hash of its token, which finds it.
+/// A logged-in admin's session, as stored. Printing it leaves out the hash of its token, which finds it.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Session {
     /// The hash of the token that found it, so a change made in its name can be checked against it again.
     pub(crate) hash: [u8; 32],
     pub(crate) realm: Realm,
-    pub(crate) operator: OperatorId,
+    pub(crate) admin: AdminId,
     pub(crate) started_at: SystemTime,
     /// When a passkey last proved the person in it: at the start of a login, and never for a session joining began,
     /// which rests on the invite link (ADR-0069).
@@ -921,8 +918,8 @@ impl Session {
     }
 
     #[must_use]
-    pub fn operator(&self) -> OperatorId {
-        self.operator
+    pub fn admin(&self) -> AdminId {
+        self.admin
     }
 
     #[must_use]
@@ -950,7 +947,7 @@ impl std::fmt::Debug for Session {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Session")
             .field("realm", &self.realm)
-            .field("operator", &self.operator)
+            .field("admin", &self.admin)
             .field("started_at", &self.started_at)
             .field("proven_at", &self.proven_at)
             .field("last_seen_at", &self.last_seen_at)
@@ -992,8 +989,8 @@ mod tests {
     fn a_printed_session_hides_its_hash() {
         let session = Session {
             hash: [0xab; 32],
-            realm: Realm::Operator,
-            operator: OperatorId::new(1),
+            realm: Realm::Admin,
+            admin: AdminId::new(1),
             started_at: SystemTime::UNIX_EPOCH,
             proven_at: None,
             last_seen_at: SystemTime::UNIX_EPOCH,
@@ -1001,7 +998,7 @@ mod tests {
         };
         let printed = format!("{session:?}");
         assert!(
-            printed.starts_with("Session { realm: Operator, operator: "),
+            printed.starts_with("Session { realm: Admin, admin: "),
             "{printed}"
         );
         assert_eq!(
@@ -1038,7 +1035,7 @@ mod tests {
             format!(
                 "{:?}",
                 TakenCeremony {
-                    operator: OperatorId::new(1),
+                    admin: AdminId::new(1),
                     link_hash: [0xab; 32],
                     state: String::new(),
                 }
@@ -1048,7 +1045,7 @@ mod tests {
                 TakenAddition {
                     token: [0xab; 32],
                     session: [0xab; 32],
-                    operator: OperatorId::new(1),
+                    admin: AdminId::new(1),
                     state: String::new(),
                 }
             ),
@@ -1061,28 +1058,28 @@ mod tests {
         assert_eq!(
             printed,
             [
-                "TakenCeremony { operator: OperatorId(1), .. }",
-                "TakenAddition { operator: OperatorId(1), .. }"
+                "TakenCeremony { admin: AdminId(1), .. }",
+                "TakenAddition { admin: AdminId(1), .. }"
             ]
         );
     }
 
-    /// A browser's actor names the operator once logged in, or a browser before, at its device, and a device the
+    /// A browser's actor names the admin once logged in, or a browser before, at its device, and a device the
     /// request did not name reads `unknown`.
     #[test]
-    fn a_browsers_actor_names_the_operator_and_device() {
+    fn a_browsers_actor_names_the_admin_and_device() {
         let linux = Device::from_user_agent(Some("Mozilla/5.0 (X11; Linux x86_64) Firefox/140.0"));
         let named = [
-            Actor::browser(Some(OperatorId::new(3)), linux),
+            Actor::browser(Some(AdminId::new(3)), linux),
             Actor::browser(None, linux),
-            Actor::browser(Some(OperatorId::new(3)), None),
+            Actor::browser(Some(AdminId::new(3)), None),
         ];
         assert_eq!(
             named.each_ref().map(Actor::as_str),
             [
-                "operator-3@Firefox on Linux",
+                "admin-3@Firefox on Linux",
                 "browser@Firefox on Linux",
-                "operator-3@unknown"
+                "admin-3@unknown"
             ]
         );
     }
@@ -1173,7 +1170,7 @@ mod tests {
             "a\u{3000}b",
             "a\u{00A0}b",
         ] {
-            assert!(OperatorName::parse(hidden).is_err(), "{hidden:?}");
+            assert!(AdminName::parse(hidden).is_err(), "{hidden:?}");
             assert!(
                 Actor::parse(&format!("{hidden}@host")).is_err(),
                 "{hidden:?}"
@@ -1188,10 +1185,10 @@ mod tests {
             "\u{FE10}",
             "\u{FFFD}",
         ] {
-            assert!(OperatorName::parse(shown).is_ok(), "{shown:?}");
+            assert!(AdminName::parse(shown).is_ok(), "{shown:?}");
         }
         // Two spaces together would read as a gap between the list's columns.
-        assert!(OperatorName::parse("Kurt  disabled").is_err());
+        assert!(AdminName::parse("Kurt  disabled").is_err());
     }
 
     /// An actor made from a login names `unknown` for any part that is missing or cannot be shown safely, so it
@@ -1233,11 +1230,11 @@ mod tests {
     }
 
     #[test]
-    fn an_operator_id_is_a_plain_positive_number() {
-        assert_eq!(OperatorId::parse("42"), Some(OperatorId(42)));
+    fn an_admin_id_is_a_plain_positive_number() {
+        assert_eq!(AdminId::parse("42"), Some(AdminId(42)));
         assert_eq!(
-            OperatorId::parse("9223372036854775807"),
-            Some(OperatorId(i64::MAX))
+            AdminId::parse("9223372036854775807"),
+            Some(AdminId(i64::MAX))
         );
         for bad in [
             "",
@@ -1251,7 +1248,7 @@ mod tests {
             "x",
             "9223372036854775808",
         ] {
-            assert_eq!(OperatorId::parse(bad), None, "{bad:?}");
+            assert_eq!(AdminId::parse(bad), None, "{bad:?}");
         }
     }
     use proptest::prelude::*;
@@ -1260,9 +1257,9 @@ mod tests {
     const MINUTE: Duration = Duration::from_mins(1);
 
     #[test]
-    fn operators_get_eight_hours_and_fifteen_idle_minutes() {
+    fn admins_get_eight_hours_and_fifteen_idle_minutes() {
         assert_eq!(
-            Realm::Operator.limits(),
+            Realm::Admin.limits(),
             Limits {
                 absolute: 8 * HOUR,
                 idle: 15 * MINUTE
@@ -1272,30 +1269,27 @@ mod tests {
 
     #[test]
     fn a_realm_reads_back_its_own_name_and_no_other() {
-        assert_eq!(
-            Realm::parse(Realm::Operator.as_str()),
-            Some(Realm::Operator)
-        );
-        assert_eq!(Realm::parse("Operator"), None);
+        assert_eq!(Realm::parse(Realm::Admin.as_str()), Some(Realm::Admin));
+        assert_eq!(Realm::parse("Admin"), None);
         assert_eq!(Realm::parse("staff"), None);
     }
 
     #[test]
     fn a_name_is_trimmed_and_bounded() {
         assert_eq!(
-            OperatorName::parse("  Kurt Medley ").map(|name| name.as_str().to_string()),
+            AdminName::parse("  Kurt Medley ").map(|name| name.as_str().to_string()),
             Ok("Kurt Medley".to_string())
         );
-        assert!(OperatorName::parse(&"é".repeat(100)).is_ok());
+        assert!(AdminName::parse(&"é".repeat(100)).is_ok());
         let length = Err(Error::Invalid("a name has 1 to 100 characters".to_string()));
         let control = Err(Error::Invalid(
             "a name has no control, invisible, or direction-changing characters, and single plain spaces".to_string(),
         ));
-        assert_eq!(OperatorName::parse(""), length);
-        assert_eq!(OperatorName::parse("   "), length);
-        assert_eq!(OperatorName::parse(&"a".repeat(101)), length);
-        assert_eq!(OperatorName::parse("Kurt\nMedley"), control);
-        assert_eq!(OperatorName::parse("Kurt\u{7}"), control);
+        assert_eq!(AdminName::parse(""), length);
+        assert_eq!(AdminName::parse("   "), length);
+        assert_eq!(AdminName::parse(&"a".repeat(101)), length);
+        assert_eq!(AdminName::parse("Kurt\nMedley"), control);
+        assert_eq!(AdminName::parse("Kurt\u{7}"), control);
     }
 
     #[test]

@@ -29,11 +29,11 @@ use tracing_subscriber::layer::SubscriberExt;
 
 use crate::settings::{Export, LogFormat};
 
-/// The realm a request is for: the operators' at a path Identity's operator pages serve, and the customers' at any
+/// The realm a request is for: the admins' at a path Identity's admin pages serve, and the customers' at any
 /// other (ADR-0048). Only the path, never its text, decides, so the label names no person.
 fn realm_of(path: &str) -> &'static str {
     if tetsu_identity::PATHS.contains(&path) {
-        "operator"
+        "admin"
     } else {
         "customer"
     }
@@ -289,7 +289,7 @@ mod tests {
     #[test]
     fn text_lines_carry_the_same_fields_for_a_person_to_read() {
         let text = logged(LogFormat::Text, || {
-            let span = tracing::info_span!(target: "tetsu", "request", realm = "operator");
+            let span = tracing::info_span!(target: "tetsu", "request", realm = "admin");
             let _entered = span.enter();
             tracing::info!(target: "tetsu_tenancy::adapters", status = 200, "served");
             tracing::info!(target: "deadpool_postgres", "dropped");
@@ -297,12 +297,7 @@ mod tests {
         let line = text.lines().next().unwrap_or_default();
         assert_eq!(text.lines().count(), 1, "{text}");
         assert!(!line.starts_with('{'), "{line}");
-        for shown in [
-            " INFO ",
-            "request: served",
-            "status=200",
-            "realm=\"operator\"",
-        ] {
+        for shown in [" INFO ", "request: served", "status=200", "realm=\"admin\""] {
             assert!(line.contains(shown), "{shown} in {line}");
         }
     }
@@ -332,7 +327,7 @@ mod tests {
             .collect()
     }
 
-    /// A request to an operator page is the operators' realm; any other is the customers'.
+    /// A request to an admin page is the admins' realm; any other is the customers'.
     #[test]
     fn a_request_is_labelled_with_its_realm() {
         let realms = [
@@ -348,7 +343,7 @@ mod tests {
         assert_eq!(
             realms,
             [
-                "operator", "operator", "operator", "customer", "customer", "customer", "customer"
+                "admin", "admin", "admin", "customer", "customer", "customer", "customer"
             ]
         );
     }

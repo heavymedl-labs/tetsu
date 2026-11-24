@@ -1,11 +1,11 @@
-//! The operator's pages in the settings shell any realm fills, after Linear's settings mode: Profile and Security
-//! (#156), and the mailbox in the Platform group only operators have (ADR-0084). Each page carries a skip link, a
+//! The admin's pages in the settings shell any realm fills, after Linear's settings mode: Profile and Security
+//! (#156), and the mailbox in the Platform group only admins have (ADR-0084). Each page carries a skip link, a
 //! labelled settings `nav` headed by Tetsu's wordmark, then `main` with the page's `h1`; logout from the sidebar's
 //! foot and the narrow bar's initials menu (`v5.0.0-7.4.4`); and a narrow-screen menu that is a native popover, which
 //! a browser without popovers shows in place, above the page.
 
 use crate::http_tests::{MENU_SCRIPT, PROFILE, assert_in_order, get, logged_in, logs_out_from};
-use crate::join_tests::as_admin;
+use crate::join_tests::as_db_admin;
 
 const SECURITY: &str = "/admin/settings/security";
 const MAILBOX: &str = "/admin/mailbox";
@@ -25,7 +25,7 @@ const SHELL_PARTS: [&str; 11] = [
     "<h1",
 ];
 
-/// Each page in the shell has all of it, in order, and marks only its own page as current in the sidebar. Operators
+/// Each page in the shell has all of it, in order, and marks only its own page as current in the sidebar. Admins
 /// have no app outside it yet (#157), so nothing links back to one.
 #[tokio::test]
 async fn each_account_page_has_the_settings_shell() {
@@ -84,7 +84,7 @@ async fn the_narrow_menu_is_a_popover() {
     );
 }
 
-/// The sidebar's Log out carries the page's own form token, so it logs the operator out from any page in it.
+/// The sidebar's Log out carries the page's own form token, so it logs the admin out from any page in it.
 #[tokio::test]
 async fn each_account_page_logs_out() {
     for path in [PROFILE, SECURITY, MAILBOX] {
@@ -92,17 +92,17 @@ async fn each_account_page_logs_out() {
     }
 }
 
-/// Profile shows who the operator is: their name, their email address, or that they have none, and their role.
+/// Profile shows who the admin is: their name, their email address, or that they have none, and their role.
 #[tokio::test]
-async fn profile_shows_the_operators_name_email_and_role() {
+async fn profile_shows_the_admins_name_email_and_role() {
     let (address, database, cookie, _) = logged_in().await;
     let page = get(address, PROFILE, &cookie).await;
-    for shown in [">Kurt Medley</p>", ">No email address</p>", ">Operator</p>"] {
+    for shown in [">Kurt Medley</p>", ">No email address</p>", ">Admin</p>"] {
         assert!(page.body.contains(shown), "{shown}: {}", page.body);
     }
-    as_admin(
+    as_db_admin(
         &database,
-        "UPDATE identity.operators SET email = 'kurt@example.com'",
+        "UPDATE identity.admins SET email = 'kurt@example.com'",
     )
     .await;
     let page = get(address, PROFILE, &cookie).await;
@@ -110,7 +110,7 @@ async fn profile_shows_the_operators_name_email_and_role() {
     assert!(!page.body.contains("No email address"));
 }
 
-/// Security lists sessions first, as Linear does, then the operator's passkeys, one row each, inside the passkeys
+/// Security lists sessions first, as Linear does, then the admin's passkeys, one row each, inside the passkeys
 /// island, which adds one from the page.
 #[tokio::test]
 async fn security_lists_sessions_then_passkeys() {
@@ -156,7 +156,7 @@ async fn an_account_page_without_a_session_goes_to_log_in() {
     }
 }
 
-/// Until operators have a home (#157), their realm's own address sends them to their Profile, where logging in lands,
+/// Until admins have a home (#157), their realm's own address sends them to their Profile, where logging in lands,
 /// and anyone without a session to log in (ADR-0084).
 #[tokio::test]
 async fn the_realms_address_goes_to_profile() {
@@ -180,7 +180,7 @@ async fn a_session_shows_the_kind_of_device_it_is_on() {
         ("Safari on iPadOS", 0, 2),
         ("Firefox on Linux", 0, 2),
     ] {
-        as_admin(
+        as_db_admin(
             &database,
             &format!("UPDATE identity.sessions SET device = '{device}'"),
         )
@@ -197,7 +197,7 @@ async fn a_session_shows_the_kind_of_device_it_is_on() {
     }
 }
 
-/// An account page is unavailable, rather than missing a part, when it cannot check the session, read the operator's
+/// An account page is unavailable, rather than missing a part, when it cannot check the session, read the admin's
 /// account, or, for Profile, read their email.
 #[tokio::test]
 async fn an_account_page_that_cannot_be_read_is_unavailable() {
@@ -212,7 +212,7 @@ async fn an_account_page_that_cannot_be_read_is_unavailable() {
         ),
         (
             PROFILE,
-            "REVOKE SELECT (email) ON identity.operators FROM tetsu_identity",
+            "REVOKE SELECT (email) ON identity.admins FROM tetsu_identity",
         ),
         (
             SECURITY,
@@ -224,7 +224,7 @@ async fn an_account_page_that_cannot_be_read_is_unavailable() {
         ),
     ] {
         let (address, database, cookie, _) = logged_in().await;
-        as_admin(&database, broken).await;
+        as_db_admin(&database, broken).await;
         assert_eq!(
             get(address, path, &cookie).await.status,
             503,

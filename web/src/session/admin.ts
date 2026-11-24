@@ -1,4 +1,4 @@
-// A logged-in operator page's session script: it registers the session island (./island.ts) with the browser's own
+// A logged-in admin page's session script: it registers the session island (./island.ts) with the browser's own
 // parts.
 
 import { channel, define } from "./island";

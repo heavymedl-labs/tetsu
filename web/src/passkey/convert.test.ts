@@ -37,7 +37,7 @@ describe("creation", () => {
     expect(options.signal).toBe(signal);
     expect(publicKey.user.name).toBe(created.publicKey.user.name);
     expect(publicKey.authenticatorSelection).toEqual(created.publicKey.authenticatorSelection);
-    expect(publicKey.rp).toEqual({ name: "Tetsu", id: "ops.example.com" });
+    expect(publicKey.rp).toEqual({ name: "Tetsu", id: "admin.example.com" });
   });
 
   it("excludes nothing, with no transports, when the server lists none", () => {
@@ -58,7 +58,7 @@ describe("request", () => {
     expect(publicKey.challenge).toEqual(decode(requested.publicKey.challenge));
     expect(publicKey.allowCredentials).toEqual([]);
     expect(publicKey.userVerification).toBe("required");
-    expect(publicKey.rpId).toBe("ops.example.com");
+    expect(publicKey.rpId).toBe("admin.example.com");
   });
 
   it("names nothing when the server leaves the list out", () => {

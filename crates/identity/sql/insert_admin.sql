@@ -1,9 +1,9 @@
--- Adds an operator with no passkey, and their email address if given, and
+-- Adds an admin with no passkey, and their email address if given, and
 -- says whether it did: a name already
--- taken adds none, and names the operator who holds it, if the statement can
+-- taken adds none, and names the admin who holds it, if the statement can
 -- see them yet.
 WITH added AS (
-    INSERT INTO identity.operators (name, email) VALUES ($1, $2)
+    INSERT INTO identity.admins (name, email) VALUES ($1, $2)
     ON CONFLICT (name) DO NOTHING
     RETURNING id
 )
@@ -16,5 +16,5 @@ UNION ALL
 SELECT
     o.id,
     false AS created
-FROM identity.operators AS o
+FROM identity.admins AS o
 WHERE o.name = $1 AND NOT EXISTS (SELECT FROM added);

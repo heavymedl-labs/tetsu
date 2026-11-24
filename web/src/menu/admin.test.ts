@@ -5,6 +5,6 @@ afterEach(() => {
 });
 
 it("registers the menu island with the browser's own registry", async () => {
-  await import("./ops");
+  await import("./admin");
   expect(customElements.get("tetsu-menu")).toBeDefined();
 });

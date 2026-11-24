@@ -1,20 +1,19 @@
-//! What Identity's integration tests share: a migrated database, Identity's use cases over it, and one operator.
+//! What Identity's integration tests share: a migrated database, Identity's use cases over it, and one admin.
 
 use tetsu_identity::{
-    Actor, Identity, OperatorId, OperatorName, OperatorStore, Operators, SessionToken,
-    postgres_store,
+    Actor, AdminId, AdminName, AdminStore, Admins, Identity, SessionToken, postgres_store,
 };
 use tetsu_postgres::connect;
 use tetsu_postgres::pool;
 use tetsu_postgres::test_support::{TestDatabase, migrated_database};
 
-/// Who runs the operator command in these tests.
+/// Who runs the admin command in these tests.
 pub fn actor() -> Actor {
     Actor::parse("kurt@workstation").expect("an actor")
 }
 
-pub fn name(name: &str) -> OperatorName {
-    OperatorName::parse(name).expect("a name")
+pub fn name(name: &str) -> AdminName {
+    AdminName::parse(name).expect("a name")
 }
 
 /// A fresh, migrated database.
@@ -25,25 +24,25 @@ pub async fn ready() -> TestDatabase {
 }
 
 /// A migrated database, with Identity's use cases over it as the application role, as `tetsu serve` logs in.
-pub async fn migrated() -> (TestDatabase, Operators<impl OperatorStore>) {
+pub async fn migrated() -> (TestDatabase, Admins<impl AdminStore>) {
     let database = ready().await;
-    let operators = postgres_store(pool(&database.as_app()).expect("a pool"));
-    (database, operators)
+    let admins = postgres_store(pool(&database.as_app()).expect("a pool"));
+    (database, admins)
 }
 
-/// [`migrated`], holding one operator, Kurt Medley.
-pub async fn with_kurt() -> (TestDatabase, Operators<impl OperatorStore>, OperatorId) {
-    let (database, operators) = migrated().await;
-    let kurt = operators
+/// [`migrated`], holding one admin, Kurt Medley.
+pub async fn with_kurt() -> (TestDatabase, Admins<impl AdminStore>, AdminId) {
+    let (database, admins) = migrated().await;
+    let kurt = admins
         .create(&name("Kurt Medley"), None, &actor())
         .await
         .expect("creates");
-    (database, operators, kurt)
+    (database, admins, kurt)
 }
 
-/// Starts an operator's session as a passkey login would, as the test server's administrator, and returns its
+/// Starts an admin's session as a passkey login would, as the test server's administrator, and returns its
 /// token: only the login function may start one, so Identity's role cannot call `start_session` (ADR-0048).
-pub async fn logged_in(database: &TestDatabase, operator: OperatorId) -> SessionToken {
+pub async fn logged_in(database: &TestDatabase, admin: AdminId) -> SessionToken {
     let mut bytes = [0u8; 32];
     getrandom::fill(&mut bytes).expect("random bytes");
     let text = bytes.iter().fold(String::new(), |mut text, byte| {
@@ -54,8 +53,8 @@ pub async fn logged_in(database: &TestDatabase, operator: OperatorId) -> Session
         .await
         .expect("connects")
         .execute(
-            "SELECT identity.start_session(sha256(decode($1, 'hex')), 'operator', $2, true)",
-            &[&text, &operator.get()],
+            "SELECT identity.start_session(sha256(decode($1, 'hex')), 'admin', $2, true)",
+            &[&text, &admin.get()],
         )
         .await
         .expect("starts");

@@ -1,8 +1,8 @@
 //! The driven port Identity calls out through.
 
 use crate::domain::{
-    Account, Actor, Addition, Disabling, Ending, Error, FailedCheck, Invitee, Issue, ListedSession,
-    Login, NewPasskey, OperatorId, OperatorName, OperatorSummary, RateLimit, Realm, Redemption,
+    Account, Actor, Addition, AdminId, AdminName, AdminSummary, Disabling, Ending, Error,
+    FailedCheck, Invitee, Issue, ListedSession, Login, NewPasskey, RateLimit, Realm, Redemption,
     Refusal, Removal, Session, SessionId, SessionStart, Signer, TakenAddition, TakenCeremony,
     TimeLeft,
 };
@@ -10,30 +10,30 @@ use std::future::Future;
 use std::time::Duration;
 use tetsu_kernel::{Address, Requester};
 
-/// Where operators and their sessions are kept. A session is reached only by its token's hash and realm, one at a
+/// Where admins and their sessions are kept. A session is reached only by its token's hash and realm, one at a
 /// time (ADR-0048), and the store keeps each realm's limits beside its own clock, so no caller can stretch a
 /// session. The Postgres adapter implements it, and tests may use their own.
-pub trait OperatorStore {
-    /// Stores a new operator, with their email address if given and no passkey yet. Each change below records an
+pub trait AdminStore {
+    /// Stores a new admin, with their email address if given and no passkey yet. Each change below records an
     /// audit event naming `actor`, with its outcome, in the same transaction.
-    fn insert_operator(
+    fn insert_admin(
         &self,
-        name: &OperatorName,
+        name: &AdminName,
         email: Option<&Address>,
         actor: &Actor,
-    ) -> impl Future<Output = Result<OperatorId, Error>> + Send;
+    ) -> impl Future<Output = Result<AdminId, Error>> + Send;
 
-    /// An operator's email address, or none for one who has none or does not exist (ADR-0074).
-    fn operator_email(
+    /// An admin's email address, or none for one who has none or does not exist (ADR-0074).
+    fn admin_email(
         &self,
-        operator: OperatorId,
+        admin: AdminId,
     ) -> impl Future<Output = Result<Option<Address>, Error>> + Send;
 
-    /// Sets an operator's email address, and says whether it changed, or none for an operator who does not exist
+    /// Sets an admin's email address, and says whether it changed, or none for an admin who does not exist
     /// (ADR-0074).
-    fn set_operator_email(
+    fn set_admin_email(
         &self,
-        operator: OperatorId,
+        admin: AdminId,
         email: &Address,
         actor: &Actor,
     ) -> impl Future<Output = Result<Option<bool>, Error>> + Send;
@@ -50,7 +50,7 @@ pub trait OperatorStore {
 
     /// How long the live session stored under a token's hash in a realm has left, read without counting as a
     /// request, so it renews nothing and removes nothing; none for a session spent, of another realm, or of a
-    /// disabled operator, as [`Self::use_session`] would find.
+    /// disabled admin, as [`Self::use_session`] would find.
     fn session_left(
         &self,
         hash: &[u8; 32],
@@ -64,17 +64,17 @@ pub trait OperatorStore {
         realm: Realm,
     ) -> impl Future<Output = Result<bool, Error>> + Send;
 
-    /// Stores an operator's invite link under its token's hash, good for an hour, replacing any earlier one,
-    /// and says what came of it: an operator who is disabled or holds a passkey is issued none, and one who does
+    /// Stores an admin's invite link under its token's hash, good for an hour, replacing any earlier one,
+    /// and says what came of it: an admin who is disabled or holds a passkey is issued none, and one who does
     /// not exist is none.
     fn issue_invite(
         &self,
         hash: &[u8; 32],
-        operator: OperatorId,
+        admin: AdminId,
         actor: &Actor,
     ) -> impl Future<Output = Result<Option<Issue>, Error>> + Send;
 
-    /// The operator an invite link's hash names, while the link is open, the operator enabled, and no passkey
+    /// The admin an invite link's hash names, while the link is open, the admin enabled, and no passkey
     /// theirs yet. Reading it uses nothing up.
     fn invitee(
         &self,
@@ -83,11 +83,11 @@ pub trait OperatorStore {
 
     /// Keeps a join ceremony's state under its token's hash, with the link it will redeem, for ten minutes
     /// but never past the link, and replacing any earlier ceremony of that link. Says whether it did: not once the
-    /// link has ended, or its operator is disabled or holds a passkey.
+    /// link has ended, or its admin is disabled or holds a passkey.
     fn begin_join(
         &self,
         token: &[u8; 32],
-        operator: OperatorId,
+        admin: AdminId,
         link: &[u8; 32],
         state: &str,
     ) -> impl Future<Output = Result<bool, Error>> + Send;
@@ -99,8 +99,8 @@ pub trait OperatorStore {
         token: &[u8; 32],
     ) -> impl Future<Output = Result<Option<TakenCeremony>, Error>> + Send;
 
-    /// Stores an operator's first passkey and uses up the ceremony's link, in one transaction, and says what came of
-    /// it, or none for an operator who does not exist. Redeemed, it ends the session the browser presented and starts
+    /// Stores an admin's first passkey and uses up the ceremony's link, in one transaction, and says what came of
+    /// it, or none for an admin who does not exist. Redeemed, it ends the session the browser presented and starts
     /// `session`, unproven, since it rests on the link (ADR-0069).
     fn redeem_invite(
         &self,
@@ -110,11 +110,11 @@ pub trait OperatorStore {
         actor: &Actor,
     ) -> impl Future<Output = Result<Option<Redemption>, Error>> + Send;
 
-    /// Disables an operator, ending every session and invite link they hold, and says what it did, or none for
-    /// an operator who does not exist.
-    fn disable_operator(
+    /// Disables an admin, ending every session and invite link they hold, and says what it did, or none for
+    /// an admin who does not exist.
+    fn disable_admin(
         &self,
-        operator: OperatorId,
+        admin: AdminId,
         actor: &Actor,
     ) -> impl Future<Output = Result<Option<Disabling>, Error>> + Send;
 
@@ -151,15 +151,15 @@ pub trait OperatorStore {
         token: &[u8; 32],
     ) -> impl Future<Output = Result<Option<String>, Error>> + Send;
 
-    /// The passkey a credential ID names, with its operator and whether they are disabled, or none for a credential
-    /// no operator holds.
+    /// The passkey a credential ID names, with its admin and whether they are disabled, or none for a credential
+    /// no admin holds.
     fn signer(
         &self,
         credential: &[u8],
     ) -> impl Future<Output = Result<Option<Signer>, Error>> + Send;
 
     /// Stores a passkey's verified new state, if no other login changed it meanwhile and it is still the signer's
-    /// operator's, and starts the operator's session under a token's hash, in one transaction, recording it; says
+    /// admin's, and starts the admin's session under a token's hash, in one transaction, recording it; says
     /// what came of it, or none for a passkey that no longer exists or is no longer theirs.
     fn login(
         &self,
@@ -169,14 +169,14 @@ pub trait OperatorStore {
         actor: &Actor,
     ) -> impl Future<Output = Result<Option<Login>, Error>> + Send;
 
-    /// The account a live session's hash names, if the operator is enabled. Reading it changes nothing.
+    /// The account a live session's hash names, if the admin is enabled. Reading it changes nothing.
     fn account(
         &self,
         session: &[u8; 32],
     ) -> impl Future<Output = Result<Option<Account>, Error>> + Send;
 
     /// The account a live session's hash names, as [`Self::account`] finds it, if the session began within ten
-    /// minutes and the operator holds fewer than two passkeys.
+    /// minutes and the admin holds fewer than two passkeys.
     fn adder(
         &self,
         session: &[u8; 32],
@@ -200,9 +200,9 @@ pub trait OperatorStore {
         actor: &Actor,
     ) -> impl Future<Output = Result<(), Error>> + Send;
 
-    /// Ends the other session `only` of the operator whose session this hash names, or every other one, if that
-    /// session is live, its operator enabled, and it was proven by a passkey within ten minutes, and records the
-    /// attempt either way. The operator comes from the session alone, never from the caller. It never ends this
+    /// Ends the other session `only` of the admin whose session this hash names, or every other one, if that
+    /// session is live, its admin enabled, and it was proven by a passkey within ten minutes, and records the
+    /// attempt either way. The admin comes from the session alone, never from the caller. It never ends this
     /// session, and never answers [`Ending::Refused`], which the request's own checks decide.
     fn end_other_sessions(
         &self,
@@ -212,12 +212,12 @@ pub trait OperatorStore {
     ) -> impl Future<Output = Result<Ending, Error>> + Send;
 
     /// Keeps a ceremony for adding a passkey for ten minutes, if the session still allows it, replacing the
-    /// operator's earlier one; says whether it did.
+    /// admin's earlier one; says whether it did.
     fn begin_addition(
         &self,
         token: &[u8; 32],
         session: &[u8; 32],
-        operator: OperatorId,
+        admin: AdminId,
         state: &str,
     ) -> impl Future<Output = Result<bool, Error>> + Send;
 
@@ -229,8 +229,8 @@ pub trait OperatorStore {
         session: &[u8; 32],
     ) -> impl Future<Output = Result<Option<TakenAddition>, Error>> + Send;
 
-    /// Stores an operator's added passkey while their session is live, using up the addition it took and ending
-    /// their other sessions, in one transaction, recording it; says what came of it, or none for an operator who
+    /// Stores an admin's added passkey while their session is live, using up the addition it took and ending
+    /// their other sessions, in one transaction, recording it; says what came of it, or none for an admin who
     /// does not exist.
     fn add_passkey(
         &self,
@@ -239,27 +239,27 @@ pub trait OperatorStore {
         actor: &Actor,
     ) -> impl Future<Output = Result<Option<Addition>, Error>> + Send;
 
-    /// Removes every passkey an operator holds, ending their sessions and any ceremony, and says what it did, or none
-    /// for an operator who does not exist.
+    /// Removes every passkey an admin holds, ending their sessions and any ceremony, and says what it did, or none
+    /// for an admin who does not exist.
     fn remove_passkeys(
         &self,
-        operator: OperatorId,
+        admin: AdminId,
         actor: &Actor,
     ) -> impl Future<Output = Result<Option<Removal>, Error>> + Send;
 
-    /// Enables a disabled operator again, and says whether they were disabled, or none for an operator who does not
+    /// Enables a disabled admin again, and says whether they were disabled, or none for an admin who does not
     /// exist. Their sessions stay ended.
-    fn enable_operator(
+    fn enable_admin(
         &self,
-        operator: OperatorId,
+        admin: AdminId,
         actor: &Actor,
     ) -> impl Future<Output = Result<Option<bool>, Error>> + Send;
 
-    /// Ends every session one operator holds in a realm, and says how many, or none for an operator who does not
+    /// Ends every session one admin holds in a realm, and says how many, or none for an admin who does not
     /// exist.
-    fn end_operator_sessions(
+    fn end_admin_sessions(
         &self,
-        operator: OperatorId,
+        admin: AdminId,
         realm: Realm,
         actor: &Actor,
     ) -> impl Future<Output = Result<Option<u64>, Error>> + Send;
@@ -271,6 +271,6 @@ pub trait OperatorStore {
         actor: &Actor,
     ) -> impl Future<Output = Result<u64, Error>> + Send;
 
-    /// Every operator, oldest first.
-    fn list_operators(&self) -> impl Future<Output = Result<Vec<OperatorSummary>, Error>> + Send;
+    /// Every admin, oldest first.
+    fn list_admins(&self) -> impl Future<Output = Result<Vec<AdminSummary>, Error>> + Send;
 }

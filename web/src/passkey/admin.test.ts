@@ -10,7 +10,7 @@ it("registers the passkey islands with the browser's own parts", async () => {
   const signalled = vi.fn().mockResolvedValue(undefined);
   vi.stubGlobal("PublicKeyCredential", { signalAllAcceptedCredentials: signalled });
   vi.stubGlobal("navigator", { credentials: {} });
-  await import("./ops");
+  await import("./admin");
   document.body.innerHTML =
     '<tetsu-passkey action="login"><button disabled><span data-label>Go</span></button><p role="status"></p></tetsu-passkey>' +
     '<tetsu-passkeys user="U1" credentials="A1"></tetsu-passkeys>';

@@ -369,7 +369,7 @@ describe("channel", () => {
   });
 });
 
-describe("a session island when the operator logs out", () => {
+describe("a session island when the admin logs out", () => {
   it("tells the site's other tabs when a logout form on the page is sent, and nothing for other forms", async () => {
     const { page, listeners } = browser();
     answers([900, 28_800]);

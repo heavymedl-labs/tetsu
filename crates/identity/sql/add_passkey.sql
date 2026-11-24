@@ -1,4 +1,4 @@
--- Stores an operator's added passkey, using up its addition and ending their
+-- Stores an admin's added passkey, using up its addition and ending their
 -- other sessions.
 SELECT
     a.added,

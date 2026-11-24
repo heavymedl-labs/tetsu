@@ -1,6 +1,6 @@
 [package]
 name = "tetsu-identity"
-description = "Who logs in: operators, staff, and customers, their passkeys, and their sessions."
+description = "Who logs in: admins, staff, and customers, their passkeys, and their sessions."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

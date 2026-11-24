@@ -1,10 +1,10 @@
-//! The operator's initials menu (#148, `v5.0.0-7.4.4`), at the end of the settings shell's narrow bar on every
-//! operator page: their initials opening a menu with their name, "Operator", Account, and Log out. Pages before login,
+//! The admin's initials menu (#148, `v5.0.0-7.4.4`), at the end of the settings shell's narrow bar on every
+//! admin page: their initials opening a menu with their name, "Admin", Account, and Log out. Pages before login,
 //! and the refused, unavailable, and not-found pages, carry none.
 
 use crate::adapters::http::initials;
 use crate::http_tests::{PROFILE, assert_in_order, get, logged_in, send};
-use crate::join_tests::{as_admin, replace};
+use crate::join_tests::{as_db_admin, replace};
 
 const MENU_BUTTON: &str = "popovertarget=\"tetsu-account-menu\"";
 
@@ -15,7 +15,7 @@ const MENU_PARTS: [&str; 10] = [
     "pointer-coarse:after:content-['']\">KM<span class=\"sr-only\">, account menu, Kurt Medley</span></button>",
     "<div id=\"tetsu-account-menu\" popover",
     ">Kurt Medley</p>",
-    ">Operator</p>",
+    ">Admin</p>",
     "href=\"/admin/settings/profile\"",
     "pointer-coarse:py-3\">Account</a>",
     "<form method=\"post\" action=\"/admin/logout\"",
@@ -23,9 +23,9 @@ const MENU_PARTS: [&str; 10] = [
     "pointer-coarse:py-3\">Log out</button>",
 ];
 
-/// Each operator page carries the whole menu once, in order.
+/// Each admin page carries the whole menu once, in order.
 #[tokio::test]
-async fn every_operator_page_has_the_menu() {
+async fn every_admin_page_has_the_menu() {
     let (address, _database, cookie, _) = logged_in().await;
     for path in [PROFILE, "/admin/settings/security", "/admin/mailbox"] {
         let page = get(address, path, &cookie).await;
@@ -58,7 +58,7 @@ async fn pages_without_a_session_show_no_menu() {
     .await;
     assert_eq!(refused.status, 403);
     pages.push(refused);
-    as_admin(
+    as_db_admin(
         &database,
         "REVOKE EXECUTE ON FUNCTION identity.account(bytea) FROM tetsu_identity",
     )
@@ -71,12 +71,12 @@ async fn pages_without_a_session_show_no_menu() {
     }
 }
 
-/// An operator disabled since their session was checked has no account to name, so the mailbox sends them to log in,
+/// An admin disabled since their session was checked has no account to name, so the mailbox sends them to log in,
 /// returning there after, as their Profile does.
 #[tokio::test]
 async fn a_page_without_an_account_goes_to_log_in() {
     let (address, database, cookie, _) = logged_in().await;
-    let returns = "TABLE (operator_id bigint, user_handle bytea, name text, credential_id bytea, transports text, \
+    let returns = "TABLE (admin_id bigint, user_handle bytea, name text, credential_id bytea, transports text, \
                    backup_eligible boolean, backup_state boolean)";
     let none = "SELECT 1::bigint, ''::bytea, ''::text, ''::bytea, ''::text, true, true WHERE false";
     replace(&database, "account(bytea)", returns, none).await;
@@ -107,11 +107,11 @@ fn initials_are_the_first_and_last_names_first_letters() {
     }
 }
 
-/// A page that cannot read the operator's account to name them is unavailable, rather than a page without a name.
+/// A page that cannot read the admin's account to name them is unavailable, rather than a page without a name.
 #[tokio::test]
 async fn a_page_whose_account_cannot_be_read_is_unavailable() {
     let (address, database, cookie, _) = logged_in().await;
-    as_admin(
+    as_db_admin(
         &database,
         "REVOKE EXECUTE ON FUNCTION identity.account(bytea) FROM tetsu_identity",
     )
@@ -119,13 +119,13 @@ async fn a_page_whose_account_cannot_be_read_is_unavailable() {
     assert_eq!(get(address, "/admin/mailbox", &cookie).await.status, 503);
 }
 
-/// An operator's name is shown as text everywhere the menu and the sidebar put it, however it reads (`v5.0.0-3.2.2`).
+/// An admin's name is shown as text everywhere the menu and the sidebar put it, however it reads (`v5.0.0-3.2.2`).
 #[tokio::test]
 async fn a_name_with_markup_is_shown_as_text() {
     let (address, database, cookie, _) = logged_in().await;
-    as_admin(
+    as_db_admin(
         &database,
-        "UPDATE identity.operators SET name = '<b>Ada</b> & \"Co\"'",
+        "UPDATE identity.admins SET name = '<b>Ada</b> & \"Co\"'",
     )
     .await;
     let page = get(address, PROFILE, &cookie).await;

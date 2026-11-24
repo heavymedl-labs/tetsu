@@ -12,6 +12,10 @@ server-rendered pages) calls the module's use cases. An outbound adapter
 implements a driven port with a specific technology, such as Postgres or a
 payment processor.
 
+**Admin.** A person who works for Tetsu itself, not for a tenant, and logs in to Tetsu's own tools at `/admin`
+([ADR-0040](adr/0040-identity-and-sign-in.md), [ADR-0085](adr/0085-admins-not-operators.md)). ADRs before ADR-0085
+call them operators.
+
 **ADR.** Architecture Decision Record: a short document in `docs/adr` that
 records one significant decision, its alternatives, and its sources.
 
@@ -71,13 +75,13 @@ sessions. Each says why it is global ([ADR-0042](adr/0042-tenant-isolation.md)).
 **Guest.** A person who books with a tenant without an account, with a client profile of their own. A guest's
 link can view or cancel that one booking ([ADR-0040](adr/0040-identity-and-sign-in.md)).
 
-**Invite link.** A single-use link, good for an hour, through which an operator joins Tetsu with their first passkey.
-The operator command issues it and prints it only to the terminal that ran it ([ADR-0040](adr/0040-identity-and-sign-in.md)).
+**Invite link.** A single-use link, good for an hour, through which an admin joins Tetsu with their first passkey.
+The admin command issues it and prints it only to the terminal that ran it ([ADR-0040](adr/0040-identity-and-sign-in.md)).
 
 **Island.** A small Web Component that adds behavior to server-rendered HTML on a Tetsu page, without
 rendering markup of its own ([ADR-0031](adr/0031-front-end-model-revised.md)).
 
-**Join.** What an invited operator does: open their invite link and create their first passkey, which logs them in
+**Join.** What an invited admin does: open their invite link and create their first passkey, which logs them in
 with a session that is never fresh ([ADR-0069](adr/0069-logged-in-on-joining.md)). People who make their own
 account sign up instead.
 
@@ -97,8 +101,6 @@ Postgres schema. Platform capabilities and verticals are both modules.
 **Notification address.** An extra email a person confirms, besides their account's own, for notices such as a
 recovery ([ADR-0041](adr/0041-account-recovery.md)).
 
-**Operator.** A person who works for Tetsu itself, not for a tenant, and logs in to Tetsu's own tools ([ADR-0040](adr/0040-identity-and-sign-in.md)).
-
 **Outbox.** A module's table of domain events, written in the same transaction as the change each describes, from
 which a dispatcher delivers them at least once ([ADR-0043](adr/0043-domain-event-delivery.md)).
 
@@ -111,7 +113,7 @@ shared capabilities, and connectors.
 **Port.** A Rust trait a module calls out through, also called a driven port.
 Outbound adapters implement it.
 
-**Realm.** One of the three kinds of account, each with its own passkey domain: operator accounts, staff
+**Realm.** One of the three kinds of account, each with its own passkey domain: admin accounts, staff
 members' identities, and customer accounts ([ADR-0040](adr/0040-identity-and-sign-in.md)).
 
 **Recovery code.** A one-time secret a person saves, required for staff and owners and offered to customers,
@@ -138,7 +140,7 @@ the realm's pages beside a panel, and below a tablet's width a bar whose "Menu" 
 **Shared capability.** Industry-neutral behavior the platform builds up front
 for more than one vertical, such as scheduling, booking, or the ledger.
 
-**Sign up.** Making an account for yourself, as a customer will. Operators join from an invite instead.
+**Sign up.** Making an account for yourself, as a customer will. Admins join from an invite instead.
 
 **Staff member.** A person who works for one or more tenants, with one identity and a staff role at each ([ADR-0040](adr/0040-identity-and-sign-in.md)).
 

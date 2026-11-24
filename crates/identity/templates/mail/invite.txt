@@ -1,6 +1,6 @@
 Hello,
 
-You're invited to Tetsu as an operator. Open this link on the device that will
+You're invited to Tetsu as an admin. Open this link on the device that will
 hold your passkey, and create one:
 
 {{ link }}

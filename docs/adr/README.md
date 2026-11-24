@@ -45,7 +45,7 @@ number, and add a row below. Never renumber.
 | [0037](0037-fictional-customers-on-tetsus-page.md) | Fictional customers on Tetsu's page | Writing content for Tetsu's own pages | Accepted |
 | [0038](0038-color-scheme-control.md) | A color-scheme control without script | Changing colors, the color schemes, or the header's control | Superseded by 0070 |
 | [0039](0039-response-compression-and-page-budget.md) | Response compression and a page budget | Changing how responses are sent, adding page weight, or a page that holds a secret | Accepted |
-| [0040](0040-identity-and-sign-in.md) | Identity and login | Building login, signup, accounts, sessions, or anything operators use | Accepted |
+| [0040](0040-identity-and-sign-in.md) | Identity and login | Building login, signup, accounts, sessions, or anything admins use | Accepted |
 | [0041](0041-account-recovery.md) | Account recovery | Building recovery, recovery codes, anything that replaces a credential, or any link between an account and a client profile | Accepted |
 | [0042](0042-tenant-isolation.md) | Tenant isolation | Storing tenant data, adding a table or module schema, writing a query, or adding a database role | Accepted |
 | [0043](0043-domain-event-delivery.md) | Domain event delivery | Recording or consuming a domain event, or sending a webhook | Accepted |
@@ -62,7 +62,7 @@ number, and add a row below. Never renumber.
 | [0054](0054-browser-tests.md) | Browser tests | Changing pages, styles, or interactions, or testing in a browser | Proposed |
 | [0055](0055-fault-injection-tests.md) | Fault injection tests | Testing how Tetsu handles Postgres or network failures | Proposed |
 | [0056](0056-typescript-tests.md) | TypeScript tests | Writing or testing TypeScript in `web/` | Accepted |
-| [0057](0057-operator-passkeys-before-level-2.md) | Operator passkeys and email before the Level 2 review | Building operator login, or sending email before #111 | Accepted |
+| [0057](0057-operator-passkeys-before-level-2.md) | Operator passkeys and email before the Level 2 review | Building admin login, or sending email before #111 | Accepted |
 | [0058](0058-test-authenticator.md) | A virtual authenticator for login tests | Testing passkey enrollment or login | Accepted |
 | [0059](0059-session-controls-and-request-checks.md) | Session controls and cross-site request checks | Building sessions, logout, session lists, or checks on state-changing requests | Accepted |
 | [0060](0060-database-hardening.md) | Database hardening after the design review | Writing a migration, a table, or connection settings | Accepted |
@@ -73,12 +73,12 @@ number, and add a row below. Never renumber.
 | [0065](0065-arm-runner-for-checks.md) | An Arm runner for the checks job | Changing which runners CI uses | Accepted |
 | [0066](0066-public-repository.md) | A public repository | Changing who can see or run the repository, or licensing it | Accepted |
 | [0067](0067-sign-in-after-a-first-passkey.md) | Logging in after a first passkey | Building invites, joining, or signup for any realm | Accepted |
-| [0069](0069-logged-in-on-joining.md) | Logged in on joining | Building joining or freshness for operators and staff | Accepted |
+| [0069](0069-logged-in-on-joining.md) | Logged in on joining | Building joining or freshness for admins and staff | Accepted |
 | [0070](0070-a-remembered-color-scheme.md) | A remembered color scheme, in the footer | Changing the color scheme control or what it remembers | Accepted |
 | [0071](0071-readable-logs-in-a-terminal.md) | Readable logs in a terminal | Changing how log lines are laid out | Accepted |
 | [0072](0072-rate-limits-by-network-address.md) | Rate limits by network address | Changing rate limits or how a requester's address is read | Accepted |
 | [0073](0073-settings-files-per-environment.md) | Settings files per environment | Running `tetsu` against a hosted environment, or keeping its secrets | Accepted |
-| [0074](0074-operator-email-in-development.md) | Operator email in development | Sending email, changing the mail provider, or changing how operators are invited | Accepted |
+| [0074](0074-operator-email-in-development.md) | Operator email in development | Sending email, changing the mail provider, or changing how admins are invited | Accepted |
 | [0075](0075-github-secret-scanning.md) | GitHub secret scanning | Changing the secret scan, or GitHub's security settings | Accepted |
 | [0076](0076-pull-requests-from-contributors.md) | Pull requests from contributors | Taking a contributor's change, or changing who reviews what | Accepted |
 | [0077](0077-doubt-mode-in-the-fresh-review.md) | Doubt mode in the fresh review | Reviewing a risky change, or changing the fresh review | Accepted |

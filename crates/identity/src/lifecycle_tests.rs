@@ -1,4 +1,4 @@
-//! The edges of an operator's login over HTTP: a login page that knows who is already logged in, where it returns
+//! The edges of an admin's login over HTTP: a login page that knows who is already logged in, where it returns
 //! to, why it was shown, what logging out clears, and how a page learns its session's time left and stays
 //! logged in (docs/research/identity/operator-lifecycles.md).
 
@@ -8,15 +8,15 @@ use crate::http_tests::{
     PROFILE, SESSION_SCRIPT, UNAVAILABLE, form_on, get, join, logged_in, login_sending, logout,
     post, reported, send, serving, text,
 };
-use crate::join_tests::{ORIGIN, as_admin};
+use crate::join_tests::{ORIGIN, as_db_admin};
 
-/// The notice the login page shows when a session ended under the operator, rather than by their logging out.
+/// The notice the login page shows when a session ended under the admin, rather than by their logging out.
 const ENDED: &str = "You were logged out. Sessions end after 15 minutes without activity.";
 
-/// A logged-in operator who opens the login page is sent on, to the page it would return to or their own, as
+/// A logged-in admin who opens the login page is sent on, to the page it would return to or their own, as
 /// Django's `redirect_authenticated_user` does; logging in again would only replace their session.
 #[tokio::test]
-async fn a_logged_in_operator_is_sent_on_from_the_login_page() {
+async fn a_logged_in_admin_is_sent_on_from_the_login_page() {
     let (address, _database, cookie, _) = logged_in().await;
     for (path, to) in [
         ("/admin/login", PROFILE),
@@ -59,7 +59,7 @@ async fn the_login_page_keeps_a_checked_return_and_says_why_it_shows() {
 }
 
 /// Finishing a login sends the browser where the page asked, once checked again on the server, since the script's
-/// request could say anything; anything else goes to the operator's page.
+/// request could say anything; anything else goes to the admin's page.
 #[tokio::test]
 async fn a_login_returns_where_the_page_asked_once_checked() {
     for (sent, next) in [
@@ -79,7 +79,7 @@ async fn a_login_returns_where_the_page_asked_once_checked() {
     }
 }
 
-/// Logging out also tells the browser to drop what it cached of the operator's pages, so Back shows none of them.
+/// Logging out also tells the browser to drop what it cached of the admin's pages, so Back shows none of them.
 /// Only the cache: clearing cookies would end the browser's sessions in every realm on the host.
 #[tokio::test]
 async fn logging_out_clears_the_browsers_cache_of_the_pages() {
@@ -91,9 +91,9 @@ async fn logging_out_clears_the_browsers_cache_of_the_pages() {
     );
 }
 
-/// Moves every session's last request `minutes` into the past, as if the operator had been away.
+/// Moves every session's last request `minutes` into the past, as if the admin had been away.
 async fn away(database: &tetsu_postgres::test_support::TestDatabase, minutes: u32) {
-    as_admin(
+    as_db_admin(
         database,
         &format!("UPDATE identity.sessions SET last_seen_at = last_seen_at - interval '{minutes} minutes'"),
     )
@@ -132,7 +132,7 @@ async fn a_page_reads_its_sessions_time_left_without_renewing_it() {
 }
 
 /// The read's idle limit is the one requests are held to: past it, the read finds no session, and neither does the
-/// operator's page.
+/// admin's page.
 #[tokio::test]
 async fn a_session_past_its_idle_limit_has_no_time_left() {
     let (address, database, cookie, _) = logged_in().await;
@@ -166,7 +166,7 @@ async fn staying_logged_in_renews_the_session() {
     assert_eq!(ended.status, 401);
 }
 
-/// Every operator page carries the session island and its script, with the form token staying logged in sends; the
+/// Every admin page carries the session island and its script, with the form token staying logged in sends; the
 /// login page carries neither.
 #[tokio::test]
 async fn logged_in_pages_carry_the_session_island() {
@@ -192,11 +192,11 @@ async fn logged_in_pages_carry_the_session_island() {
 }
 
 /// A read of the time left that storage refuses is unavailable to the page, which asks again later, and reported to
-/// the operator.
+/// the admin.
 #[tokio::test]
 async fn a_failed_read_of_the_time_left_is_unavailable() {
     let (address, database, cookie, _) = logged_in().await;
-    as_admin(
+    as_db_admin(
         &database,
         "REVOKE EXECUTE ON FUNCTION identity.session_left(bytea, text) FROM tetsu_identity",
     )
@@ -258,11 +258,11 @@ async fn a_browser_without_a_session_has_no_time_left() {
     );
 }
 
-/// A login page whose check for a session storage refuses is unavailable, and reported to the operator.
+/// A login page whose check for a session storage refuses is unavailable, and reported to the admin.
 #[tokio::test]
 async fn a_login_page_that_cannot_check_the_session_is_unavailable() {
     let (address, database, cookie, _) = logged_in().await;
-    as_admin(
+    as_db_admin(
         &database,
         "REVOKE EXECUTE ON FUNCTION identity.use_session(bytea, text) FROM tetsu_identity",
     )
@@ -286,7 +286,7 @@ async fn an_unreadable_time_left_is_unavailable() {
         ("idle_left bigint, absolute_left text", "1::bigint, '1'"),
     ] {
         let (address, database, cookie, _) = logged_in().await;
-        as_admin(
+        as_db_admin(
             &database,
             &format!(
                 "DROP FUNCTION identity.session_left(bytea, text);
@@ -330,7 +330,7 @@ async fn the_pages_say_the_limits_the_database_keeps() {
     );
 }
 
-/// A login page shown because the session ended on its own also clears the browser's cache of the operator's pages,
+/// A login page shown because the session ended on its own also clears the browser's cache of the admin's pages,
 /// as logging out does (ASVS 14.3.1); one shown for any other reason clears nothing.
 #[tokio::test]
 async fn a_login_after_the_session_ended_clears_the_cache() {
@@ -341,7 +341,7 @@ async fn a_login_after_the_session_ended_clears_the_cache() {
     assert_eq!(plain.header("clear-site-data"), None);
 }
 
-/// Joining logs the operator in at once, with a session that rests on the invite link and so is never fresh: it shows
+/// Joining logs the admin in at once, with a session that rests on the invite link and so is never fresh: it shows
 /// their page, but adding a passkey waits for a passkey login (ADR-0069).
 #[tokio::test]
 async fn joining_logs_in_with_a_session_that_is_never_fresh() {
@@ -370,10 +370,10 @@ async fn joining_logs_in_with_a_session_that_is_never_fresh() {
     assert_eq!(text(&database, proven).await, "true");
 }
 
-/// Every operator page carries the color scheme control in its footer, with the visitor's kept scheme checked, and
+/// Every admin page carries the color scheme control in its footer, with the visitor's kept scheme checked, and
 /// loads the script that keeps a new choice (ADR-0070).
 #[tokio::test]
-async fn operator_pages_arrive_in_the_kept_scheme() {
+async fn admin_pages_arrive_in_the_kept_scheme() {
     let (address, _database, cookie, _) = logged_in().await;
     let script = "<script type=\"module\" src=\"/assets/scheme-test.js\">";
     for (path, kept) in [

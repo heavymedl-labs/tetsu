@@ -15,9 +15,9 @@ use crate::domain::{Error, HeldPasskey, NewPasskey};
 /// finds no passkey says nothing and browsers treat this only as a hint; it never stops a request already sent.
 const PROMPT_LIMIT: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// What an account picker shows before an operator's name. Authenticators may keep only the first 64 bytes of a
+/// What an account picker shows before an admin's name. Authenticators may keep only the first 64 bytes of a
 /// name (`WebAuthn` L3 §6.4.1), so the label comes first, where a cut never reaches it.
-const LABEL: &str = "Tetsu operator · ";
+const LABEL: &str = "Tetsu admin · ";
 
 /// The relying party a realm's passkeys belong to: its origin's scheme, host, and port, which `webauthn-rs` compares
 /// (a path or query a client adds is not), and that origin's host as the relying party ID. A response from any
@@ -50,8 +50,8 @@ impl RelyingParty {
     /// Starts registering a passkey for a user handle and name: the options for the browser, and the state to keep
     /// until it answers. The passkey must verify the user, and must be discoverable, so logging in needs no name.
     /// Every realm shares one passkey domain until Tetsu has domains (ADR-0061), so the name a device's account
-    /// picker shows says the passkey is an operator's. The credentials the operator already `held` are listed for the
-    /// device to refuse, so it makes no second passkey where it has one. It fails only for a stored operator with no
+    /// picker shows says the passkey is an admin's. The credentials the admin already `held` are listed for the
+    /// device to refuse, so it makes no second passkey where it has one. It fails only for a stored admin with no
     /// name, a fault of storage, never the browser's.
     pub(crate) fn begin_registration(
         &self,
@@ -255,19 +255,19 @@ fn refused(error: &WebauthnError) -> Error {
     Error::Invalid(reason.to_string())
 }
 
-/// A ceremony `webauthn-rs` could not start: a fault of what Identity stored, such as an operator with no name,
+/// A ceremony `webauthn-rs` could not start: a fault of what Identity stored, such as an admin with no name,
 /// never the browser's. Only starting a ceremony uses it; finishing one maps each refusal itself, so no `?` can
 /// turn a browser's refusal into a storage failure.
 fn not_started(error: impl std::fmt::Display) -> Error {
     Error::Storage(format!("no ceremony could start: {error}"))
 }
 
-/// The name an account picker shows for an operator's passkey: the label, then their name, cut to the 64 bytes an
+/// The name an account picker shows for an admin's passkey: the label, then their name, cut to the 64 bytes an
 /// authenticator may keep. A name that does not fit is cut after its last whole word that does, so the cut splits no
 /// accent from its letter; a single word too long for that is cut at a character's end.
 fn account_name(name: &str) -> String {
     let fits = name.floor_char_boundary(64 - LABEL.len());
-    // Operator names are trimmed, so a space is never first, and cutting at one keeps at least a word.
+    // Admin names are trimmed, so a space is never first, and cutting at one keeps at least a word.
     let end = if fits < name.len() {
         name[..fits].rfind(' ').unwrap_or(fits)
     } else {
@@ -299,15 +299,15 @@ mod tests {
     /// bytes.
     #[test]
     fn an_account_name_keeps_its_label_within_64_bytes() {
-        assert_eq!(account_name("Kurt Medley"), "Tetsu operator · Kurt Medley");
-        let words = "Maximiliana Alexandrovna Worthington-Fairweathers";
+        assert_eq!(account_name("Kurt Medley"), "Tetsu admin · Kurt Medley");
+        let words = "Maximiliana Alexandrovna Worthington-Fairweatherstone";
         assert_eq!(
             account_name(words),
-            "Tetsu operator · Maximiliana Alexandrovna"
+            "Tetsu admin · Maximiliana Alexandrovna"
         );
-        let exactly = "a".repeat(46);
+        let exactly = "a".repeat(49);
         assert_eq!(account_name(&exactly), format!("{LABEL}{exactly}"));
-        // The label is 18 bytes, leaving 46: fifteen three-byte characters fill 45, and a sixteenth would not fit.
+        // The label is 15 bytes, leaving 49: sixteen three-byte characters fill 48, and a seventeenth would not fit.
         let long = account_name(&"あ".repeat(100));
         assert_eq!((long.len(), long.starts_with(LABEL)), (63, true));
         assert_eq!(account_name(&"a".repeat(100)).len(), 64);

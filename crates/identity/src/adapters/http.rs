@@ -1,6 +1,6 @@
-//! Identity's inbound HTTP adapter: the operator pages at `/admin`, and the JSON endpoints their passkey script calls
+//! Identity's inbound HTTP adapter: the admin pages at `/admin`, and the JSON endpoints their passkey script calls
 //! (ADR-0048). Every state-changing request is checked through [`Origins::admit`], and once logged in through
-//! [`Operators::session_for_change`], so no other site can act through a logged-in browser.
+//! [`Admins::session_for_change`], so no other site can act through a logged-in browser.
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -20,13 +20,13 @@ use crate::domain::{
     ListedSession, RateLimit, Realm, Session, SessionId, SessionToken, TimeLeft,
 };
 use crate::passkeys::{RelyingParty, base64url};
-use crate::ports::OperatorStore;
-use crate::use_cases::Operators;
+use crate::ports::AdminStore;
+use crate::use_cases::Admins;
 use tetsu_kernel::{Mailbox, Requester, Scheme};
 
-/// The operators' realm (ADR-0084), which sends them to their Profile until it has a home of its own (#157).
+/// The admins' realm (ADR-0084), which sends them to their Profile until it has a home of its own (#157).
 const HOME: &str = "/admin";
-/// The operator's account (#156): who they are, and how they log in and where. Logging in lands on Profile.
+/// The admin's account (#156): who they are, and how they log in and where. Logging in lands on Profile.
 const PROFILE: &str = "/admin/settings/profile";
 const SECURITY: &str = "/admin/settings/security";
 const LOGIN: &str = "/admin/login";
@@ -38,13 +38,13 @@ const JOIN_FINISH: &str = "/admin/join/finish";
 const ADD_BEGIN: &str = "/admin/passkeys/begin";
 const ADD_FINISH: &str = "/admin/passkeys/finish";
 const LOGOUT: &str = "/admin/logout";
-/// Ending the operator's other sessions, one by its id or every one (ADR-0059).
+/// Ending the admin's other sessions, one by its id or every one (ADR-0059).
 const END_SESSIONS: &str = "/admin/sessions/end";
 /// How long the browser's session has left (GET), and staying logged in (POST), for the session island.
 const SESSION: &str = "/admin/session";
-/// The operators' mailbox: email kept rather than sent (ADR-0074).
+/// The admins' mailbox: email kept rather than sent (ADR-0074).
 const MAILBOX: &str = "/admin/mailbox";
-/// Any other path under `/admin`: a login for anyone logged out, and not found for an operator.
+/// Any other path under `/admin`: a login for anyone logged out, and not found for an admin.
 const ELSEWHERE: &str = "/admin/{*rest}";
 
 /// Every path Identity serves, which the composition root checks each start with a name no tenant may hold.
@@ -67,13 +67,13 @@ pub const PATHS: [&str; 16] = [
     ELSEWHERE,
 ];
 
-/// The operator pages' policy: the site's, with Tetsu's own script, its calls back to this origin, and forms
+/// The admin pages' policy: the site's, with Tetsu's own script, its calls back to this origin, and forms
 /// posted here allowed, and still no inline script or style (ADR-0029).
 const POLICY: &str = "default-src 'none'; object-src 'none'; script-src 'self'; connect-src 'self'; \
                       style-src 'self'; font-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; \
                       frame-ancestors 'none'";
 
-/// The operator pages' referrer policy. Under the site's `no-referrer`, a browser sends `Origin: null` with a
+/// The admin pages' referrer policy. Under the site's `no-referrer`, a browser sends `Origin: null` with a
 /// posted form, such as logging out, which the origin check must refuse; `same-origin` sends the real origin, and a
 /// referrer, to Tetsu alone and nothing to any other site (Fetch, "append a request `Origin` header").
 const REFERRER: &str = "same-origin";
@@ -87,9 +87,9 @@ const LOGGED_OUT: &str = "you are logged out; log in again";
 const UNAVAILABLE: &str = "logging in is unavailable. Try again in a minute";
 
 /// What the pages need from the composition root: the relying party and the origins state-changing requests
-/// must come from, whether this is the demo, the shared stylesheet's URL, the passkey script's, which every operator
-/// page loads, the session script's, which a logged-in operator's pages load too, and the color scheme control's,
-/// and where a failure the operator should see is reported (#27).
+/// must come from, whether this is the demo, the shared stylesheet's URL, the passkey script's, which every admin
+/// page loads, the session script's, which a logged-in admin's pages load too, and the color scheme control's,
+/// and where a failure the admin should see is reported (#27).
 pub struct Web {
     pub party: RelyingParty,
     pub origins: Origins,
@@ -97,7 +97,7 @@ pub struct Web {
     pub stylesheet: &'static str,
     pub script: &'static str,
     pub session_script: &'static str,
-    /// The color scheme control's script, which every operator page loads (ADR-0070).
+    /// The color scheme control's script, which every admin page loads (ADR-0070).
     pub scheme_script: &'static str,
     /// The settings shell's menu script, which keeps focus where it shows (#156).
     pub menu_script: &'static str,
@@ -115,7 +115,7 @@ struct LoginPage<'a> {
     scheme_script: &'static str,
     /// The radio the color scheme control checks, from the visitor's cookie (ADR-0070).
     scheme: &'static str,
-    /// The checked page a login returns to, or empty for the operator's own.
+    /// The checked page a login returns to, or empty for the admin's own.
     next: &'a str,
     /// Whether the session ended on its own, which the page says.
     ended: bool,
@@ -136,7 +136,7 @@ struct JoinPage {
 #[template(path = "account_profile.html")]
 struct ProfilePage {
     shell: Shell,
-    /// The operator's email address, if they have one.
+    /// The admin's email address, if they have one.
     email: Option<String>,
 }
 
@@ -149,11 +149,11 @@ struct SecurityPage {
     passkeys: Vec<&'static str>,
     can_add: bool,
     fresh: bool,
-    /// The operator's live sessions, the one asking first (ADR-0059).
+    /// The admin's live sessions, the one asking first (ADR-0059).
     sessions: Vec<Shown>,
 }
 
-/// What every logged-in operator page holds (#148): the shared page's, and the operator the header names with the
+/// What every logged-in admin page holds (#148): the shared page's, and the admin the header names with the
 /// form token its Log out posts. Each page's struct holds one and reads through it, so templates name its fields
 /// directly.
 struct Shell {
@@ -166,7 +166,7 @@ struct Shell {
     session_script: &'static str,
     menu_script: &'static str,
     name: String,
-    /// The operator's initials, which the header's menu button shows.
+    /// The admin's initials, which the header's menu button shows.
     initials: String,
     form: String,
     /// The page's own path, which the menu marks as current when it is the account's.
@@ -205,7 +205,7 @@ macro_rules! through_shell {
 
 through_shell!(ProfilePage, SecurityPage, MailboxPage);
 
-/// A session as the operator's page lists it: its id, which ending it names, its device, whether that is a phone,
+/// A session as the admin's page lists it: its id, which ending it names, its device, whether that is a phone,
 /// which its icon shows, and how long ago it started and was last used.
 struct Shown {
     id: String,
@@ -271,16 +271,16 @@ struct UnavailablePage {
 }
 
 struct Served<S> {
-    operators: Operators<S>,
+    admins: Admins<S>,
     web: Web,
 }
 
 type Shared<S> = State<Arc<Served<S>>>;
 
 /// Identity's routes. They set no fallback, which is the site's alone (#90).
-pub fn router<S>(operators: Operators<S>, web: Web) -> Router
+pub fn router<S>(admins: Admins<S>, web: Web) -> Router
 where
-    S: OperatorStore + Send + Sync + 'static,
+    S: AdminStore + Send + Sync + 'static,
 {
     Router::new()
         .route(HOME, get(home::<S>))
@@ -303,10 +303,10 @@ where
         .route(MAILBOX, get(mailbox::<S>))
         .route(ELSEWHERE, get(elsewhere::<S>))
         .layer(DefaultBodyLimit::max(LARGEST_BODY))
-        .with_state(Arc::new(Served { operators, web }))
+        .with_state(Arc::new(Served { admins, web }))
 }
 
-fn before_route<S: OperatorStore + Send + Sync + 'static>(
+fn before_route<S: AdminStore + Send + Sync + 'static>(
     step: Before,
 ) -> MethodRouter<Arc<Served<S>>> {
     post(
@@ -317,7 +317,7 @@ fn before_route<S: OperatorStore + Send + Sync + 'static>(
     )
 }
 
-fn logged_in_route<S: OperatorStore + Send + Sync + 'static>(
+fn logged_in_route<S: AdminStore + Send + Sync + 'static>(
     step: LoggedIn,
 ) -> MethodRouter<Arc<Served<S>>> {
     post(
@@ -328,16 +328,16 @@ fn logged_in_route<S: OperatorStore + Send + Sync + 'static>(
     )
 }
 
-/// The login page. An operator already logged in is sent on, to the checked page it would return to or their own,
+/// The login page. An admin already logged in is sent on, to the checked page it would return to or their own,
 /// since logging in again would only replace their session.
-async fn login_page<S: OperatorStore>(
+async fn login_page<S: AdminStore>(
     State(served): Shared<S>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
     let web = &served.web;
     let next = query(&uri, "next").and_then(return_path);
-    match served.operators.session(cookies(&headers)).await {
+    match served.admins.session(cookies(&headers)).await {
         Ok(Some(_)) => see_other(next.unwrap_or(PROFILE)),
         Ok(None) => {
             let ended = query(&uri, "ended") == Some("1");
@@ -376,54 +376,52 @@ async fn join_page<S>(State(served): Shared<S>, headers: HeaderMap) -> Response 
     })
 }
 
-/// The operators' realm itself (ADR-0084): until it has a home (#157), it sends a logged-in operator to their
+/// The admins' realm itself (ADR-0084): until it has a home (#157), it sends a logged-in admin to their
 /// Profile, and anyone else to log in.
-async fn home<S: OperatorStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
-    match served.operators.session(cookies(&headers)).await {
+async fn home<S: AdminStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
+    match served.admins.session(cookies(&headers)).await {
         Ok(Some(_)) => see_other(PROFILE),
         Ok(None) => see_other(LOGIN),
-        Err(error) => unavailable_page(&served.web, "could not show an operator's page", &error),
+        Err(error) => unavailable_page(&served.web, "could not show an admin's page", &error),
     }
 }
 
-/// The operator's Profile (#156): their name, email address, and role. Anyone without a live session is sent to
+/// The admin's Profile (#156): their name, email address, and role. Anyone without a live session is sent to
 /// log in, returning here after.
-async fn profile<S: OperatorStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
+async fn profile<S: AdminStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
     let web = &served.web;
     let (account, form) = match viewer(&served, &headers).await {
         Ok(Some(viewer)) => viewer,
         Ok(None) => return see_other(&return_to(PROFILE)),
-        Err(error) => return unavailable_page(web, "could not show an operator's profile", &error),
+        Err(error) => return unavailable_page(web, "could not show an admin's profile", &error),
     };
-    match served.operators.email(account.operator).await {
+    match served.admins.email(account.admin).await {
         Ok(email) => page(&ProfilePage {
             email: email.map(|email| email.as_str().to_string()),
             shell: Shell::of(web, &headers, account.name, form, PROFILE),
         }),
-        Err(error) => unavailable_page(web, "could not show an operator's profile", &error),
+        Err(error) => unavailable_page(web, "could not show an admin's profile", &error),
     }
 }
 
-/// The operator's Security (#156): their sessions and passkeys. Anyone without a live session is sent to log in,
+/// The admin's Security (#156): their sessions and passkeys. Anyone without a live session is sent to log in,
 /// returning here after.
-async fn security<S: OperatorStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
+async fn security<S: AdminStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
     match shown(&served, &headers).await {
         Ok(Some(page)) => page,
         Ok(None) => see_other(&return_to(SECURITY)),
-        Err(error) => {
-            unavailable_page(&served.web, "could not show an operator's security", &error)
-        }
+        Err(error) => unavailable_page(&served.web, "could not show an admin's security", &error),
     }
 }
 
-/// The operators' mailbox. Anyone without a live session is sent to log in, returning here after.
-async fn mailbox<S: OperatorStore>(
+/// The admins' mailbox. Anyone without a live session is sent to log in, returning here after.
+async fn mailbox<S: AdminStore>(
     State(served): Shared<S>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
     let web = &served.web;
-    // A session found live names an enabled operator, so an account is missing only if they were disabled since.
+    // A session found live names an enabled admin, so an account is missing only if they were disabled since.
     let (account, viewer) = match viewer(&served, &headers).await {
         Ok(Some(viewer)) => viewer,
         Ok(None) => return see_other(&return_to(uri.path())),
@@ -449,15 +447,15 @@ async fn mailbox<S: OperatorStore>(
 }
 
 /// The account of the live session a page's request comes with, and a form token for the page to carry; none for a
-/// request with no live session, or whose operator was disabled since it was checked.
-async fn viewer<S: OperatorStore>(
+/// request with no live session, or whose admin was disabled since it was checked.
+async fn viewer<S: AdminStore>(
     served: &Served<S>,
     headers: &HeaderMap,
 ) -> Result<Option<(Account, String)>, Error> {
     let Some((session, form)) = viewing(served, headers).await? else {
         return Ok(None);
     };
-    let account = served.operators.account(&session).await?;
+    let account = served.admins.account(&session).await?;
     Ok(account.map(|account| (account, form)))
 }
 
@@ -488,15 +486,15 @@ fn ago(at: SystemTime, now: SystemTime) -> String {
 }
 
 /// A path under `/admin` that Identity does not serve. Anyone without a live session is sent to log in, returning here
-/// after, as at `/admin`, so the operator pages cannot be mapped from outside; an operator gets the site's not-found
+/// after, as at `/admin`, so the admin pages cannot be mapped from outside; an admin gets the site's not-found
 /// page, as any wrong address does.
-async fn elsewhere<S: OperatorStore>(
+async fn elsewhere<S: AdminStore>(
     State(served): Shared<S>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
     let web = &served.web;
-    match served.operators.session(cookies(&headers)).await {
+    match served.admins.session(cookies(&headers)).await {
         Ok(Some(_)) => (
             StatusCode::NOT_FOUND,
             page(&NotFoundPage {
@@ -507,39 +505,39 @@ async fn elsewhere<S: OperatorStore>(
         )
             .into_response(),
         Ok(None) => see_other(&return_to(uri.path())),
-        Err(error) => unavailable_page(web, "could not answer an unknown operator path", &error),
+        Err(error) => unavailable_page(web, "could not answer an unknown admin path", &error),
     }
 }
 
 /// The live session a page's request comes with, which the request renews, and a form token for the page to carry;
 /// none for a request with no live session.
-async fn viewing<S: OperatorStore>(
+async fn viewing<S: AdminStore>(
     served: &Served<S>,
     headers: &HeaderMap,
 ) -> Result<Option<(Session, String)>, Error> {
     let cookies = cookies(headers);
-    let Some(token) = Realm::Operator
+    let Some(token) = Realm::Admin
         .token_in(cookies.iter().copied())
         .and_then(SessionToken::parse)
     else {
         return Ok(None);
     };
-    let Some(session) = served.operators.session(cookies.iter().copied()).await? else {
+    let Some(session) = served.admins.session(cookies.iter().copied()).await? else {
         return Ok(None);
     };
     token.form_token().map(|form| Some((session, form)))
 }
 
-async fn shown<S: OperatorStore>(
+async fn shown<S: AdminStore>(
     served: &Served<S>,
     headers: &HeaderMap,
 ) -> Result<Option<Response>, Error> {
     let Some((session, form)) = viewing(served, headers).await? else {
         return Ok(None);
     };
-    // A session found live names an enabled operator, so an account is missing only if they were disabled since.
-    let account = served.operators.account(&session).await?;
-    let sessions = served.operators.sessions(&session).await?;
+    // A session found live names an enabled admin, so an account is missing only if they were disabled since.
+    let account = served.admins.account(&session).await?;
+    let sessions = served.admins.sessions(&session).await?;
     let web = &served.web;
     let now = SystemTime::now();
     Ok(account.map(|account| {
@@ -565,8 +563,8 @@ async fn shown<S: OperatorStore>(
 
 /// How long the browser's session has left, read without renewing it, for the session island's clock: only the
 /// person's own requests renew a session (NIST SP 800-63B-4).
-async fn time_left<S: OperatorStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
-    let left = served.operators.time_left(cookies(&headers)).await;
+async fn time_left<S: AdminStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
+    let left = served.admins.time_left(cookies(&headers)).await;
     answered(&served.web, left.map(left_json))
 }
 
@@ -584,7 +582,7 @@ fn left_json(left: Option<TimeLeft>) -> Response {
     )
 }
 
-/// How long after logging in an operator may add a passkey, which the database decides (ADR-0048, `v5.0.0-7.5.1`).
+/// How long after logging in an admin may add a passkey, which the database decides (ADR-0048, `v5.0.0-7.5.1`).
 /// The page uses it only to offer the button, or say why it does not.
 const FRESH: Duration = Duration::from_mins(10);
 
@@ -595,7 +593,7 @@ pub(crate) fn fresh(proven: Option<SystemTime>, now: SystemTime) -> bool {
     proven.is_some_and(|proven| now.duration_since(proven).map_or(true, |age| age < FRESH))
 }
 
-/// How the operator's page lists a passkey: whether it is synced to their other devices, as the authenticator
+/// How the admin's page lists a passkey: whether it is synced to their other devices, as the authenticator
 /// last said.
 fn described(passkey: &HeldPasskey) -> &'static str {
     if passkey.backup_state {
@@ -614,7 +612,7 @@ enum Before {
     FinishJoin,
 }
 
-/// A step a logged-in operator takes, with the page's form token.
+/// A step a logged-in admin takes, with the page's form token.
 #[derive(Clone, Copy)]
 enum LoggedIn {
     BeginAdding,
@@ -657,7 +655,7 @@ impl LoggedIn {
 
 /// Runs a step before login, once the request is admitted and its network has room under the step's rate limit,
 /// and counts a login that fails against its network.
-async fn before<S: OperatorStore>(
+async fn before<S: AdminStore>(
     served: Arc<Served<S>>,
     from: Requester,
     headers: HeaderMap,
@@ -665,14 +663,14 @@ async fn before<S: OperatorStore>(
     step: Before,
 ) -> Result<Response, Refused> {
     let sent = admitted(&served, &from, &headers, &body, step.path()).await?;
-    let operators = &served.operators;
-    let result = match operators.admit(step.limit(), &from).await {
+    let admins = &served.admins;
+    let result = match admins.admit(step.limit(), &from).await {
         Ok(()) => stepped(&served, &headers, &sent, step).await,
         Err(refused) => Err(refused),
     };
     let result = match result {
         Err(Error::Invalid(why)) if step.limit() == RateLimit::LoginFailure => {
-            operators.failed(&from).await.and(Err(Error::Invalid(why)))
+            admins.failed(&from).await.and(Err(Error::Invalid(why)))
         }
         other => other,
     };
@@ -680,13 +678,13 @@ async fn before<S: OperatorStore>(
 }
 
 /// Begins or finishes logging in or joining.
-async fn stepped<S: OperatorStore>(
+async fn stepped<S: AdminStore>(
     served: &Served<S>,
     headers: &HeaderMap,
     sent: &Value,
     step: Before,
 ) -> Result<Response, Error> {
-    let (web, operators) = (&served.web, &served.operators);
+    let (web, admins) = (&served.web, &served.admins);
     let (ceremony, response) = answer_in(sent);
     let answer = Answer {
         ceremony,
@@ -694,32 +692,32 @@ async fn stepped<S: OperatorStore>(
     };
     let actor = browser(headers, None);
     match step {
-        Before::BeginLogin => operators
+        Before::BeginLogin => admins
             .begin_login(&web.party)
             .await
             .map(|begun| begun_json(&begun)),
-        Before::FinishLogin => operators
+        Before::FinishLogin => admins
             .finish_login(&web.party, answer, &cookies(headers), &actor)
             .await
             .map(|token| {
                 let to = sent["next"].as_str().and_then(return_path);
                 logged_in_at(&token, to.unwrap_or(PROFILE))
             }),
-        Before::BeginJoin => operators
+        Before::BeginJoin => admins
             .begin_join(&web.party, sent["link"].as_str().unwrap_or_default())
             .await
             .map(|begun| begun_json(&begun)),
-        // Joining logs the operator in, with a session that rests on the link and is never fresh (ADR-0069).
-        Before::FinishJoin => operators
+        // Joining logs the admin in, with a session that rests on the link and is never fresh (ADR-0069).
+        Before::FinishJoin => admins
             .finish_join(&web.party, answer, &cookies(headers), &actor)
             .await
             .map(|(_, token)| logged_in_at(&token, PROFILE)),
     }
 }
 
-/// Runs a logged-in operator's step, once the request has passed the checks for a change, which renew the session:
+/// Runs a logged-in admin's step, once the request has passed the checks for a change, which renew the session:
 /// begins or finishes adding a passkey, or stays logged in.
-async fn logged_in<S: OperatorStore>(
+async fn logged_in<S: AdminStore>(
     served: Arc<Served<S>>,
     from: Requester,
     headers: HeaderMap,
@@ -729,9 +727,9 @@ async fn logged_in<S: OperatorStore>(
     // The origin before the body, so another site's form, which a browser sends without asking, is recorded as one.
     let sent = admitted(&served, &from, &headers, &body, step.path()).await?;
     let checked = acting(&served, &from, &headers, &sent, step.path()).await?;
-    let (web, operators) = (&served.web, &served.operators);
+    let (web, admins) = (&served.web, &served.admins);
     let answered_with = match step {
-        LoggedIn::BeginAdding => operators
+        LoggedIn::BeginAdding => admins
             .begin_adding_passkey(&web.party, &checked)
             .await
             .map(|begun| begun_json(&begun)),
@@ -741,22 +739,22 @@ async fn logged_in<S: OperatorStore>(
                 ceremony,
                 response: &response,
             };
-            let actor = browser(&headers, Some(checked.session().operator()));
-            operators
+            let actor = browser(&headers, Some(checked.session().admin()));
+            admins
                 .finish_adding_passkey(&web.party, &checked, answer, &actor)
                 .await
                 .map(|()| next(SECURITY))
         }
-        LoggedIn::Stay => operators.time_left(cookies(&headers)).await.map(left_json),
+        LoggedIn::Stay => admins.time_left(cookies(&headers)).await.map(left_json),
     };
     Ok(answered(web, answered_with))
 }
 
-/// Logs out from the operator's page's form, with its form token, and sends the browser to log in with its
+/// Logs out from the admin's page's form, with its form token, and sends the browser to log in with its
 /// cookie cleared, whether or not the session was still live, returning after to the checked page the form's address
 /// names, as the session dialog's "Log in again" does. A form posts and shows pages, so a logout refused or failed
 /// gets a page saying so, never a bare status or JSON.
-async fn logout<S: OperatorStore>(
+async fn logout<S: AdminStore>(
     State(served): Shared<S>,
     Extension(from): Extension<Requester>,
     headers: HeaderMap,
@@ -765,7 +763,7 @@ async fn logout<S: OperatorStore>(
 ) -> Response {
     let change = change(&headers, field(&body, "form").unwrap_or_default());
     match served
-        .operators
+        .admins
         .end_session(&served.web.origins, &change)
         .await
     {
@@ -774,18 +772,18 @@ async fn logout<S: OperatorStore>(
         // cookies would end its sessions in every realm on the host.
         Ok(Logout::Ended | Logout::NothingToEnd) => (
             [
-                (header::SET_COOKIE, Realm::Operator.cleared_cookie()),
+                (header::SET_COOKIE, Realm::Admin.cleared_cookie()),
                 (CLEAR_SITE_DATA, "\"cache\"".to_string()),
             ],
             see_other(&return_to(query(&uri, "next").unwrap_or_default())),
         )
             .into_response(),
-        Err(error) => unavailable_page(&served.web, "could not log an operator out", &error),
+        Err(error) => unavailable_page(&served.web, "could not log an admin out", &error),
     }
 }
 
 /// A page that says logging in is unavailable just now, for a request a person made by following a link or posting
-/// a form, with the detail reported to the operator, never shown.
+/// a form, with the detail reported to the admin, never shown.
 fn unavailable_page(web: &Web, what: &str, error: &Error) -> Response {
     (web.report)(&format!("identity: {what}: {error}"));
     let unavailable = UnavailablePage {
@@ -805,12 +803,12 @@ fn field<'a>(body: &'a [u8], name: &str) -> Option<&'a str> {
     })
 }
 
-/// Ends one of the operator's other sessions, the one the form names, or every other one when it names none
+/// Ends one of the admin's other sessions, the one the form names, or every other one when it names none
 /// (ADR-0059, `v5.0.0-7.5.2`), then returns to their page, which lists what is left, and says there why a session
 /// not proven within ten minutes ended none. Its checks are logging out's: a request from elsewhere, without its
 /// session's form token, or naming a session in no form an id takes is refused, and one whose session has ended goes
 /// to log in.
-async fn end_sessions<S: OperatorStore>(
+async fn end_sessions<S: AdminStore>(
     State(served): Shared<S>,
     Extension(from): Extension<Requester>,
     headers: HeaderMap,
@@ -825,7 +823,7 @@ async fn end_sessions<S: OperatorStore>(
             // naming no session id.
             let Some(id) = SessionId::parse(text) else {
                 let check = change
-                    .verified(Realm::Operator, &web.origins)
+                    .verified(Realm::Admin, &web.origins)
                     .err()
                     .unwrap_or(FailedCheck::Field);
                 return refused_form(&served, &from, &headers, END_SESSIONS, check).await;
@@ -835,7 +833,7 @@ async fn end_sessions<S: OperatorStore>(
     };
     let device = Device::from_user_agent(text(&headers, &header::USER_AGENT));
     match served
-        .operators
+        .admins
         .end_others(&web.origins, &change, only.as_ref(), device)
         .await
     {
@@ -844,13 +842,13 @@ async fn end_sessions<S: OperatorStore>(
         Ok(Ending::Refused(check)) => {
             refused_form(&served, &from, &headers, END_SESSIONS, check).await
         }
-        Err(error) => unavailable_page(web, "could not end an operator's sessions", &error),
+        Err(error) => unavailable_page(web, "could not end an admin's sessions", &error),
     }
 }
 
 /// Records a form a check refused (#152), then the page it gets: forbidden, or unavailable if the record could not
 /// be made.
-async fn refused_form<S: OperatorStore>(
+async fn refused_form<S: AdminStore>(
     served: &Served<S>,
     from: &Requester,
     headers: &HeaderMap,
@@ -874,7 +872,7 @@ fn refused_page(web: &Web) -> Response {
 
 /// The live session a logged-in request acts for, or the answer it gets instead: forbidden when it comes from
 /// elsewhere or without its session's form token, and unauthorized when its session has ended.
-async fn acting<S: OperatorStore>(
+async fn acting<S: AdminStore>(
     served: &Served<S>,
     from: &Requester,
     headers: &HeaderMap,
@@ -883,7 +881,7 @@ async fn acting<S: OperatorStore>(
 ) -> Result<crate::CheckedSession, Refused> {
     let change = change(headers, sent["form"].as_str().unwrap_or_default());
     match served
-        .operators
+        .admins
         .session_for_change(&served.web.origins, &change)
         .await
     {
@@ -900,7 +898,7 @@ async fn acting<S: OperatorStore>(
 
 /// A request before login, which has no session to check: its JSON, if it comes from one of the realm's
 /// origins and says so in both ways a browser can (ADR-0059), or the answer it gets instead.
-async fn admitted<S: OperatorStore>(
+async fn admitted<S: AdminStore>(
     served: &Served<S>,
     from: &Requester,
     headers: &HeaderMap,
@@ -918,7 +916,7 @@ async fn admitted<S: OperatorStore>(
 
 /// Records a request a check refused (#152), then the answer a script gets: forbidden, or unavailable if the record
 /// could not be made.
-async fn refused_json<S: OperatorStore>(
+async fn refused_json<S: AdminStore>(
     served: &Served<S>,
     from: &Requester,
     headers: &HeaderMap,
@@ -932,7 +930,7 @@ async fn refused_json<S: OperatorStore>(
 }
 
 /// Records a request a check refused, naming the device it came from.
-async fn record_refused<S: OperatorStore>(
+async fn record_refused<S: AdminStore>(
     served: &Served<S>,
     from: &Requester,
     headers: &HeaderMap,
@@ -940,7 +938,7 @@ async fn record_refused<S: OperatorStore>(
     check: FailedCheck,
 ) -> Result<(), Error> {
     let actor = browser(headers, None);
-    served.operators.refused(from, route, check, &actor).await
+    served.admins.refused(from, route, check, &actor).await
 }
 
 /// The answer a request gets when a check refuses it before its use case runs. Boxed, since a response is large and
@@ -1010,7 +1008,7 @@ fn begun_json(ceremony: &Ceremony) -> Response {
 
 /// A session's cookie for the browser, and where the script sends it next.
 fn logged_in_at(token: &SessionToken, path: &str) -> Response {
-    let cookie = Realm::Operator.session_cookie(token);
+    let cookie = Realm::Admin.session_cookie(token);
     ([(header::SET_COOKIE, cookie)], next(path)).into_response()
 }
 
@@ -1019,7 +1017,7 @@ fn next(path: &str) -> Response {
     json_out(StatusCode::OK, &json!({ "next": path }))
 }
 
-/// A use case's answer: its response, its one refusal, or unavailable when the server failed, which the operator
+/// A use case's answer: its response, its one refusal, or unavailable when the server failed, which the admin
 /// is told of through `report` and the browser only in general.
 fn answered(web: &Web, result: Result<Response, Error>) -> Response {
     match result {
@@ -1065,7 +1063,7 @@ fn json_out(status: StatusCode, body: &Value) -> Response {
     (status, headers, body.to_string()).into_response()
 }
 
-/// Renders an operator page, under the operator pages' policy, kept by no cache, since it may carry a form token.
+/// Renders an admin page, under the admin pages' policy, kept by no cache, since it may carry a form token.
 /// A compiled template fails only if writing fails, so a failure gets a bare unavailable status rather than half a
 /// page.
 fn page(page: &impl Template) -> Response {
@@ -1104,7 +1102,7 @@ fn query<'a>(uri: &'a Uri, name: &str) -> Option<&'a str> {
     })
 }
 
-/// The color scheme a request's cookies keep, which the operator pages' footer shows (ADR-0070).
+/// The color scheme a request's cookies keep, which the admin pages' footer shows (ADR-0070).
 fn scheme_of(headers: &HeaderMap) -> Scheme {
     Scheme::from_cookies(cookies(headers))
 }
@@ -1134,9 +1132,9 @@ fn text<'a>(headers: &'a HeaderMap, name: &HeaderName) -> Option<&'a str> {
 }
 
 /// Who acts from this browser, as the audit record names them.
-fn browser(headers: &HeaderMap, operator: Option<crate::OperatorId>) -> Actor {
+fn browser(headers: &HeaderMap, admin: Option<crate::AdminId>) -> Actor {
     Actor::browser(
-        operator,
+        admin,
         Device::from_user_agent(text(headers, &header::USER_AGENT)),
     )
 }

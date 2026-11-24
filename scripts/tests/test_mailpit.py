@@ -249,10 +249,8 @@ class Mailpit(unittest.TestCase):
     def test_it_prints_the_next_steps_with_the_address_and_its_settings_file(self):
         result = self.start("avery@example.com")
         self.assertIn("http://localhost:8025", result.stdout)
-        self.assertIn(
-            'cargo tetsu --env mailpit operator create "Your Name" avery@example.com', result.stdout
-        )
-        self.assertIn("cargo tetsu --env mailpit operator email <id> avery@example.com", result.stdout)
+        self.assertIn('cargo tetsu --env mailpit admin create "Your Name" avery@example.com', result.stdout)
+        self.assertIn("cargo tetsu --env mailpit admin email <id> avery@example.com", result.stdout)
         self.assertIn("cargo tetsu --env mailpit serve", result.stdout)
 
     def test_an_address_is_required(self):

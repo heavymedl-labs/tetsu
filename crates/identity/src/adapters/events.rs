@@ -1,7 +1,7 @@
-//! Identity's notices (ADR-0074): an outbox consumer of its own events that emails an operator when they log in, add
+//! Identity's notices (ADR-0074): an outbox consumer of its own events that emails an admin when they log in, add
 //! a passkey, or join, naming when and from which device, so a login they did not make is one they hear about
 //! (`v5.0.0-6.3.5`, `v5.0.0-6.3.7`). It applies
-//! each event in the transaction the dispatcher opens as Identity's role, which reads the operator's address.
+//! each event in the transaction the dispatcher opens as Identity's role, which reads the admin's address.
 //!
 //! Identity's inbox records each event a consumer of Identity's applied, by the event alone, so this is the one
 //! consumer Identity runs; a second would find these events already applied.
@@ -16,7 +16,7 @@ use crate::mail::{Happened, Notice, notice_message};
 
 const NOTICE: &str = include_str!("../../sql/notice.sql");
 
-/// Emails operators through `mailer` when they log in or add a passkey.
+/// Emails admins through `mailer` when they log in or add a passkey.
 #[must_use]
 pub fn notices<M: Mailer + 'static>(mailer: Arc<M>) -> Arc<dyn Consumer> {
     Arc::new(Notices { mailer })
@@ -44,16 +44,16 @@ impl<M: Mailer + 'static> Consumer for Notices<M> {
     fn apply<'a>(&'a self, transaction: &'a Transaction<'a>, event: &'a Event) -> Applied<'a> {
         Box::pin(async move {
             let told = changed(&event.payload).zip(Notice::of(&event.kind));
-            let Some(((operator, device), notice)) = told else {
+            let Some(((admin, device), notice)) = told else {
                 return Ok(());
             };
             let Some(row) = transaction
-                .query_opt(NOTICE, &[&operator, &event.occurred_at])
+                .query_opt(NOTICE, &[&admin, &event.occurred_at])
                 .await?
             else {
                 return Ok(());
             };
-            // An address that cannot be read is a fault to try again; an operator with none has no one to tell.
+            // An address that cannot be read is a fault to try again; an admin with none has no one to tell.
             let Some(email) = row.try_get::<_, Option<String>>("email")? else {
                 return Ok(());
             };
@@ -65,8 +65,8 @@ impl<M: Mailer + 'static> Consumer for Notices<M> {
             };
             let Some(message) = notice_message(notice, &email, &happened, &event.id) else {
                 tracing::warn!(
-                    operator,
-                    "identity: an operator's address is not plain, so they get no notices"
+                    admin,
+                    "identity: an admin's address is not plain, so they get no notices"
                 );
                 return Ok(());
             };
@@ -75,8 +75,8 @@ impl<M: Mailer + 'static> Consumer for Notices<M> {
     }
 }
 
-/// The operator an event's payload names, with the device that acted, if what it records went through: a refused
-/// login or addition is no one's to be told of. The actor reads `operator-<id>@<device>`, and a device the request
+/// The admin an event's payload names, with the device that acted, if what it records went through: a refused
+/// login or addition is no one's to be told of. The actor reads `admin-<id>@<device>`, and a device the request
 /// did not name reads as unknown.
 fn changed(payload: &str) -> Option<(i64, String)> {
     let payload: Value = serde_json::from_str(payload).ok()?;
@@ -87,9 +87,9 @@ fn changed(payload: &str) -> Option<(i64, String)> {
         .filter(|device| *device != "unknown")
         .unwrap_or("an unknown device");
     (payload["outcome"] == "changed")
-        .then(|| payload["operator_id"].as_i64())
+        .then(|| payload["admin_id"].as_i64())
         .flatten()
-        .map(|operator| (operator, device.to_string()))
+        .map(|admin| (admin, device.to_string()))
 }
 
 /// A notice that could not go just now is tried again; one the mail server refused for good, or one sent or kept,
@@ -106,25 +106,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_a_change_names_an_operator_to_tell() {
+    fn only_a_change_names_an_admin_to_tell() {
         let unknown = || Some((7, "an unknown device".to_string()));
         for (payload, told) in [
             (
-                r#"{"outcome": "changed", "operator_id": 7, "actor": "operator-7@Firefox on Linux"}"#,
+                r#"{"outcome": "changed", "admin_id": 7, "actor": "admin-7@Firefox on Linux"}"#,
                 Some((7, "Firefox on Linux".to_string())),
             ),
             (
-                r#"{"outcome": "changed", "operator_id": 7, "actor": "operator-7@unknown"}"#,
+                r#"{"outcome": "changed", "admin_id": 7, "actor": "admin-7@unknown"}"#,
                 unknown(),
             ),
             (
-                r#"{"outcome": "changed", "operator_id": 7, "actor": "no device"}"#,
+                r#"{"outcome": "changed", "admin_id": 7, "actor": "no device"}"#,
                 unknown(),
             ),
-            (r#"{"outcome": "changed", "operator_id": 7}"#, unknown()),
-            (r#"{"outcome": "refused", "operator_id": 7}"#, None),
+            (r#"{"outcome": "changed", "admin_id": 7}"#, unknown()),
+            (r#"{"outcome": "refused", "admin_id": 7}"#, None),
             (r#"{"outcome": "changed"}"#, None),
-            (r#"{"outcome": "changed", "operator_id": "7"}"#, None),
+            (r#"{"outcome": "changed", "admin_id": "7"}"#, None),
             ("not json", None),
         ] {
             assert_eq!(changed(payload), told, "{payload}");

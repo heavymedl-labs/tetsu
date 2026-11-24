@@ -99,8 +99,8 @@
     }
 
     /* The header's and footer's wordmarks stand still: the hero's board books the wordmark in as the page opens, and
-       the footer's is far below the screen, where no one would see it. An operator page's wordmark still books in,
-       as its card shows it is ready (ops_page.html). */
+       the footer's is far below the screen, where no one would see it. An admin page's wordmark still books in,
+       as its card shows it is ready (admin_page.html). */
     header .tetsu-slot,
     footer .tetsu-slot {
       animation: none;

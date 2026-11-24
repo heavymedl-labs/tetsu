@@ -8,7 +8,7 @@ While Mailpit runs, `.env.mailpit` holds `.env`'s settings, with the mail settin
 place of any of yours, for `cargo tetsu --env mailpit` (ADR-0073). Only you can read it, since it holds the
 login, and it goes when the script stops, by Ctrl+C, Ctrl+\\, closing its terminal, or kill. Only kill -9 or a
 crash leaves it, and the next run then asks you to remove it. `.env` itself is never touched. Only the
-addresses given reach Mailpit, so give your operator's to see their invite, which Tetsu itself never keeps.
+addresses given reach Mailpit, so give your admin's to see their invite, which Tetsu itself never keeps.
 Mailpit's inbox, kept in `.tools/mailpit/`, opens with no login to anyone using this machine. Two first runs
 started at the same instant can leave a key and certificate that do not match, and Mailpit then cannot start:
 remove `.tools/mailpit/key.pem` and `cert.pem`, and the next run makes them again.
@@ -120,12 +120,12 @@ def next_steps(address):
 
 In another terminal, from the repository's root, use Mailpit's settings with --env mailpit:
   cargo tetsu --env mailpit setup
-  cargo tetsu --env mailpit operator list
-With no operator, make yours, and its invite email arrives:
-  cargo tetsu --env mailpit operator create "Your Name" {address}
+  cargo tetsu --env mailpit admin list
+With no admin, make yours, and its invite email arrives:
+  cargo tetsu --env mailpit admin create "Your Name" {address}
 With one, give it this address and send a new invite:
-  cargo tetsu --env mailpit operator email <id> {address}
-  cargo tetsu --env mailpit operator invite <id>
+  cargo tetsu --env mailpit admin email <id> {address}
+  cargo tetsu --env mailpit admin invite <id>
 Then run cargo tetsu --env mailpit serve, open the invite from Mailpit, and join: the login and passkey
 notices follow.
 

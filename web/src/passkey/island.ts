@@ -3,7 +3,7 @@
 // - <tetsu-passkey action="login|join|add" form-token="…" next="…"> wraps a button and a status line, and runs one
 //   passkey ceremony when the button is pressed. Its state is an attribute, data-state, of ready, waiting, done, or
 //   failed, for styles to read (ADR-0032).
-// - <tetsu-passkeys user="…" credentials="…"> wraps the list of an operator's passkeys, and tells their devices every
+// - <tetsu-passkeys user="…" credentials="…"> wraps the list of an admin's passkeys, and tells their devices every
 //   passkey Tetsu holds, so a device can hide one Tetsu removed.
 
 import { Refused } from "../shared/http";
@@ -21,7 +21,7 @@ export interface Browser {
 const ACTIONS: readonly Action[] = ["login", "join", "add"];
 
 /** What the page says once an action is done, in the moment before the browser goes where the server says. Joining
- * logs the operator in too (ADR-0069). */
+ * logs the admin in too (ADR-0069). */
 const DONE: Record<Action, string> = {
   login: "Logged in.",
   join: "Passkey created. Logging you in.",
@@ -50,7 +50,7 @@ export function said(error: unknown): string {
   return failed;
 }
 
-/** What both halves of a ceremony send: a join's link, which leaves the address bar at once, the operator's form
+/** What both halves of a ceremony send: a join's link, which leaves the address bar at once, the admin's form
  * token, or the page a login returns to, which the server checks again. */
 function sentFor(action: Action, host: HTMLElement, browser: Browser): Record<string, string> {
   if (action === "join") {
@@ -239,7 +239,7 @@ class Presses {
   }
 }
 
-/** Tells the operator's devices every passkey a `<tetsu-passkeys>` lists. A browser that cannot, or a device that
+/** Tells the admin's devices every passkey a `<tetsu-passkeys>` lists. A browser that cannot, or a device that
  * will not, changes nothing. */
 export function signal(host: HTMLElement, browser: Browser): void {
   const passkeys = browser.passkeys;

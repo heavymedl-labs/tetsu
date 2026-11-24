@@ -1,4 +1,4 @@
-//! Adding an operator's second passkey after a fresh login (ADR-0057), end to end, with passkey-rs's authenticator
+//! Adding an admin's second passkey after a fresh login (ADR-0057), end to end, with passkey-rs's authenticator
 //! in place of their devices (ADR-0058), against Postgres logged in as the application role. They live in this one
 //! build for the reason join's do: llvm-cov scores each build of a generic use case on its own.
 
@@ -6,15 +6,16 @@ use passkey::types::Passkey;
 use serde_json::{Value, json};
 use tetsu_postgres::test_support::TestDatabase;
 
-use crate::adapters::postgres::PostgresOperators;
+use crate::adapters::postgres::PostgresAdmins;
 use crate::domain::{Addition, NewPasskey};
 use crate::join_tests::{
-    ORIGIN, actor, app_pool, as_admin, failure, number, party, recorded, register_keeping, replace,
+    ORIGIN, actor, app_pool, as_db_admin, failure, number, party, recorded, register_keeping,
+    replace,
 };
 use crate::login_tests::{answer, joined};
-use crate::ports::OperatorStore;
+use crate::ports::AdminStore;
 use crate::{
-    Answer, Change, CheckedSession, ForChange, OperatorId, Operators, Origins, Realm, Session,
+    AdminId, Admins, Answer, Change, CheckedSession, ForChange, Origins, Realm, Session,
     TakenAddition,
 };
 
@@ -25,14 +26,14 @@ fn not_adding() -> String {
 /// Kurt Medley, joined and freshly logged in, and his live session, as a request that passed the checks for a
 /// change finds it.
 async fn logged_in() -> (
-    Operators<PostgresOperators>,
+    Admins<PostgresAdmins>,
     TestDatabase,
-    OperatorId,
+    AdminId,
     CheckedSession,
 ) {
-    let (operators, database, kurt, kept) = joined().await;
-    let (token, response) = answer(&operators, kept, ORIGIN, |_| {}).await;
-    let session_token = operators
+    let (admins, database, kurt, kept) = joined().await;
+    let (token, response) = answer(&admins, kept, ORIGIN, |_| {}).await;
+    let session_token = admins
         .finish_login(
             &party(),
             Answer {
@@ -44,31 +45,27 @@ async fn logged_in() -> (
         )
         .await
         .expect("logs in");
-    let cookie = format!(
-        "{}={}",
-        Realm::Operator.cookie_name(),
-        session_token.to_text()
-    );
+    let cookie = format!("{}={}", Realm::Admin.cookie_name(), session_token.to_text());
     let form = session_token.form_token().expect("a form token");
     let origins = Origins::parse(&[ORIGIN]).expect("origins");
     let change = Change::new([cookie.as_str()], Some(ORIGIN), None, &form);
-    let ForChange::Acting(session) = operators
+    let ForChange::Acting(session) = admins
         .session_for_change(&origins, &change)
         .await
         .expect("reads")
     else {
         panic!("a session acting for a change");
     };
-    (operators, database, kurt, session)
+    (admins, database, kurt, session)
 }
 
 /// An addition taken for `session`, stored as the administrator, as storing a passkey needs one: any addition
-/// the operator held is replaced.
+/// the admin held is replaced.
 async fn taken(database: &TestDatabase, session: &CheckedSession, n: u8) -> TakenAddition {
     let addition = TakenAddition {
         token: [n; 32],
         session: session.session().hash,
-        operator: session.session().operator(),
+        admin: session.session().admin(),
         state: "{}".to_string(),
     };
     let hex = |bytes: &[u8]| {
@@ -76,15 +73,15 @@ async fn taken(database: &TestDatabase, session: &CheckedSession, n: u8) -> Take
             .iter()
             .fold(String::new(), |text, byte| format!("{text}{byte:02x}"))
     };
-    as_admin(
+    as_db_admin(
         database,
         &format!(
             "DELETE FROM identity.ceremonies WHERE kind = 'add';
              INSERT INTO identity.ceremonies
-                 (token_hash, kind, operator_id, session_hash, taken, state, ends_at)
+                 (token_hash, kind, admin_id, session_hash, taken, state, ends_at)
              VALUES ('\\x{}', 'add', {}, '\\x{}', true, '{{}}', now() + interval '10 minutes')",
             hex(&addition.token),
-            addition.operator.get(),
+            addition.admin.get(),
             hex(&addition.session)
         ),
     )
@@ -95,12 +92,12 @@ async fn taken(database: &TestDatabase, session: &CheckedSession, n: u8) -> Take
 /// Begins adding a passkey for `session`, registers one on a new device, and finishes with `response` rewritten by
 /// `rewrite`: what finishing says, and the options the device was given.
 async fn add(
-    operators: &Operators<PostgresOperators>,
+    admins: &Admins<PostgresAdmins>,
     session: &CheckedSession,
     rewrite: impl Fn(String) -> String,
 ) -> (Result<(), crate::Error>, Value) {
     let party = party();
-    let ceremony = operators
+    let ceremony = admins
         .begin_adding_passkey(&party, session)
         .await
         .expect("begins");
@@ -110,7 +107,7 @@ async fn add(
         ceremony: &ceremony.token.to_text(),
         response: &rewrite(response),
     };
-    let added = operators
+    let added = admins
         .finish_adding_passkey(&party, session, answer, &actor())
         .await;
     (
@@ -119,23 +116,23 @@ async fn add(
     )
 }
 
-/// A live session finds its account: the operator, their user handle and name, and every credential they hold, as
-/// the operator's page and the browser's passkey list need, however long ago it began. A session that ended, or
-/// whose operator is disabled, finds none.
+/// A live session finds its account: the admin, their user handle and name, and every credential they hold, as
+/// the admin's page and the browser's passkey list need, however long ago it began. A session that ended, or
+/// whose admin is disabled, finds none.
 #[tokio::test]
 async fn a_live_session_finds_its_account() {
-    let (operators, database, kurt, session) = logged_in().await;
-    as_admin(
+    let (admins, database, kurt, session) = logged_in().await;
+    as_db_admin(
         &database,
         "UPDATE identity.sessions SET started_at = now() - interval '2 hours'",
     )
     .await;
-    let account = operators
+    let account = admins
         .account(session.session())
         .await
         .expect("reads")
         .expect("an account");
-    let handle = "SELECT count(*) FROM identity.operators WHERE uuid_send(user_handle) = $1";
+    let handle = "SELECT count(*) FROM identity.admins WHERE uuid_send(user_handle) = $1";
     let found: i64 = tetsu_postgres::connect(&database)
         .await
         .expect("connects")
@@ -146,23 +143,23 @@ async fn a_live_session_finds_its_account() {
         .expect("a count");
     assert_eq!(
         (
-            account.operator,
+            account.admin,
             account.name.as_str(),
             account.passkeys.len(),
             found
         ),
         (kurt, "Kurt Medley", 1, 1)
     );
-    operators.disable(kurt, &actor()).await.expect("disables");
-    assert_eq!(operators.account(session.session()).await, Ok(None));
+    admins.disable(kurt, &actor()).await.expect("disables");
+    assert_eq!(admins.account(session.session()).await, Ok(None));
 }
 
 /// An account lists each passkey with how the browser said it can reach it, and whether it may be and is synced,
 /// read from the passkey as the authenticator last signed it.
 #[tokio::test]
 async fn an_accounts_passkeys_say_how_to_reach_them_and_whether_synced() {
-    let (operators, database, _, session) = logged_in().await;
-    let account = operators
+    let (admins, database, _, session) = logged_in().await;
+    let account = admins
         .account(session.session())
         .await
         .expect("reads")
@@ -180,12 +177,12 @@ async fn an_accounts_passkeys_say_how_to_reach_them_and_whether_synced() {
             true
         )
     );
-    as_admin(
+    as_db_admin(
         &database,
         "UPDATE identity.passkeys SET passkey = jsonb_set(passkey, '{cred,backup_state}', 'false')",
     )
     .await;
-    let read = operators.account(session.session()).await.expect("reads");
+    let read = admins.account(session.session()).await.expect("reads");
     assert_eq!(
         read.and_then(|account| account.passkeys.first().map(|held| held.backup_state)),
         Some(false),
@@ -193,12 +190,12 @@ async fn an_accounts_passkeys_say_how_to_reach_them_and_whether_synced() {
     );
 }
 
-/// An operator whose passkeys are gone while their session lives has an account with none listed.
+/// An admin whose passkeys are gone while their session lives has an account with none listed.
 #[tokio::test]
 async fn an_account_may_hold_no_passkey() {
-    let (operators, database, _, session) = logged_in().await;
-    as_admin(&database, "DELETE FROM identity.passkeys").await;
-    let account = operators.account(session.session()).await.expect("reads");
+    let (admins, database, _, session) = logged_in().await;
+    as_db_admin(&database, "DELETE FROM identity.passkeys").await;
+    let account = admins.account(session.session()).await.expect("reads");
     assert_eq!(account.map(|account| account.passkeys.len()), Some(0));
 }
 
@@ -211,9 +208,9 @@ async fn an_unreadable_passkey_row_is_a_storage_failure() {
         ("'\\x01'::bytea", "1", "true"),
         ("'\\x01'::bytea", "''::text", "null::boolean"),
     ] {
-        let (operators, database, _, session) = logged_in().await;
+        let (admins, database, _, session) = logged_in().await;
         let returns = format!(
-            "TABLE (operator_id bigint, user_handle bytea, name text, credential_id {}, transports {}, \
+            "TABLE (admin_id bigint, user_handle bytea, name text, credential_id {}, transports {}, \
              backup_eligible boolean, backup_state boolean)",
             if credential.ends_with("text") {
                 "text"
@@ -226,9 +223,7 @@ async fn an_unreadable_passkey_row_is_a_storage_failure() {
             "SELECT 1::bigint, uuid_send(gen_random_uuid()), 'Kurt', {credential}, {transports}, {eligible}, true"
         );
         replace(&database, "account(bytea)", &returns, &body).await;
-        said.push(failure(
-            operators.account(session.session()).await.map(drop),
-        ));
+        said.push(failure(admins.account(session.session()).await.map(drop)));
     }
     for (said, column) in said.iter().zip(3..) {
         assert!(
@@ -243,24 +238,24 @@ async fn an_unreadable_passkey_row_is_a_storage_failure() {
 /// Reading an account fails as storage when the database refuses its lookup.
 #[tokio::test]
 async fn an_account_that_cannot_be_read_is_a_storage_failure() {
-    let (operators, database, _, session) = logged_in().await;
-    as_admin(
+    let (admins, database, _, session) = logged_in().await;
+    as_db_admin(
         &database,
         "REVOKE EXECUTE ON FUNCTION identity.account(bytea) FROM tetsu_identity",
     )
     .await;
     assert_eq!(
-        failure(operators.account(session.session()).await.map(drop)),
+        failure(admins.account(session.session()).await.map(drop)),
         "storage failed: permission denied for function account"
     );
 }
 
-/// A freshly logged-in operator adds a second passkey: the device is told which passkey they hold, so it makes no
+/// A freshly logged-in admin adds a second passkey: the device is told which passkey they hold, so it makes no
 /// second on a device that has one, and the addition is recorded. A third is refused, as ADR-0057 allows two.
 #[tokio::test]
-async fn an_operator_adds_a_second_passkey_and_no_third() {
-    let (operators, database, _, session) = logged_in().await;
-    let (added, options) = add(&operators, &session, |response| response).await;
+async fn an_admin_adds_a_second_passkey_and_no_third() {
+    let (admins, database, _, session) = logged_in().await;
+    let (added, options) = add(&admins, &session, |response| response).await;
     assert_eq!(added, Ok(()));
     let excluded = options["publicKey"]["excludeCredentials"]
         .as_array()
@@ -280,7 +275,7 @@ async fn an_operator_adds_a_second_passkey_and_no_third() {
     );
     assert_eq!(
         failure(
-            operators
+            admins
                 .begin_adding_passkey(&party(), &session)
                 .await
                 .map(drop)
@@ -294,14 +289,14 @@ async fn an_operator_adds_a_second_passkey_and_no_third() {
 }
 
 /// A registration that is not one, or that does not verify, adds nothing, and each is recorded with its reason and
-/// the operator whose addition it was; the addition is spent, as any ceremony is once taken.
+/// the admin whose addition it was; the addition is spent, as any ceremony is once taken.
 #[tokio::test]
 async fn a_registration_that_does_not_verify_is_recorded() {
-    let (operators, database, _, session) = logged_in().await;
+    let (admins, database, _, session) = logged_in().await;
     let party = party();
     let mut finished = Vec::new();
-    for origin in [None, Some("https://evil.ops.example.com")] {
-        let ceremony = operators
+    for origin in [None, Some("https://evil.admin.example.com")] {
+        let ceremony = admins
             .begin_adding_passkey(&party, &session)
             .await
             .expect("begins");
@@ -314,18 +309,18 @@ async fn a_registration_that_does_not_verify_is_recorded() {
             response: &response,
         };
         finished.push(failure(
-            operators
+            admins
                 .finish_adding_passkey(&party, &session, answer, &actor())
                 .await,
         ));
     }
     assert_eq!(finished, [not_adding(), not_adding()]);
-    let operators_named = "SELECT count(*) FROM identity.outbox_global
-                           WHERE event_type = 'identity.passkey_added' AND payload ->> 'operator_id' = '1'";
+    let admins_named = "SELECT count(*) FROM identity.outbox_global
+                           WHERE event_type = 'identity.passkey_added' AND payload ->> 'admin_id' = '1'";
     assert_eq!(
         (
             recorded(&database, "identity.passkey_added").await,
-            number(&database, operators_named).await
+            number(&database, admins_named).await
         ),
         (
             vec![
@@ -341,30 +336,30 @@ async fn a_registration_that_does_not_verify_is_recorded() {
 /// refusal goes unrecorded unseen.
 #[tokio::test]
 async fn a_refusal_that_cannot_be_recorded_fails_as_storage() {
-    let (operators, database, _, session) = logged_in().await;
-    as_admin(
+    let (admins, database, _, session) = logged_in().await;
+    as_db_admin(
         &database,
         "REVOKE INSERT ON identity.outbox_global FROM tetsu_identity",
     )
     .await;
-    let (refused, _) = add(&operators, &session, |_| "{}".to_string()).await;
+    let (refused, _) = add(&admins, &session, |_| "{}".to_string()).await;
     assert_eq!(
         failure(refused),
         "storage failed: permission denied for table outbox_global"
     );
 }
 
-/// Adding a passkey ends the operator's other sessions and keeps the one that added it (ADR-0059,
+/// Adding a passkey ends the admin's other sessions and keeps the one that added it (ADR-0059,
 /// `v5.0.0-7.4.3`), and the record says how many live ones it ended.
 #[tokio::test]
-async fn adding_a_passkey_ends_the_operators_other_sessions() {
-    let (operators, database, _, session) = logged_in().await;
-    as_admin(
+async fn adding_a_passkey_ends_the_admins_other_sessions() {
+    let (admins, database, _, session) = logged_in().await;
+    as_db_admin(
         &database,
-        "SELECT identity.start_session(sha256('other'::bytea), 'operator', 1, true)",
+        "SELECT identity.start_session(sha256('other'::bytea), 'admin', 1, true)",
     )
     .await;
-    let (added, _) = add(&operators, &session, |response| response).await;
+    let (added, _) = add(&admins, &session, |response| response).await;
     assert_eq!(added, Ok(()));
     let left = "SELECT count(*) FROM identity.sessions WHERE token_hash <> sha256('other'::bytea)";
     assert_eq!(
@@ -379,13 +374,13 @@ async fn adding_a_passkey_ends_the_operators_other_sessions() {
     assert_eq!(number(&database, ended).await, 1);
 }
 
-/// An addition belongs to the session that began it: another of the operator's sessions cannot finish it, nor use
+/// An addition belongs to the session that began it: another of the admin's sessions cannot finish it, nor use
 /// it up.
 #[tokio::test]
 async fn only_the_session_that_began_an_addition_finishes_it() {
-    let (operators, _database, _, session) = logged_in().await;
+    let (admins, _database, _, session) = logged_in().await;
     let party = party();
-    let ceremony = operators
+    let ceremony = admins
         .begin_adding_passkey(&party, &session)
         .await
         .expect("begins");
@@ -401,14 +396,14 @@ async fn only_the_session_that_began_an_addition_finishes_it() {
     };
     assert_eq!(
         failure(
-            operators
+            admins
                 .finish_adding_passkey(&party, &other, answer(), &actor())
                 .await
         ),
         not_adding()
     );
     assert_eq!(
-        operators
+        admins
             .finish_adding_passkey(&party, &session, answer(), &actor())
             .await,
         Ok(()),
@@ -416,34 +411,34 @@ async fn only_the_session_that_began_an_addition_finishes_it() {
     );
 }
 
-/// An operator has one addition open at a time, however many begin, and it ends with the session that began it.
+/// An admin has one addition open at a time, however many begin, and it ends with the session that began it.
 #[tokio::test]
 async fn one_addition_is_open_at_a_time_and_ends_with_its_session() {
-    let (operators, database, _, session) = logged_in().await;
+    let (admins, database, _, session) = logged_in().await;
     let open = "SELECT count(*) FROM identity.ceremonies WHERE kind = 'add'";
     for _ in 0..2 {
-        operators
+        admins
             .begin_adding_passkey(&party(), &session)
             .await
             .expect("begins");
     }
     assert_eq!(number(&database, open).await, 1);
-    as_admin(&database, "DELETE FROM identity.sessions").await;
+    as_db_admin(&database, "DELETE FROM identity.sessions").await;
     assert_eq!(number(&database, open).await, 0, "it ends with its session");
 }
 
 /// Only a fresh login may add a passkey: a session begun more than ten minutes ago is refused.
 #[tokio::test]
 async fn a_session_that_is_not_fresh_adds_no_passkey() {
-    let (operators, database, _, session) = logged_in().await;
-    as_admin(
+    let (admins, database, _, session) = logged_in().await;
+    as_db_admin(
         &database,
         "UPDATE identity.sessions SET proven_at = now() - interval '11 minutes'",
     )
     .await;
     assert_eq!(
         failure(
-            operators
+            admins
                 .begin_adding_passkey(&party(), &session)
                 .await
                 .map(drop)
@@ -454,11 +449,11 @@ async fn a_session_that_is_not_fresh_adds_no_passkey() {
 
 /// Finishing refuses, the same way each time, a registration that is not one, a ceremony token that is unknown or
 /// malformed, and a session that went idle meanwhile. The registration and the idle session are recorded; a token
-/// that names no ceremony has no operator to record against.
+/// that names no ceremony has no admin to record against.
 #[tokio::test]
 async fn finishing_refuses_what_no_longer_allows_it() {
-    let (operators, database, _, session) = logged_in().await;
-    let (refused, _) = add(&operators, &session, |_| "{}".to_string()).await;
+    let (admins, database, _, session) = logged_in().await;
+    let (refused, _) = add(&admins, &session, |_| "{}".to_string()).await;
     let mut said = vec![refused];
     for ceremony in ["ab".repeat(32), "not a token".to_string()] {
         let answer = Answer {
@@ -466,18 +461,18 @@ async fn finishing_refuses_what_no_longer_allows_it() {
             response: "{}",
         };
         said.push(
-            operators
+            admins
                 .finish_adding_passkey(&party(), &session, answer, &actor())
                 .await,
         );
     }
     let ended = {
-        let ceremony = operators
+        let ceremony = admins
             .begin_adding_passkey(&party(), &session)
             .await
             .expect("begins");
         let (response, _) = register_keeping(&ceremony.options, ORIGIN, true).await;
-        as_admin(
+        as_db_admin(
             &database,
             "UPDATE identity.sessions SET last_seen_at = now() - interval '16 minutes'",
         )
@@ -486,7 +481,7 @@ async fn finishing_refuses_what_no_longer_allows_it() {
             ceremony: &ceremony.token.to_text(),
             response: &response,
         };
-        operators
+        admins
             .finish_adding_passkey(&party(), &session, answer, &actor())
             .await
     };
@@ -502,12 +497,12 @@ async fn finishing_refuses_what_no_longer_allows_it() {
     );
 }
 
-/// Storing an added passkey refuses an operator disabled, holding two already, a credential or passkey larger than
-/// the table keeps, and an operator who does not exist, recording each.
+/// Storing an added passkey refuses an admin disabled, holding two already, a credential or passkey larger than
+/// the table keeps, and an admin who does not exist, recording each.
 #[tokio::test]
 async fn storing_an_added_passkey_refuses_and_records_why() {
-    let (operators, database, kurt, session) = logged_in().await;
-    let store = PostgresOperators {
+    let (admins, database, kurt, session) = logged_in().await;
+    let store = PostgresAdmins {
         pool: app_pool(&database),
     };
     let fresh = |id: u8, size: usize| NewPasskey {
@@ -516,20 +511,20 @@ async fn storing_an_added_passkey_refuses_and_records_why() {
         transports: Vec::new(),
     };
     let mut answers = Vec::new();
-    for (passkey, operator) in [
+    for (passkey, admin) in [
         (fresh(1, 15), kurt),
-        (fresh(2, 16), OperatorId::new(99)),
+        (fresh(2, 16), AdminId::new(99)),
         (fresh(3, 16), kurt),
         (fresh(3, 16), kurt),
     ] {
         let addition = TakenAddition {
-            operator,
+            admin,
             ..taken(&database, &session, 1).await
         };
         answers.push(store.add_passkey(&addition, &passkey, &actor()).await);
     }
     let addition = taken(&database, &session, 2).await;
-    operators.disable(kurt, &actor()).await.expect("disables");
+    admins.disable(kurt, &actor()).await.expect("disables");
     answers.push(store.add_passkey(&addition, &fresh(4, 16), &actor()).await);
     assert_eq!(
         answers,
@@ -558,8 +553,8 @@ async fn storing_an_added_passkey_refuses_and_records_why() {
 /// record names the adding session by its public ID, and the passkey's flags.
 #[tokio::test]
 async fn an_addition_not_taken_or_a_credential_taken_adds_nothing() {
-    let (_operators, database, _, session) = logged_in().await;
-    let store = PostgresOperators {
+    let (_admins, database, _, session) = logged_in().await;
+    let store = PostgresAdmins {
         pool: app_pool(&database),
     };
     let first: Vec<u8> = tetsu_postgres::connect(&database)
@@ -597,9 +592,9 @@ async fn an_addition_not_taken_or_a_credential_taken_adds_nothing() {
 /// read, whether a column of the wrong type, a user handle that is not 16 bytes, or an answer never written.
 #[tokio::test]
 async fn failures_of_the_server_are_told_apart() {
-    let (_operators, database, _, session) = logged_in().await;
-    let failing = Operators::with_fill(
-        PostgresOperators {
+    let (_admins, database, _, session) = logged_in().await;
+    let failing = Admins::with_fill(
+        PostgresAdmins {
             pool: app_pool(&database),
         },
         |_| Err(getrandom::Error::UNSUPPORTED),
@@ -618,9 +613,9 @@ async fn failures_of_the_server_are_told_apart() {
     );
     let mut said = Vec::new();
     for (function, returns, body) in UNREADABLE {
-        let (operators, database, _, session) = logged_in().await;
+        let (admins, database, _, session) = logged_in().await;
         replace(&database, function, returns, body).await;
-        said.push(failure(add_once(&operators, &session).await));
+        said.push(failure(add_once(&admins, &session).await));
     }
     assert!(
         said.iter().all(|said| said.starts_with("storage failed: ")),
@@ -646,32 +641,32 @@ async fn failures_of_the_server_are_told_apart() {
 const UNREADABLE: [(&str, &str, &str); 14] = [
     (
         "adder(bytea)",
-        "TABLE (operator_id text, user_handle bytea, name text, credential_id bytea, transports text, backup_eligible boolean, backup_state boolean)",
+        "TABLE (admin_id text, user_handle bytea, name text, credential_id bytea, transports text, backup_eligible boolean, backup_state boolean)",
         "SELECT '1', uuid_send(gen_random_uuid()), 'Kurt', null::bytea, null::text, null::boolean, null::boolean",
     ),
     (
         "adder(bytea)",
-        "TABLE (operator_id bigint, user_handle bytea, name text, credential_id bytea, transports text, backup_eligible boolean, backup_state boolean)",
+        "TABLE (admin_id bigint, user_handle bytea, name text, credential_id bytea, transports text, backup_eligible boolean, backup_state boolean)",
         "SELECT 1::bigint, '\\x00'::bytea, 'Kurt', null::bytea, null::text, null::boolean, null::boolean",
     ),
     (
         "adder(bytea)",
-        "TABLE (operator_id bigint, user_handle bytea, name integer, credential_id bytea, transports text, backup_eligible boolean, backup_state boolean)",
+        "TABLE (admin_id bigint, user_handle bytea, name integer, credential_id bytea, transports text, backup_eligible boolean, backup_state boolean)",
         "SELECT 1::bigint, uuid_send(gen_random_uuid()), 1, null::bytea, null::text, null::boolean, null::boolean",
     ),
     (
         "adder(bytea)",
-        "TABLE (operator_id bigint, user_handle bytea, name text, credential_id bytea, transports text, backup_eligible boolean, backup_state boolean)",
+        "TABLE (admin_id bigint, user_handle bytea, name text, credential_id bytea, transports text, backup_eligible boolean, backup_state boolean)",
         "SELECT 1::bigint, uuid_send(gen_random_uuid()), 'Kurt', '\\x01'::bytea, ''::text, true, null::boolean",
     ),
     (
         "take_addition(bytea, bytea)",
-        "TABLE (operator_id text, state text)",
+        "TABLE (admin_id text, state text)",
         "SELECT '1', '{}'",
     ),
     (
         "take_addition(bytea, bytea)",
-        "TABLE (operator_id bigint, state integer)",
+        "TABLE (admin_id bigint, state integer)",
         "SELECT 1::bigint, 1",
     ),
     (
@@ -718,16 +713,16 @@ const UNREADABLE: [(&str, &str, &str); 14] = [
 
 /// Begins and finishes one addition, stopping at the first failure.
 async fn add_once(
-    operators: &Operators<PostgresOperators>,
+    admins: &Admins<PostgresAdmins>,
     session: &CheckedSession,
 ) -> Result<(), crate::Error> {
-    let ceremony = operators.begin_adding_passkey(&party(), session).await?;
+    let ceremony = admins.begin_adding_passkey(&party(), session).await?;
     let (response, _) = register_keeping(&ceremony.options, ORIGIN, true).await;
     let answer = Answer {
         ceremony: &ceremony.token.to_text(),
         response: &response,
     };
-    operators
+    admins
         .finish_adding_passkey(&party(), session, answer, &actor())
         .await
 }
@@ -742,13 +737,13 @@ async fn each_step_fails_as_storage_when_refused() {
         "take_addition(bytea, bytea)",
         "add_passkey(bytea, bytea, bigint, bytea, jsonb, text)",
     ] {
-        let (operators, database, _, session) = logged_in().await;
-        as_admin(
+        let (admins, database, _, session) = logged_in().await;
+        as_db_admin(
             &database,
             &format!("REVOKE EXECUTE ON FUNCTION identity.{function} FROM tetsu_identity"),
         )
         .await;
-        said.push(failure(add_once(&operators, &session).await));
+        said.push(failure(add_once(&admins, &session).await));
     }
     let expected: Vec<String> = ["adder", "begin_addition", "take_addition", "add_passkey"]
         .iter()

@@ -1,4 +1,4 @@
-//! Identity's notices (ADR-0074): a login or an added passkey that went through is emailed to the operator, once,
+//! Identity's notices (ADR-0074): a login or an added passkey that went through is emailed to the admin, once,
 //! through the dispatcher, and a notice that could not go just now is tried again.
 
 use support::{ready, record};
@@ -9,7 +9,7 @@ use tetsu_postgres::connect;
 mod support {
     use std::sync::{Arc, Mutex};
 
-    use tetsu_identity::{Actor, Identity, OperatorName, notices, postgres_store};
+    use tetsu_identity::{Actor, AdminName, Identity, notices, postgres_store};
     use tetsu_kernel::{Address, Delivery, MailError, Mailer, Message};
     use tetsu_postgres::test_support::{TestDatabase, migrated_database};
     use tetsu_postgres::{Dispatcher, ModuleTransaction, NewEvent, Pool, pool};
@@ -40,20 +40,17 @@ mod support {
         }
     }
 
-    /// Operator 1 with an address and operator 2 without, a dispatcher handing Identity's events to the notices,
-    /// and the mailer they use, with the events of making the operators already delivered.
+    /// Admin 1 with an address and admin 2 without, a dispatcher handing Identity's events to the notices,
+    /// and the mailer they use, with the events of making the admins already delivered.
     pub async fn ready() -> (TestDatabase, Pool, Dispatcher, Arc<Recorder>) {
         let database = migrated_database(&[&Identity]).await.expect("a database");
         let pool = pool(&database.as_app()).expect("a pool");
-        let operators = postgres_store(pool.clone());
+        let admins = postgres_store(pool.clone());
         let actor = Actor::parse("kurt@workstation").expect("an actor");
         let ada = Address::parse("ada@example.com").expect("an address");
         for (name, email) in [("Ada Lovelace", Some(&ada)), ("Lee Park", None)] {
-            let name = OperatorName::parse(name).expect("a name");
-            operators
-                .create(&name, email, &actor)
-                .await
-                .expect("created");
+            let name = AdminName::parse(name).expect("a name");
+            admins.create(&name, email, &actor).await.expect("created");
         }
         let recorder = Arc::new(Recorder {
             sent: Mutex::new(Vec::new()),
@@ -96,19 +93,19 @@ async fn a_login_a_passkey_and_a_join_are_each_told_once() {
     let login = record(
         &pool,
         "identity.logged_in",
-        r#"{"operator_id": 1, "outcome": "changed", "actor": "operator-1@Firefox on Linux"}"#,
+        r#"{"admin_id": 1, "outcome": "changed", "actor": "admin-1@Firefox on Linux"}"#,
     )
     .await;
     record(
         &pool,
         "identity.passkey_added",
-        r#"{"operator_id": 1, "outcome": "changed"}"#,
+        r#"{"admin_id": 1, "outcome": "changed"}"#,
     )
     .await;
     record(
         &pool,
         "identity.invite_redeemed",
-        r#"{"operator_id": 1, "outcome": "changed"}"#,
+        r#"{"admin_id": 1, "outcome": "changed"}"#,
     )
     .await;
     dispatcher.deliver_due().await.unwrap();
@@ -140,30 +137,30 @@ async fn a_login_a_passkey_and_a_join_are_each_told_once() {
 }
 
 #[tokio::test]
-async fn a_refused_login_or_an_operator_without_an_address_is_told_nothing() {
+async fn a_refused_login_or_an_admin_without_an_address_is_told_nothing() {
     let (database, pool, dispatcher, recorder) = ready().await;
     record(
         &pool,
         "identity.logged_in",
-        r#"{"operator_id": 1, "outcome": "refused"}"#,
+        r#"{"admin_id": 1, "outcome": "refused"}"#,
     )
     .await;
     record(
         &pool,
         "identity.logged_in",
-        r#"{"operator_id": 2, "outcome": "changed"}"#,
+        r#"{"admin_id": 2, "outcome": "changed"}"#,
     )
     .await;
     record(
         &pool,
         "identity.logged_in",
-        r#"{"operator_id": 9, "outcome": "changed"}"#,
+        r#"{"admin_id": 9, "outcome": "changed"}"#,
     )
     .await;
     record(
         &pool,
-        "identity.operator_created",
-        r#"{"operator_id": 1, "outcome": "changed"}"#,
+        "identity.admin_created",
+        r#"{"admin_id": 1, "outcome": "changed"}"#,
     )
     .await;
     assert_eq!(dispatcher.deliver_due().await.unwrap(), 4);
@@ -187,7 +184,7 @@ async fn a_notice_that_could_not_go_just_now_is_tried_again() {
     let login = record(
         &pool,
         "identity.logged_in",
-        r#"{"operator_id": 1, "outcome": "changed"}"#,
+        r#"{"admin_id": 1, "outcome": "changed"}"#,
     )
     .await;
     assert_eq!(dispatcher.deliver_due().await.unwrap(), 0);
@@ -203,13 +200,13 @@ async fn an_address_that_cannot_be_looked_up_leaves_the_notice_to_retry() {
     connect(&database)
         .await
         .unwrap()
-        .batch_execute("REVOKE SELECT (email) ON identity.operators FROM tetsu_identity")
+        .batch_execute("REVOKE SELECT (email) ON identity.admins FROM tetsu_identity")
         .await
         .unwrap();
     record(
         &pool,
         "identity.logged_in",
-        r#"{"operator_id": 1, "outcome": "changed"}"#,
+        r#"{"admin_id": 1, "outcome": "changed"}"#,
     )
     .await;
     assert_eq!(dispatcher.deliver_due().await.unwrap(), 0);
@@ -223,13 +220,13 @@ async fn an_address_that_is_not_plain_is_told_nothing() {
     connect(&database)
         .await
         .unwrap()
-        .batch_execute("UPDATE identity.operators SET email = 'ops@localhost' WHERE id = 1")
+        .batch_execute("UPDATE identity.admins SET email = 'admin@localhost' WHERE id = 1")
         .await
         .unwrap();
     record(
         &pool,
         "identity.logged_in",
-        r#"{"operator_id": 1, "outcome": "changed"}"#,
+        r#"{"admin_id": 1, "outcome": "changed"}"#,
     )
     .await;
     assert_eq!(dispatcher.deliver_due().await.unwrap(), 1);
@@ -244,15 +241,15 @@ async fn an_address_that_cannot_be_read_leaves_the_notice_to_retry() {
         .await
         .unwrap()
         .batch_execute(
-            "ALTER TABLE identity.operators DROP CONSTRAINT operators_email_check;
-             ALTER TABLE identity.operators ALTER COLUMN email TYPE bytea USING convert_to(email, 'UTF8')",
+            "ALTER TABLE identity.admins DROP CONSTRAINT admins_email_check;
+             ALTER TABLE identity.admins ALTER COLUMN email TYPE bytea USING convert_to(email, 'UTF8')",
         )
         .await
         .unwrap();
     record(
         &pool,
         "identity.logged_in",
-        r#"{"operator_id": 1, "outcome": "changed"}"#,
+        r#"{"admin_id": 1, "outcome": "changed"}"#,
     )
     .await;
     assert_eq!(dispatcher.deliver_due().await.unwrap(), 0);
@@ -283,5 +280,5 @@ async fn the_notices_want_only_identitys_own_events() {
     };
     assert!(notices.wants(&event("identity", "identity.logged_in")));
     assert!(!notices.wants(&event("tenancy", "identity.logged_in")));
-    assert!(!notices.wants(&event("identity", "identity.operator_created")));
+    assert!(!notices.wants(&event("identity", "identity.admin_created")));
 }

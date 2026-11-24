@@ -1,13 +1,13 @@
-{#- The operators' mailbox (ADR-0044, ADR-0074), in the Platform group of their sidebar (ADR-0084): email Tetsu kept
+{#- The admins' mailbox (ADR-0044, ADR-0074), in the Platform group of their sidebar (ADR-0084): email Tetsu kept
     rather than sent, newest first, as text. A message's HTML is never shown, so nothing in an email runs or loads on
-    an operator page. -#}
+    an admin page. -#}
 {% extends "account_shell.html" %}
 {% import "../../../web/templates/components.html" as shared %}
 {% block title %}Mailbox – Tetsu{% endblock %}
 {% block content %}
   <h1 class="text-2xl font-medium text-balance text-ink">Mailbox</h1>
   <p class="mt-2 text-mini text-pretty text-muted"
-  >Email from the past week that went to no inbox, newest first. Every operator sees it, and invites are never kept
+  >Email from the past week that went to no inbox, newest first. Every admin sees it, and invites are never kept
     here.</p>
   {% if messages.is_empty() %}<p class="mt-8 text-mini text-muted">Nothing kept yet.</p>
   {% else %}<ol aria-label="Kept email" class="mt-8 space-y-4">

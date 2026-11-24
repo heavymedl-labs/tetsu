@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use tetsu_postgres::test_support::TestDatabase;
 
 use crate::http_tests::{PROFILE, Reply, get, logged_in, send, serving, text};
-use crate::join_tests::{ORIGIN, as_admin};
+use crate::join_tests::{ORIGIN, as_db_admin};
 
 const FIREFOX: &str = "Mozilla/5.0 (X11; Linux x86_64) Firefox/140.0";
 const ELSEWHERE: &str = "https://evil.example";
@@ -153,7 +153,7 @@ async fn a_flood_of_refusals_is_recorded_only_up_to_its_limit() {
 #[tokio::test]
 async fn a_refusal_that_cannot_be_recorded_is_unavailable() {
     let (address, database, cookie, form_token) = logged_in().await;
-    as_admin(
+    as_db_admin(
         &database,
         "REVOKE EXECUTE ON FUNCTION identity.admit(text, bytea) FROM tetsu_identity",
     )
@@ -176,7 +176,7 @@ async fn a_refusal_that_cannot_be_recorded_is_unavailable() {
 #[tokio::test]
 async fn an_unreadable_limit_leaves_a_refusal_unavailable() {
     let (address, database, _) = serving().await;
-    as_admin(
+    as_db_admin(
         &database,
         "DROP FUNCTION identity.admit(text, bytea);
          CREATE FUNCTION identity.admit(text, bytea) RETURNS text LANGUAGE sql AS $$ SELECT 'soon' $$;
@@ -218,7 +218,7 @@ async fn malformed_input_and_an_ended_session_are_not_recorded() {
     )
     .await;
     assert_eq!(text_body.status, 415);
-    as_admin(&database, "DELETE FROM identity.sessions").await;
+    as_db_admin(&database, "DELETE FROM identity.sessions").await;
     let ended = script(
         address,
         "/admin/session",

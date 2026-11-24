@@ -1,4 +1,4 @@
-//! The operator pages and their JSON endpoints over HTTP, against a real database, with passkey-rs as the device.
+//! The admin pages and their JSON endpoints over HTTP, against a real database, with passkey-rs as the device.
 
 use std::fmt::Write as _;
 use std::net::SocketAddr;
@@ -12,12 +12,12 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::adapters::http::{PATHS, Web, router};
-use crate::adapters::postgres::PostgresOperators;
-use crate::join_tests::{ORIGIN, as_admin, authenticate, party, register_keeping, with_link};
-use crate::{Operators, Origins};
+use crate::adapters::postgres::PostgresAdmins;
+use crate::join_tests::{ORIGIN, as_db_admin, authenticate, party, register_keeping, with_link};
+use crate::{Admins, Origins};
 
 const SCRIPT: &str = "/assets/passkey-test.js";
-/// The operator's Profile, where logging in lands (ADR-0084), and so the page tests read a form token from.
+/// The admin's Profile, where logging in lands (ADR-0084), and so the page tests read a form token from.
 pub(crate) const PROFILE: &str = "/admin/settings/profile";
 pub(crate) const SESSION_SCRIPT: &str = "/assets/session-test.js";
 pub(crate) const MENU_SCRIPT: &str = "/assets/menu-test.js";
@@ -27,7 +27,7 @@ const POLICY: &str = "default-src 'none'; object-src 'none'; script-src 'self'; 
 const REFUSED: &str = "this request was refused";
 pub(crate) const UNAVAILABLE: &str = "logging in is unavailable. Try again in a minute";
 
-/// What the operator was told, from every test, since `report` is a plain function.
+/// What the admin was told, from every test, since `report` is a plain function.
 static REPORTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 fn report(line: &str) {
@@ -90,14 +90,11 @@ pub(crate) async fn serving() -> (SocketAddr, TestDatabase, String) {
 }
 
 async fn serving_with(mailbox: Arc<dyn Mailbox>) -> (SocketAddr, TestDatabase, String) {
-    let (operators, database, _, link) = with_link().await;
-    (serve(operators, mailbox).await, database, link)
+    let (admins, database, _, link) = with_link().await;
+    (serve(admins, mailbox).await, database, link)
 }
 
-pub(crate) async fn serve(
-    operators: Operators<PostgresOperators>,
-    mailbox: Arc<dyn Mailbox>,
-) -> SocketAddr {
+pub(crate) async fn serve(admins: Admins<PostgresAdmins>, mailbox: Arc<dyn Mailbox>) -> SocketAddr {
     let web = Web {
         party: party(),
         origins: Origins::parse(&[ORIGIN]).expect("origins"),
@@ -112,7 +109,7 @@ pub(crate) async fn serve(
     };
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("binds");
     let address = listener.local_addr().expect("an address");
-    let app = router(operators, web).layer(axum::middleware::from_fn(requester));
+    let app = router(admins, web).layer(axum::middleware::from_fn(requester));
     tokio::spawn(async move { axum::serve(listener, app).await });
     address
 }
@@ -153,7 +150,7 @@ pub(crate) async fn send_bytes(
     body: &[u8],
 ) -> Reply {
     let mut request = format!(
-        "{method} {path} HTTP/1.1\r\nHost: ops.example.com\r\nConnection: close\r\nContent-Length: {}\r\n",
+        "{method} {path} HTTP/1.1\r\nHost: admin.example.com\r\nConnection: close\r\nContent-Length: {}\r\n",
         body.len()
     );
     for (name, value) in headers {
@@ -231,7 +228,7 @@ pub(crate) async fn join(address: SocketAddr, link: &str) -> (Passkey, String) {
         &json!({"ceremony": begun["ceremony"], "response": response}),
     )
     .await;
-    // Joining logs the operator in, with a session that rests on the link (ADR-0069).
+    // Joining logs the admin in, with a session that rests on the link (ADR-0069).
     assert_eq!(
         (finished.status, finished.json()),
         (200, json!({"next": "/admin/settings/profile"}))
@@ -239,7 +236,7 @@ pub(crate) async fn join(address: SocketAddr, link: &str) -> (Passkey, String) {
     assert!(
         finished
             .header("set-cookie")
-            .is_some_and(|set| set.starts_with("__Host-tetsu-operator=")),
+            .is_some_and(|set| set.starts_with("__Host-tetsu-admin=")),
         "{}",
         finished.head
     );
@@ -272,7 +269,7 @@ pub(crate) async fn login_sending(
     post(address, "/admin/login/finish", presented, &finish).await
 }
 
-/// The form token the operator's page carries.
+/// The form token the admin's page carries.
 pub(crate) fn form_on(page: &str) -> String {
     let (_, after) = page
         .split_once("name=\"form\" value=\"")
@@ -314,7 +311,7 @@ pub(crate) fn assert_in_order(page: &Reply, parts: &[&str], path: &str) {
     }
 }
 
-/// Logs a fresh operator out through the form on `path`, with that page's own form token, and checks the session
+/// Logs a fresh admin out through the form on `path`, with that page's own form token, and checks the session
 /// ended: the cookie is cleared, and the page now sends them to log in.
 pub(crate) async fn logs_out_from(path: &str) {
     let (address, _database, cookie, _) = logged_in().await;
@@ -371,7 +368,7 @@ async fn add_passkey(address: SocketAddr, cookie: &str, form: &str) -> Reply {
     post(address, "/admin/passkeys/finish", cookie, &finish).await
 }
 
-/// Posts the operator page's logout form from `origin`.
+/// Posts the admin page's logout form from `origin`.
 pub(crate) async fn logout(address: SocketAddr, origin: &str, cookie: &str, form: &str) -> Reply {
     let headers = [("Origin", origin), ("Cookie", cookie)];
     send(
@@ -384,17 +381,17 @@ pub(crate) async fn logout(address: SocketAddr, origin: &str, cookie: &str, form
     .await
 }
 
-/// An operator joins and logs in as the passkey script would, sees their page, and adds a second passkey; with
+/// An admin joins and logs in as the passkey script would, sees their page, and adds a second passkey; with
 /// two, the page offers no third.
 #[tokio::test]
-async fn an_operator_joins_logs_in_and_adds_a_passkey() {
+async fn an_admin_joins_logs_in_and_adds_a_passkey() {
     let (address, database, cookie, form) = logged_in().await;
     let page = get(address, "/admin/settings/security", &cookie).await;
     assert_eq!(
         (page.status, page.header("content-security-policy")),
         (200, Some(POLICY))
     );
-    let account = "SELECT encode(uuid_send(user_handle), 'base64') FROM identity.operators";
+    let account = "SELECT encode(uuid_send(user_handle), 'base64') FROM identity.admins";
     let handle = text(&database, account).await;
     let user = handle
         .trim_end_matches('=')
@@ -429,7 +426,7 @@ async fn an_operator_joins_logs_in_and_adds_a_passkey() {
 #[tokio::test]
 async fn a_stale_login_is_told_to_login_again_to_add_a_passkey() {
     let (address, database, cookie, _) = logged_in().await;
-    as_admin(
+    as_db_admin(
         &database,
         "UPDATE identity.sessions SET proven_at = now() - interval '11 minutes'",
     )
@@ -464,12 +461,12 @@ fn a_login_is_fresh_for_under_ten_minutes_and_a_session_never_proven_never_is() 
     assert!(!crate::adapters::http::fresh(None, now));
 }
 
-/// Logging out clears the cookie and sends the browser to log in, and the operator's page then does the same.
+/// Logging out clears the cookie and sends the browser to log in, and the admin's page then does the same.
 #[tokio::test]
 async fn logging_out_clears_the_cookie() {
     let (address, _database, cookie, form) = logged_in().await;
     let out = logout(address, ORIGIN, &cookie, &form).await;
-    let cleared = "__Host-tetsu-operator=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0";
+    let cleared = "__Host-tetsu-admin=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0";
     assert_eq!(
         (out.status, out.header("location"), out.header("set-cookie")),
         (303, Some("/admin/login"), Some(cleared))
@@ -478,8 +475,8 @@ async fn logging_out_clears_the_cookie() {
     assert_eq!(page.header("location"), Some("/admin/login"));
 }
 
-/// The pages before login load Tetsu's own script under the operator pages' policy, and are kept by no cache. A
-/// browser with no live session asking for the operator's page is sent to log in.
+/// The pages before login load Tetsu's own script under the admin pages' policy, and are kept by no cache. A
+/// browser with no live session asking for the admin's page is sent to log in.
 #[tokio::test]
 async fn the_pages_run_only_tetsus_own_script() {
     let (address, _database, _) = serving().await;
@@ -506,7 +503,7 @@ async fn the_pages_run_only_tetsus_own_script() {
             "{path}"
         );
     }
-    let unknown = format!("__Host-tetsu-operator={}", "ab".repeat(32));
+    let unknown = format!("__Host-tetsu-admin={}", "ab".repeat(32));
     for cookie in ["", unknown.as_str()] {
         let page = get(address, "/admin", cookie).await;
         assert_eq!(
@@ -540,11 +537,11 @@ async fn each_page_offers_one_passkey_island() {
 
 /// A passkey on one device is listed as one, not as synced.
 /// A path under `/admin` that Identity does not serve sends anyone logged out to log in, so no one can map the
-/// operator pages without a session, and shows a logged-in operator the site's not-found page.
+/// admin pages without a session, and shows a logged-in admin the site's not-found page.
 #[tokio::test]
-async fn an_unknown_operator_path_is_a_login_or_not_found() {
+async fn an_unknown_admin_path_is_a_login_or_not_found() {
     let (address, _database, cookie, _) = logged_in().await;
-    let unknown = format!("__Host-tetsu-operator={}", "ab".repeat(32));
+    let unknown = format!("__Host-tetsu-admin={}", "ab".repeat(32));
     for path in ["/admin/nowhere", "/admin/a/b"] {
         for logged_out in ["", unknown.as_str()] {
             let page = get(address, path, logged_out).await;
@@ -575,7 +572,7 @@ async fn an_unknown_operator_path_is_a_login_or_not_found() {
 #[tokio::test]
 async fn a_passkey_on_one_device_is_listed_as_one() {
     let (address, database, cookie, _) = logged_in().await;
-    as_admin(
+    as_db_admin(
         &database,
         "UPDATE identity.passkeys SET passkey = jsonb_set(passkey, '{cred,backup_state}', 'false')",
     )
@@ -651,12 +648,12 @@ async fn refused_ceremonies_get_their_one_refusal() {
         (
             "/admin/join/begin",
             json!({"link": "not a link"}),
-            "this invite has ended. Log in, or ask an operator for a new one",
+            "this invite has ended. Log in, or ask an admin for a new one",
         ),
         (
             "/admin/join/finish",
             json!({}),
-            "this invite has ended. Log in, or ask an operator for a new one",
+            "this invite has ended. Log in, or ask an admin for a new one",
         ),
     ];
     for (path, body, refusal) in said {
@@ -720,20 +717,20 @@ async fn logged_in_changes_need_the_session_and_its_form_token() {
     );
 }
 
-/// A failure of the server is unavailable to the browser, which learns nothing more, and reported to the operator.
+/// A failure of the server is unavailable to the browser, which learns nothing more, and reported to the admin.
 #[tokio::test]
 async fn failures_of_the_server_are_unavailable() {
     let revoke = |function: &str| {
         format!("REVOKE EXECUTE ON FUNCTION identity.{function} FROM tetsu_identity")
     };
     let (address, database, cookie, form) = logged_in().await;
-    as_admin(&database, &revoke("account(bytea)")).await;
+    as_db_admin(&database, &revoke("account(bytea)")).await;
     let page = get(address, PROFILE, &cookie).await;
     assert_eq!(
         (page.status, page.header("cache-control")),
         (503, Some("no-store"))
     );
-    as_admin(&database, &revoke("end_session(bytea, text)")).await;
+    as_db_admin(&database, &revoke("end_session(bytea, text)")).await;
     let out = logout(address, ORIGIN, &cookie, &form).await;
     assert_eq!(out.status, 503);
     assert!(
@@ -741,7 +738,7 @@ async fn failures_of_the_server_are_unavailable() {
         "{}",
         out.body
     );
-    as_admin(&database, &revoke("use_session(bytea, text)")).await;
+    as_db_admin(&database, &revoke("use_session(bytea, text)")).await;
     assert_eq!(get(address, "/admin", &cookie).await.status, 503);
     assert_eq!(get(address, "/admin/nowhere", &cookie).await.status, 503);
     let refused = post(
@@ -755,20 +752,20 @@ async fn failures_of_the_server_are_unavailable() {
         (refused.status, refused.json()),
         (503, json!({ "error": UNAVAILABLE }))
     );
-    as_admin(&database, &revoke("begin_login(bytea, jsonb)")).await;
+    as_db_admin(&database, &revoke("begin_login(bytea, jsonb)")).await;
     let refused = post(address, "/admin/login/begin", "", &json!({})).await;
     assert_eq!(
         (refused.status, refused.json()),
         (503, json!({ "error": UNAVAILABLE }))
     );
     assert!(reported(
-        "identity: could not show an operator's page: storage failed"
+        "identity: could not show an admin's page: storage failed"
     ));
     assert!(reported(
         "identity: a passkey request failed: storage failed"
     ));
     assert!(reported(
-        "identity: could not log an operator out: storage failed"
+        "identity: could not log an admin out: storage failed"
     ));
 }
 
@@ -881,10 +878,10 @@ async fn a_limit_says_when_to_try_again() {
     }
 }
 
-/// The mailbox shows each kept message's text, escaped, to a logged-in operator, linked from their sidebar; its HTML
+/// The mailbox shows each kept message's text, escaped, to a logged-in admin, linked from their sidebar; its HTML
 /// never reaches the page.
 #[tokio::test]
-async fn an_operator_reads_the_mailbox() {
+async fn an_admin_reads_the_mailbox() {
     let (address, _database, cookie, _) = logged_in().await;
     assert!(
         get(address, PROFILE, &cookie)
@@ -924,14 +921,14 @@ async fn an_empty_or_unreadable_mailbox_says_so() {
 
 /// Anyone logged out is sent to log in and back; a session that cannot be checked is unavailable.
 #[tokio::test]
-async fn the_mailbox_is_for_operators_alone() {
+async fn the_mailbox_is_for_admins_alone() {
     let (address, database, cookie, _) = logged_in().await;
     let outside = get(address, "/admin/mailbox", "").await;
     assert_eq!(
         (outside.status, outside.header("location")),
         (303, Some("/admin/login?next=/admin/mailbox"))
     );
-    as_admin(
+    as_db_admin(
         &database,
         "REVOKE EXECUTE ON FUNCTION identity.use_session(bytea, text) FROM tetsu_identity",
     )
@@ -942,16 +939,12 @@ async fn the_mailbox_is_for_operators_alone() {
     ));
 }
 
-/// A disabled operator's live session no longer opens the mailbox.
+/// A disabled admin's live session no longer opens the mailbox.
 #[tokio::test]
-async fn a_disabled_operator_cannot_read_the_mailbox() {
+async fn a_disabled_admin_cannot_read_the_mailbox() {
     let (address, database, cookie, _) = logged_in().await;
     assert_eq!(get(address, "/admin/mailbox", &cookie).await.status, 200);
-    as_admin(
-        &database,
-        "UPDATE identity.operators SET disabled_at = now()",
-    )
-    .await;
+    as_db_admin(&database, "UPDATE identity.admins SET disabled_at = now()").await;
     let refused = get(address, "/admin/mailbox", &cookie).await;
     assert_eq!(
         (refused.status, refused.header("location")),
@@ -972,14 +965,14 @@ impl tetsu_kernel::Mailer for Handed {
     }
 }
 
-/// The events a real join and login record reach the notices as they expect them: the operator is told of the
+/// The events a real join and login record reach the notices as they expect them: the admin is told of the
 /// passkey joining stored and of the login, at their address.
 #[tokio::test]
-async fn a_real_join_and_login_are_told_to_the_operator() {
+async fn a_real_join_and_login_are_told_to_the_admin() {
     let (_, database, _, _) = logged_in().await;
-    as_admin(
+    as_db_admin(
         &database,
-        "UPDATE identity.operators SET email = 'kurt@example.com'",
+        "UPDATE identity.admins SET email = 'kurt@example.com'",
     )
     .await;
     let mailer = Arc::new(Handed(Mutex::new(Vec::new())));

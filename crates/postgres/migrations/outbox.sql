@@ -25,7 +25,7 @@ CREATE TABLE outbox_global (
 );
 
 COMMENT ON TABLE outbox_global IS
-'tetsu:global: events that belong to no business, such as an operator''s';
+'tetsu:global: events that belong to no business, such as an admin''s';
 
 -- The same columns, for one business's events.
 CREATE TABLE outbox (

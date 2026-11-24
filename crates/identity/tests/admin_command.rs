@@ -1,12 +1,12 @@
-//! What the operator command does to operators and sessions (ADR-0040, ADR-0059), in Postgres, logged in as the
-//! application role: invite links, disabling an operator, ending sessions, and the audit events each records.
+//! What the admin command does to admins and sessions (ADR-0040, ADR-0059), in Postgres, logged in as the
+//! application role: invite links, disabling an admin, ending sessions, and the audit events each records.
 //! Their shared setup is in `common`.
 
 use std::fmt::Write;
 
 use serde_json::{Value, json};
 
-use tetsu_identity::{Disabling, Error, OperatorId, Removal, postgres_store};
+use tetsu_identity::{AdminId, Disabling, Error, Removal, postgres_store};
 use tetsu_postgres::test_support::TestDatabase;
 use tetsu_postgres::{ModuleTransaction, Pool, connect, pool};
 
@@ -14,7 +14,7 @@ use tetsu_postgres::{ModuleTransaction, Pool, connect, pool};
 mod support {
     use super::*;
 
-    /// A migrated database holding Kurt Medley, operator 1, and a pool over it as the application role.
+    /// A migrated database holding Kurt Medley, admin 1, and a pool over it as the application role.
     pub async fn kurt_and_pool() -> (TestDatabase, Pool) {
         let database = ready().await;
         let pool = pool(&database.as_app()).expect("a pool");
@@ -47,7 +47,7 @@ mod support {
     }
 
     /// Runs SQL as the test's own superuser, to break one thing on purpose.
-    pub async fn as_admin(database: &TestDatabase, sql: &str) {
+    pub async fn as_db_admin(database: &TestDatabase, sql: &str) {
         connect(database)
             .await
             .expect("connects")
@@ -79,12 +79,12 @@ mod support {
         panic!("nothing waited on a lock");
     }
 
-    /// SQL that stores a passkey for an operator, as join will, with a credential ID of 16 bytes made from
-    /// the operator's ID.
-    pub fn passkey_for(operator: i64) -> String {
+    /// SQL that stores a passkey for an admin, as join will, with a credential ID of 16 bytes made from
+    /// the admin's ID.
+    pub fn passkey_for(admin: i64) -> String {
         format!(
-            "INSERT INTO identity.passkeys (credential_id, operator_id, passkey, created_at)
-             VALUES (sha256(int8send({operator}))::bytea, {operator}, '{{}}', now());"
+            "INSERT INTO identity.passkeys (credential_id, admin_id, passkey, created_at)
+             VALUES (sha256(int8send({admin}))::bytea, {admin}, '{{}}', now());"
         )
     }
 
@@ -120,24 +120,21 @@ mod common;
 
 use common::{actor, logged_in, migrated, name, ready, with_kurt};
 use support::{
-    address, as_admin, disabled, events, kurt_and_pool, number, passkey_for, waits_for_a_lock,
+    address, as_db_admin, disabled, events, kurt_and_pool, number, passkey_for, waits_for_a_lock,
 };
 
 /// The link's token is stored only as its SHA-256 hash, is good for an hour, and a new one replaces the last; each
-/// issue is recorded with the operator's ID and nothing of the token (ADR-0040, ADR-0047).
+/// issue is recorded with the admin's ID and nothing of the token (ADR-0040, ADR-0047).
 #[tokio::test]
 async fn an_invite_link_is_stored_hashed_for_an_hour_and_replaced() {
-    let (database, operators, kurt) = with_kurt().await;
-    let first = operators.invite(kurt, &actor()).await.expect("issues");
-    let second = operators
-        .invite(kurt, &actor())
-        .await
-        .expect("issues again");
+    let (database, admins, kurt) = with_kurt().await;
+    let first = admins.invite(kurt, &actor()).await.expect("issues");
+    let second = admins.invite(kurt, &actor()).await.expect("issues again");
     assert_ne!(first.to_text(), second.to_text());
     assert_eq!(
         number(&database, "SELECT count(*) FROM identity.invites").await,
         1,
-        "one open link per operator"
+        "one open link per admin"
     );
     let stored = |token: &str| {
         format!(
@@ -149,34 +146,34 @@ async fn an_invite_link_is_stored_hashed_for_an_hour_and_replaced() {
     assert_eq!(number(&database, &stored(&second.to_text())).await, 1);
     assert_eq!(number(&database, &stored(&first.to_text())).await, 0);
     let id = kurt.get();
-    let changed = json!({"operator_id": id, "actor": "kurt@workstation", "outcome": "changed"});
-    let issued = json!({"operator_id": id, "actor": "kurt@workstation", "outcome": "changed",
+    let changed = json!({"admin_id": id, "actor": "kurt@workstation", "outcome": "changed"});
+    let issued = json!({"admin_id": id, "actor": "kurt@workstation", "outcome": "changed",
                         "reason": null});
     assert_eq!(
         events(&database).await,
         [
-            ("identity.operator_created".into(), changed),
+            ("identity.admin_created".into(), changed),
             ("identity.invite_issued".into(), issued.clone()),
             ("identity.invite_issued".into(), issued),
         ]
     );
 }
 
-/// Disabling ends every session and the open link in one step, records it once, and from then on the operator starts
+/// Disabling ends every session and the open link in one step, records it once, and from then on the admin starts
 /// no session and is issued no link (`v5.0.0-7.4.2`).
 #[tokio::test]
-async fn a_disabled_operator_is_logged_out_and_logs_in_nowhere() {
-    let (database, operators, kurt) = with_kurt().await;
+async fn a_disabled_admin_is_logged_out_and_logs_in_nowhere() {
+    let (database, admins, kurt) = with_kurt().await;
     for _ in 0..2 {
         logged_in(&database, kurt).await;
     }
-    operators.invite(kurt, &actor()).await.expect("issues");
+    admins.invite(kurt, &actor()).await.expect("issues");
     assert_eq!(
-        operators.disable(kurt, &actor()).await,
+        admins.disable(kurt, &actor()).await,
         Ok(disabled(true, 2, 1))
     );
     assert_eq!(
-        operators.disable(kurt, &actor()).await,
+        admins.disable(kurt, &actor()).await,
         Ok(disabled(false, 0, 0)),
         "already disabled"
     );
@@ -187,88 +184,79 @@ async fn a_disabled_operator_is_logged_out_and_logs_in_nowhere() {
             "{table}"
         );
     }
-    let refused = Err(Error::Invalid(format!(
-        "no enabled operator {}",
-        kurt.get()
-    )));
-    assert_eq!(operators.invite(kurt, &actor()).await.map(|_| ()), refused);
+    let refused = Err(Error::Invalid(format!("no enabled admin {}", kurt.get())));
+    assert_eq!(admins.invite(kurt, &actor()).await.map(|_| ()), refused);
     let disabled: Vec<_> = events(&database)
         .await
         .into_iter()
-        .filter(|(kind, _)| kind == "identity.operator_disabled")
+        .filter(|(kind, _)| kind == "identity.admin_disabled")
         .map(|(_, payload)| payload["outcome"].clone())
         .collect();
     assert_eq!(disabled, [json!("changed"), json!("unchanged")]);
-    let listed = operators.list().await.expect("lists");
+    let listed = admins.list().await.expect("lists");
     assert!(listed[0].disabled_at.is_some());
 }
 
-/// No command acts on an operator who does not exist: each says so, and is recorded as refused, never as a no-op
+/// No command acts on an admin who does not exist: each says so, and is recorded as refused, never as a no-op
 /// (`v5.0.0-16.3.3`).
 #[tokio::test]
-async fn an_unknown_operator_is_issued_no_link() {
-    let (database, operators) = migrated().await;
-    let nobody = OperatorId::parse("42").expect("an ID");
+async fn an_unknown_admin_is_issued_no_link() {
+    let (database, admins) = migrated().await;
+    let nobody = AdminId::parse("42").expect("an ID");
     assert_eq!(
-        operators.invite(nobody, &actor()).await.map(|_| ()),
-        Err(Error::Invalid("no operator 42".into()))
+        admins.invite(nobody, &actor()).await.map(|_| ()),
+        Err(Error::Invalid("no admin 42".into()))
     );
-    let no_operator = Err(Error::Invalid("no operator 42".into()));
+    let no_admin = Err(Error::Invalid("no admin 42".into()));
+    assert_eq!(admins.disable(nobody, &actor()).await.map(drop), no_admin);
+    assert_eq!(admins.enable(nobody, &actor()).await.map(drop), no_admin);
     assert_eq!(
-        operators.disable(nobody, &actor()).await.map(drop),
-        no_operator
-    );
-    assert_eq!(
-        operators.enable(nobody, &actor()).await.map(drop),
-        no_operator
+        admins.end_sessions(nobody, &actor()).await.map(drop),
+        no_admin
     );
     assert_eq!(
-        operators.end_sessions(nobody, &actor()).await.map(drop),
-        no_operator
-    );
-    assert_eq!(
-        operators
+        admins
             .set_email(nobody, &address("ada@example.com"), &actor())
             .await
             .map(drop),
-        no_operator
+        no_admin
     );
-    let refused = json!({"operator_id": 42, "actor": "kurt@workstation", "outcome": "refused"});
-    let ended = json!({"operator_id": 42, "realm": "operator", "ended": null,
+    let refused = json!({"admin_id": 42, "actor": "kurt@workstation", "outcome": "refused"});
+    let ended = json!({"admin_id": 42, "realm": "admin", "ended": null,
                        "actor": "kurt@workstation", "outcome": "refused"});
     let refused_email = refused.clone();
-    let unissued = json!({"operator_id": 42, "actor": "kurt@workstation", "outcome": "refused",
+    let unissued = json!({"admin_id": 42, "actor": "kurt@workstation", "outcome": "refused",
                           "reason": "unknown"});
     assert_eq!(
         events(&database).await,
         [
             ("identity.invite_issued".into(), unissued),
-            ("identity.operator_disabled".into(), refused.clone()),
-            ("identity.operator_enabled".into(), refused),
+            ("identity.admin_disabled".into(), refused.clone()),
+            ("identity.admin_enabled".into(), refused),
             ("identity.sessions_ended".into(), ended),
-            ("identity.operator_email_set".into(), refused_email),
+            ("identity.admin_email_set".into(), refused_email),
         ]
     );
 }
 
-/// An operator made without an address is given one, and a new one replaces it; each change is recorded by the
-/// operator alone, never the address (ADR-0074).
+/// An admin made without an address is given one, and a new one replaces it; each change is recorded by the
+/// admin alone, never the address (ADR-0074).
 #[tokio::test]
-async fn an_operators_email_address_is_set_and_changed() {
-    let (database, operators, kurt) = with_kurt().await;
+async fn an_admins_email_address_is_set_and_changed() {
+    let (database, admins, kurt) = with_kurt().await;
     let before = events(&database).await.len();
-    assert_eq!(operators.email(kurt).await, Ok(None));
+    assert_eq!(admins.email(kurt).await, Ok(None));
     let ada = address("ada@example.com");
-    assert_eq!(operators.set_email(kurt, &ada, &actor()).await, Ok(true));
-    assert_eq!(operators.email(kurt).await, Ok(Some(ada.clone())));
-    assert_eq!(operators.set_email(kurt, &ada, &actor()).await, Ok(false));
+    assert_eq!(admins.set_email(kurt, &ada, &actor()).await, Ok(true));
+    assert_eq!(admins.email(kurt).await, Ok(Some(ada.clone())));
+    assert_eq!(admins.set_email(kurt, &ada, &actor()).await, Ok(false));
     let lee = address("lee@example.org");
-    assert_eq!(operators.set_email(kurt, &lee, &actor()).await, Ok(true));
-    assert_eq!(operators.email(kurt).await, Ok(Some(lee)));
+    assert_eq!(admins.set_email(kurt, &lee, &actor()).await, Ok(true));
+    assert_eq!(admins.email(kurt).await, Ok(Some(lee)));
     let set = |outcome: &str| {
         (
-            "identity.operator_email_set".to_string(),
-            json!({"operator_id": kurt.get(), "actor": "kurt@workstation", "outcome": outcome}),
+            "identity.admin_email_set".to_string(),
+            json!({"admin_id": kurt.get(), "actor": "kurt@workstation", "outcome": outcome}),
         )
     };
     assert_eq!(
@@ -277,27 +265,27 @@ async fn an_operators_email_address_is_set_and_changed() {
     );
 }
 
-/// An administrator ends one operator's sessions or every one, and each is recorded with how many ended
+/// An administrator ends one admin's sessions or every one, and each is recorded with how many ended
 /// (`v5.0.0-7.4.5`).
 #[tokio::test]
-async fn sessions_end_for_one_operator_or_all() {
-    let (database, operators, kurt) = with_kurt().await;
-    let lee = operators
+async fn sessions_end_for_one_admin_or_all() {
+    let (database, admins, kurt) = with_kurt().await;
+    let lee = admins
         .create(&name("Lee Park"), None, &actor())
         .await
         .expect("creates");
-    for operator in [kurt, kurt, lee] {
-        logged_in(&database, operator).await;
+    for admin in [kurt, kurt, lee] {
+        logged_in(&database, admin).await;
     }
-    assert_eq!(operators.end_sessions(kurt, &actor()).await, Ok(2));
-    assert_eq!(operators.end_sessions(kurt, &actor()).await, Ok(0));
+    assert_eq!(admins.end_sessions(kurt, &actor()).await, Ok(2));
+    assert_eq!(admins.end_sessions(kurt, &actor()).await, Ok(0));
     assert_eq!(
         number(&database, "SELECT count(*) FROM identity.sessions").await,
         1,
         "Lee's remains"
     );
-    assert_eq!(operators.end_all_sessions(&actor()).await, Ok(1));
-    assert_eq!(operators.end_all_sessions(&actor()).await, Ok(0));
+    assert_eq!(admins.end_all_sessions(&actor()).await, Ok(1));
+    assert_eq!(admins.end_all_sessions(&actor()).await, Ok(0));
     let ended: Vec<Value> = events(&database)
         .await
         .into_iter()
@@ -308,33 +296,27 @@ async fn sessions_end_for_one_operator_or_all() {
     assert_eq!(
         ended,
         [
-            json!({"operator_id": id, "realm": "operator", "ended": 2, "actor": by, "outcome": "changed"}),
-            json!({"operator_id": id, "realm": "operator", "ended": 0, "actor": by, "outcome": "unchanged"}),
-            json!({"realm": "operator", "ended": 1, "actor": by, "outcome": "changed"}),
-            json!({"realm": "operator", "ended": 0, "actor": by, "outcome": "unchanged"}),
+            json!({"admin_id": id, "realm": "admin", "ended": 2, "actor": by, "outcome": "changed"}),
+            json!({"admin_id": id, "realm": "admin", "ended": 0, "actor": by, "outcome": "unchanged"}),
+            json!({"realm": "admin", "ended": 1, "actor": by, "outcome": "changed"}),
+            json!({"realm": "admin", "ended": 0, "actor": by, "outcome": "unchanged"}),
         ]
     );
 }
 
-/// Operators are listed oldest first, with whether each is disabled.
+/// Admins are listed oldest first, with whether each is disabled.
 #[tokio::test]
-async fn operators_are_listed_oldest_first() {
-    let (_database, operators, kurt) = with_kurt().await;
-    let lee = operators
+async fn admins_are_listed_oldest_first() {
+    let (_database, admins, kurt) = with_kurt().await;
+    let lee = admins
         .create(&name("Lee Park"), None, &actor())
         .await
         .expect("creates");
-    operators.disable(lee, &actor()).await.expect("disables");
-    let listed = operators.list().await.expect("lists");
+    admins.disable(lee, &actor()).await.expect("disables");
+    let listed = admins.list().await.expect("lists");
     let shown: Vec<_> = listed
         .iter()
-        .map(|operator| {
-            (
-                operator.id,
-                operator.name.as_str(),
-                operator.disabled_at.is_some(),
-            )
-        })
+        .map(|admin| (admin.id, admin.name.as_str(), admin.disabled_at.is_some()))
         .collect();
     assert_eq!(
         shown,
@@ -345,13 +327,13 @@ async fn operators_are_listed_oldest_first() {
 
 /// A disable that starts while a login or a link is still being written waits for it, then ends what it wrote:
 /// it never leaves a session or a link behind (`v5.0.0-7.4.2`). The writer holds its transaction open until
-/// Postgres shows the disable waiting on the operator's row, so the order is the same on every run.
+/// Postgres shows the disable waiting on the admin's row, so the order is the same on every run.
 #[tokio::test]
 async fn a_disable_waits_for_a_login_or_link_being_written_then_ends_it() {
     for (table, writes) in [
         (
             "sessions",
-            "SELECT identity.start_session(sha256('a'::bytea), 'operator', $1, true)",
+            "SELECT identity.start_session(sha256('a'::bytea), 'admin', $1, true)",
         ),
         (
             "invites",
@@ -360,8 +342,8 @@ async fn a_disable_waits_for_a_login_or_link_being_written_then_ends_it() {
     ] {
         let database = ready().await;
         let pool = pool(&database.as_app()).expect("a pool");
-        let operators = postgres_store(pool.clone());
-        let kurt = operators
+        let admins = postgres_store(pool.clone());
+        let kurt = admins
             .create(&name("Kurt Medley"), None, &actor())
             .await
             .expect("creates");
@@ -372,7 +354,7 @@ async fn a_disable_waits_for_a_login_or_link_being_written_then_ends_it() {
             .execute(writes, &[&kurt.get()])
             .await
             .expect("writes");
-        let disabling = tokio::spawn(async move { operators.disable(kurt, &actor()).await });
+        let disabling = tokio::spawn(async move { admins.disable(kurt, &actor()).await });
         waits_for_a_lock(&database).await;
         writing.commit().await.expect("commits");
         assert!(
@@ -390,14 +372,14 @@ async fn a_disable_waits_for_a_login_or_link_being_written_then_ends_it() {
     }
 }
 
-/// Ending an operator's sessions while a login is still being written waits for it, then ends it too.
+/// Ending an admin's sessions while a login is still being written waits for it, then ends it too.
 #[tokio::test]
 async fn ending_sessions_waits_for_a_login_being_written() {
     for all in [false, true] {
         let database = ready().await;
         let pool = pool(&database.as_app()).expect("a pool");
-        let operators = postgres_store(pool.clone());
-        let kurt = operators
+        let admins = postgres_store(pool.clone());
+        let kurt = admins
             .create(&name("Kurt Medley"), None, &actor())
             .await
             .expect("creates");
@@ -406,16 +388,16 @@ async fn ending_sessions_waits_for_a_login_being_written() {
         let writing = admin.transaction().await.expect("begins");
         writing
             .execute(
-                "SELECT identity.start_session(sha256('a'::bytea), 'operator', $1, true)",
+                "SELECT identity.start_session(sha256('a'::bytea), 'admin', $1, true)",
                 &[&kurt.get()],
             )
             .await
             .expect("writes");
         let ending = tokio::spawn(async move {
             if all {
-                operators.end_all_sessions(&actor()).await
+                admins.end_all_sessions(&actor()).await
             } else {
-                operators.end_sessions(kurt, &actor()).await
+                admins.end_sessions(kurt, &actor()).await
             }
         });
         waits_for_a_lock(&database).await;
@@ -428,43 +410,40 @@ async fn ending_sessions_waits_for_a_login_being_written() {
     }
 }
 
-/// An operator enabled again logs in afresh: their sessions stayed ended, and each change is recorded.
+/// An admin enabled again logs in afresh: their sessions stayed ended, and each change is recorded.
 #[tokio::test]
-async fn an_operator_enabled_again_logs_in_afresh() {
-    let (database, operators, kurt) = with_kurt().await;
+async fn an_admin_enabled_again_logs_in_afresh() {
+    let (database, admins, kurt) = with_kurt().await;
     logged_in(&database, kurt).await;
     assert_eq!(
-        operators.enable(kurt, &actor()).await,
+        admins.enable(kurt, &actor()).await,
         Ok(false),
         "never disabled"
     );
-    operators.disable(kurt, &actor()).await.expect("disables");
-    assert_eq!(operators.enable(kurt, &actor()).await, Ok(true));
+    admins.disable(kurt, &actor()).await.expect("disables");
+    assert_eq!(admins.enable(kurt, &actor()).await, Ok(true));
     assert_eq!(
         number(&database, "SELECT count(*) FROM identity.sessions").await,
         0,
         "sessions stay ended"
     );
     logged_in(&database, kurt).await;
-    operators
-        .invite(kurt, &actor())
-        .await
-        .expect("may join again");
+    admins.invite(kurt, &actor()).await.expect("may join again");
     let enabled: Vec<_> = events(&database)
         .await
         .into_iter()
-        .filter(|(kind, _)| kind == "identity.operator_enabled")
+        .filter(|(kind, _)| kind == "identity.admin_enabled")
         .map(|(_, payload)| payload["outcome"].clone())
         .collect();
     assert_eq!(enabled, [json!("unchanged"), json!("changed")]);
 }
 
-/// Two links issued at the same moment both succeed, and the operator holds one: whichever was stored last.
+/// Two links issued at the same moment both succeed, and the admin holds one: whichever was stored last.
 #[tokio::test]
 async fn links_issued_at_once_leave_one() {
-    let (database, operators, kurt) = with_kurt().await;
+    let (database, admins, kurt) = with_kurt().await;
     let by = actor();
-    let (first, second) = tokio::join!(operators.invite(kurt, &by), operators.invite(kurt, &by));
+    let (first, second) = tokio::join!(admins.invite(kurt, &by), admins.invite(kurt, &by));
     let held = |token: &str| {
         format!(
             "SELECT count(*) FROM identity.invites WHERE token_hash = sha256(decode('{token}', 'hex'))"
@@ -494,68 +473,64 @@ async fn identitys_role_cannot_read_invite_links() {
     );
 }
 
-/// Each statement the operator command runs fails as storage when its function is out of reach, and so does a
+/// Each statement the admin command runs fails as storage when its function is out of reach, and so does a
 /// change whose audit event cannot be recorded, which rolls the change back.
 #[tokio::test]
 async fn each_command_fails_as_storage_when_the_database_refuses_it() {
-    let (database, operators, kurt) = with_kurt().await;
-    as_admin(
+    let (database, admins, kurt) = with_kurt().await;
+    as_db_admin(
         &database,
         "REVOKE EXECUTE ON FUNCTION identity.issue_invite(bytea, bigint),
-           identity.disable_operator(bigint), identity.enable_operator(bigint),
+           identity.disable_admin(bigint), identity.enable_admin(bigint),
            identity.remove_passkeys(bigint), identity.end_sessions(text, bigint),
-           identity.list_operators() FROM tetsu_identity;
+           identity.list_admins() FROM tetsu_identity;
          REVOKE INSERT ON identity.outbox_global FROM tetsu_identity",
     )
     .await;
     let storage = |result: Result<(), Error>| matches!(result, Err(Error::Storage(_)));
-    assert!(storage(operators.invite(kurt, &actor()).await.map(drop)));
-    assert!(storage(operators.disable(kurt, &actor()).await.map(drop)));
-    assert!(storage(operators.enable(kurt, &actor()).await.map(drop)));
+    assert!(storage(admins.invite(kurt, &actor()).await.map(drop)));
+    assert!(storage(admins.disable(kurt, &actor()).await.map(drop)));
+    assert!(storage(admins.enable(kurt, &actor()).await.map(drop)));
     assert!(storage(
-        operators.remove_passkeys(kurt, &actor()).await.map(drop)
+        admins.remove_passkeys(kurt, &actor()).await.map(drop)
     ));
     assert!(storage(
-        operators
+        admins
             .set_email(kurt, &address("ada@example.com"), &actor())
             .await
             .map(drop)
     ));
-    assert!(storage(
-        operators.end_sessions(kurt, &actor()).await.map(drop)
-    ));
-    assert!(storage(
-        operators.end_all_sessions(&actor()).await.map(drop)
-    ));
-    assert!(storage(operators.list().await.map(drop)));
+    assert!(storage(admins.end_sessions(kurt, &actor()).await.map(drop)));
+    assert!(storage(admins.end_all_sessions(&actor()).await.map(drop)));
+    assert!(storage(admins.list().await.map(drop)));
     // Creating reads the new ID back, so the event's own refusal shows only once that is allowed again.
-    as_admin(
+    as_db_admin(
         &database,
-        "GRANT SELECT ON identity.operators TO tetsu_identity",
+        "GRANT SELECT ON identity.admins TO tetsu_identity",
     )
     .await;
     assert!(storage(
-        operators
+        admins
             .create(&name("Lee Park"), None, &actor())
             .await
             .map(drop)
     ));
     assert_eq!(
-        number(&database, "SELECT count(*) FROM identity.operators").await,
+        number(&database, "SELECT count(*) FROM identity.admins").await,
         1,
-        "no operator without its event"
+        "no admin without its event"
     );
 }
 
 /// A function that answers in the wrong type is a storage failure, never a guess.
 #[tokio::test]
 async fn an_answer_of_the_wrong_type_is_a_storage_failure() {
-    let (database, operators, kurt) = with_kurt().await;
+    let (database, admins, kurt) = with_kurt().await;
     let mut replaced = String::new();
     for (function, arguments) in [
         ("issue_invite", "bytea, bigint"),
-        ("disable_operator", "bigint"),
-        ("enable_operator", "bigint"),
+        ("disable_admin", "bigint"),
+        ("enable_admin", "bigint"),
         ("end_sessions", "text, bigint"),
     ] {
         write!(
@@ -566,21 +541,17 @@ async fn an_answer_of_the_wrong_type_is_a_storage_failure() {
         )
         .expect("writes");
     }
-    as_admin(&database, &replaced).await;
+    as_db_admin(&database, &replaced).await;
     let storage = |result: Result<(), Error>| matches!(result, Err(Error::Storage(_)));
-    assert!(storage(operators.invite(kurt, &actor()).await.map(drop)));
-    assert!(storage(operators.disable(kurt, &actor()).await.map(drop)));
-    assert!(storage(operators.enable(kurt, &actor()).await.map(drop)));
-    assert!(storage(
-        operators.end_sessions(kurt, &actor()).await.map(drop)
-    ));
-    assert!(storage(
-        operators.end_all_sessions(&actor()).await.map(drop)
-    ));
+    assert!(storage(admins.invite(kurt, &actor()).await.map(drop)));
+    assert!(storage(admins.disable(kurt, &actor()).await.map(drop)));
+    assert!(storage(admins.enable(kurt, &actor()).await.map(drop)));
+    assert!(storage(admins.end_sessions(kurt, &actor()).await.map(drop)));
+    assert!(storage(admins.end_all_sessions(&actor()).await.map(drop)));
 }
 
 /// A listed column of the wrong type is a storage failure, whichever column it is. The list's function is replaced
-/// outright, so no operator need exist for it to answer.
+/// outright, so no admin need exist for it to answer.
 #[tokio::test]
 async fn a_listed_column_of_the_wrong_type_is_a_storage_failure() {
     let right = [
@@ -592,7 +563,7 @@ async fn a_listed_column_of_the_wrong_type_is_a_storage_failure() {
         ("link_minutes", "bigint", "null"),
     ];
     for wrong in 0..right.len() {
-        let (database, operators) = migrated().await;
+        let (database, admins) = migrated().await;
         let columns: Vec<String> = right
             .iter()
             .enumerate()
@@ -611,20 +582,20 @@ async fn a_listed_column_of_the_wrong_type_is_a_storage_failure() {
                 }
             })
             .collect();
-        as_admin(
+        as_db_admin(
             &database,
             &format!(
-                "DROP FUNCTION identity.list_operators();
-                 CREATE FUNCTION identity.list_operators() RETURNS TABLE ({})
+                "DROP FUNCTION identity.list_admins();
+                 CREATE FUNCTION identity.list_admins() RETURNS TABLE ({})
                  LANGUAGE sql AS 'SELECT {}';
-                 GRANT EXECUTE ON FUNCTION identity.list_operators() TO tetsu_identity",
+                 GRANT EXECUTE ON FUNCTION identity.list_admins() TO tetsu_identity",
                 columns.join(", "),
                 values.join(", ").replace('\'', "''")
             ),
         )
         .await;
         assert!(
-            matches!(operators.list().await, Err(Error::Storage(_))),
+            matches!(admins.list().await, Err(Error::Storage(_))),
             "{}",
             right[wrong].0
         );
@@ -648,22 +619,19 @@ async fn a_disable_answer_of_the_wrong_type_is_a_storage_failure() {
             "SELECT true, 0::bigint, ''none''",
         ),
     ] {
-        let (database, operators, kurt) = with_kurt().await;
-        as_admin(
+        let (database, admins, kurt) = with_kurt().await;
+        as_db_admin(
             &database,
             &format!(
-                "DROP FUNCTION identity.disable_operator(bigint);
-                 CREATE FUNCTION identity.disable_operator(bigint) RETURNS TABLE ({columns})
+                "DROP FUNCTION identity.disable_admin(bigint);
+                 CREATE FUNCTION identity.disable_admin(bigint) RETURNS TABLE ({columns})
                  LANGUAGE sql AS '{answer}';
-                 GRANT EXECUTE ON FUNCTION identity.disable_operator(bigint) TO tetsu_identity"
+                 GRANT EXECUTE ON FUNCTION identity.disable_admin(bigint) TO tetsu_identity"
             ),
         )
         .await;
         assert!(
-            matches!(
-                operators.disable(kurt, &actor()).await,
-                Err(Error::Storage(_))
-            ),
+            matches!(admins.disable(kurt, &actor()).await, Err(Error::Storage(_))),
             "{columns}"
         );
     }
@@ -674,17 +642,17 @@ async fn a_disable_answer_of_the_wrong_type_is_a_storage_failure() {
 /// would escape their checks, whoever starts the transaction; so does beginning a login, whose sweep would fail
 /// there when begins overlap.
 #[tokio::test]
-async fn changes_that_wait_on_an_operator_need_read_committed() {
+async fn changes_that_wait_on_an_admin_need_read_committed() {
     let (_database, pool) = kurt_and_pool().await;
     let mut client = pool.get().await.expect("a connection");
     for call in [
-        "SELECT * FROM identity.disable_operator(1)",
-        "SELECT identity.end_sessions('operator', 1)",
-        "SELECT identity.end_sessions('operator', null)",
+        "SELECT * FROM identity.disable_admin(1)",
+        "SELECT identity.end_sessions('admin', 1)",
+        "SELECT identity.end_sessions('admin', null)",
         "SELECT identity.issue_invite(sha256('a'::bytea), 1)",
         "SELECT identity.redeem_invite(sha256('a'::bytea), 1, sha256('c'::bytea), '{}', '', sha256('s'::bytea), null)",
         "SELECT identity.begin_join(sha256('t'::bytea), 1, sha256('a'::bytea), '{}')",
-        "SELECT identity.enable_operator(1)",
+        "SELECT identity.enable_admin(1)",
         "SELECT * FROM identity.remove_passkeys(1)",
         "SELECT * FROM identity.login(sha256('c'::bytea), 1, '{}', '{}', sha256('s'::bytea), null)",
         "SELECT identity.begin_login(sha256('t'::bytea), '{}')",
@@ -716,22 +684,22 @@ async fn changes_that_wait_on_an_operator_need_read_committed() {
 /// record says so.
 #[tokio::test]
 async fn spent_sessions_and_links_are_removed_but_not_counted() {
-    let (database, operators, kurt) = with_kurt().await;
-    let spent = "SELECT identity.start_session(sha256('a'::bytea), 'operator', 1, true);
+    let (database, admins, kurt) = with_kurt().await;
+    let spent = "SELECT identity.start_session(sha256('a'::bytea), 'admin', 1, true);
                  UPDATE identity.sessions SET last_seen_at = last_seen_at - interval '16 minutes';
                  SELECT identity.issue_invite(sha256('b'::bytea), 1);
                  UPDATE identity.invites SET ends_at = now() - interval '1 second'";
-    as_admin(&database, spent).await;
-    assert_eq!(operators.end_sessions(kurt, &actor()).await, Ok(0));
+    as_db_admin(&database, spent).await;
+    assert_eq!(admins.end_sessions(kurt, &actor()).await, Ok(0));
     assert_eq!(
         number(&database, "SELECT count(*) FROM identity.sessions").await,
         0
     );
-    as_admin(&database, spent).await;
-    assert_eq!(operators.end_all_sessions(&actor()).await, Ok(0));
-    as_admin(&database, spent).await;
+    as_db_admin(&database, spent).await;
+    assert_eq!(admins.end_all_sessions(&actor()).await, Ok(0));
+    as_db_admin(&database, spent).await;
     assert_eq!(
-        operators.disable(kurt, &actor()).await,
+        admins.disable(kurt, &actor()).await,
         Ok(disabled(true, 0, 0))
     );
     assert_eq!(
@@ -754,12 +722,12 @@ async fn spent_sessions_and_links_are_removed_but_not_counted() {
     );
 }
 
-/// A login that waits while the operator's passkeys are removed finds its passkey gone: it starts no session,
+/// A login that waits while the admin's passkeys are removed finds its passkey gone: it starts no session,
 /// and answers that the passkey is unknown, not that another login changed it.
 #[tokio::test]
 async fn a_login_waiting_on_a_removal_finds_its_passkey_unknown() {
     let (database, pool) = kurt_and_pool().await;
-    as_admin(&database, &passkey_for(1)).await;
+    as_db_admin(&database, &passkey_for(1)).await;
     let mut admin = connect(&database).await.expect("connects");
     let removing = admin.transaction().await.expect("begins");
     removing
@@ -797,15 +765,15 @@ async fn a_login_waiting_on_a_removal_finds_its_passkey_unknown() {
     );
 }
 
-/// A login that names no operator logs no one in: it answers that the passkey is unknown.
+/// A login that names no admin logs no one in: it answers that the passkey is unknown.
 #[tokio::test]
-async fn a_login_for_no_operator_signs_no_one_in() {
+async fn a_login_for_no_admin_signs_no_one_in() {
     let (database, pool) = kurt_and_pool().await;
     let passkey = r#"{"cred": {"counter": 0, "backup_eligible": false, "backup_state": false}}"#;
-    as_admin(
+    as_db_admin(
         &database,
         &format!(
-            "INSERT INTO identity.passkeys (credential_id, operator_id, passkey, created_at)
+            "INSERT INTO identity.passkeys (credential_id, admin_id, passkey, created_at)
              VALUES (sha256(int8send(1)), 1, '{passkey}', now())"
         ),
     )
@@ -833,9 +801,9 @@ async fn a_login_for_no_operator_signs_no_one_in() {
 #[tokio::test]
 async fn an_addition_begun_as_its_session_ends_is_refused() {
     let (database, pool) = kurt_and_pool().await;
-    as_admin(
+    as_db_admin(
         &database,
-        "SELECT identity.start_session(sha256('s'::bytea), 'operator', 1, true)",
+        "SELECT identity.start_session(sha256('s'::bytea), 'admin', 1, true)",
     )
     .await;
     let mut admin = connect(&database).await.expect("connects");
@@ -866,14 +834,14 @@ async fn an_addition_begun_as_its_session_ends_is_refused() {
     assert!(!beginning.await.expect("finishes"));
 }
 
-/// A session starts when it is stored, after any wait for the operator's row, never before an end of sessions that
+/// A session starts when it is stored, after any wait for the admin's row, never before an end of sessions that
 /// held it up.
 #[tokio::test]
 async fn a_session_starts_after_the_wait_that_held_it_up() {
     let database = ready().await;
     let pool = pool(&database.as_app()).expect("a pool");
-    let operators = postgres_store(pool.clone());
-    operators
+    let admins = postgres_store(pool.clone());
+    admins
         .create(&name("Kurt Medley"), None, &actor())
         .await
         .expect("creates");
@@ -881,7 +849,7 @@ async fn a_session_starts_after_the_wait_that_held_it_up() {
     let holding = admin.transaction().await.expect("begins");
     holding
         .execute(
-            "SELECT FROM identity.operators WHERE id = 1 FOR NO KEY UPDATE",
+            "SELECT FROM identity.admins WHERE id = 1 FOR NO KEY UPDATE",
             &[],
         )
         .await
@@ -892,7 +860,7 @@ async fn a_session_starts_after_the_wait_that_held_it_up() {
         let writing = client.transaction().await.expect("begins");
         writing
             .execute(
-                "SELECT identity.start_session(sha256('a'::bytea), 'operator', 1, true)",
+                "SELECT identity.start_session(sha256('a'::bytea), 'admin', 1, true)",
                 &[],
             )
             .await
@@ -919,24 +887,24 @@ async fn a_session_starts_after_the_wait_that_held_it_up() {
     assert!(started >= released, "{started:?} before {released:?}");
 }
 
-/// Identity's role adds an operator by name alone, and the database refuses a name with a control character, so
+/// Identity's role adds an admin by name alone, and the database refuses a name with a control character, so
 /// neither a direct insert nor a later path around the domain's checks can forge a line of the command's output.
 #[tokio::test]
-async fn an_operator_is_added_by_a_plain_name_alone() {
+async fn an_admin_is_added_by_a_plain_name_alone() {
     let database = ready().await;
     let pool = pool(&database.as_app()).expect("a pool");
     let mut client = pool.get().await.expect("a connection");
     for (insert, refused) in [
         (
-            "INSERT INTO identity.operators (name, disabled_at) VALUES ('Eve', now())",
+            "INSERT INTO identity.admins (name, disabled_at) VALUES ('Eve', now())",
             tokio_postgres::error::SqlState::INSUFFICIENT_PRIVILEGE,
         ),
         (
-            "INSERT INTO identity.operators (id, name) OVERRIDING SYSTEM VALUE VALUES (3, 'Eve')",
+            "INSERT INTO identity.admins (id, name) OVERRIDING SYSTEM VALUE VALUES (3, 'Eve')",
             tokio_postgres::error::SqlState::INSUFFICIENT_PRIVILEGE,
         ),
         (
-            "INSERT INTO identity.operators (name) VALUES (E'Eve\\n1  Kurt Medley  enabled')",
+            "INSERT INTO identity.admins (name) VALUES (E'Eve\\n1  Kurt Medley  enabled')",
             tokio_postgres::error::SqlState::CHECK_VIOLATION,
         ),
     ] {
@@ -948,22 +916,22 @@ async fn an_operator_is_added_by_a_plain_name_alone() {
     }
 }
 
-/// Names are unique, so a create retried after its output was lost finds the first operator rather than making a
-/// second; the refusal is recorded, naming the operator who holds the name.
+/// Names are unique, so a create retried after its output was lost finds the first admin rather than making a
+/// second; the refusal is recorded, naming the admin who holds the name.
 #[tokio::test]
 async fn a_name_already_taken_is_refused_and_recorded() {
-    let (database, operators) = migrated().await;
-    operators
+    let (database, admins) = migrated().await;
+    admins
         .create(&name("Kurt Medley"), None, &actor())
         .await
         .expect("creates");
     assert_eq!(
-        operators.create(&name("Kurt Medley"), None, &actor()).await,
-        Err(Error::Invalid("operator 1 already has that name".into()))
+        admins.create(&name("Kurt Medley"), None, &actor()).await,
+        Err(Error::Invalid("admin 1 already has that name".into()))
     );
     let (kind, payload) = events(&database).await.pop().expect("an event");
-    assert_eq!(kind, "identity.operator_created");
-    assert_eq!(payload["operator_id"], json!(1));
+    assert_eq!(kind, "identity.admin_created");
+    assert_eq!(payload["admin_id"], json!(1));
     assert_eq!(payload["outcome"], json!("refused"));
 }
 
@@ -971,85 +939,83 @@ async fn a_name_already_taken_is_refused_and_recorded() {
 /// it cannot yet see who holds the name.
 #[tokio::test]
 async fn a_name_taken_while_a_create_waits_is_refused() {
-    let (database, operators) = migrated().await;
+    let (database, admins) = migrated().await;
     let mut admin = connect(&database).await.expect("connects");
     let writing = admin.transaction().await.expect("begins");
     writing
         .execute(
-            "INSERT INTO identity.operators (name) VALUES ('Kurt Medley')",
+            "INSERT INTO identity.admins (name) VALUES ('Kurt Medley')",
             &[],
         )
         .await
         .expect("writes");
     let creating =
-        tokio::spawn(async move { operators.create(&name("Kurt Medley"), None, &actor()).await });
+        tokio::spawn(async move { admins.create(&name("Kurt Medley"), None, &actor()).await });
     waits_for_a_lock(&database).await;
     writing.commit().await.expect("commits");
     assert_eq!(
         creating.await.expect("finishes"),
-        Err(Error::Invalid(
-            "another operator already has that name".into()
-        ))
+        Err(Error::Invalid("another admin already has that name".into()))
     );
     let (_, payload) = events(&database).await.pop().expect("an event");
-    assert_eq!(payload["operator_id"], Value::Null);
+    assert_eq!(payload["admin_id"], Value::Null);
     assert_eq!(payload["outcome"], json!("refused"));
 }
 
 /// A disable never answers "already disabled" over an enable about to commit: it waits for the enable, then
-/// disables, so the operator ends disabled, as it says.
+/// disables, so the admin ends disabled, as it says.
 #[tokio::test]
 async fn a_disable_waits_for_an_enable_being_written() {
     let database = ready().await;
     let pool = pool(&database.as_app()).expect("a pool");
-    let operators = postgres_store(pool.clone());
-    let kurt = operators
+    let admins = postgres_store(pool.clone());
+    let kurt = admins
         .create(&name("Kurt Medley"), None, &actor())
         .await
         .expect("creates");
-    operators.disable(kurt, &actor()).await.expect("disables");
+    admins.disable(kurt, &actor()).await.expect("disables");
     let mut client = pool.get().await.expect("a connection");
     let enabling = ModuleTransaction::begin(&mut client, "identity")
         .await
         .expect("begins");
     enabling
-        .execute("SELECT identity.enable_operator($1)", &[&kurt.get()])
+        .execute("SELECT identity.enable_admin($1)", &[&kurt.get()])
         .await
         .expect("enables");
-    let disabling = tokio::spawn(async move { operators.disable(kurt, &actor()).await });
+    let disabling = tokio::spawn(async move { admins.disable(kurt, &actor()).await });
     waits_for_a_lock(&database).await;
     enabling.commit().await.expect("commits");
     assert_eq!(disabling.await.expect("finishes"), Ok(disabled(true, 0, 0)));
     assert_eq!(
         number(
             &database,
-            "SELECT count(*) FROM identity.operators WHERE disabled_at IS NOT NULL"
+            "SELECT count(*) FROM identity.admins WHERE disabled_at IS NOT NULL"
         )
         .await,
         1
     );
 }
 
-/// An operator who holds a passkey is issued no link: another passkey is added only after logging in
+/// An admin who holds a passkey is issued no link: another passkey is added only after logging in
 /// (`v5.0.0-6.4.1`). Each refusal records why.
 #[tokio::test]
-async fn a_joined_or_disabled_operator_is_issued_no_link() {
-    let (database, operators, kurt) = with_kurt().await;
-    let lee = operators
+async fn a_joined_or_disabled_admin_is_issued_no_link() {
+    let (database, admins, kurt) = with_kurt().await;
+    let lee = admins
         .create(&name("Lee Park"), None, &actor())
         .await
         .expect("creates");
-    as_admin(&database, &passkey_for(kurt.get())).await;
-    operators.disable(lee, &actor()).await.expect("disables");
+    as_db_admin(&database, &passkey_for(kurt.get())).await;
+    admins.disable(lee, &actor()).await.expect("disables");
     assert_eq!(
-        operators.invite(kurt, &actor()).await.map(drop),
+        admins.invite(kurt, &actor()).await.map(drop),
         Err(Error::Invalid(
-            "operator 1 has a passkey already, and adds another after logging in".into()
+            "admin 1 has a passkey already, and adds another after logging in".into()
         ))
     );
     assert_eq!(
-        operators.invite(lee, &actor()).await.map(drop),
-        Err(Error::Invalid("no enabled operator 2".into()))
+        admins.invite(lee, &actor()).await.map(drop),
+        Err(Error::Invalid("no enabled admin 2".into()))
     );
     let reasons: Vec<Value> = events(&database)
         .await
@@ -1067,53 +1033,53 @@ async fn a_joined_or_disabled_operator_is_issued_no_link() {
     );
 }
 
-/// The list shows how many passkeys each operator holds, and the minutes left on an open link, rounded up, but
+/// The list shows how many passkeys each admin holds, and the minutes left on an open link, rounded up, but
 /// not a link that has ended.
 #[tokio::test]
 async fn the_list_shows_passkeys_and_open_links() {
-    let (database, operators, kurt) = with_kurt().await;
-    let lee = operators
+    let (database, admins, kurt) = with_kurt().await;
+    let lee = admins
         .create(&name("Lee Park"), None, &actor())
         .await
         .expect("creates");
-    let ana = operators
+    let ana = admins
         .create(&name("Ana Ortiz"), None, &actor())
         .await
         .expect("creates");
-    operators.invite(kurt, &actor()).await.expect("issues");
-    operators.invite(ana, &actor()).await.expect("issues");
-    as_admin(
+    admins.invite(kurt, &actor()).await.expect("issues");
+    admins.invite(ana, &actor()).await.expect("issues");
+    as_db_admin(
         &database,
         &format!(
-            "{} UPDATE identity.invites SET ends_at = now() - interval '1 second' WHERE operator_id = {};",
+            "{} UPDATE identity.invites SET ends_at = now() - interval '1 second' WHERE admin_id = {};",
             passkey_for(lee.get()),
             ana.get()
         ),
     )
     .await;
-    let listed: Vec<(u64, Option<u64>)> = operators
+    let listed: Vec<(u64, Option<u64>)> = admins
         .list()
         .await
         .expect("lists")
         .iter()
-        .map(|operator| (operator.passkeys, operator.link_minutes))
+        .map(|admin| (admin.passkeys, admin.link_minutes))
         .collect();
     assert_eq!(listed, [(0, Some(60)), (1, None), (0, None)]);
 }
 
-/// A begin holds the operator's row as it stores a ceremony, so a disable at the same moment waits for it and then
+/// A begin holds the admin's row as it stores a ceremony, so a disable at the same moment waits for it and then
 /// ends what it stored, and two begins on one link leave one ceremony.
 #[tokio::test]
 async fn a_disable_or_second_begin_waits_for_a_begin_being_written() {
     for second in ["disable", "begin"] {
         let database = ready().await;
         let pool = pool(&database.as_app()).expect("a pool");
-        let operators = postgres_store(pool.clone());
-        let kurt = operators
+        let admins = postgres_store(pool.clone());
+        let kurt = admins
             .create(&name("Kurt Medley"), None, &actor())
             .await
             .expect("creates");
-        let link = operators
+        let link = admins
             .invite(kurt, &actor())
             .await
             .expect("issues")
@@ -1152,18 +1118,18 @@ async fn a_disable_or_second_begin_waits_for_a_begin_being_written() {
     }
 }
 
-/// A new link takes the operator's row for update, so a begin from the old link waits for it, then finds its link
+/// A new link takes the admin's row for update, so a begin from the old link waits for it, then finds its link
 /// gone and keeps no ceremony.
 #[tokio::test]
 async fn a_begin_waits_for_a_new_link_being_written() {
     let database = ready().await;
     let pool = pool(&database.as_app()).expect("a pool");
-    let operators = postgres_store(pool.clone());
-    let kurt = operators
+    let admins = postgres_store(pool.clone());
+    let kurt = admins
         .create(&name("Kurt Medley"), None, &actor())
         .await
         .expect("creates");
-    let old = operators
+    let old = admins
         .invite(kurt, &actor())
         .await
         .expect("issues")
@@ -1203,17 +1169,17 @@ async fn a_begin_waits_for_a_new_link_being_written() {
     );
 }
 
-/// Removing an operator's passkeys lets them be issued a link and join again, as when their only one is lost. It
+/// Removing an admin's passkeys lets them be issued a link and join again, as when their only one is lost. It
 /// ends their sessions and any ceremony with it, says what it removed, and records each attempt: changed, unchanged
-/// when there was nothing to remove, and refused for an operator who does not exist.
+/// when there was nothing to remove, and refused for an admin who does not exist.
 #[tokio::test]
-async fn removing_passkeys_lets_an_operator_join_again() {
-    let (database, operators, kurt) = with_kurt().await;
-    as_admin(&database, &passkey_for(kurt.get())).await;
+async fn removing_passkeys_lets_an_admin_join_again() {
+    let (database, admins, kurt) = with_kurt().await;
+    as_db_admin(&database, &passkey_for(kurt.get())).await;
     logged_in(&database, kurt).await;
     let removed = [
-        operators.remove_passkeys(kurt, &actor()).await,
-        operators.remove_passkeys(kurt, &actor()).await,
+        admins.remove_passkeys(kurt, &actor()).await,
+        admins.remove_passkeys(kurt, &actor()).await,
     ];
     let removal = |passkeys_removed, sessions_ended| {
         Ok(Removal {
@@ -1223,12 +1189,12 @@ async fn removing_passkeys_lets_an_operator_join_again() {
     };
     assert_eq!(removed, [removal(1, 1), removal(0, 0)]);
     assert_eq!(
-        operators
-            .remove_passkeys(OperatorId::parse("99").expect("an ID"), &actor())
+        admins
+            .remove_passkeys(AdminId::parse("99").expect("an ID"), &actor())
             .await,
-        Err(Error::Invalid("no operator 99".into()))
+        Err(Error::Invalid("no admin 99".into()))
     );
-    assert!(operators.invite(kurt, &actor()).await.is_ok());
+    assert!(admins.invite(kurt, &actor()).await.is_ok());
     let recorded: Vec<Value> = events(&database)
         .await
         .into_iter()
@@ -1264,8 +1230,8 @@ async fn a_removal_answer_of_the_wrong_type_is_a_storage_failure() {
             "0::bigint, ''1''",
         ),
     ] {
-        let (database, operators, kurt) = with_kurt().await;
-        as_admin(
+        let (database, admins, kurt) = with_kurt().await;
+        as_db_admin(
             &database,
             &format!(
                 "DROP FUNCTION identity.remove_passkeys(bigint);
@@ -1277,7 +1243,7 @@ async fn a_removal_answer_of_the_wrong_type_is_a_storage_failure() {
         .await;
         assert!(
             matches!(
-                operators.remove_passkeys(kurt, &actor()).await,
+                admins.remove_passkeys(kurt, &actor()).await,
                 Err(Error::Storage(_))
             ),
             "{columns}"

@@ -208,7 +208,7 @@ pub trait Mailer: Send + Sync {
     fn send(&self, message: &Message) -> impl Future<Output = Result<Delivery, MailError>> + Send;
 }
 
-/// A message kept rather than sent, as the operators' mailbox shows it (ADR-0044).
+/// A message kept rather than sent, as the admins' mailbox shows it (ADR-0044).
 #[derive(Clone, PartialEq, Eq)]
 pub struct Captured {
     pub recipient: String,
@@ -222,7 +222,7 @@ pub struct Captured {
 pub type Reading<'a> =
     std::pin::Pin<Box<dyn Future<Output = Result<Vec<Captured>, MailError>> + Send + 'a>>;
 
-/// Reads the messages Mail kept rather than sent, for the operators' mailbox page (ADR-0044, ADR-0074). It hands
+/// Reads the messages Mail kept rather than sent, for the admins' mailbox page (ADR-0044, ADR-0074). It hands
 /// back a boxed future so a page can hold any mailbox as `dyn Mailbox`.
 pub trait Mailbox: Send + Sync {
     fn captured(&self) -> Reading<'_>;
