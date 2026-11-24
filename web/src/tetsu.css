@@ -106,6 +106,14 @@
   }
 }
 
+/* Where the browser has no popovers, such as Safari 16.4 at ADR-0053's floor: a button that would open or close one
+   does nothing there, so it hides, and its menu shows what it must in place. */
+@custom-variant no-popovers {
+  @supports not selector(:popover-open) {
+    @slot;
+  }
+}
+
 /* Tailwind's dark variant, for the tokens below and any dark: utility: the system's scheme, unless the visitor picks
    one (ADR-0070). The pick is the footer control's checked radio once the browser has read it, and before then the
    scheme the server wrote on <html> (data-scheme), so the top of a long page, drawn before its footer is read, is

@@ -211,31 +211,34 @@
 
 {#- A header menu's look: a native popover under the button that opens it, which anchors itself as
     `[anchor-name:--tetsu-menu]` where the browser can anchor it, and sits under the header's corner where it cannot.
-    No page has two, so they share the anchor's name. The caller adds its width. -#}
+    No page has two, so they share the anchor's name. The caller adds its width, as `popovers:w-…`, since a browser
+    without popovers shows the menu in place, unstyled by this. -#}
 {% macro menu_style() -%}
-  inset-auto top-16 right-6 m-0 mt-2 rounded-xl border border-edge bg-surface p-2 text-ink shadow-lg
-  [position-anchor:--tetsu-menu] supports-[top:anchor(bottom)]:top-[anchor(bottom)]
-  supports-[top:anchor(bottom)]:right-[anchor(right)]
+  text-ink popovers:inset-auto popovers:top-16 popovers:right-6 popovers:m-0 popovers:mt-2 popovers:rounded-xl
+  popovers:border popovers:border-edge popovers:bg-surface popovers:p-2 popovers:shadow-lg
+  popovers:[position-anchor:--tetsu-menu] popovers:supports-[top:anchor(bottom)]:top-[anchor(bottom)]
+  popovers:supports-[top:anchor(bottom)]:right-[anchor(right)]
 {%- endmacro %}
 
 {#- A signed-in person's account menu (#148), for any realm: their initials, which open a menu with their name, their
     role in this realm (`role`), Account (`account`, marked current when `here` is it), and Log out, which posts
     `form`, the session's form token, to `logout`. It works without script, and Escape or a tap outside closes it.
     The button names its visible initials first, so speech input can say them, and the button and rows grow to 44px
-    under a coarse pointer, the button's by an invisible ring around its 32px circle. -#}
+    under a coarse pointer, the button's by an invisible ring around its 32px circle. A browser without popovers
+    shows Account and Log out in a row in the button's place. -#}
 {% macro account_menu(name, initials, role, account, logout, form, here) %}
   <button
     type="button"
     popovertarget="tetsu-account-menu"
-    class="flex size-8 cursor-pointer items-center justify-center rounded-full bg-ink/8 text-xs font-medium tracking-wide text-ink ring-1 ring-edge transition-colors [anchor-name:--tetsu-menu] hover:bg-ink/12 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent relative pointer-coarse:after:absolute pointer-coarse:after:-inset-1.5 pointer-coarse:after:content-['']"
+    class="flex size-8 cursor-pointer items-center justify-center rounded-full bg-ink/8 text-xs font-medium tracking-wide text-ink ring-1 ring-edge transition-colors [anchor-name:--tetsu-menu] hover:bg-ink/12 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent relative pointer-coarse:after:absolute pointer-coarse:after:-inset-1.5 pointer-coarse:after:content-[''] no-popovers:hidden"
   >{{ initials }}<span class="sr-only">, account menu, {{ name }}</span></button>
-  <div id="tetsu-account-menu" popover class="w-60 {% call menu_style() %}{% endcall %}">
-    <div class="px-3 pt-1.5 pb-2.5">
+  <div id="tetsu-account-menu" popover class="popovers:w-60 {% call menu_style() %}{% endcall %}">
+    <div class="px-3 pt-1.5 pb-2.5 no-popovers:hidden">
       <p class="text-mini font-medium break-words text-ink">{{ name }}</p>
       <p class="text-xs text-muted">{{ role }}</p>
     </div>
-    <div class="mx-1 border-t border-edge-soft"></div>
-    <ul role="list" class="mt-1.5 text-mini">
+    <div class="mx-1 border-t border-edge-soft no-popovers:hidden"></div>
+    <ul role="list" class="mt-1.5 text-mini no-popovers:mt-0 no-popovers:flex">
       <li><a
           href="{{ account }}"
           {% if here == account %}aria-current="page"{% endif %}

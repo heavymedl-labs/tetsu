@@ -5,7 +5,8 @@
     app while it has one, and what the realm puts at the bar's end; "Menu" opens the sidebar as a native popover that
     Escape or a tap outside closes. Its island, `<tetsu-menu>` (web/src/menu), moves focus in as it opens and closes
     it as focus leaves, so focus never rests on what it covers. The control and mark sit at the page's foot. A browser
-    without popovers shows the menu in place, above the page, since its drawer's look applies only where popovers do.
+    without popovers shows the menu in place, above the page, since its drawer's look applies only where popovers do,
+    and hides the buttons that would open and close it.
 
     A realm's template extends this, gives the shared page's fields and `scheme`, the visitor's color scheme, and
     loads the menu's script. It fills `nav` and `menu`, its sidebar for the page and for the menu, each naming its
@@ -35,7 +36,7 @@
           type="button"
           popovertarget="tetsu-settings-menu"
           aria-label="Menu"
-          class="inline-flex size-8 cursor-pointer items-center justify-center rounded-md text-soft hover:bg-ink/5 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent pointer-coarse:size-11"
+          class="inline-flex size-8 cursor-pointer items-center justify-center rounded-md text-soft hover:bg-ink/5 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent pointer-coarse:size-11 no-popovers:hidden"
         >{% call ui::icon("menu") %}{% endcall %}</button>
         {% block bar_back %}{% endblock %}
       </div>
@@ -44,7 +45,7 @@
     <tetsu-menu class="contents"><div
         id="tetsu-settings-menu"
         popover
-        class="border-b border-edge-soft px-(--tetsu-gutter) py-3 text-ink motion-safe:transition-[translate,display,overlay] motion-safe:transition-discrete motion-safe:duration-200 motion-safe:ease-out backdrop:bg-black/40 backdrop:opacity-0 backdrop:transition-[opacity,display,overlay] backdrop:transition-discrete backdrop:duration-200 open:flex open:backdrop:opacity-100 popovers:inset-y-0 popovers:right-auto popovers:left-0 popovers:m-0 popovers:h-dvh popovers:max-h-none popovers:w-72 popovers:max-w-[85vw] popovers:flex-col popovers:rounded-r-xl popovers:border-0 popovers:border-r popovers:border-edge popovers:bg-canvas popovers:px-3 starting:open:-translate-x-full starting:open:backdrop:opacity-0 md:hidden [&:not(:popover-open)]:-translate-x-full"
+        class="border-b border-edge-soft px-(--tetsu-gutter) py-3 text-ink motion-safe:transition-[translate,display,overlay] motion-safe:transition-discrete motion-safe:duration-200 motion-safe:ease-out backdrop:bg-black/40 backdrop:opacity-0 backdrop:transition-[opacity,display,overlay] backdrop:transition-discrete backdrop:duration-200 open:flex open:backdrop:opacity-100 popovers:inset-y-0 popovers:right-auto popovers:left-0 popovers:m-0 popovers:h-dvh popovers:max-h-none popovers:w-72 popovers:max-w-[85vw] popovers:flex-col popovers:rounded-r-xl popovers:border-0 popovers:border-r popovers:border-edge popovers:bg-canvas popovers:px-3 starting:open:-translate-x-full starting:open:backdrop:opacity-0 md:hidden popovers:[&:not(:popover-open)]:-translate-x-full"
       >
         <div class="mb-3 flex items-center justify-between">
           <a
@@ -57,7 +58,7 @@
             popovertarget="tetsu-settings-menu"
             popovertargetaction="hide"
             aria-label="Close menu"
-            class="inline-flex size-8 cursor-pointer items-center justify-center rounded-md text-muted hover:bg-ink/5 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent pointer-coarse:size-11"
+            class="inline-flex size-8 cursor-pointer items-center justify-center rounded-md text-muted hover:bg-ink/5 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent pointer-coarse:size-11 no-popovers:hidden"
           >{% call ui::icon("close") %}{% endcall %}</button>
         </div>
         <nav aria-label="Settings" class="flex min-h-0 flex-1 flex-col">{% block menu %}{% endblock %}</nav>

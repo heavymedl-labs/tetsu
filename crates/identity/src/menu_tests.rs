@@ -1,6 +1,7 @@
 //! The admin's initials menu (#148, `v5.0.0-7.4.4`), at the end of the settings shell's narrow bar on every
-//! admin page: their initials opening a menu with their name, "Admin", Account, and Log out. Pages before login,
-//! and the refused, unavailable, and not-found pages, carry none.
+//! admin page: their initials opening a menu with their name, "Admin", Account, and Log out, which a browser without
+//! popovers shows as Account and Log out in a row. Pages before login, and the refused, unavailable, and not-found
+//! pages, carry none.
 
 use crate::adapters::http::initials;
 use crate::http_tests::{PROFILE, assert_in_order, get, logged_in, send};
@@ -9,13 +10,16 @@ use crate::join_tests::{as_db_admin, replace};
 const MENU_BUTTON: &str = "popovertarget=\"tetsu-account-menu\"";
 
 /// What the menu shows, in the order a reader meets it. The button's name starts with the initials it shows, so speech
-/// input can say them (WCAG 2.5.3), and its target and the menu's rows grow to 44px under a coarse pointer.
-const MENU_PARTS: [&str; 10] = [
+/// input can say them (WCAG 2.5.3), and its target and the menu's rows grow to 44px under a coarse pointer. Without
+/// popovers, the button and the name hide, and the rows line up.
+const MENU_PARTS: [&str; 12] = [
     MENU_BUTTON,
-    "pointer-coarse:after:content-['']\">KM<span class=\"sr-only\">, account menu, Kurt Medley</span></button>",
+    "no-popovers:hidden\">KM<span class=\"sr-only\">, account menu, Kurt Medley</span></button>",
     "<div id=\"tetsu-account-menu\" popover",
+    "no-popovers:hidden\">",
     ">Kurt Medley</p>",
     ">Admin</p>",
+    "no-popovers:mt-0 no-popovers:flex\">",
     "href=\"/admin/settings/profile\"",
     "pointer-coarse:py-3\">Account</a>",
     "<form method=\"post\" action=\"/admin/logout\"",
