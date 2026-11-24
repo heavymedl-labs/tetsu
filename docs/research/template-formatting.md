@@ -80,7 +80,7 @@ content.
 
 Served locally after adopting both, the root page was 424 KB before compression against 286 KB before formatting,
 and its source still looked formatted: 76% of it is inline SVG, which html-minifier sends as written, and markup_fmt
-had put each shape's attributes on lines of their own. Leaving the drawings in `art` and `home/panels` unformatted
+had put each shape's attributes on lines of their own. Leaving the drawings in `art` and `home/panels`, since moved to `home/art`, unformatted
 brought it to 286.4 KB, and 25.8 KB gzipped against 25.7 KB (2026-11-23).
 
 ## Weighing it

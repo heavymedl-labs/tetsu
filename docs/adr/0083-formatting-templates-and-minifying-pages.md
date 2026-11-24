@@ -16,7 +16,7 @@ indentation every page carries: 13% on the root page and 7% on operator pages af
 - **markup_fmt formats every HTML template,** as Jinja, in strict whitespace mode, 120 columns wide, indented by
   two spaces. Strict mode never adds or removes whitespace a browser would show, and markup_fmt leaves a tag's
   Rust as written. A generated template, whose first line says so, stays as its generator writes it. So do the
-  drawings in `crates/tetsu/templates/art` and `home/panels`: inline SVG, which the minifier sends as written, so
+  drawings in `crates/tetsu/templates/art` and `home/art` (once `home/panels`): inline SVG, which the minifier sends as written, so
   formatting them grew the root page from 286 KB to 424 KB before compression.
 - **A Cargo tool runs it:** `cargo run -p tetsu-format-templates` formats in place, and with `--check` fails on a
   template that is not formatted. It lives in `tools/format-templates`, outside the default members like the

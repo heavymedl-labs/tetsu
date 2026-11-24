@@ -73,7 +73,7 @@ The site's templates:
 | `site.html` | The head tags of Tetsu's own pages, around the shared header and footer (`web/templates/site_header.html`, `site_footer.html`), whose color scheme control (`scheme.html`) the operator pages share |
 | `not_found.html` | The site's not-found page, around the shared one (`web/templates/not_found.html`), which Tenancy also shows |
 | `home.html`, `home/` | The root page, which lists its sections, one file each |
-| `home/panels/` | Each product picture on the root page |
+| `home/art/` | Each product picture on the root page, a drawing the formatter leaves as written (ADR-0083) |
 | `art/` | The wordmark and its booked slots (`brand.html`, shared with the hero board), the hero board, the figures, bands, and spot maps, drawn from rows of data where they can be, and the parts of the product pictures (`app.html`) |
 
 Every component, such as a button, a section, its heading, a features list, or a footer column, is a macro in

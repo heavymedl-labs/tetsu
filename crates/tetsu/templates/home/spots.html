@@ -7,8 +7,8 @@
     call ui::head("spots-title", "Map your space", "Draw your studio, courts, or campground once. Customers pick their bike, mat, or site as they book, and pay what each one costs.")
   %}{% endcall %}
   <div class="tetsu-scene tetsu-scene-layer">
-    <div class="tetsu-scene-back">{% include "panels/layouts.html" %}</div>
-    <div class="tetsu-scene-front tetsu-stories">{% include "panels/spots.html" %}</div>
+    <div class="tetsu-scene-back">{% include "art/layouts.html" %}</div>
+    <div class="tetsu-scene-front tetsu-stories">{% include "art/spots.html" %}</div>
   </div>
   {%
     call ui::features(["Spot types and prices", "Guest spots", "Accessible spots", "Holds at checkout", "Filters by size", "Layout editor"])
