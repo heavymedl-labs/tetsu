@@ -1,6 +1,7 @@
 # Storing admin and staff accounts for one login flow
 
-Researched 2026-11-24 for [#111](https://github.com/heavymedl-labs/tetsu/issues/111), before its first sub-slice
+Researched 2026-11-24 for [#111](https://github.com/heavymedl-labs/tetsu/issues/111), and extended the same day when
+the maintainer asked what industry leaders do, before its first sub-slice
 makes Identity's login serve staff as well as admins. Today every Identity table points at `admins`: passkeys,
 invites, ceremonies, and sessions, though `sessions` already has a `realm` column that allows only `'admin'`. Should
 staff accounts share those tables with admins, or have their own? Customers are out of scope: ADR-0048 makes their
@@ -9,16 +10,42 @@ accounts and passkeys belong to one business, so they get tables of their own in
 
 ## Summary
 
-There are three shapes. **One account table for both realms, with a realm column,** is how Keycloak stores every
-realm's users, and it keeps one set of login functions; its risk is that admin and staff rows sit together, so a
-mistake in a function that forgets the realm reaches both. Storing the realm on every child row too, with a foreign
-key on the pair `(account, realm)`, makes the database refuse a staff passkey or session that points at an admin,
-which removes most of that risk. **A nullable column per realm on each shared table** (an exclusive arc) keeps
-foreign keys but makes every function branch. **Separate tables per realm,** GitLab's rule for its own schema, isolates
-the realms best and suits ADR-0061's plan to give admins their own database login, but copies each login function per
-realm. The "type and id" columns with no foreign key are the one shape every source rejects. For Tetsu, one account
-table with the realm carried in each foreign key fits best: it is what a shared login flow means in storage, and the
-separate admin login ADR-0061 plans for later can be a row policy on the realm.
+Industry leaders keep the people who work for the platform apart from the people who use it. Identity vendors split
+**workforce identity**, a company's own staff, from **customer identity**, everyone its product serves, into separate
+products and tenants: Microsoft puts customers in an external tenant "distinct and separate" from the workforce one.
+Stripe's employees log in through company SSO with hardware keys on Stripe-issued machines, and reach a business's
+Dashboard only through an access request the business approves. Tetsu's admins are its workforce, and staff and
+customers are its customer identity, so leaders would keep admins out of the tables staff use. Within customer
+identity, one account store with a type or realm is normal: Keycloak keeps every realm's users in one table. The
+schema guidance agrees that each realm's rows need real foreign keys, never a type-and-id pair. For Tetsu that means
+admins keep their own tables, staff get tables of their own, and the login flow, templates, and script are shared in
+code rather than in storage. A later choice, not needed now, is whether admins move to a company SSO, as Stripe's
+employees use.
+
+## Leaders separate workforce identity from customer identity
+
+**Takeaway:**
+
+Every source draws the same line: employees and the platform's own tools on one side, customers and the businesses
+it serves on the other, in separate tenants or separate products, with employees reaching a customer's account only
+through an access the customer grants and that is logged.
+
+**Cited Findings:**
+
+- [Microsoft Entra: tenant configurations](https://learn.microsoft.com/en-us/entra/external-id/tenant-configurations):
+  an external tenant, for apps published to consumers and business customers, is "distinct and separate from your
+  workforce tenant", where employees and internal apps live.
+- [Okta: IAM overview](https://developer.okta.com/docs/concepts/iam-overview) describes customer identity users as
+  people who create their own identities and sign in from many places, unlike workforce users; Okta sells the two as
+  separate products, Workforce Identity and Customer Identity.
+- [Stripe: security](https://docs.stripe.com/security): employees use SSO and two-factor authentication with a
+  hardware token, with mTLS on Stripe-issued machines, and systems outside an employee's standard work need further
+  permission.
+- [Stripe: grant Stripe employees access to your Dashboard](https://support.stripe.com/questions/grant-stripe-employees-access-to-your-dashboard):
+  employees "may request temporary access to view your Dashboard by providing you with an access request link to
+  approve", and every such access is logged.
+- [Shopify: collaborator accounts](https://help.shopify.com/en/manual/your-account/staff-accounts/collaborator-accounts):
+  outside partners reach a store only through a request its owner approves, on a track separate from staff accounts.
 
 ## Identity products keep every realm's accounts in one table
 
@@ -91,24 +118,30 @@ Either shape can give that: separate tables through grants, one table through a 
 | Realm rules that differ (attestation) | A check per realm | A check per column | Each table's own |
 | Adding a third global realm | New realm value | A column on every child | Every table again |
 | Migration from today | Rename `admins` to accounts, add realm to keys | Add `staff_id` beside `admin_id` | New tables beside |
+| Workforce apart from customers, as leaders do | No | No | Yes |
 
 ## Recommendations for Tetsu
 
-- **One `accounts` table for admins and staff, with a realm column,** after Keycloak. Realm details that differ, such
-  as a staff member's businesses, live in tables of their own that point at it.
-- **Carry the realm in every key.** Passkeys, invites, ceremonies, and sessions store the realm and reference
-  `accounts (id, realm)`, and every function takes the realm it serves and matches it, so the database refuses a row
-  of one realm that points at another's account.
-- **Migrate, keep the data.** A new migration turns `admins` into `accounts` and adds the realm to each key, so the
-  maintainer's admin survives; ADR-0085's reset was allowed only while nothing stored mattered.
-- **When admins get their own database login (ADR-0061),** a row policy on the realm limits it, and a test shows a
-  staff function cannot read an admin row.
+- **Keep admins apart in storage,** as leaders keep workforce identity apart: `admins` and its passkeys, invites, and
+  ceremonies stay admin tables. ADR-0061's admin database login then comes from table grants, and ADR-0057's stricter
+  admin passkeys from the admin tables' own checks.
+- **Give staff tables of their own,** with their businesses and roles in tables that point at them, as ADR-0048 has
+  it. Customers get theirs per business later.
+- **Share the flow in code, not in storage.** One login template, passkey script, ceremony logic, and account area
+  serve every realm; each realm has its own store behind the same port, and its SQL functions are its own.
+- **Sessions can stay one table,** since its `realm` column was built for it, with a nullable key per realm and a check
+  that exactly one is set and matches the realm (an exclusive arc), or each realm can keep its own; the slice's plan
+  decides.
+- **Admins reach inside a business only by a grant the business gives,** logged, as Stripe and Shopify do; that is
+  [#24](https://github.com/heavymedl-labs/tetsu/issues/24)'s decision.
 - **Decide it in an ADR,** since it settles how ADR-0048's global tables are shaped.
 
 ## Gaps
 
-- No source compared these shapes for authentication data specifically; the evidence is general schema design and
-  Keycloak's model.
+- No source compared these shapes for authentication data specifically; the evidence is general schema design,
+  Keycloak's model, and how leaders separate their workforce.
+- Shopify's and Stripe's internal storage is not public; what is public is that their employees log in apart from
+  their customers.
 - Kratos's storage was not confirmed.
 - Whether a row policy on the realm costs anything measurable on the session lookup, which every request makes, was
   not measured.
