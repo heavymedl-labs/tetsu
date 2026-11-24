@@ -25,8 +25,8 @@ const SHELL_PARTS: [&str; 11] = [
     "<h1",
 ];
 
-/// Each page in the shell has all of it, in order, and marks only its own page as current in the sidebar. Admins
-/// have no app outside it yet (#157), so nothing links back to one.
+/// Each page in the shell has all of it, in order, and marks only its own page as current in the sidebar. The account
+/// area is the admins' home (ADR-0086), so nothing links back to an app.
 #[tokio::test]
 async fn each_account_page_has_the_settings_shell() {
     let (address, _database, cookie, _) = logged_in().await;
@@ -156,8 +156,8 @@ async fn an_account_page_without_a_session_goes_to_log_in() {
     }
 }
 
-/// Until admins have a home (#157), their realm's own address sends them to their Profile, where logging in lands,
-/// and anyone without a session to log in (ADR-0084).
+/// The realm's own address sends admins to their Profile, where logging in lands, as the account area is their home
+/// (ADR-0086), and anyone without a session to log in.
 #[tokio::test]
 async fn the_realms_address_goes_to_profile() {
     let (address, _database, cookie, _) = logged_in().await;

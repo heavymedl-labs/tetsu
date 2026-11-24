@@ -218,8 +218,8 @@ pages, in a layout of Tetsu's own, load only Tetsu's own script, under a policy 
 Logging in is by passkey alone, as ADR-0040 sets for admins. Endpoints read only a JSON object sent as
 `application/json`, answer `no-store`, and give each ceremony's one refusal; a failure of the server is `503` to
 the browser and logged. Logging in ends the session the browser presented, in the transaction
-that starts the new one. Logging out is a plain form that clears the cookie and the browser's cache of the pages. Until
-admins have a home (#157), `/admin` sends them to Profile, where logging in and joining land too. Every admin
+that starts the new one. Logging out is a plain form that clears the cookie and the browser's cache of the pages. The
+account area is the admins' home (ADR-0086): `/admin` sends them to Profile, where logging in and joining land too. Every admin
 page takes Linear's settings mode (#156): the shared settings shell, `web/templates/settings.html`, with a sidebar of
 Tetsu's wordmark, the Personal pages, a Platform group of pages only admins have, now the mailbox, and the
 admin with Log out at its foot, which below a tablet's width opens from "Menu" as a native popover, beside the

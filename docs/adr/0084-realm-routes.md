@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-23
 - Supersedes [ADR-0061](0061-one-service-until-domains.md)'s `/ops` as the operators' path
+- Operators' home superseded by [ADR-0086](0086-the-account-area-is-the-admins-home.md): the account area
 
 ## Context
 

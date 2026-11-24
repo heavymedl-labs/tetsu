@@ -24,7 +24,7 @@ use crate::ports::AdminStore;
 use crate::use_cases::Admins;
 use tetsu_kernel::{Mailbox, Requester, Scheme};
 
-/// The admins' realm (ADR-0084), which sends them to their Profile until it has a home of its own (#157).
+/// The admins' realm (ADR-0084), which sends them to their Profile, as the account area is their home (ADR-0086).
 const HOME: &str = "/admin";
 /// The admin's account (#156): who they are, and how they log in and where. Logging in lands on Profile.
 const PROFILE: &str = "/admin/settings/profile";
@@ -376,8 +376,8 @@ async fn join_page<S>(State(served): Shared<S>, headers: HeaderMap) -> Response 
     })
 }
 
-/// The admins' realm itself (ADR-0084): until it has a home (#157), it sends a logged-in admin to their
-/// Profile, and anyone else to log in.
+/// The admins' realm itself (ADR-0084): it sends a logged-in admin to their Profile, as the account area is their
+/// home (ADR-0086), and anyone else to log in.
 async fn home<S: AdminStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
     match served.admins.session(cookies(&headers)).await {
         Ok(Some(_)) => see_other(PROFILE),
