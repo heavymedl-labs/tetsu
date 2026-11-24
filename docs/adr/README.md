@@ -91,7 +91,7 @@ number, and add a row below. Never renumber.
 | [0084](0084-realm-routes.md) | Realm routes | Adding or naming a realm's page or route | Accepted |
 | [0085](0085-admins-not-operators.md) | Admins, not operators | Naming anything for the people who work for Tetsu itself | Accepted |
 | [0086](0086-the-account-area-is-the-admins-home.md) | The account area is the admins' home | Adding an admin page, or a home to any realm | Accepted |
-| [0087](0087-one-log-in-button.md) | One "Log in" button, routed by a remembered realm | Changing the site header's login, or where a realm's login starts | Proposed |
+| [0087](0087-one-log-in-button.md) | One "Log in" button, routed by a remembered realm | Changing the site header's login, or where a realm's login starts | Accepted |
 | [0068](0068-no-demo-note.md) | No demo note | Changing what marks a demo page | Proposed |
 
 ## Open decisions
