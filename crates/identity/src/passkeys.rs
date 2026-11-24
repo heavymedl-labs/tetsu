@@ -267,11 +267,12 @@ fn not_started(error: impl std::fmt::Display) -> Error {
 /// accent from its letter; a single word too long for that is cut at a character's end.
 fn account_name(name: &str) -> String {
     let fits = name.floor_char_boundary(64 - LABEL.len());
-    // Admin names are trimmed, so a space is never first, and cutting at one keeps at least a word.
-    let end = if fits < name.len() {
-        name[..fits].rfind(' ').unwrap_or(fits)
-    } else {
+    // Admin names are trimmed, so a space is never first, and cutting at one keeps at least a word. A cut just
+    // before a space already ends a word.
+    let end = if fits == name.len() || name[fits..].starts_with(' ') {
         fits
+    } else {
+        name[..fits].rfind(' ').unwrap_or(fits)
     };
     format!("{LABEL}{}", &name[..end])
 }
@@ -304,6 +305,12 @@ mod tests {
         assert_eq!(
             account_name(words),
             "Tetsu admin · Maximiliana Alexandrovna"
+        );
+        // A name whose cut falls just before a space keeps the word that ends there.
+        let at_a_word = format!("Ann {}", "a".repeat(45));
+        assert_eq!(
+            account_name(&format!("{at_a_word} Lee")),
+            format!("{LABEL}{at_a_word}")
         );
         let exactly = "a".repeat(49);
         assert_eq!(account_name(&exactly), format!("{LABEL}{exactly}"));
