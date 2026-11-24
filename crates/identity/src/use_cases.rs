@@ -1,25 +1,27 @@
-//! Use cases, reached only through [`Admins`] (ADR-0021).
+//! Use cases, reached only through [`Accounts`] (ADR-0021).
 
 use crate::browser::{Change, CheckedSession, ForChange, Logout, Origins};
 use crate::domain::{
-    Account, Actor, Addition, AdminId, AdminName, AdminSummary, Answer, Ceremony, CeremonyKind,
+    Account, AccountId, Actor, Addition, AdminName, AdminSummary, Answer, Ceremony, CeremonyKind,
     CeremonyToken, Device, Disabling, Ending, Error, FailedCheck, Fill, InviteToken, Issue,
     ListedSession, Login, NewPasskey, RateLimit, Realm, Redemption, Refusal, Removal, Session,
     SessionId, SessionStart, SessionToken, Signer, TimeLeft,
 };
 use crate::passkeys::RelyingParty;
-use crate::ports::AdminStore;
+use crate::ports::{AdminDirectory, LoginStore};
 use tetsu_kernel::{Address, Requester};
 
-/// The admin realm's use cases over a store. It offers nothing that reaches the store, so no caller can read or
-/// write a session except through these.
-pub struct Admins<S> {
+/// A realm's use cases over its store, in the realm the store names (ADR-0088). It offers nothing that reaches the
+/// store, so no caller can read or write a session except through these. Every realm's store gives the login flow;
+/// only the admin realm's gives managing its accounts, so only its use cases offer that.
+pub struct Accounts<S> {
     store: S,
     fill: Fill,
 }
 
-impl<S: AdminStore> Admins<S> {
-    /// Wraps a store, such as a test's own or another adapter.
+impl<S> Accounts<S> {
+    /// Wraps a realm's store, such as a test's own or another adapter. The store names its realm, so no caller can
+    /// pair one realm's store with another realm's sessions.
     pub fn new(store: S) -> Self {
         Self {
             store,
@@ -32,7 +34,9 @@ impl<S: AdminStore> Admins<S> {
     pub(crate) fn with_fill(store: S, fill: Fill) -> Self {
         Self { store, fill }
     }
+}
 
+impl<S: AdminDirectory> Accounts<S> {
     /// Creates an admin with no passkey, and their email address if given (ADR-0074), for ADR-0040's join
     /// command, and records it for the audit record.
     ///
@@ -43,7 +47,7 @@ impl<S: AdminStore> Admins<S> {
         name: &AdminName,
         email: Option<&Address>,
         actor: &Actor,
-    ) -> Result<AdminId, Error> {
+    ) -> Result<AccountId, Error> {
         self.store.insert_admin(name, email, actor).await
     }
 
@@ -51,7 +55,7 @@ impl<S: AdminStore> Admins<S> {
     ///
     /// # Errors
     /// Fails if storage fails.
-    pub async fn email(&self, admin: AdminId) -> Result<Option<Address>, Error> {
+    pub async fn email(&self, admin: AccountId) -> Result<Option<Address>, Error> {
         self.store.admin_email(admin).await
     }
 
@@ -62,7 +66,7 @@ impl<S: AdminStore> Admins<S> {
     /// Fails with [`Error::Invalid`] for an admin who does not exist, or if storage fails.
     pub async fn set_email(
         &self,
-        admin: AdminId,
+        admin: AccountId,
         email: &Address,
         actor: &Actor,
     ) -> Result<bool, Error> {
@@ -78,7 +82,7 @@ impl<S: AdminStore> Admins<S> {
     /// # Errors
     /// Fails with [`Error::Invalid`] for an admin who is disabled, holds a passkey already, or does not exist,
     /// each named as such, if no secure random source can be read, or if storage fails.
-    pub async fn invite(&self, admin: AdminId, actor: &Actor) -> Result<InviteToken, Error> {
+    pub async fn invite(&self, admin: AccountId, actor: &Actor) -> Result<InviteToken, Error> {
         let token = InviteToken::generate(self.fill)?;
         match self.store.issue_invite(&token.hash(), admin, actor).await? {
             Some(Issue::Issued) => Ok(token),
@@ -91,6 +95,74 @@ impl<S: AdminStore> Admins<S> {
         }
     }
 
+    /// Disables an admin, and then ends every session and invite link they hold, so a disabled admin is
+    /// logged out at once and logs in again nowhere (`v5.0.0-7.4.2`). Says what it did; an admin already
+    /// disabled is left as is.
+    ///
+    /// # Errors
+    /// Fails with [`Error::Invalid`] for an admin who does not exist, or if storage fails.
+    pub async fn disable(&self, admin: AccountId, actor: &Actor) -> Result<Disabling, Error> {
+        self.store
+            .disable_admin(admin, actor)
+            .await?
+            .ok_or_else(|| no_admin(admin))
+    }
+
+    /// Removes every passkey an admin holds, so they can be issued a link and join again, as when their only
+    /// passkey is lost or unusable (ADR-0057). Their sessions and any ceremony end too, since a session begun with a
+    /// removed passkey must not outlive it (`v5.0.0-7.4.3`). Says how many passkeys it removed and sessions it
+    /// ended.
+    ///
+    /// # Errors
+    /// Fails with [`Error::Invalid`] for an admin who does not exist, or if storage fails.
+    pub async fn remove_passkeys(&self, admin: AccountId, actor: &Actor) -> Result<Removal, Error> {
+        self.store
+            .remove_passkeys(admin, actor)
+            .await?
+            .ok_or_else(|| no_admin(admin))
+    }
+
+    /// Enables a disabled admin again, and says whether they were disabled. Their sessions stay ended, so they
+    /// log in afresh.
+    ///
+    /// # Errors
+    /// Fails with [`Error::Invalid`] for an admin who does not exist, or if storage fails.
+    pub async fn enable(&self, admin: AccountId, actor: &Actor) -> Result<bool, Error> {
+        self.store
+            .enable_admin(admin, actor)
+            .await?
+            .ok_or_else(|| no_admin(admin))
+    }
+
+    /// Ends every session one admin holds, as an administrator may (`v5.0.0-7.4.5`), and says how many.
+    ///
+    /// # Errors
+    /// Fails with [`Error::Invalid`] for an admin who does not exist, or if storage fails.
+    pub async fn end_sessions(&self, admin: AccountId, actor: &Actor) -> Result<u64, Error> {
+        self.store
+            .end_admin_sessions(admin, Realm::Admin, actor)
+            .await?
+            .ok_or_else(|| no_admin(admin))
+    }
+
+    /// Ends every admin session, as an administrator may (`v5.0.0-7.4.5`), and says how many.
+    ///
+    /// # Errors
+    /// Fails if storage fails.
+    pub async fn end_all_sessions(&self, actor: &Actor) -> Result<u64, Error> {
+        self.store.end_realm_sessions(Realm::Admin, actor).await
+    }
+
+    /// Every admin, oldest first.
+    ///
+    /// # Errors
+    /// Fails if storage fails.
+    pub async fn list(&self) -> Result<Vec<AdminSummary>, Error> {
+        self.store.list_admins().await
+    }
+}
+
+impl<S: LoginStore> Accounts<S> {
     /// Begins joining an admin's first passkey from the token their invite link carries. The link stays
     /// open: only finishing uses it up, so a scanner that opens the page, or a ceremony the admin abandons, costs
     /// nothing. The ceremony lasts ten minutes, never past the link, replaces any earlier one of the same link, and its
@@ -135,7 +207,7 @@ impl<S: AdminStore> Admins<S> {
         answer: Answer<'_>,
         cookies: &[&str],
         actor: &Actor,
-    ) -> Result<(AdminId, SessionToken), Error> {
+    ) -> Result<(AccountId, SessionToken), Error> {
         let held = CeremonyToken::parse(answer.ceremony).ok_or_else(not_joining)?;
         let taken = self
             .store
@@ -162,19 +234,6 @@ impl<S: AdminStore> Admins<S> {
             Some(Redemption::Redeemed) => Ok((taken.admin, started)),
             _ => Err(not_joining()),
         }
-    }
-
-    /// Disables an admin, and then ends every session and invite link they hold, so a disabled admin is
-    /// logged out at once and logs in again nowhere (`v5.0.0-7.4.2`). Says what it did; an admin already
-    /// disabled is left as is.
-    ///
-    /// # Errors
-    /// Fails with [`Error::Invalid`] for an admin who does not exist, or if storage fails.
-    pub async fn disable(&self, admin: AdminId, actor: &Actor) -> Result<Disabling, Error> {
-        self.store
-            .disable_admin(admin, actor)
-            .await?
-            .ok_or_else(|| no_admin(admin))
     }
 
     /// Admits an attempt from `from` under a rate limit (ADR-0072), counting it unless the limit counts only
@@ -347,7 +406,7 @@ impl<S: AdminStore> Admins<S> {
             ForChange::Refused(check) => return Ok(Ending::Refused(check)),
         };
         let session = checked.session();
-        let actor = Actor::browser(Some(session.admin()), device);
+        let actor = Actor::browser(S::REALM, Some(session.admin()), device);
         self.store
             .end_other_sessions(&session.hash, only, &actor)
             .await
@@ -424,59 +483,6 @@ impl<S: AdminStore> Admins<S> {
             .ok_or_else(not_adding)
     }
 
-    /// Removes every passkey an admin holds, so they can be issued a link and join again, as when their only
-    /// passkey is lost or unusable (ADR-0057). Their sessions and any ceremony end too, since a session begun with a
-    /// removed passkey must not outlive it (`v5.0.0-7.4.3`). Says how many passkeys it removed and sessions it
-    /// ended.
-    ///
-    /// # Errors
-    /// Fails with [`Error::Invalid`] for an admin who does not exist, or if storage fails.
-    pub async fn remove_passkeys(&self, admin: AdminId, actor: &Actor) -> Result<Removal, Error> {
-        self.store
-            .remove_passkeys(admin, actor)
-            .await?
-            .ok_or_else(|| no_admin(admin))
-    }
-
-    /// Enables a disabled admin again, and says whether they were disabled. Their sessions stay ended, so they
-    /// log in afresh.
-    ///
-    /// # Errors
-    /// Fails with [`Error::Invalid`] for an admin who does not exist, or if storage fails.
-    pub async fn enable(&self, admin: AdminId, actor: &Actor) -> Result<bool, Error> {
-        self.store
-            .enable_admin(admin, actor)
-            .await?
-            .ok_or_else(|| no_admin(admin))
-    }
-
-    /// Ends every session one admin holds, as an administrator may (`v5.0.0-7.4.5`), and says how many.
-    ///
-    /// # Errors
-    /// Fails with [`Error::Invalid`] for an admin who does not exist, or if storage fails.
-    pub async fn end_sessions(&self, admin: AdminId, actor: &Actor) -> Result<u64, Error> {
-        self.store
-            .end_admin_sessions(admin, Realm::Admin, actor)
-            .await?
-            .ok_or_else(|| no_admin(admin))
-    }
-
-    /// Ends every admin session, as an administrator may (`v5.0.0-7.4.5`), and says how many.
-    ///
-    /// # Errors
-    /// Fails if storage fails.
-    pub async fn end_all_sessions(&self, actor: &Actor) -> Result<u64, Error> {
-        self.store.end_realm_sessions(Realm::Admin, actor).await
-    }
-
-    /// Every admin, oldest first.
-    ///
-    /// # Errors
-    /// Fails if storage fails.
-    pub async fn list(&self) -> Result<Vec<AdminSummary>, Error> {
-        self.store.list_admins().await
-    }
-
     /// The live admin session named by the session cookie among a request's `Cookie` headers, for a request
     /// that only reads; this request counts as its latest. A request with no such cookie, one sent twice, a token
     /// that is malformed, unknown, from another realm, or past either limit names none, and a session past a limit
@@ -489,7 +495,7 @@ impl<S: AdminStore> Admins<S> {
         &self,
         cookies: impl IntoIterator<Item = &'a str>,
     ) -> Result<Option<Session>, Error> {
-        match admin_token(cookies) {
+        match Self::token(cookies) {
             Some(token) => self.live(&token).await,
             None => Ok(None),
         }
@@ -505,8 +511,8 @@ impl<S: AdminStore> Admins<S> {
         &self,
         cookies: impl IntoIterator<Item = &'a str>,
     ) -> Result<Option<TimeLeft>, Error> {
-        match admin_token(cookies) {
-            Some(token) => self.store.session_left(&token.hash(), Realm::Admin).await,
+        match Self::token(cookies) {
+            Some(token) => self.store.session_left(&token.hash(), S::REALM).await,
             None => Ok(None),
         }
     }
@@ -522,7 +528,7 @@ impl<S: AdminStore> Admins<S> {
         origins: &Origins,
         change: &Change<'_>,
     ) -> Result<ForChange, Error> {
-        let token = match change.verified(Realm::Admin, origins) {
+        let token = match change.verified(S::REALM, origins) {
             Ok(token) => token,
             Err(check) => return Ok(ForChange::Refused(check)),
         };
@@ -561,14 +567,11 @@ impl<S: AdminStore> Admins<S> {
         origins: &Origins,
         change: &Change<'_>,
     ) -> Result<Logout, Error> {
-        let token = match change.verified(Realm::Admin, origins) {
+        let token = match change.verified(S::REALM, origins) {
             Ok(token) => token,
             Err(check) => return Ok(Logout::Refused(check)),
         };
-        let ended = self
-            .store
-            .delete_session(&token.hash(), Realm::Admin)
-            .await?;
+        let ended = self.store.delete_session(&token.hash(), S::REALM).await?;
         Ok(if ended {
             Logout::Ended
         } else {
@@ -582,19 +585,19 @@ impl<S: AdminStore> Admins<S> {
         let token = SessionToken::generate(self.fill)?;
         let session = SessionStart {
             hash: token.hash(),
-            replacing: admin_token(cookies.iter().copied()).map(|presented| presented.hash()),
+            replacing: Self::token(cookies.iter().copied()).map(|presented| presented.hash()),
         };
         Ok((token, session))
     }
 
     async fn live(&self, token: &SessionToken) -> Result<Option<Session>, Error> {
-        self.store.use_session(&token.hash(), Realm::Admin).await
+        self.store.use_session(&token.hash(), S::REALM).await
     }
-}
 
-/// The admin session's token among a request's cookies, if there is exactly one and it is well formed.
-fn admin_token<'a>(cookies: impl IntoIterator<Item = &'a str>) -> Option<SessionToken> {
-    Realm::Admin.token_in(cookies).and_then(SessionToken::parse)
+    /// The realm's session token among a request's cookies, if there is exactly one and it is well formed.
+    fn token<'a>(cookies: impl IntoIterator<Item = &'a str>) -> Option<SessionToken> {
+        S::REALM.token_in(cookies).and_then(SessionToken::parse)
+    }
 }
 
 /// One answer for every way a join can fail, so a browser learns nothing about which links or admins
@@ -612,7 +615,7 @@ fn not_logging_in() -> Error {
 /// A registration whose ceremony was taken: what kind it is, whose, and the state it began with.
 struct Pending<'a> {
     kind: CeremonyKind,
-    admin: AdminId,
+    admin: AccountId,
     state: &'a str,
 }
 
@@ -623,7 +626,7 @@ fn not_adding() -> Error {
 
 /// Why a login was refused before its passkey was verified: no admin holds the credential, theirs is
 /// disabled, or the answer gives another user handle.
-fn refused_before_verifying(found: Option<&Signer>) -> (Option<AdminId>, &'static str) {
+fn refused_before_verifying(found: Option<&Signer>) -> (Option<AccountId>, &'static str) {
     match found {
         None => (None, "unknown_credential"),
         Some(signer) if signer.disabled => (Some(signer.admin), "disabled"),
@@ -640,10 +643,10 @@ fn refusing(error: Error, refusal: fn() -> Error) -> Error {
     }
 }
 
-fn no_admin(admin: AdminId) -> Error {
+fn no_admin(admin: AccountId) -> Error {
     Error::Invalid(format!("no admin {}", admin.get()))
 }
 
-fn no_enabled(admin: AdminId) -> Error {
+fn no_enabled(admin: AccountId) -> Error {
     Error::Invalid(format!("no enabled admin {}", admin.get()))
 }

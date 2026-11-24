@@ -5,8 +5,8 @@
 use std::time::Duration;
 
 use tetsu_identity::{
-    AdminId, Change, Error, FailedCheck, ForChange, Identity, Logout, Origins, Realm, RelyingParty,
-    SessionToken, postgres_store,
+    AccountId, Change, Error, FailedCheck, ForChange, Identity, Logout, Origins, Realm,
+    RelyingParty, SessionToken, postgres_store,
 };
 use tetsu_kernel::Address;
 use tetsu_postgres::test_support::TestDatabase;
@@ -1017,7 +1017,7 @@ async fn an_admin_keeps_the_email_address_they_were_created_with() {
     assert_eq!(admins.email(with).await, Ok(Some(ada)));
     assert_eq!(admins.email(without).await, Ok(None));
     assert_eq!(
-        admins.email(AdminId::parse("999").expect("an ID")).await,
+        admins.email(AccountId::parse("999").expect("an ID")).await,
         Ok(None)
     );
 }

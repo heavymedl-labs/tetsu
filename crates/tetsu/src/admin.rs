@@ -11,8 +11,8 @@ use std::env::VarError;
 use std::io::Read;
 
 use tetsu_identity::{
-    Actor, AdminId, AdminName, AdminStore, AdminSummary, Admins, Disabling, InviteToken, Removal,
-    invite_message,
+    AccountId, Accounts, Actor, AdminName, AdminStore, AdminSummary, Disabling, InviteToken,
+    Removal, invite_message,
 };
 use tetsu_kernel::{Address, Delivery, MailError, Mailer};
 
@@ -22,13 +22,13 @@ use crate::settings::{self, Local};
 #[derive(Debug, PartialEq, Eq)]
 pub enum Admin {
     Create { name: AdminName, email: Address },
-    Email { id: AdminId, email: Address },
-    Invite { id: AdminId },
+    Email { id: AccountId, email: Address },
+    Invite { id: AccountId },
     List,
-    Disable { id: AdminId },
-    Enable { id: AdminId },
-    RemovePasskeys { id: AdminId },
-    EndSessions { id: AdminId },
+    Disable { id: AccountId },
+    Enable { id: AccountId },
+    RemovePasskeys { id: AccountId },
+    EndSessions { id: AccountId },
     EndAllSessions,
 }
 
@@ -65,7 +65,7 @@ fn creating(name: &str, email: &str) -> Result<Admin, String> {
 
 /// Setting admin `id`'s address to `email`.
 fn emailing(id: &str, email: &str) -> Result<Admin, String> {
-    let id = AdminId::parse(id).ok_or(format!("{id:?} is not an admin ID"))?;
+    let id = AccountId::parse(id).ok_or(format!("{id:?} is not an admin ID"))?;
     Ok(Admin::Email {
         id,
         email: plain(email)?,
@@ -78,7 +78,7 @@ fn plain(email: &str) -> Result<Address, String> {
 
 /// A command that acts on one admin, with that admin's ID.
 fn with_id(command: &str, text: &str) -> Result<Admin, String> {
-    let named: fn(AdminId) -> Admin = match command {
+    let named: fn(AccountId) -> Admin = match command {
         "invite" => |id| Admin::Invite { id },
         "disable" => |id| Admin::Disable { id },
         "enable" => |id| Admin::Enable { id },
@@ -86,7 +86,7 @@ fn with_id(command: &str, text: &str) -> Result<Admin, String> {
         "end-sessions" => |id| Admin::EndSessions { id },
         _ => return Err(USAGE.into()),
     };
-    AdminId::parse(text)
+    AccountId::parse(text)
         .map(named)
         .ok_or(format!("{text:?} is not an admin ID"))
 }
@@ -183,7 +183,7 @@ fn host_name(text: &str) -> Option<&str> {
 
 /// Does what an admin command asks, through Identity's use cases, emailing any invite link it issues.
 async fn act(
-    admins: &Admins<impl AdminStore>,
+    admins: &Accounts<impl AdminStore>,
     mailer: &impl Mailer,
     admin: Admin,
     acting: &Acting,
@@ -235,11 +235,11 @@ async fn act(
 /// Creates an admin and issues their first invite link's token. These are two steps, so if the second fails the
 /// admin exists without a link, and the error names them so the link can be issued again.
 async fn create(
-    admins: &Admins<impl AdminStore>,
+    admins: &Accounts<impl AdminStore>,
     name: &AdminName,
     email: &Address,
     by: &Actor,
-) -> Result<(AdminId, InviteToken), String> {
+) -> Result<(AccountId, InviteToken), String> {
     let id = admins
         .create(name, Some(email), by)
         .await
@@ -255,7 +255,7 @@ async fn create(
 
 /// Creates an admin and emails their first invite link, saying what came of each.
 async fn created(
-    admins: &Admins<impl AdminStore>,
+    admins: &Accounts<impl AdminStore>,
     mailer: &impl Mailer,
     name: &AdminName,
     email: &Address,
@@ -268,7 +268,7 @@ async fn created(
 }
 
 /// What setting an admin's address did.
-fn emailed(id: AdminId, email: &Address, done: bool) -> String {
+fn emailed(id: AccountId, email: &Address, done: bool) -> String {
     if done {
         format!(
             "admin {} now gets their invites and notices at {}",
@@ -281,7 +281,7 @@ fn emailed(id: AdminId, email: &Address, done: bool) -> String {
 }
 
 /// What enabling an admin did.
-fn enabled(id: AdminId, done: bool) -> String {
+fn enabled(id: AccountId, done: bool) -> String {
     if done {
         format!("enabled admin {}, who logs in afresh", id.get())
     } else {
@@ -292,9 +292,9 @@ fn enabled(id: AdminId, done: bool) -> String {
 /// What issuing a link said: the link, printed as always, and what came of emailing it (ADR-0074). A link that
 /// could not be emailed still works, so mail never fails the command.
 async fn issued(
-    admins: &Admins<impl AdminStore>,
+    admins: &Accounts<impl AdminStore>,
     mailer: &impl Mailer,
-    id: AdminId,
+    id: AccountId,
     origin: &str,
     token: &InviteToken,
 ) -> Vec<String> {
@@ -343,7 +343,7 @@ fn delivered(to: &Address, sent: Result<Delivery, MailError>) -> String {
 }
 
 /// What removing an admin's passkeys did, and what they do next.
-fn removed(id: AdminId, removal: Removal) -> String {
+fn removed(id: AccountId, removal: Removal) -> String {
     format!(
         "removed {} passkeys of admin {id}, ending {} sessions; issue a link with tetsu admin invite {id}",
         removal.passkeys_removed,
@@ -353,7 +353,7 @@ fn removed(id: AdminId, removal: Removal) -> String {
 }
 
 /// What disabling an admin did, with how many sessions and invite links it ended.
-fn disabled(id: AdminId, done: Disabling) -> String {
+fn disabled(id: AccountId, done: Disabling) -> String {
     if done.done {
         format!(
             "disabled admin {}, ending {} sessions and {} invite links",
@@ -422,7 +422,7 @@ mod tests {
         assert_eq!(
             parse(&args(&["email", "7", "kurt@example.com"])),
             Ok(Admin::Email {
-                id: AdminId::parse("7").unwrap(),
+                id: AccountId::parse("7").unwrap(),
                 email: Address::parse("kurt@example.com").unwrap(),
             })
         );
@@ -444,7 +444,7 @@ mod tests {
 
     #[test]
     fn admin_commands_are_parsed_exactly() {
-        let kurt = AdminId::parse("7").unwrap();
+        let kurt = AccountId::parse("7").unwrap();
         for (words, parsed) in [
             (
                 &["create", "Kurt Medley", "kurt@example.com"][..],
@@ -497,7 +497,7 @@ mod tests {
         for admin in [
             creating("Kurt Medley"),
             Admin::Invite {
-                id: AdminId::parse("7").unwrap(),
+                id: AccountId::parse("7").unwrap(),
             },
         ] {
             let refused = run(admin, || panic!("reads no settings"), false)
@@ -515,7 +515,7 @@ mod tests {
     async fn a_link_needs_the_sites_origin() {
         let refused = run(
             Admin::Invite {
-                id: AdminId::parse("7").unwrap(),
+                id: AccountId::parse("7").unwrap(),
             },
             || Ok(Local::default()),
             true,
@@ -531,7 +531,7 @@ mod tests {
         let base =
             "DATABASE_URL=postgres://127.0.0.1:1/none\nTETSU_ORIGIN=https://admin.example.com\n";
         let invite = || Admin::Invite {
-            id: AdminId::parse("7").unwrap(),
+            id: AccountId::parse("7").unwrap(),
         };
         let missing = format!("{base}TETSU_SMTP_HOST=smtp.example.com\n");
         assert_eq!(
@@ -677,7 +677,7 @@ mod tests {
     #[test]
     fn a_list_line_counts_passkeys_and_shows_an_open_link() {
         let admin = |passkeys, link_minutes| AdminSummary {
-            id: AdminId::parse("3").unwrap(),
+            id: AccountId::parse("3").unwrap(),
             name: "Ana Ortiz".into(),
             created_at: std::time::SystemTime::UNIX_EPOCH,
             disabled_at: None,
@@ -759,7 +759,7 @@ mod tests {
 
     /// What a command said, as the maintainer ran it.
     async fn said(
-        admins: &Admins<impl AdminStore>,
+        admins: &Accounts<impl AdminStore>,
         office: &PostOffice,
         admin: Admin,
     ) -> Vec<String> {
@@ -769,7 +769,7 @@ mod tests {
     /// Identity's use cases and a post office that keeps every message, over a fresh, migrated database, kept while
     /// the test runs.
     async fn migrated() -> (
-        Admins<impl AdminStore>,
+        Accounts<impl AdminStore>,
         PostOffice,
         tetsu_postgres::test_support::TestDatabase,
     ) {
@@ -788,7 +788,7 @@ mod tests {
     #[tokio::test]
     async fn each_command_acts_and_says_what_it_did() {
         let (admins, office, _database) = migrated().await;
-        let kurt = AdminId::parse("1").unwrap();
+        let kurt = AccountId::parse("1").unwrap();
         let created = said(&admins, &office, creating("Kurt Medley")).await;
         assert_eq!(created[0], "created admin 1, Kurt Medley");
         let prefix =
@@ -841,7 +841,7 @@ mod tests {
                 &admins,
                 &office,
                 Admin::RemovePasskeys {
-                    id: AdminId::parse("1").unwrap()
+                    id: AccountId::parse("1").unwrap()
                 }
             )
             .await,
@@ -855,7 +855,7 @@ mod tests {
     #[tokio::test]
     async fn an_admin_is_disabled_and_enabled_again() {
         let (admins, office, _database) = migrated().await;
-        let kurt = AdminId::parse("1").unwrap();
+        let kurt = AccountId::parse("1").unwrap();
         said(&admins, &office, creating("Kurt Medley")).await;
         assert_eq!(
             said(&admins, &office, Admin::Disable { id: kurt }).await,
@@ -882,7 +882,7 @@ mod tests {
             ["admin 1 was already enabled"]
         );
 
-        let nobody = AdminId::parse("9").unwrap();
+        let nobody = AccountId::parse("9").unwrap();
         for command in [
             Admin::Disable { id: nobody },
             Admin::Enable { id: nobody },

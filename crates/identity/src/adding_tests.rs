@@ -13,9 +13,9 @@ use crate::join_tests::{
     replace,
 };
 use crate::login_tests::{answer, joined};
-use crate::ports::AdminStore;
+use crate::ports::LoginStore;
 use crate::{
-    AdminId, Admins, Answer, Change, CheckedSession, ForChange, Origins, Realm, Session,
+    AccountId, Accounts, Answer, Change, CheckedSession, ForChange, Origins, Realm, Session,
     TakenAddition,
 };
 
@@ -26,9 +26,9 @@ fn not_adding() -> String {
 /// Kurt Medley, joined and freshly logged in, and his live session, as a request that passed the checks for a
 /// change finds it.
 async fn logged_in() -> (
-    Admins<PostgresAdmins>,
+    Accounts<PostgresAdmins>,
     TestDatabase,
-    AdminId,
+    AccountId,
     CheckedSession,
 ) {
     let (admins, database, kurt, kept) = joined().await;
@@ -92,7 +92,7 @@ async fn taken(database: &TestDatabase, session: &CheckedSession, n: u8) -> Take
 /// Begins adding a passkey for `session`, registers one on a new device, and finishes with `response` rewritten by
 /// `rewrite`: what finishing says, and the options the device was given.
 async fn add(
-    admins: &Admins<PostgresAdmins>,
+    admins: &Accounts<PostgresAdmins>,
     session: &CheckedSession,
     rewrite: impl Fn(String) -> String,
 ) -> (Result<(), crate::Error>, Value) {
@@ -513,7 +513,7 @@ async fn storing_an_added_passkey_refuses_and_records_why() {
     let mut answers = Vec::new();
     for (passkey, admin) in [
         (fresh(1, 15), kurt),
-        (fresh(2, 16), AdminId::new(99)),
+        (fresh(2, 16), AccountId::new(99)),
         (fresh(3, 16), kurt),
         (fresh(3, 16), kurt),
     ] {
@@ -593,7 +593,7 @@ async fn an_addition_not_taken_or_a_credential_taken_adds_nothing() {
 #[tokio::test]
 async fn failures_of_the_server_are_told_apart() {
     let (_admins, database, _, session) = logged_in().await;
-    let failing = Admins::with_fill(
+    let failing = Accounts::with_fill(
         PostgresAdmins {
             pool: app_pool(&database),
         },
@@ -713,7 +713,7 @@ const UNREADABLE: [(&str, &str, &str); 14] = [
 
 /// Begins and finishes one addition, stopping at the first failure.
 async fn add_once(
-    admins: &Admins<PostgresAdmins>,
+    admins: &Accounts<PostgresAdmins>,
     session: &CheckedSession,
 ) -> Result<(), crate::Error> {
     let ceremony = admins.begin_adding_passkey(&party(), session).await?;

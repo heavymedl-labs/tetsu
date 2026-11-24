@@ -106,7 +106,7 @@ impl<'a> Change<'a> {
 }
 
 /// A live session whose request passed the checks for a change: the realm's own origin and the session's form
-/// token. Only [`crate::Admins::session_for_change`] makes one, so a use case that changes state on a session's
+/// token. Only [`crate::Accounts::session_for_change`] makes one, so a use case that changes state on a session's
 /// behalf, such as adding a passkey, cannot be reached without them. It stands for the one request it checked: it
 /// cannot be cloned, and a page adapter must not keep it past that request, since a later one would skip the
 /// checks.

@@ -12,8 +12,8 @@ use crate::http_tests::{
 };
 use crate::join_tests::app_pool;
 use crate::join_tests::{ORIGIN, actor, as_db_admin, with_link};
-use crate::ports::AdminStore;
-use crate::{Actor, AdminName, Ending, SessionId};
+use crate::ports::LoginStore;
+use crate::{Actor, AdminName, Ending, Realm, SessionId};
 
 const FIREFOX: &str = "Mozilla/5.0 (X11; Linux x86_64) Firefox/140.0";
 /// The admin's Security page, which lists their sessions (#156).
@@ -327,8 +327,8 @@ async fn a_failing_store_is_unavailable() {
 #[test]
 fn an_actor_names_the_device_it_acted_from() {
     let device = crate::Device::from_user_agent(Some(FIREFOX));
-    assert_eq!(Actor::browser(None, device).device(), device);
-    assert_eq!(Actor::browser(None, None).device(), None);
+    assert_eq!(Actor::browser(Realm::Admin, None, device).device(), device);
+    assert_eq!(Actor::browser(Realm::Admin, None, None).device(), None);
     // An actor typed as text names no device: only a device read from a request is one.
     let typed = Actor::parse("admin-1@workstation").expect("an actor");
     assert_eq!(typed.device(), None);
@@ -441,7 +441,10 @@ async fn storage_says_why_it_ends_nothing() {
     let store = PostgresAdmins {
         pool: app_pool(&database),
     };
-    let (hash, actor) = (newest_hash(&database).await, Actor::browser(None, None));
+    let (hash, actor) = (
+        newest_hash(&database).await,
+        Actor::browser(Realm::Admin, None, None),
+    );
     let asking = text(
         &database,
         "SELECT id::text FROM identity.sessions ORDER BY started_at DESC LIMIT 1",

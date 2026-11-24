@@ -1,8 +1,8 @@
 //! Identity: who logs in to Tetsu, their passkeys, and their sessions (ADR-0040, ADR-0048). Admins come first,
 //! in slice 5; staff and customers follow.
 //!
-//! The public surface (ADR-0021): the use cases on [`Admins`], the driven port, the domain types they name, the
-//! module's registration, the adapter constructor, which returns an [`Admins`], and the admin pages' router
+//! The public surface (ADR-0021): the use cases on [`Accounts`], the driven ports, the domain types they name, the
+//! module's registration, the adapter constructor, which returns an [`Accounts`], and the admin pages' router
 //! with the paths it serves.
 
 mod adapters;
@@ -39,7 +39,7 @@ pub use adapters::http::{PATHS, Web, router};
 pub use adapters::postgres::postgres_store;
 pub use browser::{Change, CheckedSession, ForChange, Logout, Origins};
 pub use domain::{
-    Account, Actor, Addition, AdminId, AdminName, AdminSummary, Answer, Ceremony, CeremonyKind,
+    Account, AccountId, Actor, Addition, AdminName, AdminSummary, Answer, Ceremony, CeremonyKind,
     CeremonyToken, Device, Disabling, Ending, Error, FailedCheck, HeldPasskey, InviteToken,
     Invitee, Issue, Limits, ListedSession, Login, NewPasskey, RateLimit, Realm, Redemption,
     Refusal, Removal, Session, SessionId, SessionStart, SessionToken, Signer, TakenAddition,
@@ -47,8 +47,8 @@ pub use domain::{
 };
 pub use mail::invite_message;
 pub use passkeys::RelyingParty;
-pub use ports::AdminStore;
-pub use use_cases::Admins;
+pub use ports::{AdminDirectory, AdminStore, LoginStore};
+pub use use_cases::Accounts;
 
 /// Registers Identity with the kernel.
 pub struct Identity;

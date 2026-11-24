@@ -56,11 +56,11 @@ pub struct Limits {
     pub idle: Duration,
 }
 
-/// An admin, as Postgres numbers them.
+/// An account, as Postgres numbers them in its realm's own table (ADR-0088), so an ID means nothing without its realm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AdminId(i64);
+pub struct AccountId(i64);
 
-impl AdminId {
+impl AccountId {
     pub(crate) fn new(id: i64) -> Self {
         Self(id)
     }
@@ -299,7 +299,7 @@ pub struct Ceremony {
 /// An admin whose open invite link a browser presented: enabled, and holding no passkey yet.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Invitee {
-    pub admin: AdminId,
+    pub admin: AccountId,
     /// The user handle `WebAuthn` names them by: random, so it says nothing about the admin (ADR-0040).
     pub user_handle: [u8; 16],
     pub name: String,
@@ -309,7 +309,7 @@ pub struct Invitee {
 /// Printing it leaves out the link's hash.
 #[derive(Clone, PartialEq, Eq)]
 pub struct TakenCeremony {
-    pub admin: AdminId,
+    pub admin: AccountId,
     pub link_hash: [u8; 32],
     pub state: String,
 }
@@ -346,7 +346,7 @@ pub struct HeldPasskey {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Signer {
     pub credential: Vec<u8>,
-    pub admin: AdminId,
+    pub admin: AccountId,
     pub user_handle: [u8; 16],
     pub passkey: String,
     pub disabled: bool,
@@ -440,7 +440,7 @@ impl std::fmt::Debug for Answer<'_> {
 /// on a device that has one all need.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Account {
-    pub admin: AdminId,
+    pub admin: AccountId,
     pub user_handle: [u8; 16],
     pub name: String,
     pub passkeys: Vec<HeldPasskey>,
@@ -452,7 +452,7 @@ pub struct Account {
 pub struct TakenAddition {
     pub token: [u8; 32],
     pub session: [u8; 32],
-    pub admin: AdminId,
+    pub admin: AccountId,
     pub state: String,
 }
 
@@ -615,7 +615,7 @@ pub enum CeremonyKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Refusal<'a> {
     pub kind: CeremonyKind,
-    pub admin: Option<AdminId>,
+    pub admin: Option<AccountId>,
     pub credential: Option<&'a [u8]>,
     pub reason: &'a str,
 }
@@ -724,11 +724,15 @@ impl Actor {
         }
     }
 
-    /// Who acted from a browser, as the audit record names them: `admin-<id>@<device>` once logged in, or
-    /// `browser@<device>` before, where a device the request did not name reads `unknown`, as for a command.
+    /// Who acted from a browser, as the audit record names them: `<realm>-<id>@<device>` once logged in, such as
+    /// `admin-7@Firefox on Linux`, or `browser@<device>` before, where a device the request did not name reads
+    /// `unknown`, as for a command.
     #[must_use]
-    pub fn browser(admin: Option<AdminId>, device: Option<Device>) -> Self {
-        let user = admin.map_or_else(|| "browser".to_string(), |id| format!("admin-{}", id.get()));
+    pub fn browser(realm: Realm, account: Option<AccountId>, device: Option<Device>) -> Self {
+        let user = account.map_or_else(
+            || "browser".to_string(),
+            |id| format!("{}-{}", realm.as_str(), id.get()),
+        );
         let named = device.map_or_else(|| "unknown".to_string(), |device| device.to_string());
         Self {
             text: format!("{user}@{named}"),
@@ -839,7 +843,7 @@ pub struct Removal {
 /// An admin as the admin command lists them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdminSummary {
-    pub id: AdminId,
+    pub id: AccountId,
     pub name: String,
     pub created_at: SystemTime,
     /// When the admin was disabled, if they were.
@@ -902,7 +906,7 @@ pub struct Session {
     /// The hash of the token that found it, so a change made in its name can be checked against it again.
     pub(crate) hash: [u8; 32],
     pub(crate) realm: Realm,
-    pub(crate) admin: AdminId,
+    pub(crate) admin: AccountId,
     pub(crate) started_at: SystemTime,
     /// When a passkey last proved the person in it: at the start of a login, and never for a session joining began,
     /// which rests on the invite link (ADR-0069).
@@ -918,7 +922,7 @@ impl Session {
     }
 
     #[must_use]
-    pub fn admin(&self) -> AdminId {
+    pub fn admin(&self) -> AccountId {
         self.admin
     }
 
@@ -990,7 +994,7 @@ mod tests {
         let session = Session {
             hash: [0xab; 32],
             realm: Realm::Admin,
-            admin: AdminId::new(1),
+            admin: AccountId::new(1),
             started_at: SystemTime::UNIX_EPOCH,
             proven_at: None,
             last_seen_at: SystemTime::UNIX_EPOCH,
@@ -1035,7 +1039,7 @@ mod tests {
             format!(
                 "{:?}",
                 TakenCeremony {
-                    admin: AdminId::new(1),
+                    admin: AccountId::new(1),
                     link_hash: [0xab; 32],
                     state: String::new(),
                 }
@@ -1045,7 +1049,7 @@ mod tests {
                 TakenAddition {
                     token: [0xab; 32],
                     session: [0xab; 32],
-                    admin: AdminId::new(1),
+                    admin: AccountId::new(1),
                     state: String::new(),
                 }
             ),
@@ -1058,8 +1062,8 @@ mod tests {
         assert_eq!(
             printed,
             [
-                "TakenCeremony { admin: AdminId(1), .. }",
-                "TakenAddition { admin: AdminId(1), .. }"
+                "TakenCeremony { admin: AccountId(1), .. }",
+                "TakenAddition { admin: AccountId(1), .. }"
             ]
         );
     }
@@ -1070,9 +1074,9 @@ mod tests {
     fn a_browsers_actor_names_the_admin_and_device() {
         let linux = Device::from_user_agent(Some("Mozilla/5.0 (X11; Linux x86_64) Firefox/140.0"));
         let named = [
-            Actor::browser(Some(AdminId::new(3)), linux),
-            Actor::browser(None, linux),
-            Actor::browser(Some(AdminId::new(3)), None),
+            Actor::browser(Realm::Admin, Some(AccountId::new(3)), linux),
+            Actor::browser(Realm::Admin, None, linux),
+            Actor::browser(Realm::Admin, Some(AccountId::new(3)), None),
         ];
         assert_eq!(
             named.each_ref().map(Actor::as_str),
@@ -1231,10 +1235,10 @@ mod tests {
 
     #[test]
     fn an_admin_id_is_a_plain_positive_number() {
-        assert_eq!(AdminId::parse("42"), Some(AdminId(42)));
+        assert_eq!(AccountId::parse("42"), Some(AccountId(42)));
         assert_eq!(
-            AdminId::parse("9223372036854775807"),
-            Some(AdminId(i64::MAX))
+            AccountId::parse("9223372036854775807"),
+            Some(AccountId(i64::MAX))
         );
         for bad in [
             "",
@@ -1248,7 +1252,7 @@ mod tests {
             "x",
             "9223372036854775808",
         ] {
-            assert_eq!(AdminId::parse(bad), None, "{bad:?}");
+            assert_eq!(AccountId::parse(bad), None, "{bad:?}");
         }
     }
     use proptest::prelude::*;

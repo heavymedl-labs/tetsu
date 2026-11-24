@@ -4,9 +4,11 @@ Who logs in to Tetsu, their passkeys, and their sessions ([ADR-0040](../../docs/
 [ADR-0048](../../docs/adr/0048-sign-in-design.md)). Tier 1, since it is identity and access. Admins come first,
 in slice 5 ([#110](https://github.com/heavymedl-labs/tetsu/issues/110)); staff and customers follow.
 
-So far, `Admins` creates, lists, disables, and enables admins, issues their invite links, begins and
-finishes joining with their first passkey, logs them in with it, adds their second, removes their passkeys, and
-starts, finds, and ends their sessions. `postgres_store(pool)` returns it over Postgres.
+So far, `Accounts`, a realm's use cases over its store, creates, lists, disables, and enables admins, issues their
+invite links, begins and finishes joining with their first passkey, logs them in with it, adds their second, removes
+their passkeys, and starts, finds, and ends their sessions. The login flow runs over any realm's `LoginStore`, and
+managing accounts over the admin realm's `AdminDirectory` alone, so each realm keeps its own tables
+([ADR-0088](../../docs/adr/0088-admins-apart-from-staff.md)). `postgres_store(pool)` returns the admins' over Postgres.
 
 An admin may hold an email address ([ADR-0074](../../docs/adr/0074-operator-email-in-development.md)).
 `invite_message` renders their invite from templates, never kept for the mailbox, and `notices(mailer)` is an outbox
@@ -63,7 +65,7 @@ the kernel's `Mailbox` port, which Mail implements; a message's HTML is never sh
   (`Realm::token_in`) takes every `Cookie` header, as HTTP/2 may split them, refuses a request that carries it
   twice, and trims only ASCII whitespace, so a name led by Unicode whitespace is never taken for it.
 - **Every state-changing request for a session** must come from one of the realm's `Origins`, exactly, and carry
-  the session's form token (`Admins::session_for_change`). Logging in and joining have no session yet, so
+  the session's form token (`Accounts::session_for_change`). Logging in and joining have no session yet, so
   their requests pass `Origins::admit` alone, the only guard against logging someone in to an attacker's account:
   an exact `Origin`, and a `Sec-Fetch-Site` of `same-origin` when the browser sends one (ADR-0059). A `Change`
   checks both too, and is built from every `Cookie` header, so the session token is always read through

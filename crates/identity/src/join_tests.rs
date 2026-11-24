@@ -19,14 +19,14 @@ use sha2::{Digest, Sha256};
 
 use crate::adapters::postgres::PostgresAdmins;
 use crate::domain::{NewPasskey, Redemption, SessionStart, SessionToken, TakenCeremony};
-use crate::ports::AdminStore;
-use crate::{Actor, AdminId, AdminName, Admins, Answer, Error, Identity, RelyingParty};
+use crate::ports::LoginStore;
+use crate::{AccountId, Accounts, Actor, AdminName, Answer, Error, Identity, RelyingParty};
 
 pub(crate) const ORIGIN: &str = "https://admin.example.com";
 
 /// Identity over `database` with no secure random source, and what it says when it needs one.
-pub(crate) fn without_randomness(database: &TestDatabase) -> (Admins<PostgresAdmins>, String) {
-    let failing = Admins::with_fill(
+pub(crate) fn without_randomness(database: &TestDatabase) -> (Accounts<PostgresAdmins>, String) {
+    let failing = Accounts::with_fill(
         PostgresAdmins {
             pool: app_pool(database),
         },
@@ -41,11 +41,11 @@ pub(crate) fn without_randomness(database: &TestDatabase) -> (Admins<PostgresAdm
 
 /// Finishes a join as the pages would, with no session presented, and says whose it was.
 async fn joining(
-    admins: &Admins<PostgresAdmins>,
+    admins: &Accounts<PostgresAdmins>,
     party: &RelyingParty,
     ceremony: &str,
     response: &str,
-) -> Result<AdminId, Error> {
+) -> Result<AccountId, Error> {
     admins
         .finish_join(party, Answer { ceremony, response }, &[], &actor())
         .await
@@ -160,11 +160,11 @@ pub(crate) async fn authenticate(
 }
 
 /// Identity's use cases over a fresh copy of a migrated database, with Kurt Medley as admin 1 and his link issued.
-pub(crate) async fn with_link() -> (Admins<PostgresAdmins>, TestDatabase, AdminId, String) {
+pub(crate) async fn with_link() -> (Accounts<PostgresAdmins>, TestDatabase, AccountId, String) {
     let database = migrated_database(&[&Identity])
         .await
         .expect("a migrated test database");
-    let admins = Admins::new(PostgresAdmins {
+    let admins = Accounts::new(PostgresAdmins {
         pool: app_pool(&database),
     });
     let kurt = admins
@@ -200,7 +200,7 @@ pub(crate) fn failure(result: Result<(), Error>) -> String {
         .unwrap_or_default()
 }
 
-fn not_joining() -> Result<AdminId, Error> {
+fn not_joining() -> Result<AccountId, Error> {
     Err(Error::Invalid(
         "this invite has ended. Log in, or ask an admin for a new one".to_string(),
     ))
@@ -508,12 +508,12 @@ async fn a_change_while_joining_refuses_the_passkey() {
 /// Begins a join from `link`, registers, and finishes with the response rewritten: `value` replaces the
 /// response's transports, or stands in for its extension results under the name `field`.
 async fn finish_rewritten(
-    admins: &Admins<PostgresAdmins>,
+    admins: &Accounts<PostgresAdmins>,
     party: &RelyingParty,
     link: &str,
     field: &str,
     value: Value,
-) -> Result<AdminId, Error> {
+) -> Result<AccountId, Error> {
     let ceremony = admins.begin_join(party, link).await.expect("begins");
     let mut response: Value =
         serde_json::from_str(&register(&ceremony.options, ORIGIN, true).await).expect("JSON");
@@ -559,7 +559,7 @@ async fn an_undiscoverable_registration_is_refused() {
         finished.push(finish_rewritten(&admins, &party, &link, field, value).await);
     }
     let refused = not_joining();
-    assert_eq!(finished, [refused.clone(), refused, Ok(AdminId::new(1))]);
+    assert_eq!(finished, [refused.clone(), refused, Ok(AccountId::new(1))]);
     let kept = "SELECT count(*) FROM identity.passkeys WHERE transports = 'usb'";
     assert_eq!(number(&database, kept).await, 1);
     assert_eq!(
@@ -706,7 +706,7 @@ async fn failures_of_the_server_are_told_apart() {
 /// Kurt Medley with a stored passkey, whose credential ID is the SHA-256 of `kurt`, and Lee Park with an open link;
 /// the store, a passkey with Kurt's credential ID, and a ceremony for Lee's link and the admin given.
 async fn redeeming() -> (
-    Admins<PostgresAdmins>,
+    Accounts<PostgresAdmins>,
     TestDatabase,
     PostgresAdmins,
     NewPasskey,
@@ -741,7 +741,7 @@ async fn redeeming() -> (
         link_hash,
         state: "{}".to_string(),
     };
-    let ceremonies = [ceremony(lee), ceremony(kurt), ceremony(AdminId::new(99))];
+    let ceremonies = [ceremony(lee), ceremony(kurt), ceremony(AccountId::new(99))];
     (admins, database, store, passkey, ceremonies)
 }
 

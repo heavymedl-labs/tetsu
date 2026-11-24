@@ -6,7 +6,7 @@ use std::fmt::Write;
 
 use serde_json::{Value, json};
 
-use tetsu_identity::{AdminId, Disabling, Error, Removal, postgres_store};
+use tetsu_identity::{AccountId, Disabling, Error, Removal, postgres_store};
 use tetsu_postgres::test_support::TestDatabase;
 use tetsu_postgres::{ModuleTransaction, Pool, connect, pool};
 
@@ -202,7 +202,7 @@ async fn a_disabled_admin_is_logged_out_and_logs_in_nowhere() {
 #[tokio::test]
 async fn an_unknown_admin_is_issued_no_link() {
     let (database, admins) = migrated().await;
-    let nobody = AdminId::parse("42").expect("an ID");
+    let nobody = AccountId::parse("42").expect("an ID");
     assert_eq!(
         admins.invite(nobody, &actor()).await.map(|_| ()),
         Err(Error::Invalid("no admin 42".into()))
@@ -1190,7 +1190,7 @@ async fn removing_passkeys_lets_an_admin_join_again() {
     assert_eq!(removed, [removal(1, 1), removal(0, 0)]);
     assert_eq!(
         admins
-            .remove_passkeys(AdminId::parse("99").expect("an ID"), &actor())
+            .remove_passkeys(AccountId::parse("99").expect("an ID"), &actor())
             .await,
         Err(Error::Invalid("no admin 99".into()))
     );

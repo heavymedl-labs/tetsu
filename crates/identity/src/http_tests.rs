@@ -14,7 +14,7 @@ use tokio::net::{TcpListener, TcpStream};
 use crate::adapters::http::{PATHS, Web, router};
 use crate::adapters::postgres::PostgresAdmins;
 use crate::join_tests::{ORIGIN, as_db_admin, authenticate, party, register_keeping, with_link};
-use crate::{Admins, Origins};
+use crate::{Accounts, Origins};
 
 const SCRIPT: &str = "/assets/passkey-test.js";
 /// The admin's Profile, where logging in lands (ADR-0084), and so the page tests read a form token from.
@@ -94,7 +94,10 @@ async fn serving_with(mailbox: Arc<dyn Mailbox>) -> (SocketAddr, TestDatabase, S
     (serve(admins, mailbox).await, database, link)
 }
 
-pub(crate) async fn serve(admins: Admins<PostgresAdmins>, mailbox: Arc<dyn Mailbox>) -> SocketAddr {
+pub(crate) async fn serve(
+    admins: Accounts<PostgresAdmins>,
+    mailbox: Arc<dyn Mailbox>,
+) -> SocketAddr {
     let web = Web {
         party: party(),
         origins: Origins::parse(&[ORIGIN]).expect("origins"),

@@ -1,6 +1,6 @@
 //! Identity's inbound HTTP adapter: the admin pages at `/admin`, and the JSON endpoints their passkey script calls
 //! (ADR-0048). Every state-changing request is checked through [`Origins::admit`], and once logged in through
-//! [`Admins::session_for_change`], so no other site can act through a logged-in browser.
+//! [`Accounts::session_for_change`], so no other site can act through a logged-in browser.
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -21,7 +21,7 @@ use crate::domain::{
 };
 use crate::passkeys::{RelyingParty, base64url};
 use crate::ports::AdminStore;
-use crate::use_cases::Admins;
+use crate::use_cases::Accounts;
 use tetsu_kernel::{Mailbox, Requester, Scheme};
 
 /// The admins' realm (ADR-0084), which sends them to their Profile, as the account area is their home (ADR-0086).
@@ -271,14 +271,14 @@ struct UnavailablePage {
 }
 
 struct Served<S> {
-    admins: Admins<S>,
+    admins: Accounts<S>,
     web: Web,
 }
 
 type Shared<S> = State<Arc<Served<S>>>;
 
 /// Identity's routes. They set no fallback, which is the site's alone (#90).
-pub fn router<S>(admins: Admins<S>, web: Web) -> Router
+pub fn router<S>(admins: Accounts<S>, web: Web) -> Router
 where
     S: AdminStore + Send + Sync + 'static,
 {
@@ -1132,8 +1132,9 @@ fn text<'a>(headers: &'a HeaderMap, name: &HeaderName) -> Option<&'a str> {
 }
 
 /// Who acts from this browser, as the audit record names them.
-fn browser(headers: &HeaderMap, admin: Option<crate::AdminId>) -> Actor {
+fn browser(headers: &HeaderMap, admin: Option<crate::AccountId>) -> Actor {
     Actor::browser(
+        Realm::Admin,
         admin,
         Device::from_user_agent(text(headers, &header::USER_AGENT)),
     )

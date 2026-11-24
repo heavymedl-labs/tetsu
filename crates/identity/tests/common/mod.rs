@@ -1,7 +1,7 @@
 //! What Identity's integration tests share: a migrated database, Identity's use cases over it, and one admin.
 
 use tetsu_identity::{
-    Actor, AdminId, AdminName, AdminStore, Admins, Identity, SessionToken, postgres_store,
+    AccountId, Accounts, Actor, AdminName, AdminStore, Identity, SessionToken, postgres_store,
 };
 use tetsu_postgres::connect;
 use tetsu_postgres::pool;
@@ -24,14 +24,14 @@ pub async fn ready() -> TestDatabase {
 }
 
 /// A migrated database, with Identity's use cases over it as the application role, as `tetsu serve` logs in.
-pub async fn migrated() -> (TestDatabase, Admins<impl AdminStore>) {
+pub async fn migrated() -> (TestDatabase, Accounts<impl AdminStore>) {
     let database = ready().await;
     let admins = postgres_store(pool(&database.as_app()).expect("a pool"));
     (database, admins)
 }
 
 /// [`migrated`], holding one admin, Kurt Medley.
-pub async fn with_kurt() -> (TestDatabase, Admins<impl AdminStore>, AdminId) {
+pub async fn with_kurt() -> (TestDatabase, Accounts<impl AdminStore>, AccountId) {
     let (database, admins) = migrated().await;
     let kurt = admins
         .create(&name("Kurt Medley"), None, &actor())
@@ -42,7 +42,7 @@ pub async fn with_kurt() -> (TestDatabase, Admins<impl AdminStore>, AdminId) {
 
 /// Starts an admin's session as a passkey login would, as the test server's database administrator, and returns its
 /// token: only the login function may start one, so Identity's role cannot call `start_session` (ADR-0048).
-pub async fn logged_in(database: &TestDatabase, admin: AdminId) -> SessionToken {
+pub async fn logged_in(database: &TestDatabase, admin: AccountId) -> SessionToken {
     let mut bytes = [0u8; 32];
     getrandom::fill(&mut bytes).expect("random bytes");
     let text = bytes.iter().fold(String::new(), |mut text, byte| {

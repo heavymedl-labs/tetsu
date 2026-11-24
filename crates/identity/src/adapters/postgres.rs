@@ -11,13 +11,13 @@ use tokio_postgres::Row;
 use tokio_postgres::types::{FromSql, ToSql};
 
 use crate::domain::{
-    Account, Actor, Addition, AdminId, AdminName, AdminSummary, CeremonyKind, Disabling, Ending,
+    Account, AccountId, Actor, Addition, AdminName, AdminSummary, CeremonyKind, Disabling, Ending,
     Error, FailedCheck, HeldPasskey, Invitee, Issue, ListedSession, Login, NewPasskey, RateLimit,
     Realm, Redemption, Refusal, Removal, Session, SessionId, SessionStart, Signer, TakenAddition,
     TakenCeremony, TimeLeft,
 };
-use crate::ports::AdminStore;
-use crate::use_cases::Admins;
+use crate::ports::{AdminDirectory, AdminStore, LoginStore};
+use crate::use_cases::Accounts;
 
 pub const MIGRATIONS: &[Migration] = &[
     Migration {
@@ -121,11 +121,25 @@ type MakesEvent<'a> = &'a (dyn Fn(&[Row]) -> Result<Recorded, Error> + Sync);
 /// # }
 /// ```
 ///
-/// The handle is not a store, whatever the port's methods are called:
+/// The handle is not a store of any port, whatever their methods are called:
 ///
 /// ```compile_fail,E0277
 /// # fn bypass(pool: tetsu_postgres::Pool) {
 /// fn store(_: &impl tetsu_identity::AdminStore) {}
+/// store(&tetsu_identity::postgres_store(pool));
+/// # }
+/// ```
+///
+/// ```compile_fail,E0277
+/// # fn bypass(pool: tetsu_postgres::Pool) {
+/// fn store(_: &impl tetsu_identity::LoginStore) {}
+/// store(&tetsu_identity::postgres_store(pool));
+/// # }
+/// ```
+///
+/// ```compile_fail,E0277
+/// # fn bypass(pool: tetsu_postgres::Pool) {
+/// fn store(_: &impl tetsu_identity::AdminDirectory) {}
 /// store(&tetsu_identity::postgres_store(pool));
 /// # }
 /// ```
@@ -147,8 +161,8 @@ type MakesEvent<'a> = &'a (dyn Fn(&[Row]) -> Result<Recorded, Error> + Sync);
 /// # }
 /// ```
 #[must_use]
-pub fn postgres_store(pool: Pool) -> Admins<impl AdminStore> {
-    Admins::new(PostgresAdmins { pool })
+pub fn postgres_store(pool: Pool) -> Accounts<impl AdminStore> {
+    Accounts::new(PostgresAdmins { pool })
 }
 
 pub(crate) struct PostgresAdmins {
@@ -291,46 +305,8 @@ fn column<'a, T: FromSql<'a>>(row: &'a Row, name: &str) -> Result<T, Error> {
     row.try_get(name).map_err(|e| sorted(&e))
 }
 
-impl AdminStore for PostgresAdmins {
-    async fn insert_admin(
-        &self,
-        name: &AdminName,
-        email: Option<&Address>,
-        actor: &Actor,
-    ) -> Result<AdminId, Error> {
-        let parameters: [&(dyn ToSql + Sync); 2] = [&name.as_str(), &email.map(Address::as_str)];
-        created(
-            self.decided(INSERT_ADMIN, &parameters, |rows| creation(rows, actor))
-                .await?,
-        )
-    }
-
-    async fn admin_email(&self, admin: AdminId) -> Result<Option<Address>, Error> {
-        self.query(ADMIN_EMAIL, &[&admin.get()])
-            .await?
-            .first()
-            .map_or(Ok(None), |row| column::<Option<String>>(row, "email"))
-            .and_then(|email| email.as_deref().map(address_from).transpose())
-    }
-
-    async fn set_admin_email(
-        &self,
-        admin: AdminId,
-        email: &Address,
-        actor: &Actor,
-    ) -> Result<Option<bool>, Error> {
-        let id = admin.get();
-        // The event names the admin, never the address, as creating one does.
-        self.change(SET_ADMIN_EMAIL, &[&id, &email.as_str()], |changed| {
-            event(
-                "identity.admin_email_set",
-                actor,
-                outcome(changed),
-                json!({"admin_id": id}),
-            )
-        })
-        .await
-    }
+impl LoginStore for PostgresAdmins {
+    const REALM: Realm = Realm::Admin;
 
     async fn use_session(&self, hash: &[u8; 32], realm: Realm) -> Result<Option<Session>, Error> {
         let rows = self
@@ -360,18 +336,6 @@ impl AdminStore for PostgresAdmins {
         rows.first().map_or(Ok(false), |row| column(row, "ended"))
     }
 
-    async fn issue_invite(
-        &self,
-        hash: &[u8; 32],
-        admin: AdminId,
-        actor: &Actor,
-    ) -> Result<Option<Issue>, Error> {
-        let id = admin.get();
-        let parameters: [&(dyn ToSql + Sync); 2] = [&hash.as_slice(), &id];
-        self.decided(ISSUE_INVITE, &parameters, |rows| issuance(rows, id, actor))
-            .await
-    }
-
     async fn invitee(&self, link: &[u8; 32]) -> Result<Option<Invitee>, Error> {
         self.query(INVITEE, &[&link.as_slice()])
             .await?
@@ -383,7 +347,7 @@ impl AdminStore for PostgresAdmins {
     async fn begin_join(
         &self,
         token: &[u8; 32],
-        admin: AdminId,
+        admin: AccountId,
         link: &[u8; 32],
         state: &str,
     ) -> Result<bool, Error> {
@@ -482,7 +446,7 @@ impl AdminStore for PostgresAdmins {
 
     async fn refuse(&self, refusal: &Refusal<'_>, actor: &Actor) -> Result<(), Error> {
         let payload = json!({
-            "admin_id": refusal.admin.map(AdminId::get),
+            "admin_id": refusal.admin.map(AccountId::get),
             "credential": refusal.credential.map(hex),
         });
         self.query_recording(RECORD, &[], &|_| {
@@ -571,7 +535,7 @@ impl AdminStore for PostgresAdmins {
         &self,
         token: &[u8; 32],
         session: &[u8; 32],
-        admin: AdminId,
+        admin: AccountId,
         state: &str,
     ) -> Result<bool, Error> {
         let parameters: [&(dyn ToSql + Sync); 4] =
@@ -611,10 +575,64 @@ impl AdminStore for PostgresAdmins {
         })
         .await
     }
+}
+
+impl AdminDirectory for PostgresAdmins {
+    async fn insert_admin(
+        &self,
+        name: &AdminName,
+        email: Option<&Address>,
+        actor: &Actor,
+    ) -> Result<AccountId, Error> {
+        let parameters: [&(dyn ToSql + Sync); 2] = [&name.as_str(), &email.map(Address::as_str)];
+        created(
+            self.decided(INSERT_ADMIN, &parameters, |rows| creation(rows, actor))
+                .await?,
+        )
+    }
+
+    async fn admin_email(&self, admin: AccountId) -> Result<Option<Address>, Error> {
+        self.query(ADMIN_EMAIL, &[&admin.get()])
+            .await?
+            .first()
+            .map_or(Ok(None), |row| column::<Option<String>>(row, "email"))
+            .and_then(|email| email.as_deref().map(address_from).transpose())
+    }
+
+    async fn set_admin_email(
+        &self,
+        admin: AccountId,
+        email: &Address,
+        actor: &Actor,
+    ) -> Result<Option<bool>, Error> {
+        let id = admin.get();
+        // The event names the admin, never the address, as creating one does.
+        self.change(SET_ADMIN_EMAIL, &[&id, &email.as_str()], |changed| {
+            event(
+                "identity.admin_email_set",
+                actor,
+                outcome(changed),
+                json!({"admin_id": id}),
+            )
+        })
+        .await
+    }
+
+    async fn issue_invite(
+        &self,
+        hash: &[u8; 32],
+        admin: AccountId,
+        actor: &Actor,
+    ) -> Result<Option<Issue>, Error> {
+        let id = admin.get();
+        let parameters: [&(dyn ToSql + Sync); 2] = [&hash.as_slice(), &id];
+        self.decided(ISSUE_INVITE, &parameters, |rows| issuance(rows, id, actor))
+            .await
+    }
 
     async fn remove_passkeys(
         &self,
-        admin: AdminId,
+        admin: AccountId,
         actor: &Actor,
     ) -> Result<Option<Removal>, Error> {
         let id = admin.get();
@@ -624,7 +642,7 @@ impl AdminStore for PostgresAdmins {
 
     async fn disable_admin(
         &self,
-        admin: AdminId,
+        admin: AccountId,
         actor: &Actor,
     ) -> Result<Option<Disabling>, Error> {
         let id = admin.get();
@@ -649,7 +667,7 @@ impl AdminStore for PostgresAdmins {
         .await
     }
 
-    async fn enable_admin(&self, admin: AdminId, actor: &Actor) -> Result<Option<bool>, Error> {
+    async fn enable_admin(&self, admin: AccountId, actor: &Actor) -> Result<Option<bool>, Error> {
         let id = admin.get();
         self.change(ENABLE_ADMIN, &[&id], |enabled| {
             let payload = json!({"admin_id": id});
@@ -660,7 +678,7 @@ impl AdminStore for PostgresAdmins {
 
     async fn end_admin_sessions(
         &self,
-        admin: AdminId,
+        admin: AccountId,
         realm: Realm,
         actor: &Actor,
     ) -> Result<Option<u64>, Error> {
@@ -782,9 +800,9 @@ fn creation_event(found: Option<(i64, bool)>, actor: &Actor) -> (&'static str, S
 }
 
 /// What a create returns: the new admin, or why there is none.
-fn created(found: Option<(i64, bool)>) -> Result<AdminId, Error> {
+fn created(found: Option<(i64, bool)>) -> Result<AccountId, Error> {
     match found {
-        Some((id, true)) => Ok(AdminId::new(id)),
+        Some((id, true)) => Ok(AccountId::new(id)),
         Some((id, false)) => Err(Error::Invalid(format!("admin {id} already has that name"))),
         None => Err(Error::Invalid(
             "another admin already has that name".to_string(),
@@ -840,7 +858,7 @@ fn begun(rows: &[Row]) -> Result<bool, Error> {
 /// The admin a link names, with the user handle and name a registration needs.
 fn invitee_from(row: &Row) -> Result<Invitee, Error> {
     Ok(Invitee {
-        admin: AdminId::new(column(row, "admin_id")?),
+        admin: AccountId::new(column(row, "admin_id")?),
         user_handle: user_handle(row)?,
         name: column(row, "name")?,
     })
@@ -850,7 +868,7 @@ fn invitee_from(row: &Row) -> Result<Invitee, Error> {
 fn ceremony_from(row: &Row) -> Result<TakenCeremony, Error> {
     let link: Option<Vec<u8>> = column(row, "link_hash")?;
     Ok(TakenCeremony {
-        admin: AdminId::new(column(row, "admin_id")?),
+        admin: AccountId::new(column(row, "admin_id")?),
         link_hash: link
             .and_then(|link| link.try_into().ok())
             .ok_or_else(|| Error::Storage("a join ceremony has no link".to_string()))?,
@@ -908,7 +926,7 @@ fn summary_from(row: &Row) -> Result<AdminSummary, Error> {
     let link_minutes = column(row, "link_minutes")
         .and_then(|minutes: Option<i64>| minutes.map(nonnegative).transpose())?;
     Ok(AdminSummary {
-        id: AdminId::new(column(row, "id")?),
+        id: AccountId::new(column(row, "id")?),
         name: column(row, "name")?,
         created_at: column(row, "created_at")?,
         disabled_at: column(row, "disabled_at")?,
@@ -961,7 +979,7 @@ fn taken_state(rows: &[Row]) -> Result<Option<String>, Error> {
 fn signer_from(row: &Row, credential: &[u8]) -> Result<Signer, Error> {
     Ok(Signer {
         credential: credential.to_vec(),
-        admin: AdminId::new(column(row, "admin_id")?),
+        admin: AccountId::new(column(row, "admin_id")?),
         user_handle: user_handle(row)?,
         passkey: column(row, "passkey")?,
         disabled: column(row, "disabled")?,
@@ -1072,7 +1090,7 @@ fn taken_addition(row: &Row, token: &[u8; 32], session: &[u8; 32]) -> Result<Tak
     Ok(TakenAddition {
         token: *token,
         session: *session,
-        admin: AdminId::new(admin),
+        admin: AccountId::new(admin),
         state: column(row, "state")?,
     })
 }
@@ -1210,7 +1228,7 @@ fn session_from(row: &Row, hash: &[u8; 32]) -> Result<Session, Error> {
     Ok(Session {
         hash: *hash,
         realm: known,
-        admin: AdminId::new(column(row, "admin_id")?),
+        admin: AccountId::new(column(row, "admin_id")?),
         started_at: column(row, "started_at")?,
         proven_at: column(row, "proven_at")?,
         last_seen_at: column(row, "last_seen_at")?,
@@ -1314,7 +1332,7 @@ mod tests {
     /// admin added, a name another holds, or a name taken by one it cannot yet see.
     #[test]
     fn a_create_reports_and_records_what_it_found() {
-        assert_eq!(created(Some((1, true))), Ok(AdminId::new(1)));
+        assert_eq!(created(Some((1, true))), Ok(AccountId::new(1)));
         assert_eq!(
             created(Some((1, false))),
             Err(Error::Invalid("admin 1 already has that name".to_string()))
@@ -1378,7 +1396,7 @@ mod tests {
             .batch_execute("ALTER TABLE identity.admins ALTER COLUMN id TYPE integer")
             .await
             .expect("alters");
-        let admins = Admins::new(PostgresAdmins { pool });
+        let admins = Accounts::new(PostgresAdmins { pool });
         let failed = admins
             .create(
                 &AdminName::parse("Kurt Medley").expect("a name"),
@@ -1405,7 +1423,7 @@ mod tests {
     #[tokio::test]
     async fn a_disabled_admin_is_issued_no_link() {
         let (pool, _database) = support::migrated().await;
-        let admins = Admins::new(PostgresAdmins { pool });
+        let admins = Accounts::new(PostgresAdmins { pool });
         let kurt = admins
             .create(
                 &AdminName::parse("Kurt Medley").expect("a name"),
@@ -1429,7 +1447,7 @@ mod tests {
     #[tokio::test]
     async fn a_joined_admin_is_issued_no_link() {
         let (pool, database) = support::migrated().await;
-        let admins = Admins::new(PostgresAdmins { pool });
+        let admins = Accounts::new(PostgresAdmins { pool });
         let lee = admins
             .create(
                 &AdminName::parse("Lee Park").expect("a name"),
@@ -1476,7 +1494,7 @@ mod tests {
     #[tokio::test]
     async fn every_path_through_issuing_a_link() {
         let (pool, database) = support::migrated().await;
-        let failing = Admins::with_fill(PostgresAdmins { pool: pool.clone() }, |_| {
+        let failing = Accounts::with_fill(PostgresAdmins { pool: pool.clone() }, |_| {
             Err(getrandom::Error::UNSUPPORTED)
         });
         let kurt = failing
@@ -1494,11 +1512,11 @@ mod tests {
                 getrandom::Error::UNSUPPORTED
             )))
         );
-        let working = Admins::with_fill(PostgresAdmins { pool }, getrandom::fill);
+        let working = Accounts::with_fill(PostgresAdmins { pool }, getrandom::fill);
         assert!(working.invite(kurt, &support::actor()).await.is_ok());
         assert_eq!(
             working
-                .invite(AdminId::new(i64::MAX), &support::actor())
+                .invite(AccountId::new(i64::MAX), &support::actor())
                 .await
                 .map(drop),
             Err(Error::Invalid(format!("no admin {}", i64::MAX)))

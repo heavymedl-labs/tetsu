@@ -13,8 +13,8 @@ use crate::join_tests::{
     ORIGIN, actor, app_pool, as_db_admin, authenticate, failure, number, party, recorded,
     register_keeping, replace, with_link, without_randomness,
 };
-use crate::ports::AdminStore;
-use crate::{AdminId, Admins, Answer, Realm};
+use crate::ports::LoginStore;
+use crate::{AccountId, Accounts, Answer, Realm};
 
 /// How a hostile client rewrites a login's answer.
 type Rewrite = fn(&mut Value);
@@ -25,7 +25,7 @@ fn not_logging_in() -> String {
 
 /// Kurt Medley, admin 1, joined with a passkey, and the passkey his device keeps. Joining logs him in, but the
 /// tests that use this begin from a passkey login, so the session joining began is logged out.
-pub(crate) async fn joined() -> (Admins<PostgresAdmins>, TestDatabase, AdminId, Passkey) {
+pub(crate) async fn joined() -> (Accounts<PostgresAdmins>, TestDatabase, AccountId, Passkey) {
     let (admins, database, kurt, link) = with_link().await;
     let party = party();
     let ceremony = admins.begin_join(&party, &link).await.expect("begins");
@@ -48,7 +48,7 @@ pub(crate) async fn joined() -> (Admins<PostgresAdmins>, TestDatabase, AdminId, 
 
 /// Begins a login and has the device answer it from `origin`, with the answer rewritten by `rewrite`.
 pub(crate) async fn answer(
-    admins: &Admins<PostgresAdmins>,
+    admins: &Accounts<PostgresAdmins>,
     passkey: Passkey,
     origin: &str,
     rewrite: impl Fn(&mut Value),
@@ -63,7 +63,7 @@ pub(crate) async fn answer(
 
 /// Finishes a login with an answer, from a browser presenting no session.
 async fn finish(
-    admins: &Admins<PostgresAdmins>,
+    admins: &Accounts<PostgresAdmins>,
     ceremony: &str,
     response: &str,
 ) -> Result<crate::SessionToken, crate::Error> {
@@ -424,7 +424,7 @@ async fn a_raced_disabled_or_missing_login_starts_no_session() {
         ..signer.clone()
     };
     let elsewhere = Signer {
-        admin: AdminId::new(2),
+        admin: AccountId::new(2),
         ..signer.clone()
     };
     let missing = Signer {

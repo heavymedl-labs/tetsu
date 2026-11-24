@@ -1,7 +1,7 @@
 //! The driven port Identity calls out through.
 
 use crate::domain::{
-    Account, Actor, Addition, AdminId, AdminName, AdminSummary, Disabling, Ending, Error,
+    Account, AccountId, Actor, Addition, AdminName, AdminSummary, Disabling, Ending, Error,
     FailedCheck, Invitee, Issue, ListedSession, Login, NewPasskey, RateLimit, Realm, Redemption,
     Refusal, Removal, Session, SessionId, SessionStart, Signer, TakenAddition, TakenCeremony,
     TimeLeft,
@@ -10,33 +10,20 @@ use std::future::Future;
 use std::time::Duration;
 use tetsu_kernel::{Address, Requester};
 
-/// Where admins and their sessions are kept. A session is reached only by its token's hash and realm, one at a
-/// time (ADR-0048), and the store keeps each realm's limits beside its own clock, so no caller can stretch a
-/// session. The Postgres adapter implements it, and tests may use their own.
-pub trait AdminStore {
-    /// Stores a new admin, with their email address if given and no passkey yet. Each change below records an
-    /// audit event naming `actor`, with its outcome, in the same transaction.
-    fn insert_admin(
-        &self,
-        name: &AdminName,
-        email: Option<&Address>,
-        actor: &Actor,
-    ) -> impl Future<Output = Result<AdminId, Error>> + Send;
+/// The admin realm's store: its login flow and its directory.
+pub trait AdminStore: LoginStore + AdminDirectory {}
 
-    /// An admin's email address, or none for one who has none or does not exist (ADR-0074).
-    fn admin_email(
-        &self,
-        admin: AdminId,
-    ) -> impl Future<Output = Result<Option<Address>, Error>> + Send;
+impl<T: LoginStore + AdminDirectory> AdminStore for T {}
 
-    /// Sets an admin's email address, and says whether it changed, or none for an admin who does not exist
-    /// (ADR-0074).
-    fn set_admin_email(
-        &self,
-        admin: AdminId,
-        email: &Address,
-        actor: &Actor,
-    ) -> impl Future<Output = Result<Option<bool>, Error>> + Send;
+/// Where a realm's accounts log in: sessions, invites, ceremonies, passkeys, and limits (ADR-0088). A session is reached
+/// only by its token's hash and realm, one at a time (ADR-0048), and the store keeps each realm's limits beside its own
+/// clock, so no caller can stretch a session. Each realm's store works only on its own tables, and names its realm,
+/// which its use cases take from it. Each change that names an actor records an audit event naming it, with its outcome,
+/// in the same transaction (`v5.0.0-16.3.1`). The Postgres adapter implements it for admins, and tests may use their
+/// own.
+pub trait LoginStore {
+    /// The realm whose accounts this store keeps: every session it starts, finds, and ends is in it.
+    const REALM: Realm;
 
     /// Records a request on the live session stored under a token's hash in a realm, and returns it. A session
     /// past either of the realm's limits is removed instead, and none is returned; one in another realm is none.
@@ -64,16 +51,6 @@ pub trait AdminStore {
         realm: Realm,
     ) -> impl Future<Output = Result<bool, Error>> + Send;
 
-    /// Stores an admin's invite link under its token's hash, good for an hour, replacing any earlier one,
-    /// and says what came of it: an admin who is disabled or holds a passkey is issued none, and one who does
-    /// not exist is none.
-    fn issue_invite(
-        &self,
-        hash: &[u8; 32],
-        admin: AdminId,
-        actor: &Actor,
-    ) -> impl Future<Output = Result<Option<Issue>, Error>> + Send;
-
     /// The admin an invite link's hash names, while the link is open, the admin enabled, and no passkey
     /// theirs yet. Reading it uses nothing up.
     fn invitee(
@@ -87,7 +64,7 @@ pub trait AdminStore {
     fn begin_join(
         &self,
         token: &[u8; 32],
-        admin: AdminId,
+        admin: AccountId,
         link: &[u8; 32],
         state: &str,
     ) -> impl Future<Output = Result<bool, Error>> + Send;
@@ -109,14 +86,6 @@ pub trait AdminStore {
         session: &SessionStart,
         actor: &Actor,
     ) -> impl Future<Output = Result<Option<Redemption>, Error>> + Send;
-
-    /// Disables an admin, ending every session and invite link they hold, and says what it did, or none for
-    /// an admin who does not exist.
-    fn disable_admin(
-        &self,
-        admin: AdminId,
-        actor: &Actor,
-    ) -> impl Future<Output = Result<Option<Disabling>, Error>> + Send;
 
     /// Admits an attempt from a network under a limit, or says how long it must wait. A limit of attempts counts
     /// it; the limit of failures only checks.
@@ -217,7 +186,7 @@ pub trait AdminStore {
         &self,
         token: &[u8; 32],
         session: &[u8; 32],
-        admin: AdminId,
+        admin: AccountId,
         state: &str,
     ) -> impl Future<Output = Result<bool, Error>> + Send;
 
@@ -238,12 +207,59 @@ pub trait AdminStore {
         passkey: &NewPasskey,
         actor: &Actor,
     ) -> impl Future<Output = Result<Option<Addition>, Error>> + Send;
+}
+
+/// Managing the admin realm's accounts, which only the admin command does: creating, disabling, and listing admins,
+/// their invites and email, and ending their sessions. Each change records an audit event naming its actor, with its
+/// outcome, in the same transaction.
+pub trait AdminDirectory {
+    /// Stores a new admin, with their email address if given and no passkey yet. Each change below records an
+    /// audit event naming `actor`, with its outcome, in the same transaction.
+    fn insert_admin(
+        &self,
+        name: &AdminName,
+        email: Option<&Address>,
+        actor: &Actor,
+    ) -> impl Future<Output = Result<AccountId, Error>> + Send;
+
+    /// An admin's email address, or none for one who has none or does not exist (ADR-0074).
+    fn admin_email(
+        &self,
+        admin: AccountId,
+    ) -> impl Future<Output = Result<Option<Address>, Error>> + Send;
+
+    /// Sets an admin's email address, and says whether it changed, or none for an admin who does not exist
+    /// (ADR-0074).
+    fn set_admin_email(
+        &self,
+        admin: AccountId,
+        email: &Address,
+        actor: &Actor,
+    ) -> impl Future<Output = Result<Option<bool>, Error>> + Send;
+
+    /// Stores an admin's invite link under its token's hash, good for an hour, replacing any earlier one,
+    /// and says what came of it: an admin who is disabled or holds a passkey is issued none, and one who does
+    /// not exist is none.
+    fn issue_invite(
+        &self,
+        hash: &[u8; 32],
+        admin: AccountId,
+        actor: &Actor,
+    ) -> impl Future<Output = Result<Option<Issue>, Error>> + Send;
+
+    /// Disables an admin, ending every session and invite link they hold, and says what it did, or none for
+    /// an admin who does not exist.
+    fn disable_admin(
+        &self,
+        admin: AccountId,
+        actor: &Actor,
+    ) -> impl Future<Output = Result<Option<Disabling>, Error>> + Send;
 
     /// Removes every passkey an admin holds, ending their sessions and any ceremony, and says what it did, or none
     /// for an admin who does not exist.
     fn remove_passkeys(
         &self,
-        admin: AdminId,
+        admin: AccountId,
         actor: &Actor,
     ) -> impl Future<Output = Result<Option<Removal>, Error>> + Send;
 
@@ -251,7 +267,7 @@ pub trait AdminStore {
     /// exist. Their sessions stay ended.
     fn enable_admin(
         &self,
-        admin: AdminId,
+        admin: AccountId,
         actor: &Actor,
     ) -> impl Future<Output = Result<Option<bool>, Error>> + Send;
 
@@ -259,7 +275,7 @@ pub trait AdminStore {
     /// exist.
     fn end_admin_sessions(
         &self,
-        admin: AdminId,
+        admin: AccountId,
         realm: Realm,
         actor: &Actor,
     ) -> impl Future<Output = Result<Option<u64>, Error>> + Send;

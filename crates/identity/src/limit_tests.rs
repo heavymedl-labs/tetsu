@@ -9,21 +9,21 @@ use tetsu_postgres::test_support::TestDatabase;
 
 use crate::adapters::postgres::{PostgresAdmins, hex};
 use crate::join_tests::{as_db_admin, failure, number, with_link};
-use crate::{Admins, Error, RateLimit};
+use crate::{Accounts, Error, RateLimit};
 use tetsu_kernel::Requester;
 
 fn network(address: &str) -> Requester {
     Requester::of(address.parse::<IpAddr>().expect("an address"))
 }
 
-async fn limited() -> (Admins<PostgresAdmins>, TestDatabase) {
+async fn limited() -> (Accounts<PostgresAdmins>, TestDatabase) {
     let (admins, database, _, _) = with_link().await;
     (admins, database)
 }
 
 /// How long `limit` makes `from` wait now, or nothing when it is admitted.
 async fn wait(
-    admins: &Admins<PostgresAdmins>,
+    admins: &Accounts<PostgresAdmins>,
     limit: RateLimit,
     from: &Requester,
 ) -> Option<Duration> {
