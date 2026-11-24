@@ -2,7 +2,8 @@
 
 Researched 2026-11-24 for [#111](https://github.com/heavymedl-labs/tetsu/issues/111), after the maintainer asked
 whether Tetsu's home page should carry a "Log in" or "Sign up" button at the top right, whether every realm could
-share one login flow, and noted that an admin has to remember `/admin/login` to log back in. The public sites below
+share one login flow, and noted that an admin has to remember `/admin/login` to log back in. A second pass the same
+day asked whether the one "Log in" button could take an admin to their own login. The public sites below
 were read on 2026-11-24. How each platform separates its accounts is in
 [commerce, payments, and booking realms](commerce-booking-realms.md), and Related Origin Requests in
 [RP ID mechanics](../passkey-domains/rpid-mechanics.md#related-origin-requests-well-knownwebauthn).
@@ -19,6 +20,11 @@ passkeys per ceremony, and reaching another's needs Related Origin Requests, whi
 staff passkeys. Sharing the template, script, and copy has none of these costs. A platform's own back office is
 reached by its address, which sends a logged-out visitor to log in and back, as WordPress's `/wp-admin` does and
 Tetsu's `/admin` already does; OWASP treats a hidden admin address as something to test for, not a protection.
+For one button that serves admins too, identity platforms route by an identifier the person types, a hint in the
+link, or a remembered earlier choice. Only the remembered choice fits Tetsu: a browser that logged in as an admin
+keeps a hint, and the site's "Log in" sends that browser to the admin login. The hint is a convenience, not access,
+and under the ICO's guidance a lasting one is exempt from consent only when the person is told of it plainly, which
+an explicit "remember" choice settles best.
 
 ## The header's login link goes to the business's dashboard
 
@@ -109,6 +115,40 @@ treat it as one: every admin page requires a session.
 - [OWASP WSTG: Enumerate Infrastructure and Application Admin Interfaces](https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/02-Configuration_and_Deployment_Management_Testing/05-Enumerate_Infrastructure_and_Application_Admin_Interfaces)
   treats finding unlinked admin interfaces as a test step, so an unlinked address protects nothing by itself.
 
+## One "Log in" button can route by a remembered choice
+
+**Takeaway:**
+
+Identity platforms call routing a person to the right login "home realm discovery", and they do it three ways: by
+the email or domain typed, by a hint the app puts in the link, or by remembering what the browser chose before.
+Typing an email first is ruled out above. A hint in the link is what a bookmark of `/admin` already is. A remembered
+choice is what the maintainer asked for: logging in as an admin leaves a small hint in the browser, and the site's
+"Log in" reads it and goes to the admin login instead of the staff one. It decides only which login page shows; the
+passkey still decides who gets in, so a forged or stale hint costs nothing but a wrong page. It holds no identifier
+and must map to a fixed list of pages, so it can never become an open redirect. Because it lasts past logout, it is
+a persistent preference, which the ICO exempts from consent only when the person is told of it prominently. Asking
+the admin once, on the login page, whether to remember this browser makes it a service they requested.
+
+**Cited Findings:**
+
+- [Microsoft Entra: home realm discovery](https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/home-realm-discovery-policy):
+  Entra finds the sign-in location from the name the user enters, or a domain hint in the request, or a policy; the
+  page says nothing of remembering a previous choice.
+- [Azure AD B2C: single sign-on session providers](https://learn.microsoft.com/en-us/azure/active-directory-b2c/custom-policy-reference-sso)
+  lists "Remember the chosen identity provider during subsequent logons", which skips the identity provider selection
+  screen, using claims kept in its session cookie. It works while that session lasts, not after logout.
+- Auth0's Lock widget showed "Last time you logged in with", kept in the browser's `localStorage`, according to
+  [community threads](https://community.auth0.com/t/lock11-and-last-time-you-logged-in-as-broken/10021) rather than
+  Auth0's documentation.
+- [ICO: what are the exceptions?](https://ico.org.uk/for-organisations/direct-marketing-and-privacy-and-electronic-communications/guidance-on-the-use-of-storage-and-access-technologies/what-are-the-exceptions/):
+  "Session cookies used to store a user's preference can rely on the strictly necessary exception, provided they are
+  not linked to a persistent identifier"; for persistent ones the exception "may in some cases" apply, "but the user
+  must be given sufficient information in a prominent location"; and "strictly necessary" is judged "from the point of
+  view of the subscriber or user". It lists identifying a user once logged in "for the duration of their visit".
+- The Article 29 Working Party's Opinion 04/2012 on cookie consent exemptions found persistent login cookies outside the exemption unless the user asks for them, as
+  [summarized by the Future of Privacy Forum](https://fpf.org/2012/06/12/cookie-consent-exemption-article-29-wp-opinion/);
+  its text was not read for this page.
+
 ## Recommendations for Tetsu
 
 - **"Log in" in Tetsu's site header, for staff,** leading to `/app/login`
@@ -120,7 +160,13 @@ treat it as one: every admin page requires a session.
   ([#117](https://github.com/heavymedl-labs/tetsu/issues/117)).
 - **One login template and script for every realm, with an entry point per realm.** The passkey ceremony, copy,
   errors, session dialog, and account area are shared; the page's realm, its RP ID, and its branding are not.
-- **Admins keep `/admin` as their address,** with no public link. Bookmarking it is the remedy for remembering it.
+- **Admins keep `/admin` as their address,** with no public link.
+- **The site's "Log in" goes to a `/login` that only redirects,** a reserved name: to the admin login when the browser
+  holds the admin hint, and to the staff login otherwise. The admin login page offers "Remember this browser for
+  Log in", which sets the hint on a successful login, and the admin's Security page can forget it. The hint is one
+  fixed value, readable by the server only, `SameSite=Lax`, and set only on request. When realms move to their own
+  hosts, it belongs on the domain they share; if admins move to a domain of their own, setting it needs a redirect
+  through the main site.
 
 ## Gaps
 
@@ -129,3 +175,5 @@ treat it as one: every admin page requires a session.
 - Linear's and Square's pages were read only in part, and Shopify's storefront customer login was not covered.
 - No source measured whether a header login link changes how staff find their login; the pattern's uniformity is the
   evidence.
+- No business-facing site read here was seen remembering a realm; the evidence for it comes from identity platforms.
+- Whether UK or EU rules apply to Tetsu at all depends on where its businesses are; the advice above assumes they may.
