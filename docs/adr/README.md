@@ -89,6 +89,7 @@ number, and add a row below. Never renumber.
 | [0082](0082-a-postgres-skill-for-database-work.md) | A Postgres skill for database work | Writing or reviewing SQL, migrations, or schema | Accepted |
 | [0083](0083-formatting-templates-and-minifying-pages.md) | Formatting templates and minifying pages | Writing a template, testing a page's HTML, or changing how pages are sent | Accepted |
 | [0084](0084-realm-routes.md) | Realm routes | Adding or naming a realm's page or route | Accepted |
+| [0085](0085-admins-not-operators.md) | Admins, not operators | Naming anything for the people who work for Tetsu itself | Accepted |
 | [0068](0068-no-demo-note.md) | No demo note | Changing what marks a demo page | Proposed |
 
 ## Open decisions
