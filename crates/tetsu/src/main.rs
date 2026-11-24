@@ -3,13 +3,13 @@
 mod assets;
 mod logs;
 // build.rs embeds the front-end build with it. Compiled here too, its tests and mutants cover it.
+mod admin;
+mod chores;
 #[cfg_attr(
     not(test),
     expect(dead_code, reason = "only build.rs and the tests call it")
 )]
 mod manifest;
-mod operator;
-mod ops;
 mod seed;
 mod serve;
 mod settings;
@@ -28,7 +28,7 @@ use tetsu_tenancy::Tenancy;
 const MODULES: &[&dyn Module] = &[&Tenancy, &Identity, &Audit, &Mail];
 const USAGE: &str = "usage: tetsu [--env <name>] [setup | migrate | seed [--check] <file or folder> | serve | check | reset <schema>... \
                      | replay <schema> <event id> | rename <address> <new slug> \
-                     | operator <create <name> <email> | invite <id> | list | disable <id> | enable <id> \
+                     | admin <create <name> <email> | invite <id> | list | disable <id> | enable <id> \
                      | remove-passkeys <id> | end-sessions <id | --all>>]";
 
 #[derive(Debug, PartialEq, Eq)]
@@ -38,8 +38,8 @@ enum Command {
     Migrate,
     Seed { path: PathBuf, check_only: bool },
     Serve,
-    Chore(ops::Chore),
-    Operator(operator::Operator),
+    Chore(chores::Chore),
+    Admin(admin::Admin),
 }
 
 fn parse(args: &[String]) -> Result<Command, String> {
@@ -55,8 +55,8 @@ fn parse(args: &[String]) -> Result<Command, String> {
             "serve takes no arguments; set PORT to choose the port",
         ),
         "seed" => parse_seed(rest),
-        "operator" => operator::parse(rest).map(Command::Operator),
-        other => ops::parse(other, rest).map_or_else(
+        "admin" => admin::parse(rest).map(Command::Admin),
+        other => chores::parse(other, rest).map_or_else(
             || Err(format!("unknown command {command:?}")),
             |chore| chore.map(Command::Chore),
         ),
@@ -124,22 +124,19 @@ async fn run(command: Command, source: &settings::Source) -> Result<(), String> 
         Command::Seed { path, check_only } => run_seed(&path, check_only, source).await,
         Command::Serve => run_serve(source).await,
         Command::Chore(chore) => run_chore(chore, source).await,
-        Command::Operator(command) => run_operator(command, source).await,
+        Command::Admin(command) => run_admin(command, source).await,
     }
 }
 
-/// Runs an operator command with the local settings, telling it whether its output reaches a terminal.
-async fn run_operator(
-    command: operator::Operator,
-    source: &settings::Source,
-) -> Result<(), String> {
+/// Runs an admin command with the local settings, telling it whether its output reaches a terminal.
+async fn run_admin(command: admin::Admin, source: &settings::Source) -> Result<(), String> {
     let terminal = std::io::IsTerminal::is_terminal(&std::io::stdout());
-    say_all(&operator::run(command, || local(source), terminal).await?)
+    say_all(&admin::run(command, || local(source), terminal).await?)
 }
 
 /// Runs a hosted chore with the local settings, and prints what it reports.
-async fn run_chore(chore: ops::Chore, source: &settings::Source) -> Result<(), String> {
-    say_all(&ops::run(chore, &local(source)?, MODULES).await?)
+async fn run_chore(chore: chores::Chore, source: &settings::Source) -> Result<(), String> {
+    say_all(&chores::run(chore, &local(source)?, MODULES).await?)
 }
 
 /// Creates the database the settings name if the server has none, then migrates: a developer's one step to a
@@ -278,7 +275,7 @@ fn until(mut stopped: tokio::sync::watch::Receiver<bool>) -> Stopped {
 }
 
 /// Reads the settings, reaches the database, checks it is migrated, and binds the port: everything serving needs
-/// before it listens, with the dispatcher that delivers events to the audit record and the operators' notices.
+/// before it listens, with the dispatcher that delivers events to the audit record and the admins' notices.
 async fn ready(
     local: &settings::Local,
 ) -> Result<
@@ -296,11 +293,11 @@ async fn ready(
     let pool = migrated(local).await?;
     let office = std::sync::Arc::new(tetsu_mail::post_office(pool.clone(), smtp, allow));
     let dispatcher = delivery(&pool, &office).await?;
-    let operators = operator_pages(local, demo, office)?;
+    let admins = admin_pages(local, demo, office)?;
     let tenants = tetsu_tenancy::postgres_store(pool.clone());
     refuse_reserved_addresses(&tenants).await?;
     let modules = tetsu_tenancy::router(tenants, demo, assets::STYLESHEET, report).merge(
-        tetsu_identity::router(tetsu_identity::postgres_store(pool), operators),
+        tetsu_identity::router(tetsu_identity::postgres_store(pool), admins),
     );
     let app = serve::app(modules, demo, proxies, serve::not_found);
     Ok((bind(address).await?, app, dispatcher))
@@ -378,9 +375,9 @@ async fn delivery(
         .map_err(|error| explain(&*error))
 }
 
-/// What Identity's operator pages need: their passkeys belong to the site's own origin, the only one that may send
+/// What Identity's admin pages need: their passkeys belong to the site's own origin, the only one that may send
 /// them a state-changing request.
-fn operator_pages(
+fn admin_pages(
     local: &settings::Local,
     demo: bool,
     mailbox: std::sync::Arc<dyn tetsu_kernel::Mailbox>,
@@ -395,12 +392,13 @@ fn operator_pages(
         script: assets::PASSKEY_SCRIPT,
         session_script: assets::SESSION_SCRIPT,
         scheme_script: assets::SCHEME_SCRIPT,
+        menu_script: assets::MENU_SCRIPT,
         mailbox,
         report,
     })
 }
 
-/// Logs what a module reports for the operator, as an error on the request it happened in.
+/// Logs what a module reports, as an error on the request it happened in.
 fn report(line: &str) {
     tracing::error!("{line}");
 }

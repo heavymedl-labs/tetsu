@@ -314,7 +314,7 @@ mod support {
         sent(
             server,
             &format!(
-                "POST /ops/login/begin HTTP/1.1\r\nHost: localhost\r\nOrigin: http://localhost:8080\r\n\
+                "POST /admin/login/begin HTTP/1.1\r\nHost: localhost\r\nOrigin: http://localhost:8080\r\n\
                  X-Forwarded-For: {forwarded}\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\
                  Connection: close\r\n\r\n{{}}"
             ),
@@ -341,14 +341,14 @@ use support::{
 };
 use tetsu_postgres::test_support::fresh_database;
 
-/// The operator's login page is served, under a policy that lets it run Tetsu's own script, preloading the text's
+/// The admin's login page is served, under a policy that lets it run Tetsu's own script, preloading the text's
 /// font as every page does whichever module renders it, and the script it names is served as JavaScript.
 #[tokio::test]
 async fn the_login_page_loads_its_script() {
     let database = fresh_database().await.expect("a test database");
     ready(&database);
     let server = start(&database);
-    let page = get(&server, "/ops/login");
+    let page = get(&server, "/admin/login");
     assert!(page.starts_with("HTTP/1.1 200"), "{page}");
     assert!(page.contains("script-src 'self'"), "{page}");
     assert!(
@@ -651,7 +651,7 @@ async fn it_refuses_to_start_without_its_proxy_count() {
     );
 }
 
-/// The operator pages need the site's own origin, for their passkeys and to tell their requests from another
+/// The admin pages need the site's own origin, for their passkeys and to tell their requests from another
 /// site's, so serving refuses to start without it.
 #[tokio::test]
 async fn it_refuses_to_start_without_its_origin() {
@@ -723,7 +723,7 @@ async fn outside_a_demo_environment_no_page_is_marked_as_a_demo() {
 }
 
 #[tokio::test]
-async fn a_page_that_cannot_load_tells_the_operator_why_but_not_the_visitor() {
+async fn a_page_that_cannot_load_logs_why_but_tells_the_visitor_nothing() {
     // Tenancy's tables go once it is serving, so every lookup fails.
     let database = fresh_database().await.expect("a test database");
     ready(&database);
@@ -861,7 +861,7 @@ async fn serving_delivers_events_to_the_audit_record() {
         .record(&tetsu_postgres::NewEvent {
             kind: "identity.logged_in",
             version: 1,
-            payload: r#"{"operator_id": 1, "outcome": "refused"}"#,
+            payload: r#"{"admin_id": 1, "outcome": "refused"}"#,
             keep: false,
         })
         .await

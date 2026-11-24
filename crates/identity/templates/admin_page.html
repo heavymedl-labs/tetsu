@@ -1,4 +1,4 @@
-{#- The shell of each operator page: the look ADR-0035 gives Tetsu's own pages, in a layout of Tetsu's own:
+{#- The shell of each admin page: the look ADR-0035 gives Tetsu's own pages, in a layout of Tetsu's own:
     one narrow card in the middle of the page, Tetsu's wordmark, which links home, above a small heading, full-width choices, and a
     muted line under them. The card settles
     into place as it fades in, and the wordmark's slots book in, so the page shows it is ready. A page's struct adds
@@ -11,7 +11,7 @@
     type="module"
     src="{{ scheme_script }}"
   ></script>{% endblock %}
-{#- An operator page is Tetsu's own, so its footer holds only the color scheme control (ADR-0070), not "Runs on
+{#- An admin page is Tetsu's own, so its footer holds only the color scheme control (ADR-0070), not "Runs on
     Tetsu". #}
 {% block footer %}<footer class="flex justify-center px-6 pb-8">{%
       include "../../../web/templates/scheme.html"
@@ -27,7 +27,7 @@
         >{% include "../../../web/templates/wordmark.html" %}</a>{% endblock %}
       {% block card %}{% endblock %}
       {% block noscript %}<noscript><p class="mt-4 text-mini text-muted"
-          >Passkeys need JavaScript, which this browser has turned off.</p></noscript>{% endblock %}
+          >Turn on JavaScript to use passkeys.</p></noscript>{% endblock %}
     </div>
   </main>
   {% block after %}{% endblock %}

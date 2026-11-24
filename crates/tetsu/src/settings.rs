@@ -1397,12 +1397,12 @@ mod tests {
     /// `--env <name>` first chooses `.env.<name>`, and the command follows it; anything else leaves `.env` chosen.
     #[test]
     fn a_leading_env_chooses_an_environment_s_file() {
-        let args = words(&["--env", "demo-2", "operator", "list"]);
+        let args = words(&["--env", "demo-2", "admin", "list"]);
         let (source, rest) = Source::chosen(&args).unwrap();
         assert_eq!(source, Source::Named("demo-2".into()));
         assert_eq!(source.file(), ".env.demo-2");
         assert_eq!(rest, &args[2..]);
-        for args in [words(&[]), words(&["operator", "--env", "demo"])] {
+        for args in [words(&[]), words(&["admin", "--env", "demo"])] {
             let (source, rest) = Source::chosen(&args).unwrap();
             assert_eq!((source.file(), rest), (".env".into(), &args[..]));
         }

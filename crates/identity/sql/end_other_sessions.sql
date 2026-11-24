@@ -1,4 +1,4 @@
--- Ends one of the operator's other sessions, by its random id, or every other.
+-- Ends one of the admin's other sessions, by its random id, or every other.
 SELECT
     e.who,
     e.asking,

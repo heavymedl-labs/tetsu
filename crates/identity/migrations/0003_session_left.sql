@@ -8,7 +8,7 @@ SET statement_timeout = '30s';
 
 -- Whole seconds to each limit on the live session a token's hash names in a
 -- realm, by the database's clock, as use_session reads it: none for a session
--- spent, of another realm, or of a disabled operator. It changes and removes
+-- spent, of another realm, or of a disabled admin. It changes and removes
 -- nothing; use_session removes a spent session when it is next presented. Its
 -- idle limit must match use_session's, which a test checks; #142 gives the
 -- limits one home.
@@ -20,7 +20,7 @@ AS $$
     WITH clock AS (
         SELECT
             clock_timestamp() AS at,
-            CASE wanted_realm WHEN 'operator' THEN interval '15 minutes' END
+            CASE wanted_realm WHEN 'admin' THEN interval '15 minutes' END
                 AS idle
     )
 
@@ -30,7 +30,7 @@ AS $$
         )::bigint,
         floor(extract(EPOCH FROM s.ends_at - clock.at))::bigint
     FROM identity.sessions AS s
-    INNER JOIN identity.operators AS o ON s.operator_id = o.id
+    INNER JOIN identity.admins AS o ON s.admin_id = o.id
     CROSS JOIN clock
     WHERE
         s.token_hash = wanted_hash

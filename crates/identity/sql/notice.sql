@@ -1,4 +1,4 @@
--- Who to tell about an operator's login or new passkey, and when it was, in
+-- Who to tell about an admin's login or new passkey, and when it was, in
 -- words, so the notice needs no clock of its own.
 SELECT
     email,
@@ -6,5 +6,5 @@ SELECT
         $2::timestamptz AT TIME ZONE 'UTC',
         'FMMonth FMDD, YYYY, HH24:MI "UTC"'
     ) AS occurred
-FROM identity.operators
+FROM identity.admins
 WHERE id = $1;

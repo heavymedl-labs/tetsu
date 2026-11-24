@@ -3,11 +3,11 @@
     "publicKey": {
       "rp": {
         "name": "Tetsu",
-        "id": "ops.example.com"
+        "id": "admin.example.com"
       },
       "user": {
         "id": "-fu99I-_StGJ59XP9wIiZg",
-        "name": "Tetsu operator · Kurt Medley",
+        "name": "Tetsu admin · Kurt Medley",
         "displayName": "Kurt Medley"
       },
       "challenge": "MW8FF0EA8ho3PJUMl-ypaKX5QNjic4hK1H5-TC8Piy0",
@@ -51,7 +51,7 @@
     "publicKey": {
       "challenge": "oB2WkYJIkaHDqSRVkEb5PlvNUqe4NVR10Uj4laoBHQc",
       "timeout": 60000,
-      "rpId": "ops.example.com",
+      "rpId": "admin.example.com",
       "allowCredentials": [],
       "userVerification": "required",
       "extensions": {

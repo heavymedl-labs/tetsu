@@ -13,17 +13,18 @@
     class="m-auto w-[calc(100%-3rem)] max-w-80 rounded-xl border border-edge bg-canvas p-6 text-center text-ink shadow-lg backdrop:bg-black/40"
   >
     <h2 id="tetsu-session-title" tabindex="-1" autofocus class="text-base font-medium outline-none"><span data-idle
-      >You're about to be logged out</span><span data-absolute hidden>Your session is about to end</span></h2>
+      >Still there?</span><span data-absolute hidden>Your session is ending</span></h2>
     <p id="tetsu-session-text" class="mt-2 text-mini text-pretty text-muted"><span data-idle
-      >For your security, we'll log you out in</span><span data-absolute hidden
-      >Sessions last 8 hours. Yours ends in</span> <span data-left>2 minutes</span>.</p>
+      >You'll be logged out in</span><span data-absolute hidden>Sessions last 8 hours. Yours ends in</span> <span
+        data-left
+      >2 minutes</span>.</p>
     <button
       type="button"
       data-idle
       data-stay
       class="mt-6 {% call shared::button_style(false, false, true) %}{% endcall %}"
     >Stay logged in</button>
-    <form method="post" action="/ops/logout" class="mt-3">
+    <form method="post" action="/admin/logout" class="mt-3">
       <input type="hidden" name="form" value="{{ form }}">
       <button type="submit" class="{% call shared::button_style(true, false, true) %}{% endcall %}"><span data-idle
         >Log out</span><span data-absolute hidden>Log in again</span></button>

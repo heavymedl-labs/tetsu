@@ -2,8 +2,9 @@
 
 Research on 2026-11-22, extending the [signed-in experience](signed-in-experience.md) note: six research passes over
 Linear, general SaaS, booking software for gyms and salons, accessible app shells, account-area security, and first
-dashboards, plus two passes through a live, throwaway Linear workspace at desktop, tablet, and phone widths. Its
-screenshots are not kept, since the repository is public.
+dashboards, plus two passes through a live, throwaway Linear workspace at desktop, tablet, and phone widths. Their
+screenshots are not kept, since the repository is public; a third pass on 2026-11-23 kept [settings at four
+widths](#linears-settings-at-four-widths), with the account's email, username, and location replaced first.
 
 Tetsu should build **one server-rendered shell shared by all three realms**: a skip link, a header with the realm's context at left and the person's initials menu at right (the #148 header), a sidebar of plain links that becomes a settings sidebar with "Back to app" when the person opens their account, and one `main`. Each realm then fills it differently. Operators get a sidebar console whose home is a queue of what needs them. Staff get the same sidebar plus a business switcher, a "today" home filtered by role, and business settings gated by role. Customers, whose account belongs to one business, get a lighter top-navigation shell whose home leads with their next booking. Every realm's personal account has the same pages in Linear's order: Profile, then Security (passkeys and sessions), then Notifications and Preferences when there is something to set. The evidence is strong on shape: Linear, Vercel, GitHub, Stripe, Fresha and Square all split "me" settings from "the organization" settings, and booking products all open staff on today's schedule. It is strong on security too: OWASP ASVS 5.0 Level 2 requires visible logout on every authenticated page, a self-service session list, and re-authentication before sensitive changes, all of which this account area carries. Linear's shape is worth copying but its accessibility details are not: live inspection found an unlabelled `nav`, the current page marked only by a data attribute, and a phone-width sidebar that opens without moving focus. The evidence is weak on per-role sidebar visibility and the customer homes of Mindbody, Fresha and Vagaro, so those recommendations rest on inference. The practical result is a build order that starts with #148's header as a shared template, turns the operator's `/ops` card into a two-page account area and a real home, and then reuses all of it for staff and customers in their sign-in slices.
 
@@ -29,6 +30,31 @@ Each settings page is one centered column, about 740px wide, of titled sections,
 On desktop the sidebar is one `nav`, 244px wide, of links 28px tall with 8px rounded corners and a 150ms color transition; the current item gets a subtle filled background. A skip link and one `main` exist. Ctrl+K opens a centered command menu with focus in a "Type a command or search..." field, results grouped under headings, each command's shortcut at the right (observed in a live workspace on 2026-11-22). The workspace menu likewise shows each item's shortcut.
 
 Below about 768px Linear keeps the sidebar in the page but moves it off-screen. A second live pass at 390px wide found the header reduced to a "Menu" button at the far left, the view's name, and its controls at the right (observed in a live workspace on 2026-11-22). "Menu" slides the sidebar, about 330px wide, in from the left over the content with a **40% black backdrop**, leaving about 60px of the page visible; tapping the backdrop or pressing "Menu" again closes it (observed in a live workspace on 2026-11-22). The motion is short, CSS transitions of 150 to 200ms with ease-out. Settings does the same with its own sidebar: the header holds the same "Menu" button and a "Settings" link with a back chevron to the app, the cards fill the width, and "Menu" slides in "Back to app", search and the settings groups with the current page highlighted (observed in a live workspace on 2026-11-22). On native mobile Linear chose a different model, a user-arranged bottom toolbar plus pins ([Linear changelog 2026-01-22](https://linear.app/changelog/2026-01-22-customize-your-navigation-in-linear-mobile)). A fresh Linear account opened on an "Agent" view with a banner offering to change the default, and users choose their own "Default home view" ([Linear: Preferences](https://linear.app/docs/account-preferences)). Linear documents no first-run tour inside the app.
+
+### Linear's settings at four widths
+
+Captured on 2026-11-23 for [#156](https://github.com/heavymedl-labs/tetsu/issues/156), in dark mode, from Profile
+and Security & access. Chrome's narrowest window is 500px, so the phone width is 500, not 390.
+
+| Width | Profile | Security & access | Menu open |
+| --- | --- | --- | --- |
+| 1440 | [profile](linear-settings/linear-profile-1440.webp) | [security](linear-settings/linear-security-1440.webp) | Sidebar always shown |
+| 1024 | [profile](linear-settings/linear-profile-1024.webp) | [security](linear-settings/linear-security-1024.webp) | Sidebar always shown |
+| 768 | [profile](linear-settings/linear-profile-768.webp) | [security](linear-settings/linear-security-768.webp) | [menu](linear-settings/linear-menu-768.webp) |
+| 500 | [profile](linear-settings/linear-profile-500.webp) | [security](linear-settings/linear-security-500.webp) | [menu](linear-settings/linear-menu-500.webp) |
+
+What they add to the passes above:
+
+- **Two layouts, switching between 1024 and 768.** At 1024 and wider, the settings sidebar runs the full height with
+  no app header, and the page sits in an inset rounded panel. At 768 and below, a 42px bar holds "Menu" and "‹ Settings",
+  and the page fills the width with no panel.
+- **Rows stack only on the narrowest width.** At 500, Profile's rows put the control under its label, and inputs grow
+  to the column's width; Security's rows, whose action is a short button, stay on one line.
+- **Sessions come before Passkeys**, then personal API keys, the signing key, and authorized applications. Each
+  section is a title, one line beneath it, and a card; an empty list is a muted row with its action at the right.
+- **The narrow menu is not a modal.** It slides over a dimmed page, with no `dialog` role or `aria-modal`, and focus
+  lands on the sidebar's container rather than a control. Escape did not close it in this pass, though the key may not
+  have reached the page.
 
 ## Peers agree: the avatar holds "me", the switcher holds "us"
 
@@ -125,7 +151,7 @@ Every realm gets the same personal pages, each its own URL with its own `h1`, `<
 
 Organization settings sit below the personal group in the same settings sidebar, hidden by whole group as Linear does. For staff, a "Business" group (details, locations, services, hours, booking page) shows to owners and managers, and a "Team" page lists staff in Linear's columns (name, email, role, joined, last seen) with invite, change role and remove, where removal ends that role's sessions (7.4.2). For operators, a "Platform" group (operators, businesses) waits for its triggers, as the earlier note advised.
 
-Suggested URLs, pending #8's host decision: operators at `/ops` (home), `/ops/mailbox`, `/ops/account/profile`, `/ops/account/security`; staff, whose identity spans businesses, at host-level `/account/...` for personal pages and `/<business>/...` and `/<business>/settings/...` for business work, so that a link names its business and the switcher can keep the current page; customers at the business's booking address plus `/account/...`. A Vercel-style `/b?to=...` redirect lets emails link to "your current business" without a slug.
+Each realm's addresses are set in [ADR-0084](../../adr/0084-realm-routes.md). A Vercel-style `/b?to=...` redirect lets emails link to "your current business" without a slug.
 
 ### What each realm's home shows
 

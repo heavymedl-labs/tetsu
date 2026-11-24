@@ -1,5 +1,5 @@
 -- Stores a passkey's new counter, ends the session the browser presented,
--- starts the operator's session, and names its device.
+-- starts the admin's session, and names its device.
 SELECT
     s.outcome,
     s.session_id,

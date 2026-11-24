@@ -1,6 +1,6 @@
--- The account a live operator session names, a row for each passkey.
+-- The account a live admin session names, a row for each passkey.
 SELECT
-    a.operator_id,
+    a.admin_id,
     a.user_handle,
     a.name,
     a.credential_id,

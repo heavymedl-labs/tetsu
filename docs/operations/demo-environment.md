@@ -108,7 +108,7 @@ Web service `tetsu-demo` (`srv-dbp542rbc2fs73962k4g`) in Ohio, on the free insta
 
 - **Command:** `/usr/local/bin/tetsu serve`. Render's command replaces the image's entrypoint too, so `serve`
   alone exits with status 128.
-- **Environment:** `TETSU_DEMO=true`, `TETSU_ORIGIN=https://tetsu-demo.onrender.com`, which the operator
+- **Environment:** `TETSU_DEMO=true`, `TETSU_ORIGIN=https://tetsu-demo.onrender.com`, which the admin
   pages' passkeys belong to, `TETSU_TRUSTED_PROXIES=3`, the proxies measured in front of the service
   ([ADR-0072](../adr/0072-rate-limits-by-network-address.md)), and `DATABASE_URL`, and the export settings under
   [Logs and alerts](#logs-and-alerts). Render sets `PORT`.
@@ -235,9 +235,9 @@ A chore runs instead of a deploy, in the deploy workflow's chore job, the only w
 service through `RENDER_API_KEY` and masks in the log. It runs only from `main`, never alongside a deploy, and
 refuses inputs that are not the shape the chore takes.
 
-## Operators on the demo
+## Admins on the demo
 
-An operator is made from your own terminal, since an invite link prints only to one, with the demo's settings in
+An admin is made from your own terminal, since an invite link prints only to one, with the demo's settings in
 `.env.demo` at the repository's root ([ADR-0073](../adr/0073-settings-files-per-environment.md)). Git ignores it.
 Make it once, readable only by you (`chmod 600 .env.demo`), with these lines:
 
@@ -254,9 +254,9 @@ alike, all of them in each ([ADR-0078](../adr/0078-mail-settings-from-one-place.
 Then, from the commit the demo runs:
 
 ```bash
-cargo tetsu --env demo operator create "Your Name" you@example.com   # prints the invite link, and emails it
-cargo tetsu --env demo operator list
-cargo tetsu --env demo operator email 1 you@example.com   # gives an operator made before addresses one
+cargo tetsu --env demo admin create "Your Name" you@example.com   # prints the invite link, and emails it
+cargo tetsu --env demo admin list
+cargo tetsu --env demo admin email 1 you@example.com   # gives an admin made before addresses one
 ```
 
-Open the link to join with a passkey; it logs you in at `/ops`. Every other `operator` command works the same way.
+Open the link to join with a passkey; it logs you in and opens your Profile. Every other `admin` command works the same way.

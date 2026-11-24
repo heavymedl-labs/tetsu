@@ -12,7 +12,7 @@ const PARTS = "<dialog><span data-left></span><button data-stay></button><form><
 async function loaded(): Promise<{ host: HTMLElement; fetch: ReturnType<typeof vi.fn> }> {
   const fetch = vi.fn().mockResolvedValue(new Response('{"idle":900,"absolute":28800}'));
   vi.stubGlobal("fetch", fetch);
-  await import("./ops");
+  await import("./admin");
   document.body.innerHTML = `<tetsu-session form-token="F1">${PARTS}</tetsu-session>`;
   return { host: document.querySelector("tetsu-session") as HTMLElement, fetch };
 }
@@ -31,5 +31,5 @@ it("registers the session island with the browser's own parts and a channel to t
   );
   const { host, fetch } = await loaded();
   expect([host.dataset.ready, opened.mock.calls]).toEqual(["", [["tetsu-session"]]]);
-  expect(fetch).toHaveBeenCalledWith("/ops/session", { signal: expect.any(AbortSignal) });
+  expect(fetch).toHaveBeenCalledWith("/admin/session", { signal: expect.any(AbortSignal) });
 });

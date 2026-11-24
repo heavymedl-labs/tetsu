@@ -1,9 +1,2 @@
-{#- An address no business holds is the site's, so it gets the site's not-found page, Tetsu's header and footer
-    included. -#}
-{% extends "../../../web/templates/page.html" %}
-{% block title %}Page not found – Tetsu{% endblock %}
-{% block data_scheme %}{{ scheme }}{% endblock %}
-{% block color_scheme %}{% include "../../../web/templates/color_scheme.html" %}{% endblock %}
-{% block body %}{% include "../../../web/templates/site_header.html" %}
-  {% include "../../../web/templates/not_found.html" %}{% endblock %}
-{% block footer %}{% include "../../../web/templates/site_footer.html" %}{% endblock %}
+{#- An address no business holds is the site's, so it gets the site's not-found page. -#}
+{% extends "../../../web/templates/site_not_found.html" %}

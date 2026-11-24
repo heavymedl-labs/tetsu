@@ -11,7 +11,7 @@ impl Realm {
     #[must_use]
     pub fn cookie_name(self) -> &'static str {
         match self {
-            Self::Operator => "__Host-tetsu-operator",
+            Self::Admin => "__Host-tetsu-admin",
         }
     }
 
@@ -106,7 +106,7 @@ impl<'a> Change<'a> {
 }
 
 /// A live session whose request passed the checks for a change: the realm's own origin and the session's form
-/// token. Only [`crate::Operators::session_for_change`] makes one, so a use case that changes state on a session's
+/// token. Only [`crate::Admins::session_for_change`] makes one, so a use case that changes state on a session's
 /// behalf, such as adding a passkey, cannot be reached without them. It stands for the one request it checked: it
 /// cannot be cloned, and a page adapter must not keep it past that request, since a later one would skip the
 /// checks.
@@ -145,7 +145,7 @@ pub enum Logout {
     Refused(FailedCheck),
 }
 
-/// The origins a realm's pages are served from, such as `https://tetsu-demo-ops.onrender.com`. A state-changing
+/// The origins a realm's pages are served from, such as `https://tetsu-demo-admin.onrender.com`. A state-changing
 /// request is accepted only from one of them, so another site's form or script can never act for a logged-in
 /// person (ADR-0048, `v5.0.0-3.5.1`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -232,16 +232,16 @@ fn port_fits(scheme: &str, port: &str) -> bool {
         .is_ok_and(|number| number != 0 && number != default && number.to_string() == port)
 }
 
-/// The longest return path a login keeps; an operator page's address is far shorter.
+/// The longest return path a login keeps; an admin page's address is far shorter.
 const LONGEST_RETURN: usize = 120;
 
-/// Where a login may send the browser next, if `raw` is one of the operator pages: `/ops`, or a path under it
+/// Where a login may send the browser next, if `raw` is one of the admin pages: `/admin`, or a path under it
 /// written only in ASCII letters, digits, `-`, `_`, and `.`, with no empty, `.`, or `..` segment. So it can name no
 /// other site, scheme, or realm, and needs no decoding, which leaves nothing for a browser to read differently
 /// (OWASP, "Unvalidated Redirects and Forwards").
 #[must_use]
 pub fn return_path(raw: &str) -> Option<&str> {
-    let rest = raw.strip_prefix("/ops")?;
+    let rest = raw.strip_prefix("/admin")?;
     let plain = |segment: &str| {
         !matches!(segment, "" | "." | "..")
             && segment
@@ -262,34 +262,39 @@ mod tests {
     use proptest::prelude::*;
 
     #[test]
-    fn a_return_path_is_an_operator_page_written_plainly() {
-        for path in ["/ops", "/ops/passkeys", "/ops/a-b/c_d/e.f", "/ops/2026"] {
+    fn a_return_path_is_an_admin_page_written_plainly() {
+        for path in [
+            "/admin",
+            "/admin/passkeys",
+            "/admin/a-b/c_d/e.f",
+            "/admin/2026",
+        ] {
             assert_eq!(return_path(path), Some(path), "{path}");
         }
     }
 
     #[test]
     fn a_return_path_names_no_other_site_scheme_or_page() {
-        let long = format!("/ops/{}", "a".repeat(200));
+        let long = format!("/admin/{}", "a".repeat(200));
         for path in [
             "",
             "/",
-            "/opsx",
-            "/ops/",
-            "//evil.example/ops",
-            "/ops//evil.example",
-            "/ops/../login",
-            "/ops/./a",
-            "/ops/a/..",
-            "/ops\\evil.example",
-            "/ops/%2e%2e",
-            "/ops/a?b",
-            "/ops/a#b",
-            "/ops/a b",
-            "/ops/é",
-            "https://evil.example/ops",
+            "/adminx",
+            "/admin/",
+            "//evil.example/admin",
+            "/admin//evil.example",
+            "/admin/../login",
+            "/admin/./a",
+            "/admin/a/..",
+            "/admin\\evil.example",
+            "/admin/%2e%2e",
+            "/admin/a?b",
+            "/admin/a#b",
+            "/admin/a b",
+            "/admin/é",
+            "https://evil.example/admin",
             "javascript:alert(1)",
-            "ops/a",
+            "admin/a",
             long.as_str(),
         ] {
             assert_eq!(return_path(path), None, "{path}");
@@ -298,18 +303,18 @@ mod tests {
 
     proptest! {
         #[test]
-        fn a_return_path_is_either_refused_or_a_plain_operator_page(
-            raw in prop_oneof!["\\PC{0,40}", "/ops(/[a-z.%]{0,3}){0,4}"],
+        fn a_return_path_is_either_refused_or_a_plain_admin_page(
+            raw in prop_oneof!["\\PC{0,40}", "/admin(/[a-z.%]{0,3}){0,4}"],
         ) {
             if let Some(path) = return_path(&raw) {
-                prop_assert!(path == "/ops" || path.starts_with("/ops/"));
+                prop_assert!(path == "/admin" || path.starts_with("/admin/"));
                 // With a slash after it, an empty, `.`, or `..` segment shows as one of these anywhere in it.
                 let ended = format!("{path}/");
                 for bad in ["//", "/./", "/../", "%"] {
                     prop_assert!(!ended.contains(bad), "{} holds {}", path, bad);
                 }
             } else {
-                prop_assert_ne!(raw.as_str(), "/ops");
+                prop_assert_ne!(raw.as_str(), "/admin");
             }
         }
     }
@@ -321,15 +326,15 @@ mod tests {
     #[test]
     fn a_session_cookie_is_host_only_secure_and_hidden_from_scripts() {
         assert_eq!(
-            Realm::Operator.session_cookie(&token()),
+            Realm::Admin.session_cookie(&token()),
             format!(
-                "__Host-tetsu-operator={}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=28800",
+                "__Host-tetsu-admin={}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=28800",
                 "ab".repeat(32)
             )
         );
         assert_eq!(
-            Realm::Operator.cleared_cookie(),
-            "__Host-tetsu-operator=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0"
+            Realm::Admin.cleared_cookie(),
+            "__Host-tetsu-admin=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0"
         );
     }
 
@@ -337,15 +342,12 @@ mod tests {
     fn the_token_is_found_among_other_cookies() {
         let token = "ab".repeat(32);
         assert_eq!(
-            Realm::Operator
-                .token_in([format!("theme=dark; __Host-tetsu-operator={token}; lang=en").as_str()]),
+            Realm::Admin
+                .token_in([format!("theme=dark; __Host-tetsu-admin={token}; lang=en").as_str()]),
             Some(token.as_str())
         );
         assert_eq!(
-            Realm::Operator.token_in([
-                "theme=dark",
-                format!("__Host-tetsu-operator={token}").as_str()
-            ]),
+            Realm::Admin.token_in(["theme=dark", format!("__Host-tetsu-admin={token}").as_str()]),
             Some(token.as_str())
         );
     }
@@ -357,16 +359,12 @@ mod tests {
     fn a_name_led_by_unicode_whitespace_is_not_ours() {
         let token = "ab".repeat(32);
         for space in ["\u{2000}", "\u{a0}", "\u{85}"] {
-            let planted = format!("{space}__Host-tetsu-operator={token}");
-            assert_eq!(
-                Realm::Operator.token_in([planted.as_str()]),
-                None,
-                "{space:?}"
-            );
+            let planted = format!("{space}__Host-tetsu-admin={token}");
+            assert_eq!(Realm::Admin.token_in([planted.as_str()]), None, "{space:?}");
         }
-        let spaced = format!(" \t__Host-tetsu-operator={token}");
+        let spaced = format!(" \t__Host-tetsu-admin={token}");
         assert_eq!(
-            Realm::Operator.token_in([spaced.as_str()]),
+            Realm::Admin.token_in([spaced.as_str()]),
             Some(token.as_str())
         );
     }
@@ -375,10 +373,10 @@ mod tests {
     #[test]
     fn a_cookie_sent_twice_across_headers_names_no_token() {
         assert_eq!(
-            Realm::Operator.token_in(["__Host-tetsu-operator=a", "__Host-tetsu-operator=b"]),
+            Realm::Admin.token_in(["__Host-tetsu-admin=a", "__Host-tetsu-admin=b"]),
             None
         );
-        assert_eq!(Realm::Operator.token_in([]), None);
+        assert_eq!(Realm::Admin.token_in([]), None);
     }
 
     #[test]
@@ -386,13 +384,13 @@ mod tests {
         for cookies in [
             "",
             "theme=dark",
-            "tetsu-operator=x",
-            "__host-tetsu-operator=x",
-            "__Host-tetsu-operator",
-            "__Host-tetsu-operator=a; __Host-tetsu-operator=b",
-            "__Host-tetsu-operator=a; __Host-tetsu-operator=a",
+            "tetsu-admin=x",
+            "__host-tetsu-admin=x",
+            "__Host-tetsu-admin",
+            "__Host-tetsu-admin=a; __Host-tetsu-admin=b",
+            "__Host-tetsu-admin=a; __Host-tetsu-admin=a",
         ] {
-            assert_eq!(Realm::Operator.token_in([cookies]), None, "{cookies:?}");
+            assert_eq!(Realm::Admin.token_in([cookies]), None, "{cookies:?}");
         }
     }
 
@@ -400,15 +398,15 @@ mod tests {
     /// and that session's form token.
     #[test]
     fn a_change_is_verified_only_with_every_part_right() {
-        let origins = Origins::parse(&["https://ops.example.com"]).expect("origins");
+        let origins = Origins::parse(&["https://admin.example.com"]).expect("origins");
         let token = token();
         let (form, cookie) = (
             token.form_token().expect("a form token"),
-            format!("__Host-tetsu-operator={}", token.to_text()),
+            format!("__Host-tetsu-admin={}", token.to_text()),
         );
-        let origin = Some("https://ops.example.com");
+        let origin = Some("https://admin.example.com");
         assert_eq!(
-            Change::new([cookie.as_str()], origin, None, &form).verified(Realm::Operator, &origins),
+            Change::new([cookie.as_str()], origin, None, &form).verified(Realm::Admin, &origins),
             Ok(token.clone())
         );
         // Each names the first check it failed: the origin, then the cookie, then the form token.
@@ -419,7 +417,7 @@ mod tests {
             ),
             (Change::new([], origin, None, &form), FailedCheck::Cookie),
             (
-                Change::new(["__Host-tetsu-operator=not-a-token"], origin, None, &form),
+                Change::new(["__Host-tetsu-admin=not-a-token"], origin, None, &form),
                 FailedCheck::Cookie,
             ),
             (
@@ -443,7 +441,7 @@ mod tests {
                 FailedCheck::Origin,
             ),
         ] {
-            assert_eq!(change.verified(Realm::Operator, &origins), Err(failed));
+            assert_eq!(change.verified(Realm::Admin, &origins), Err(failed));
         }
     }
 
@@ -451,8 +449,8 @@ mod tests {
     fn origins_are_https_or_this_machine_and_nothing_else() {
         assert!(
             Origins::parse(&[
-                "https://tetsu-demo-ops.onrender.com",
-                "https://ops.example.com:8443",
+                "https://tetsu-demo-admin.onrender.com",
+                "https://admin.example.com:8443",
                 "https://ops2.example.com",
                 "http://localhost:8080",
                 "http://127.0.0.1:8080",
@@ -460,26 +458,26 @@ mod tests {
             .is_ok()
         );
         let refused = [
-            "tetsu-demo-ops.onrender.com",
-            "http://tetsu-demo-ops.onrender.com",
-            "https://tetsu-demo-ops.onrender.com/",
-            "https://Tetsu-Demo-Ops.onrender.com",
-            "https://ops.example.com:99999",
-            "https://ops.example.com:+8443",
-            "https://ops.example.com:08443",
-            "https://ops.example.com:0",
-            "https://ops.example.com:443",
+            "tetsu-demo-admin.onrender.com",
+            "http://tetsu-demo-admin.onrender.com",
+            "https://tetsu-demo-admin.onrender.com/",
+            "https://Tetsu-Demo-Admin.onrender.com",
+            "https://admin.example.com:99999",
+            "https://admin.example.com:+8443",
+            "https://admin.example.com:08443",
+            "https://admin.example.com:0",
+            "https://admin.example.com:443",
             "http://localhost:80",
             "https://.",
             "https://-",
-            "https://ops..example.com",
-            "https://-ops.example.com",
-            "https://ops-.example.com",
+            "https://admin..example.com",
+            "https://-admin.example.com",
+            "https://admin-.example.com",
             "https://ops_example.com",
-            "https://ops.example.com:",
+            "https://admin.example.com:",
             "https://",
-            "https://user@ops.example.com",
-            "ftp://ops.example.com",
+            "https://user@admin.example.com",
+            "ftp://admin.example.com",
             "null",
         ];
         for origin in refused {
@@ -499,19 +497,19 @@ mod tests {
 
     #[test]
     fn only_an_exact_listed_origin_is_allowed() {
-        let origins =
-            Origins::parse(&["https://ops.example.com", "http://localhost:8080"]).expect("origins");
-        assert!(origins.allow(Some("https://ops.example.com")));
+        let origins = Origins::parse(&["https://admin.example.com", "http://localhost:8080"])
+            .expect("origins");
+        assert!(origins.allow(Some("https://admin.example.com")));
         assert!(origins.allow(Some("http://localhost:8080")));
         for other in [
             None,
             Some("null"),
             Some(""),
-            Some("https://ops.example.com.evil.example"),
+            Some("https://admin.example.com.evil.example"),
             Some("https://evil.example"),
-            Some("http://ops.example.com"),
-            Some("https://ops.example.com:443"),
-            Some("https://OPS.example.com"),
+            Some("http://admin.example.com"),
+            Some("https://admin.example.com:443"),
+            Some("https://ADMIN.example.com"),
             Some("http://localhost:8081"),
         ] {
             assert!(!origins.allow(other), "{other:?}");
@@ -522,8 +520,8 @@ mod tests {
     /// came from, only from the same origin: two independent signals, so one browser bug opens no gap (ADR-0059).
     #[test]
     fn a_request_is_admitted_only_from_its_own_origin_by_both_signals() {
-        let origins = Origins::parse(&["https://ops.example.com"]).expect("origins");
-        let ours = Some("https://ops.example.com");
+        let origins = Origins::parse(&["https://admin.example.com"]).expect("origins");
+        let ours = Some("https://admin.example.com");
         assert!(origins.admit(ours, Some("same-origin")));
         assert!(
             origins.admit(ours, None),
@@ -540,18 +538,18 @@ mod tests {
         /// Whatever a browser sends, an origin is allowed only if it is listed exactly.
         #[test]
         fn nothing_unlisted_is_allowed(origin in "\\PC{0,40}") {
-            let origins = Origins::parse(&["https://ops.example.com"]).expect("origins");
-            prop_assert_eq!(origins.allow(Some(&origin)), origin == "https://ops.example.com");
+            let origins = Origins::parse(&["https://admin.example.com"]).expect("origins");
+            prop_assert_eq!(origins.allow(Some(&origin)), origin == "https://admin.example.com");
         }
 
         /// A token set in a cookie is read back from among any other cookies.
         #[test]
         fn a_set_token_reads_back(text in "[0-9a-f]{64}", before in "[a-z]{1,8}=[a-z0-9]{0,8}") {
             let token = SessionToken::parse(&text).expect("a token");
-            let set = Realm::Operator.session_cookie(&token);
+            let set = Realm::Admin.session_cookie(&token);
             let pair = set.split(';').next().expect("a pair");
             let cookies = format!("{before}; {pair}");
-            prop_assert_eq!(Realm::Operator.token_in([cookies.as_str()]), Some(text.as_str()));
+            prop_assert_eq!(Realm::Admin.token_in([cookies.as_str()]), Some(text.as_str()));
         }
     }
 }

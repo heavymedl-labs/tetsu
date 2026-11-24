@@ -1,24 +1,24 @@
-//! Use cases, reached only through [`Operators`] (ADR-0021).
+//! Use cases, reached only through [`Admins`] (ADR-0021).
 
 use crate::browser::{Change, CheckedSession, ForChange, Logout, Origins};
 use crate::domain::{
-    Account, Actor, Addition, Answer, Ceremony, CeremonyKind, CeremonyToken, Device, Disabling,
-    Ending, Error, FailedCheck, Fill, InviteToken, Issue, ListedSession, Login, NewPasskey,
-    OperatorId, OperatorName, OperatorSummary, RateLimit, Realm, Redemption, Refusal, Removal,
-    Session, SessionId, SessionStart, SessionToken, Signer, TimeLeft,
+    Account, Actor, Addition, AdminId, AdminName, AdminSummary, Answer, Ceremony, CeremonyKind,
+    CeremonyToken, Device, Disabling, Ending, Error, FailedCheck, Fill, InviteToken, Issue,
+    ListedSession, Login, NewPasskey, RateLimit, Realm, Redemption, Refusal, Removal, Session,
+    SessionId, SessionStart, SessionToken, Signer, TimeLeft,
 };
 use crate::passkeys::RelyingParty;
-use crate::ports::OperatorStore;
+use crate::ports::AdminStore;
 use tetsu_kernel::{Address, Requester};
 
-/// The operator realm's use cases over a store. It offers nothing that reaches the store, so no caller can read or
+/// The admin realm's use cases over a store. It offers nothing that reaches the store, so no caller can read or
 /// write a session except through these.
-pub struct Operators<S> {
+pub struct Admins<S> {
     store: S,
     fill: Fill,
 }
 
-impl<S: OperatorStore> Operators<S> {
+impl<S: AdminStore> Admins<S> {
     /// Wraps a store, such as a test's own or another adapter.
     pub fn new(store: S) -> Self {
         Self {
@@ -33,76 +33,72 @@ impl<S: OperatorStore> Operators<S> {
         Self { store, fill }
     }
 
-    /// Creates an operator with no passkey, and their email address if given (ADR-0074), for ADR-0040's join
+    /// Creates an admin with no passkey, and their email address if given (ADR-0074), for ADR-0040's join
     /// command, and records it for the audit record.
     ///
     /// # Errors
     /// Fails if storage fails.
     pub async fn create(
         &self,
-        name: &OperatorName,
+        name: &AdminName,
         email: Option<&Address>,
         actor: &Actor,
-    ) -> Result<OperatorId, Error> {
-        self.store.insert_operator(name, email, actor).await
+    ) -> Result<AdminId, Error> {
+        self.store.insert_admin(name, email, actor).await
     }
 
-    /// An operator's email address, for their invite and notices, or none for one who has none or does not exist.
+    /// An admin's email address, for their invite and notices, or none for one who has none or does not exist.
     ///
     /// # Errors
     /// Fails if storage fails.
-    pub async fn email(&self, operator: OperatorId) -> Result<Option<Address>, Error> {
-        self.store.operator_email(operator).await
+    pub async fn email(&self, admin: AdminId) -> Result<Option<Address>, Error> {
+        self.store.admin_email(admin).await
     }
 
-    /// Sets an operator's email address, where their invites and notices go from now on, and says whether it changed
+    /// Sets an admin's email address, where their invites and notices go from now on, and says whether it changed
     /// (ADR-0074).
     ///
     /// # Errors
-    /// Fails with [`Error::Invalid`] for an operator who does not exist, or if storage fails.
+    /// Fails with [`Error::Invalid`] for an admin who does not exist, or if storage fails.
     pub async fn set_email(
         &self,
-        operator: OperatorId,
+        admin: AdminId,
         email: &Address,
         actor: &Actor,
     ) -> Result<bool, Error> {
         self.store
-            .set_operator_email(operator, email, actor)
+            .set_admin_email(admin, email, actor)
             .await?
-            .ok_or_else(|| no_operator(operator))
+            .ok_or_else(|| no_admin(admin))
     }
 
-    /// Issues an operator's invite link token, good once and for an hour, replacing any earlier link, and
+    /// Issues an admin's invite link token, good once and for an hour, replacing any earlier link, and
     /// records whether one was issued, never the token (ADR-0040). The command prints it only to its own terminal.
     ///
     /// # Errors
-    /// Fails with [`Error::Invalid`] for an operator who is disabled, holds a passkey already, or does not exist,
+    /// Fails with [`Error::Invalid`] for an admin who is disabled, holds a passkey already, or does not exist,
     /// each named as such, if no secure random source can be read, or if storage fails.
-    pub async fn invite(&self, operator: OperatorId, actor: &Actor) -> Result<InviteToken, Error> {
+    pub async fn invite(&self, admin: AdminId, actor: &Actor) -> Result<InviteToken, Error> {
         let token = InviteToken::generate(self.fill)?;
-        match self
-            .store
-            .issue_invite(&token.hash(), operator, actor)
-            .await?
-        {
+        match self.store.issue_invite(&token.hash(), admin, actor).await? {
             Some(Issue::Issued) => Ok(token),
-            Some(Issue::Disabled) => Err(no_enabled(operator)),
+            Some(Issue::Disabled) => Err(no_enabled(admin)),
             Some(Issue::Joined) => Err(Error::Invalid(format!(
-                "operator {} has a passkey already, and adds another after logging in",
-                operator.get()
+                "admin {} has a passkey already, and adds another after logging in",
+                admin.get()
             ))),
-            None => Err(no_operator(operator)),
+            None => Err(no_admin(admin)),
         }
     }
 
-    /// Begins joining an operator's first passkey from the token their invite link carries. The link stays
-    /// open: only finishing uses it up, so a scanner that opens the page, or a ceremony the operator abandons, costs
+    /// Begins joining an admin's first passkey from the token their invite link carries. The link stays
+    /// open: only finishing uses it up, so a scanner that opens the page, or a ceremony the admin abandons, costs
     /// nothing. The ceremony lasts ten minutes, never past the link, replaces any earlier one of the same link, and its
     /// state never leaves the store.
     ///
     /// # Errors
     /// Fails with [`Error::Invalid`], the same for every cause, for a link that is malformed, unknown, ended, or
-    /// names an operator who is disabled or holds a passkey; if no secure random source can be read; or if storage
+    /// names an admin who is disabled or holds a passkey; if no secure random source can be read; or if storage
     /// fails.
     pub async fn begin_join(&self, party: &RelyingParty, link: &str) -> Result<Ceremony, Error> {
         let link = InviteToken::parse(link).ok_or_else(not_joining)?;
@@ -116,7 +112,7 @@ impl<S: OperatorStore> Operators<S> {
         let token = CeremonyToken::generate(self.fill)?;
         let begun = self
             .store
-            .begin_join(&token.hash(), invitee.operator, &link.hash(), &state)
+            .begin_join(&token.hash(), invitee.admin, &link.hash(), &state)
             .await
             .map_err(|error| refusing(error, not_joining))?;
         if begun {
@@ -127,19 +123,19 @@ impl<S: OperatorStore> Operators<S> {
     }
 
     /// Finishes joining: verifies the browser's registration against its ceremony, then stores the passkey and
-    /// uses up the link in one transaction, and records it. The ceremony is used up whatever happens. The operator
+    /// uses up the link in one transaction, and records it. The ceremony is used up whatever happens. The admin
     /// is not logged in: they log in with the new passkey, which proves it works.
     ///
     /// # Errors
     /// Fails with [`Error::Invalid`], the same for every cause, for a ceremony that is malformed, unknown, or ended,
-    /// a registration that does not verify, or a link or operator that no longer allows it; or if storage fails.
+    /// a registration that does not verify, or a link or admin that no longer allows it; or if storage fails.
     pub async fn finish_join(
         &self,
         party: &RelyingParty,
         answer: Answer<'_>,
         cookies: &[&str],
         actor: &Actor,
-    ) -> Result<(OperatorId, SessionToken), Error> {
+    ) -> Result<(AdminId, SessionToken), Error> {
         let held = CeremonyToken::parse(answer.ceremony).ok_or_else(not_joining)?;
         let taken = self
             .store
@@ -149,7 +145,7 @@ impl<S: OperatorStore> Operators<S> {
             .ok_or_else(not_joining)?;
         let pending = Pending {
             kind: CeremonyKind::Join,
-            operator: taken.operator,
+            admin: taken.admin,
             state: &taken.state,
         };
         let passkey = self
@@ -163,22 +159,22 @@ impl<S: OperatorStore> Operators<S> {
             .await
             .map_err(|error| refusing(error, not_joining))?
         {
-            Some(Redemption::Redeemed) => Ok((taken.operator, started)),
+            Some(Redemption::Redeemed) => Ok((taken.admin, started)),
             _ => Err(not_joining()),
         }
     }
 
-    /// Disables an operator, and then ends every session and invite link they hold, so a disabled operator is
-    /// logged out at once and logs in again nowhere (`v5.0.0-7.4.2`). Says what it did; an operator already
+    /// Disables an admin, and then ends every session and invite link they hold, so a disabled admin is
+    /// logged out at once and logs in again nowhere (`v5.0.0-7.4.2`). Says what it did; an admin already
     /// disabled is left as is.
     ///
     /// # Errors
-    /// Fails with [`Error::Invalid`] for an operator who does not exist, or if storage fails.
-    pub async fn disable(&self, operator: OperatorId, actor: &Actor) -> Result<Disabling, Error> {
+    /// Fails with [`Error::Invalid`] for an admin who does not exist, or if storage fails.
+    pub async fn disable(&self, admin: AdminId, actor: &Actor) -> Result<Disabling, Error> {
         self.store
-            .disable_operator(operator, actor)
+            .disable_admin(admin, actor)
             .await?
-            .ok_or_else(|| no_operator(operator))
+            .ok_or_else(|| no_admin(admin))
     }
 
     /// Admits an attempt from `from` under a rate limit (ADR-0072), counting it unless the limit counts only
@@ -216,15 +212,15 @@ impl<S: OperatorStore> Operators<S> {
         Ok(Ceremony { token, options })
     }
 
-    /// Finishes a passkey login and starts the operator's session, returning its token, and ends the operator
+    /// Finishes a passkey login and starts the admin's session, returning its token, and ends the admin
     /// session the browser presented among its `cookies`, whoever's it was, in the same transaction (ADR-0059,
-    /// `v5.0.0-7.2.4`). The ceremony is used up whatever happens. The passkey must belong to an enabled operator whose user handle the answer names
+    /// `v5.0.0-7.2.4`). The ceremony is used up whatever happens. The passkey must belong to an enabled admin whose user handle the answer names
     /// (`WebAuthn` L3 §7.2), and must verify, user verification included; its new counter is stored only if no other
     /// login changed it meanwhile, in the transaction that starts the session, which is recorded.
     ///
     /// # Errors
     /// Fails with [`Error::Invalid`], the same for every cause, for a ceremony that is malformed, unknown, or ended,
-    /// an answer that names no enabled operator's passkey or does not verify, or a login that lost a race; with
+    /// an answer that names no enabled admin's passkey or does not verify, or a login that lost a race; with
     /// [`Error::Unavailable`] if no secure random source can be read; or if storage fails.
     pub async fn finish_login(
         &self,
@@ -249,9 +245,9 @@ impl<S: OperatorStore> Operators<S> {
     }
 
     /// The passkey a login's answer names and verifies, with its state as it should now be stored. Each way it
-    /// can be refused once its ceremony is taken is recorded with its reason, and with the operator and credential
-    /// where known, before the one answer is given: an answer that is not one, a credential no enabled operator
-    /// holds, a user handle that is not the credential's operator's (`WebAuthn` L3 §7.2), or what `webauthn-rs`
+    /// can be refused once its ceremony is taken is recorded with its reason, and with the admin and credential
+    /// where known, before the one answer is given: an answer that is not one, a credential no enabled admin
+    /// holds, a user handle that is not the credential's admin's (`WebAuthn` L3 §7.2), or what `webauthn-rs`
     /// refuses, such as a counter that did not move forward (ADR-0047).
     async fn verified(
         &self,
@@ -260,27 +256,27 @@ impl<S: OperatorStore> Operators<S> {
         state: &str,
         actor: &Actor,
     ) -> Result<(Signer, String), Error> {
-        let (operator, credential, reason) = match party.identify(response) {
+        let (admin, credential, reason) = match party.identify(response) {
             Err(credential) => (None, credential, "malformed".to_string()),
             Ok(answer) => match self.store.signer(&answer.credential).await? {
                 Some(signer) if !signer.disabled && signer.user_handle == answer.handle => {
                     match party.finish_authentication(&answer, state, &signer.passkey) {
                         Ok(passkey) => return Ok((signer, passkey)),
                         Err(Error::Invalid(reason)) => {
-                            (Some(signer.operator), Some(answer.credential), reason)
+                            (Some(signer.admin), Some(answer.credential), reason)
                         }
                         Err(other) => return Err(other),
                     }
                 }
                 found => {
-                    let (operator, reason) = refused_before_verifying(found.as_ref());
-                    (operator, Some(answer.credential), reason.to_string())
+                    let (admin, reason) = refused_before_verifying(found.as_ref());
+                    (admin, Some(answer.credential), reason.to_string())
                 }
             },
         };
         let refusal = Refusal {
             kind: CeremonyKind::Login,
-            operator,
+            admin,
             credential: credential.as_deref(),
             reason: &reason,
         };
@@ -289,7 +285,7 @@ impl<S: OperatorStore> Operators<S> {
     }
 
     /// The passkey a registration answers with, verified against its ceremony's state. A refusal is recorded with
-    /// its reason and the operator whose ceremony it was, then returned for the caller to answer as one refusal.
+    /// its reason and the admin whose ceremony it was, then returned for the caller to answer as one refusal.
     async fn registered(
         &self,
         party: &RelyingParty,
@@ -303,7 +299,7 @@ impl<S: OperatorStore> Operators<S> {
         };
         let refusal = Refusal {
             kind: pending.kind,
-            operator: Some(pending.operator),
+            admin: Some(pending.admin),
             credential: None,
             reason: &reason,
         };
@@ -311,9 +307,9 @@ impl<S: OperatorStore> Operators<S> {
         Err(Error::Invalid(reason))
     }
 
-    /// The account a live session names: the operator, their user handle and name, and every credential they hold,
-    /// as the operator's page and the browser's list of their passkeys need; none if the session has ended or the
-    /// operator is disabled. Reading it changes nothing, not even the session's last request.
+    /// The account a live session names: the admin, their user handle and name, and every credential they hold,
+    /// as the admin's page and the browser's list of their passkeys need; none if the session has ended or the
+    /// admin is disabled. Reading it changes nothing, not even the session's last request.
     ///
     /// # Errors
     /// Fails if storage fails.
@@ -321,8 +317,8 @@ impl<S: OperatorStore> Operators<S> {
         self.store.account(&session.hash).await
     }
 
-    /// The live sessions of the operator `session` belongs to, as their page lists them, that one first (ADR-0059,
-    /// `v5.0.0-7.5.2`). They are found from the session alone, so no request lists another operator's, and reading
+    /// The live sessions of the admin `session` belongs to, as their page lists them, that one first (ADR-0059,
+    /// `v5.0.0-7.5.2`). They are found from the session alone, so no request lists another admin's, and reading
     /// them renews none.
     ///
     /// # Errors
@@ -331,10 +327,10 @@ impl<S: OperatorStore> Operators<S> {
         self.store.sessions_of(&session.hash).await
     }
 
-    /// Ends one of the operator's other sessions, by its id, or every other one when `only` names none (ADR-0059,
+    /// Ends one of the admin's other sessions, by its id, or every other one when `only` names none (ADR-0059,
     /// `v5.0.0-7.5.2`), and records it. It passes the same checks as [`Self::session_for_change`], and then only a
     /// session a passkey proved within ten minutes may, by Postgres's clock (ADR-0048, `v5.0.0-7.5.1`). The session
-    /// asking is never ended here; logging out ends it. The record names the operator and the `device` asking.
+    /// asking is never ended here; logging out ends it. The record names the admin and the `device` asking.
     ///
     /// # Errors
     /// Fails if storage fails.
@@ -351,19 +347,19 @@ impl<S: OperatorStore> Operators<S> {
             ForChange::Refused(check) => return Ok(Ending::Refused(check)),
         };
         let session = checked.session();
-        let actor = Actor::browser(Some(session.operator()), device);
+        let actor = Actor::browser(Some(session.admin()), device);
         self.store
             .end_other_sessions(&session.hash, only, &actor)
             .await
     }
 
-    /// Begins adding an operator's second passkey (ADR-0057), from a session that began with a passkey login
+    /// Begins adding an admin's second passkey (ADR-0057), from a session that began with a passkey login
     /// within ten minutes, by Postgres's clock (ADR-0048, `v5.0.0-7.5.1`). The options list the passkeys they hold,
-    /// so a device that has one makes no second, and the ceremony lasts ten minutes. With no email for operators
+    /// so a device that has one makes no second, and the ceremony lasts ten minutes. With no email for admins
     /// yet, the audit record is the notice ADR-0040 asks for.
     ///
     /// # Errors
-    /// Fails with [`Error::Invalid`], the same for every cause, for a session that is not fresh or an operator who
+    /// Fails with [`Error::Invalid`], the same for every cause, for a session that is not fresh or an admin who
     /// is disabled or holds two passkeys; with [`Error::Unavailable`] if no secure random source can be read; or if
     /// storage fails.
     pub async fn begin_adding_passkey(
@@ -384,7 +380,7 @@ impl<S: OperatorStore> Operators<S> {
         })?;
         let begun = self
             .store
-            .begin_addition(&token.hash(), &session.hash, adder.operator, &state)
+            .begin_addition(&token.hash(), &session.hash, adder.admin, &state)
             .await?;
         begun
             .then_some(Ceremony { token, options })
@@ -392,12 +388,12 @@ impl<S: OperatorStore> Operators<S> {
     }
 
     /// Finishes adding a passkey: takes the addition once, for the session that began it, verifies the registration,
-    /// and stores the passkey while the session is still live and the operator holds fewer than two, using up the
-    /// addition and ending the operator's other sessions, recording it.
+    /// and stores the passkey while the session is still live and the admin holds fewer than two, using up the
+    /// addition and ending the admin's other sessions, recording it.
     ///
     /// # Errors
     /// Fails with [`Error::Invalid`], the same for every cause, for a ceremony that is malformed, unknown, ended, or
-    /// another operator's, a registration that does not verify, or a session or operator that no longer allows it;
+    /// another admin's, a registration that does not verify, or a session or admin that no longer allows it;
     /// or if storage fails.
     pub async fn finish_adding_passkey(
         &self,
@@ -414,7 +410,7 @@ impl<S: OperatorStore> Operators<S> {
             .ok_or_else(not_adding)?;
         let pending = Pending {
             kind: CeremonyKind::Addition,
-            operator: taken.operator,
+            admin: taken.admin,
             state: &taken.state,
         };
         let passkey = self
@@ -428,64 +424,60 @@ impl<S: OperatorStore> Operators<S> {
             .ok_or_else(not_adding)
     }
 
-    /// Removes every passkey an operator holds, so they can be issued a link and join again, as when their only
+    /// Removes every passkey an admin holds, so they can be issued a link and join again, as when their only
     /// passkey is lost or unusable (ADR-0057). Their sessions and any ceremony end too, since a session begun with a
     /// removed passkey must not outlive it (`v5.0.0-7.4.3`). Says how many passkeys it removed and sessions it
     /// ended.
     ///
     /// # Errors
-    /// Fails with [`Error::Invalid`] for an operator who does not exist, or if storage fails.
-    pub async fn remove_passkeys(
-        &self,
-        operator: OperatorId,
-        actor: &Actor,
-    ) -> Result<Removal, Error> {
+    /// Fails with [`Error::Invalid`] for an admin who does not exist, or if storage fails.
+    pub async fn remove_passkeys(&self, admin: AdminId, actor: &Actor) -> Result<Removal, Error> {
         self.store
-            .remove_passkeys(operator, actor)
+            .remove_passkeys(admin, actor)
             .await?
-            .ok_or_else(|| no_operator(operator))
+            .ok_or_else(|| no_admin(admin))
     }
 
-    /// Enables a disabled operator again, and says whether they were disabled. Their sessions stay ended, so they
+    /// Enables a disabled admin again, and says whether they were disabled. Their sessions stay ended, so they
     /// log in afresh.
     ///
     /// # Errors
-    /// Fails with [`Error::Invalid`] for an operator who does not exist, or if storage fails.
-    pub async fn enable(&self, operator: OperatorId, actor: &Actor) -> Result<bool, Error> {
+    /// Fails with [`Error::Invalid`] for an admin who does not exist, or if storage fails.
+    pub async fn enable(&self, admin: AdminId, actor: &Actor) -> Result<bool, Error> {
         self.store
-            .enable_operator(operator, actor)
+            .enable_admin(admin, actor)
             .await?
-            .ok_or_else(|| no_operator(operator))
+            .ok_or_else(|| no_admin(admin))
     }
 
-    /// Ends every session one operator holds, as an administrator may (`v5.0.0-7.4.5`), and says how many.
+    /// Ends every session one admin holds, as an administrator may (`v5.0.0-7.4.5`), and says how many.
     ///
     /// # Errors
-    /// Fails with [`Error::Invalid`] for an operator who does not exist, or if storage fails.
-    pub async fn end_sessions(&self, operator: OperatorId, actor: &Actor) -> Result<u64, Error> {
+    /// Fails with [`Error::Invalid`] for an admin who does not exist, or if storage fails.
+    pub async fn end_sessions(&self, admin: AdminId, actor: &Actor) -> Result<u64, Error> {
         self.store
-            .end_operator_sessions(operator, Realm::Operator, actor)
+            .end_admin_sessions(admin, Realm::Admin, actor)
             .await?
-            .ok_or_else(|| no_operator(operator))
+            .ok_or_else(|| no_admin(admin))
     }
 
-    /// Ends every operator session, as an administrator may (`v5.0.0-7.4.5`), and says how many.
+    /// Ends every admin session, as an administrator may (`v5.0.0-7.4.5`), and says how many.
     ///
     /// # Errors
     /// Fails if storage fails.
     pub async fn end_all_sessions(&self, actor: &Actor) -> Result<u64, Error> {
-        self.store.end_realm_sessions(Realm::Operator, actor).await
+        self.store.end_realm_sessions(Realm::Admin, actor).await
     }
 
-    /// Every operator, oldest first.
+    /// Every admin, oldest first.
     ///
     /// # Errors
     /// Fails if storage fails.
-    pub async fn list(&self) -> Result<Vec<OperatorSummary>, Error> {
-        self.store.list_operators().await
+    pub async fn list(&self) -> Result<Vec<AdminSummary>, Error> {
+        self.store.list_admins().await
     }
 
-    /// The live operator session named by the session cookie among a request's `Cookie` headers, for a request
+    /// The live admin session named by the session cookie among a request's `Cookie` headers, for a request
     /// that only reads; this request counts as its latest. A request with no such cookie, one sent twice, a token
     /// that is malformed, unknown, from another realm, or past either limit names none, and a session past a limit
     /// is removed, so it can never be used again (ADR-0048, `v5.0.0-7.3.1`, `v5.0.0-7.3.2`). A request that
@@ -497,13 +489,13 @@ impl<S: OperatorStore> Operators<S> {
         &self,
         cookies: impl IntoIterator<Item = &'a str>,
     ) -> Result<Option<Session>, Error> {
-        match operator_token(cookies) {
+        match admin_token(cookies) {
             Some(token) => self.live(&token).await,
             None => Ok(None),
         }
     }
 
-    /// How long the operator session named by a request's cookies has left, read without counting as a request,
+    /// How long the admin session named by a request's cookies has left, read without counting as a request,
     /// so a page can warn before the idle limit without keeping the session alive: only the person's own requests
     /// renew it (NIST SP 800-63B-4). None for a request with no live session, as [`Self::session`] would find.
     ///
@@ -513,19 +505,15 @@ impl<S: OperatorStore> Operators<S> {
         &self,
         cookies: impl IntoIterator<Item = &'a str>,
     ) -> Result<Option<TimeLeft>, Error> {
-        match operator_token(cookies) {
-            Some(token) => {
-                self.store
-                    .session_left(&token.hash(), Realm::Operator)
-                    .await
-            }
+        match admin_token(cookies) {
+            Some(token) => self.store.session_left(&token.hash(), Realm::Admin).await,
             None => Ok(None),
         }
     }
 
-    /// What a state-changing request may do: act for its live operator session only when it comes from one of the
+    /// What a state-changing request may do: act for its live admin session only when it comes from one of the
     /// realm's origins and carries that session's own form token, so no other site's form or script can act for a
-    /// logged-in operator (ADR-0048, `v5.0.0-3.5.1`). A refused request leaves the session as it was.
+    /// logged-in admin (ADR-0048, `v5.0.0-3.5.1`). A refused request leaves the session as it was.
     ///
     /// # Errors
     /// Fails if storage fails.
@@ -534,7 +522,7 @@ impl<S: OperatorStore> Operators<S> {
         origins: &Origins,
         change: &Change<'_>,
     ) -> Result<ForChange, Error> {
-        let token = match change.verified(Realm::Operator, origins) {
+        let token = match change.verified(Realm::Admin, origins) {
             Ok(token) => token,
             Err(check) => return Ok(ForChange::Refused(check)),
         };
@@ -548,7 +536,7 @@ impl<S: OperatorStore> Operators<S> {
     /// has room under the limit on recording refusals (ADR-0081, `v5.0.0-16.3.3`). Past that, the request is still
     /// refused, but not recorded, except that the first such refusal each window says so (ADR-0081). The record
     /// names the route, the check, and `actor`, never the request's token or address. A refused request proves no
-    /// session, so its actor names no operator, even when its cookie is a live session's.
+    /// session, so its actor names no admin, even when its cookie is a live session's.
     ///
     /// # Errors
     /// Fails if storage fails.
@@ -573,13 +561,13 @@ impl<S: OperatorStore> Operators<S> {
         origins: &Origins,
         change: &Change<'_>,
     ) -> Result<Logout, Error> {
-        let token = match change.verified(Realm::Operator, origins) {
+        let token = match change.verified(Realm::Admin, origins) {
             Ok(token) => token,
             Err(check) => return Ok(Logout::Refused(check)),
         };
         let ended = self
             .store
-            .delete_session(&token.hash(), Realm::Operator)
+            .delete_session(&token.hash(), Realm::Admin)
             .await?;
         Ok(if ended {
             Logout::Ended
@@ -594,56 +582,52 @@ impl<S: OperatorStore> Operators<S> {
         let token = SessionToken::generate(self.fill)?;
         let session = SessionStart {
             hash: token.hash(),
-            replacing: operator_token(cookies.iter().copied()).map(|presented| presented.hash()),
+            replacing: admin_token(cookies.iter().copied()).map(|presented| presented.hash()),
         };
         Ok((token, session))
     }
 
     async fn live(&self, token: &SessionToken) -> Result<Option<Session>, Error> {
-        self.store.use_session(&token.hash(), Realm::Operator).await
+        self.store.use_session(&token.hash(), Realm::Admin).await
     }
 }
 
-/// The operator session's token among a request's cookies, if there is exactly one and it is well formed.
-fn operator_token<'a>(cookies: impl IntoIterator<Item = &'a str>) -> Option<SessionToken> {
-    Realm::Operator
-        .token_in(cookies)
-        .and_then(SessionToken::parse)
+/// The admin session's token among a request's cookies, if there is exactly one and it is well formed.
+fn admin_token<'a>(cookies: impl IntoIterator<Item = &'a str>) -> Option<SessionToken> {
+    Realm::Admin.token_in(cookies).and_then(SessionToken::parse)
 }
 
-/// One answer for every way a join can fail, so a browser learns nothing about which links or operators
+/// One answer for every way a join can fail, so a browser learns nothing about which links or admins
 /// exist.
 fn not_joining() -> Error {
-    Error::Invalid(
-        "this invite has ended; if you have already joined, log in, or ask an operator for a new one".to_string(),
-    )
+    Error::Invalid("this invite has ended. Log in, or ask an admin for a new one".to_string())
 }
 
-/// One answer for every way a login can fail, so a browser learns nothing about which passkeys or operators
+/// One answer for every way a login can fail, so a browser learns nothing about which passkeys or admins
 /// exist (`v5.0.0-6.3.8`).
 fn not_logging_in() -> Error {
-    Error::Invalid("this login could not be completed".to_string())
+    Error::Invalid("this login didn't work. Try again".to_string())
 }
 
 /// A registration whose ceremony was taken: what kind it is, whose, and the state it began with.
 struct Pending<'a> {
     kind: CeremonyKind,
-    operator: OperatorId,
+    admin: AdminId,
     state: &'a str,
 }
 
 /// One answer for every way adding a passkey can fail.
 fn not_adding() -> Error {
-    Error::Invalid("this passkey could not be added".to_string())
+    Error::Invalid("this passkey couldn't be added".to_string())
 }
 
-/// Why a login was refused before its passkey was verified: no operator holds the credential, theirs is
+/// Why a login was refused before its passkey was verified: no admin holds the credential, theirs is
 /// disabled, or the answer gives another user handle.
-fn refused_before_verifying(found: Option<&Signer>) -> (Option<OperatorId>, &'static str) {
+fn refused_before_verifying(found: Option<&Signer>) -> (Option<AdminId>, &'static str) {
     match found {
         None => (None, "unknown_credential"),
-        Some(signer) if signer.disabled => (Some(signer.operator), "disabled"),
-        Some(signer) => (Some(signer.operator), "handle_mismatch"),
+        Some(signer) if signer.disabled => (Some(signer.admin), "disabled"),
+        Some(signer) => (Some(signer.admin), "handle_mismatch"),
     }
 }
 
@@ -656,10 +640,10 @@ fn refusing(error: Error, refusal: fn() -> Error) -> Error {
     }
 }
 
-fn no_operator(operator: OperatorId) -> Error {
-    Error::Invalid(format!("no operator {}", operator.get()))
+fn no_admin(admin: AdminId) -> Error {
+    Error::Invalid(format!("no admin {}", admin.get()))
 }
 
-fn no_enabled(operator: OperatorId) -> Error {
-    Error::Invalid(format!("no enabled operator {}", operator.get()))
+fn no_enabled(admin: AdminId) -> Error {
+    Error::Invalid(format!("no enabled admin {}", admin.get()))
 }

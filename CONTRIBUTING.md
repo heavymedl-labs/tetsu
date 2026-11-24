@@ -19,6 +19,8 @@ People and coding agents follow the same workflow and the rules in
    each commit, and the full checks before each push, and `git config blame.ignoreRevsFile .git-blame-ignore-revs`,
    so `git blame` skips commits that only reformat. Most formatters fix what they find; for templates, run
    `cargo run -p tetsu-format-templates` ([ADR-0083](docs/adr/0083-formatting-templates-and-minifying-pages.md)).
+   A drawing, a template of inline SVG, goes in a folder named `art`, which it leaves as written; it refuses a
+   template elsewhere with more than 12 SVG shapes, such as rectangles; an icon's path does not count.
 5. Open a pull request with the template filled in and `Closes #N`.
 
 Only a contributor's changes take steps 2, 3, and 5, from a fork, and the maintainer reviews each one with them. A

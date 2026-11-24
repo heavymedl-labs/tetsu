@@ -1,6 +1,6 @@
--- The passkey a credential ID names, with whether its operator is disabled.
+-- The passkey a credential ID names, with whether its admin is disabled.
 SELECT
-    s.operator_id,
+    s.admin_id,
     s.user_handle,
     s.passkey,
     s.disabled

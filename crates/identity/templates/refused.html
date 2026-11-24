@@ -1,6 +1,6 @@
 {% extends "../../../web/templates/page.html" %}
 {% import "../../../web/templates/components.html" as ui %}
 {% block title %}Not logged out – Tetsu{% endblock %}
-{% block body %}{%
-    call ui::empty("403", "Not logged out", "This logout did not come from your own page, so nothing changed. Log out from your page instead.")
-  %}{% endcall %}{% endblock %}
+{% block body %}{% call ui::empty("403", "Not logged out", "Nothing changed. Log out from your own page.") %}{%
+    endcall
+  %}{% endblock %}

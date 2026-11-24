@@ -7,27 +7,27 @@ use std::time::Duration;
 use tetsu_postgres::connect;
 use tetsu_postgres::test_support::TestDatabase;
 
-use crate::adapters::postgres::{PostgresOperators, hex};
-use crate::join_tests::{as_admin, failure, number, with_link};
-use crate::{Error, Operators, RateLimit};
+use crate::adapters::postgres::{PostgresAdmins, hex};
+use crate::join_tests::{as_db_admin, failure, number, with_link};
+use crate::{Admins, Error, RateLimit};
 use tetsu_kernel::Requester;
 
 fn network(address: &str) -> Requester {
     Requester::of(address.parse::<IpAddr>().expect("an address"))
 }
 
-async fn limited() -> (Operators<PostgresOperators>, TestDatabase) {
-    let (operators, database, _, _) = with_link().await;
-    (operators, database)
+async fn limited() -> (Admins<PostgresAdmins>, TestDatabase) {
+    let (admins, database, _, _) = with_link().await;
+    (admins, database)
 }
 
 /// How long `limit` makes `from` wait now, or nothing when it is admitted.
 async fn wait(
-    operators: &Operators<PostgresOperators>,
+    admins: &Admins<PostgresAdmins>,
     limit: RateLimit,
     from: &Requester,
 ) -> Option<Duration> {
-    match operators.admit(limit, from).await {
+    match admins.admit(limit, from).await {
         Ok(()) => None,
         Err(Error::Limited(wait)) => Some(wait),
         Err(other) => panic!("{other}"),
@@ -36,7 +36,7 @@ async fn wait(
 
 /// Moves every limit's clock on by `seconds`.
 async fn later(database: &TestDatabase, seconds: u64) {
-    as_admin(
+    as_db_admin(
         database,
         &format!("UPDATE identity.limits SET due = due - interval '{seconds} seconds'"),
     )
@@ -47,35 +47,31 @@ async fn later(database: &TestDatabase, seconds: u64) {
 /// has its own room.
 #[tokio::test]
 async fn a_network_begins_thirty_logins_then_one_each_thirty_seconds() {
-    let (operators, database) = limited().await;
+    let (admins, database) = limited().await;
     let (one, other) = (network("192.0.2.1"), network("192.0.2.2"));
     for _ in 0..30 {
-        assert_eq!(wait(&operators, RateLimit::LoginBegin, &one).await, None);
+        assert_eq!(wait(&admins, RateLimit::LoginBegin, &one).await, None);
     }
-    let refused = wait(&operators, RateLimit::LoginBegin, &one).await;
+    let refused = wait(&admins, RateLimit::LoginBegin, &one).await;
     assert_eq!(refused, Some(Duration::from_secs(30)));
-    assert_eq!(wait(&operators, RateLimit::LoginBegin, &other).await, None);
-    assert_eq!(wait(&operators, RateLimit::Join, &one).await, None);
+    assert_eq!(wait(&admins, RateLimit::LoginBegin, &other).await, None);
+    assert_eq!(wait(&admins, RateLimit::Join, &one).await, None);
     later(&database, 30).await;
-    assert_eq!(wait(&operators, RateLimit::LoginBegin, &one).await, None);
-    assert!(
-        wait(&operators, RateLimit::LoginBegin, &one)
-            .await
-            .is_some()
-    );
+    assert_eq!(wait(&admins, RateLimit::LoginBegin, &one).await, None);
+    assert!(wait(&admins, RateLimit::LoginBegin, &one).await.is_some());
 }
 
 /// Ten join steps fit in an hour, one every six minutes after, and an IPv6 network is its /64.
 #[tokio::test]
 async fn a_network_takes_ten_join_steps_an_hour() {
-    let (operators, _database) = limited().await;
+    let (admins, _database) = limited().await;
     for n in 0..10 {
         let from = network(&format!("2001:db8:1:2::{n}"));
-        assert_eq!(wait(&operators, RateLimit::Join, &from).await, None);
+        assert_eq!(wait(&admins, RateLimit::Join, &from).await, None);
     }
     let from = network("2001:db8:1:2:ffff::1");
     assert_eq!(
-        wait(&operators, RateLimit::Join, &from).await,
+        wait(&admins, RateLimit::Join, &from).await,
         Some(Duration::from_secs(360))
     );
 }
@@ -84,55 +80,52 @@ async fn a_network_takes_ten_join_steps_an_hour() {
 /// doubles the wait, up to an hour.
 #[tokio::test]
 async fn failures_meet_their_limit_then_wait_twice_as_long_each_time() {
-    let (operators, database) = limited().await;
+    let (admins, database) = limited().await;
     let from = network("192.0.2.1");
     for _ in 0..20 {
-        assert_eq!(wait(&operators, RateLimit::LoginFailure, &from).await, None);
+        assert_eq!(wait(&admins, RateLimit::LoginFailure, &from).await, None);
     }
     for _ in 0..9 {
-        operators.failed(&from).await.expect("counts");
+        admins.failed(&from).await.expect("counts");
     }
-    assert_eq!(wait(&operators, RateLimit::LoginFailure, &from).await, None);
+    assert_eq!(wait(&admins, RateLimit::LoginFailure, &from).await, None);
     let mut waits = Vec::new();
     for _ in 0..8 {
-        operators.failed(&from).await.expect("counts");
-        let waited = wait(&operators, RateLimit::LoginFailure, &from)
+        admins.failed(&from).await.expect("counts");
+        let waited = wait(&admins, RateLimit::LoginFailure, &from)
             .await
             .expect("a wait");
         waits.push(waited.as_secs());
         later(&database, waited.as_secs()).await;
-        assert_eq!(wait(&operators, RateLimit::LoginFailure, &from).await, None);
+        assert_eq!(wait(&admins, RateLimit::LoginFailure, &from).await, None);
     }
     assert_eq!(waits, [60, 120, 240, 480, 960, 1920, 3600, 3600]);
     let other = network("192.0.2.2");
-    assert_eq!(
-        wait(&operators, RateLimit::LoginFailure, &other).await,
-        None
-    );
+    assert_eq!(wait(&admins, RateLimit::LoginFailure, &other).await, None);
 }
 
 /// Once all a network's room is free again, its strikes are forgotten, and failing starts over.
 #[tokio::test]
 async fn strikes_are_forgotten_once_the_room_is_free() {
-    let (operators, database) = limited().await;
+    let (admins, database) = limited().await;
     let from = network("192.0.2.1");
     for _ in 0..10 {
-        operators.failed(&from).await.expect("counts");
+        admins.failed(&from).await.expect("counts");
     }
     later(&database, 7200).await;
-    operators.failed(&from).await.expect("counts");
+    admins.failed(&from).await.expect("counts");
     let strikes = "SELECT strikes::bigint FROM identity.limits WHERE kind = 'login_failure'";
     assert_eq!(number(&database, strikes).await, 0);
-    assert_eq!(wait(&operators, RateLimit::LoginFailure, &from).await, None);
+    assert_eq!(wait(&admins, RateLimit::LoginFailure, &from).await, None);
 }
 
 /// A limit's row keys on its network hashed with the database's own secret, never the address or its plain hash,
 /// and rows a day past their use are swept, a hundred at a time.
 #[tokio::test]
 async fn limits_hold_no_address_and_forget_old_networks() {
-    let (operators, database) = limited().await;
+    let (admins, database) = limited().await;
     let from = network("192.0.2.1");
-    operators
+    admins
         .admit(RateLimit::LoginBegin, &from)
         .await
         .expect("admits");
@@ -143,14 +136,14 @@ async fn limits_hold_no_address_and_forget_old_networks() {
          AND l.network_hash <> sha256('\\x{bytes}'::bytea)"
     );
     assert_eq!(number(&database, &keyed).await, 1);
-    as_admin(
+    as_db_admin(
         &database,
         "INSERT INTO identity.limits (kind, network_hash, due)
          SELECT 'join', sha256(int8send(n)), now() - interval '2 days'
          FROM generate_series(1, 150) AS n",
     )
     .await;
-    operators
+    admins
         .admit(RateLimit::LoginBegin, &from)
         .await
         .expect("admits");
@@ -164,7 +157,7 @@ async fn limits_hold_no_address_and_forget_old_networks() {
 /// not one.
 #[tokio::test]
 async fn the_limits_refuse_what_they_do_not_keep() {
-    let (_operators, database) = limited().await;
+    let (_admins, database) = limited().await;
     let mut app = connect(&database.as_app()).await.expect("connects");
     let network = "'\\x00000000000000000000ffffc0000201'::bytea";
     for (call, said) in [
@@ -210,20 +203,20 @@ async fn as_identity(app: &mut tokio_postgres::Client, sql: &str) -> tokio_postg
 /// Admitting and counting fail as storage when the database refuses their functions.
 #[tokio::test]
 async fn limits_fail_as_storage_when_refused() {
-    let (operators, database) = limited().await;
+    let (admins, database) = limited().await;
     let from = network("192.0.2.1");
-    as_admin(
+    as_db_admin(
         &database,
         "REVOKE EXECUTE ON FUNCTION identity.admit(text, bytea), identity.fail(text, bytea)
          FROM tetsu_identity",
     )
     .await;
     assert_eq!(
-        failure(operators.admit(RateLimit::LoginBegin, &from).await),
+        failure(admins.admit(RateLimit::LoginBegin, &from).await),
         "storage failed: permission denied for function admit"
     );
     assert_eq!(
-        failure(operators.failed(&from).await),
+        failure(admins.failed(&from).await),
         "storage failed: permission denied for function fail"
     );
 }
@@ -232,22 +225,22 @@ async fn limits_fail_as_storage_when_refused() {
 /// once in fifteen minutes (ADR-0081).
 #[tokio::test]
 async fn a_network_has_ten_refusals_recorded_in_fifteen_minutes() {
-    let (operators, database) = limited().await;
+    let (admins, database) = limited().await;
     let from = network("192.0.2.1");
     for _ in 0..10 {
-        assert_eq!(wait(&operators, RateLimit::Refusal, &from).await, None);
+        assert_eq!(wait(&admins, RateLimit::Refusal, &from).await, None);
     }
     assert_eq!(
-        wait(&operators, RateLimit::Refusal, &from).await,
+        wait(&admins, RateLimit::Refusal, &from).await,
         Some(Duration::from_secs(90))
     );
-    assert_eq!(wait(&operators, RateLimit::RefusalFlood, &from).await, None);
+    assert_eq!(wait(&admins, RateLimit::RefusalFlood, &from).await, None);
     assert_eq!(
-        wait(&operators, RateLimit::RefusalFlood, &from).await,
+        wait(&admins, RateLimit::RefusalFlood, &from).await,
         Some(Duration::from_mins(15))
     );
     later(&database, 90).await;
-    assert_eq!(wait(&operators, RateLimit::Refusal, &from).await, None);
+    assert_eq!(wait(&admins, RateLimit::Refusal, &from).await, None);
     later(&database, 810).await;
-    assert_eq!(wait(&operators, RateLimit::RefusalFlood, &from).await, None);
+    assert_eq!(wait(&admins, RateLimit::RefusalFlood, &from).await, None);
 }

@@ -3,7 +3,7 @@
 // - <tetsu-passkey action="login|join|add" form-token="…" next="…"> wraps a button and a status line, and runs one
 //   passkey ceremony when the button is pressed. Its state is an attribute, data-state, of ready, waiting, done, or
 //   failed, for styles to read (ADR-0032).
-// - <tetsu-passkeys user="…" credentials="…"> wraps the list of an operator's passkeys, and tells their devices every
+// - <tetsu-passkeys user="…" credentials="…"> wraps the list of an admin's passkeys, and tells their devices every
 //   passkey Tetsu holds, so a device can hide one Tetsu removed.
 
 import { Refused } from "../shared/http";
@@ -21,7 +21,7 @@ export interface Browser {
 const ACTIONS: readonly Action[] = ["login", "join", "add"];
 
 /** What the page says once an action is done, in the moment before the browser goes where the server says. Joining
- * logs the operator in too (ADR-0069). */
+ * logs the admin in too (ADR-0069). */
 const DONE: Record<Action, string> = {
   login: "Logged in.",
   join: "Passkey created. Logging you in.",
@@ -39,18 +39,18 @@ export function said(error: unknown): string {
   }
   // The island's own ended ceremonies never reach here, so this is the browser ending the prompt by itself.
   if (error.name === "AbortError") {
-    return "The passkey prompt closed before it finished. Try again.";
+    return "The prompt closed early. Try again.";
   }
   if (error.name === "InvalidStateError") {
-    return "Finish or close the passkey prompt that is already open, then try again.";
+    return "Close the open passkey prompt first.";
   }
   if (error.name === "NotAllowedError") {
-    return "The passkey prompt closed without a passkey. Try again when you are ready.";
+    return "No passkey was chosen. Try again.";
   }
   return failed;
 }
 
-/** What both halves of a ceremony send: a join's link, which leaves the address bar at once, the operator's form
+/** What both halves of a ceremony send: a join's link, which leaves the address bar at once, the admin's form
  * token, or the page a login returns to, which the server checks again. */
 function sentFor(action: Action, host: HTMLElement, browser: Browser): Record<string, string> {
   if (action === "join") {
@@ -101,16 +101,15 @@ export function ready(host: HTMLElement, browser: Browser): void {
     // A join's link stays in the address bar, so the person can open it in a browser that can.
     parts.status.textContent =
       parts.action === "join"
-        ? "This browser cannot use passkeys. Open this link in one that can."
-        : "This browser cannot use passkeys.";
+        ? "This browser can't use passkeys. Open the invite in another."
+        : "This browser can't use passkeys.";
     host.dataset.state = "failed";
     return;
   }
   const sent = sentFor(parts.action, host, browser);
   // Only a join sends a link, so only a join can lack one.
   if (sent.link === "") {
-    parts.status.textContent =
-      "This page no longer holds its invite link, which leaves the address bar once the page opens. Open the link from your invite again.";
+    parts.status.textContent = "Open the invite again.";
     host.dataset.state = "failed";
     return;
   }
@@ -191,15 +190,10 @@ class Presses {
     // the link, so its link is no use again; logging in is. A refusal means the server kept nothing.
     if (this.action === "join" && this.lastSent.has(signal) && !(error instanceof Refused)) {
       this.toLogin();
-      this.say("Your passkey may have been created. Continue with passkey to log in.", "ready");
+      this.say("Your passkey may be ready. Log in with it.", "ready");
       return;
     }
-    this.say(
-      signal.reason === TIMED_OUT
-        ? "Your device did not answer within a minute, so the prompt was closed. Try again, or use the device you set up."
-        : said(error),
-      "failed",
-    );
+    this.say(signal.reason === TIMED_OUT ? "Your device didn't answer. Try again." : said(error), "failed");
   }
 
   /** Starts the clock on a ceremony, stopping any before it: a hint once it is slow, and its end once it is too
@@ -207,11 +201,7 @@ class Presses {
   private startClock(controller: AbortController): void {
     this.stopClock();
     const hint = setTimeout(
-      () =>
-        this.say(
-          "Still waiting. If your device can't find or make a passkey for Tetsu, cancel and use the one you set up, or ask an operator for a new invite.",
-          "waiting",
-        ),
+      () => this.say("Still waiting. Try the device you set up.", "waiting"),
       HINT_AFTER,
     );
     const end = setTimeout(() => controller.abort(TIMED_OUT), GIVE_UP_AFTER);
@@ -249,7 +239,7 @@ class Presses {
   }
 }
 
-/** Tells the operator's devices every passkey a `<tetsu-passkeys>` lists. A browser that cannot, or a device that
+/** Tells the admin's devices every passkey a `<tetsu-passkeys>` lists. A browser that cannot, or a device that
  * will not, changes nothing. */
 export function signal(host: HTMLElement, browser: Browser): void {
   const passkeys = browser.passkeys;

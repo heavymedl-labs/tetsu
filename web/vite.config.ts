@@ -18,13 +18,14 @@ export default defineConfig({
     // Every asset stays a file: the policy blocks the data: URIs Vite otherwise makes of small ones.
     assetsInlineLimit: 0,
     rolldownOptions: {
-      // The stylesheet, the operator pages' scripts, and the brand files a page links to, which src/manifest.rs
+      // The stylesheet, the admin pages' scripts, and the brand files a page links to, which src/manifest.rs
       // names.
       input: {
         tetsu: resolve(here, "src/tetsu.css"),
-        passkey: resolve(here, "src/passkey/ops.ts"),
-        session: resolve(here, "src/session/ops.ts"),
-        scheme: resolve(here, "src/scheme/ops.ts"),
+        passkey: resolve(here, "src/passkey/admin.ts"),
+        session: resolve(here, "src/session/admin.ts"),
+        scheme: resolve(here, "src/scheme/admin.ts"),
+        menu: resolve(here, "src/menu/admin.ts"),
         icon: resolve(here, "../docs/brand/tetsu-avatar.svg"),
         "touch-icon": resolve(here, "../docs/brand/tetsu-avatar.png"),
       },

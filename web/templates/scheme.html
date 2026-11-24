@@ -3,7 +3,7 @@
     `<tetsu-scheme>` keeps a new choice in that cookie. -#}
 {% import "../../../web/templates/components.html" as ui %}
 <tetsu-scheme class="contents">
-  <fieldset class="flex rounded-full border border-edge p-0.5 text-muted [&_svg]:size-4">
+  <fieldset class="flex rounded-full p-0.5 text-muted [&_svg]:size-4">
     <legend class="sr-only">Color scheme</legend>
     {%- for (key, name) in [("system", "System"), ("light", "Light"), ("dark", "Dark")] %}
       <label

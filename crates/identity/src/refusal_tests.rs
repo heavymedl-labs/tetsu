@@ -6,8 +6,8 @@ use std::net::SocketAddr;
 use serde_json::{Value, json};
 use tetsu_postgres::test_support::TestDatabase;
 
-use crate::http_tests::{Reply, get, logged_in, send, serving, text};
-use crate::join_tests::{ORIGIN, as_admin};
+use crate::http_tests::{PROFILE, Reply, get, logged_in, send, serving, text};
+use crate::join_tests::{ORIGIN, as_db_admin};
 
 const FIREFOX: &str = "Mozilla/5.0 (X11; Linux x86_64) Firefox/140.0";
 const ELSEWHERE: &str = "https://evil.example";
@@ -71,34 +71,16 @@ async fn each_refused_form_is_recorded_with_its_check() {
     let wrong_form = format!("form={}", "ab".repeat(32));
     let good_form = format!("form={form_token}");
     let bad_id = format!("{good_form}&session=NOT-AN-ID");
+    let (logout, end, live) = ("/admin/logout", "/admin/sessions/end", cookie.as_str());
+    let (good, wrong) = (good_form.as_str(), wrong_form.as_str());
     for sent in [
-        [
-            "/ops/logout",
-            ELSEWHERE,
-            cookie.as_str(),
-            good_form.as_str(),
-        ],
-        ["/ops/logout", ORIGIN, "", good_form.as_str()],
-        ["/ops/logout", ORIGIN, cookie.as_str(), wrong_form.as_str()],
-        [
-            "/ops/sessions/end",
-            ORIGIN,
-            cookie.as_str(),
-            bad_id.as_str(),
-        ],
+        [logout, ELSEWHERE, live, good],
+        [logout, ORIGIN, "", good],
+        [logout, ORIGIN, live, wrong],
+        [end, ORIGIN, live, bad_id.as_str()],
         // A bad id from a request that fails another check is recorded as failing that one.
-        [
-            "/ops/sessions/end",
-            ORIGIN,
-            cookie.as_str(),
-            "session=NOT-AN-ID",
-        ],
-        [
-            "/ops/sessions/end",
-            ELSEWHERE,
-            cookie.as_str(),
-            good_form.as_str(),
-        ],
+        [end, ORIGIN, live, "session=NOT-AN-ID"],
+        [end, ELSEWHERE, live, good],
     ] {
         let reply = form(address, sent, "203.0.113.7").await;
         assert_eq!(reply.status, 403, "{sent:?}");
@@ -106,15 +88,15 @@ async fn each_refused_form_is_recorded_with_its_check() {
     assert_eq!(
         refusals(&database).await,
         [
-            refusal("/ops/logout", "origin"),
-            refusal("/ops/logout", "cookie"),
-            refusal("/ops/logout", "form_token"),
-            refusal("/ops/sessions/end", "field"),
-            refusal("/ops/sessions/end", "form_token"),
-            refusal("/ops/sessions/end", "origin"),
+            refusal("/admin/logout", "origin"),
+            refusal("/admin/logout", "cookie"),
+            refusal("/admin/logout", "form_token"),
+            refusal("/admin/sessions/end", "field"),
+            refusal("/admin/sessions/end", "form_token"),
+            refusal("/admin/sessions/end", "origin"),
         ]
     );
-    assert_eq!(get(address, "/ops", &cookie).await.status, 200);
+    assert_eq!(get(address, PROFILE, &cookie).await.status, 200);
 }
 
 /// Every script request a check refuses is recorded once too: logged in, at its form token or origin, and before
@@ -123,9 +105,9 @@ async fn each_refused_form_is_recorded_with_its_check() {
 async fn each_refused_script_request_is_recorded_with_its_check() {
     let (address, database, cookie, form_token) = logged_in().await;
     for (path, origin, sent) in [
-        ("/ops/passkeys/begin", ORIGIN, json!({ "form": "wrong" })),
-        ("/ops/session", ELSEWHERE, json!({ "form": form_token })),
-        ("/ops/login/begin", ELSEWHERE, json!({})),
+        ("/admin/passkeys/begin", ORIGIN, json!({ "form": "wrong" })),
+        ("/admin/session", ELSEWHERE, json!({ "form": form_token })),
+        ("/admin/login/begin", ELSEWHERE, json!({})),
     ] {
         let reply = script(address, path, origin, &cookie, &sent).await;
         assert_eq!(reply.status, 403, "{path} {origin}");
@@ -133,9 +115,9 @@ async fn each_refused_script_request_is_recorded_with_its_check() {
     assert_eq!(
         refusals(&database).await,
         [
-            refusal("/ops/passkeys/begin", "form_token"),
-            refusal("/ops/session", "origin"),
-            refusal("/ops/login/begin", "origin"),
+            refusal("/admin/passkeys/begin", "form_token"),
+            refusal("/admin/session", "origin"),
+            refusal("/admin/login/begin", "origin"),
         ]
     );
 }
@@ -146,10 +128,15 @@ async fn each_refused_script_request_is_recorded_with_its_check() {
 async fn a_flood_of_refusals_is_recorded_only_up_to_its_limit() {
     let (address, database, _) = serving().await;
     for _ in 0..15 {
-        let reply = form(address, ["/ops/logout", ELSEWHERE, "", ""], "203.0.113.7").await;
+        let reply = form(address, ["/admin/logout", ELSEWHERE, "", ""], "203.0.113.7").await;
         assert_eq!(reply.status, 403);
     }
-    let other = form(address, ["/ops/logout", ELSEWHERE, "", ""], "198.51.100.9").await;
+    let other = form(
+        address,
+        ["/admin/logout", ELSEWHERE, "", ""],
+        "198.51.100.9",
+    )
+    .await;
     assert_eq!(other.status, 403);
     assert_eq!(refusals(&database).await.len(), 11);
     // The first refusal past the limit says that the rest go unrecorded, once in the window.
@@ -159,44 +146,44 @@ async fn a_flood_of_refusals_is_recorded_only_up_to_its_limit() {
          FROM identity.outbox_global WHERE event_type = 'identity.refusals_suppressed'",
     )
     .await;
-    assert_eq!(suppressed, "/ops/logout origin browser@Firefox on Linux");
+    assert_eq!(suppressed, "/admin/logout origin browser@Firefox on Linux");
 }
 
 /// A refusal that cannot be recorded leaves the request unavailable rather than refused unseen.
 #[tokio::test]
 async fn a_refusal_that_cannot_be_recorded_is_unavailable() {
     let (address, database, cookie, form_token) = logged_in().await;
-    as_admin(
+    as_db_admin(
         &database,
         "REVOKE EXECUTE ON FUNCTION identity.admit(text, bytea) FROM tetsu_identity",
     )
     .await;
     let page = form(
         address,
-        ["/ops/logout", ELSEWHERE, &cookie, ""],
+        ["/admin/logout", ELSEWHERE, &cookie, ""],
         "203.0.113.7",
     )
     .await;
     assert_eq!(page.status, 503);
     let sent = json!({ "form": form_token });
-    let json = script(address, "/ops/session", ELSEWHERE, &cookie, &sent).await;
+    let json = script(address, "/admin/session", ELSEWHERE, &cookie, &sent).await;
     assert_eq!(json.status, 503);
     // Nothing was refused unseen, and the session the requests carried is still live.
-    assert_eq!(get(address, "/ops", &cookie).await.status, 200);
+    assert_eq!(get(address, PROFILE, &cookie).await.status, 200);
 }
 
 /// A limit's answer storage gives in the wrong shape leaves the refusal unavailable, never recorded as if admitted.
 #[tokio::test]
 async fn an_unreadable_limit_leaves_a_refusal_unavailable() {
     let (address, database, _) = serving().await;
-    as_admin(
+    as_db_admin(
         &database,
         "DROP FUNCTION identity.admit(text, bytea);
          CREATE FUNCTION identity.admit(text, bytea) RETURNS text LANGUAGE sql AS $$ SELECT 'soon' $$;
          GRANT EXECUTE ON FUNCTION identity.admit(text, bytea) TO tetsu_identity",
     )
     .await;
-    let reply = form(address, ["/ops/logout", ELSEWHERE, "", ""], "203.0.113.7").await;
+    let reply = form(address, ["/admin/logout", ELSEWHERE, "", ""], "203.0.113.7").await;
     assert_eq!(reply.status, 503);
     assert_eq!(refusals(&database).await, Vec::<String>::new());
 }
@@ -208,14 +195,14 @@ async fn another_sites_form_to_a_script_route_is_recorded() {
     let (address, database, cookie, _) = logged_in().await;
     let reply = form(
         address,
-        ["/ops/session", ELSEWHERE, &cookie, "form=x"],
+        ["/admin/session", ELSEWHERE, &cookie, "form=x"],
         "203.0.113.7",
     )
     .await;
     assert_eq!(reply.status, 403);
     assert_eq!(
         refusals(&database).await,
-        [refusal("/ops/session", "origin")]
+        [refusal("/admin/session", "origin")]
     );
 }
 
@@ -226,15 +213,15 @@ async fn malformed_input_and_an_ended_session_are_not_recorded() {
     let (address, database, cookie, form_token) = logged_in().await;
     let text_body = form(
         address,
-        ["/ops/session", ORIGIN, &cookie, "form=x"],
+        ["/admin/session", ORIGIN, &cookie, "form=x"],
         "203.0.113.7",
     )
     .await;
     assert_eq!(text_body.status, 415);
-    as_admin(&database, "DELETE FROM identity.sessions").await;
+    as_db_admin(&database, "DELETE FROM identity.sessions").await;
     let ended = script(
         address,
-        "/ops/session",
+        "/admin/session",
         ORIGIN,
         &cookie,
         &json!({ "form": form_token }),
@@ -244,7 +231,7 @@ async fn malformed_input_and_an_ended_session_are_not_recorded() {
     let body = format!("form={form_token}");
     let logout = form(
         address,
-        ["/ops/logout", ORIGIN, &cookie, &body],
+        ["/admin/logout", ORIGIN, &cookie, &body],
         "203.0.113.7",
     )
     .await;

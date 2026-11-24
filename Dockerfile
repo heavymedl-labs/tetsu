@@ -14,8 +14,8 @@ RUN npm run build
 FROM rust:1.99.1-slim-bookworm@sha256:f2c004e3d2d8b547e8cf7ffbc29205385f4e71d23e53e4e383065db5e9f822cd AS build
 WORKDIR /src
 # Dependencies first, built from the manifests alone over stub sources, so this layer, and the build cache CI
-# keeps of it, last until a manifest or the lockfile changes. A new crate needs its manifest copied here, which
-# scripts/tests/test_dockerfile.py checks.
+# keeps of it, last until a manifest or the lockfile changes. Cargo loads every workspace member, so each one's
+# manifest is copied here, which scripts/tests/test_dockerfile.py checks.
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY crates/audit/Cargo.toml crates/audit/
 COPY crates/identity/Cargo.toml crates/identity/
@@ -26,13 +26,16 @@ COPY crates/tenancy/Cargo.toml crates/tenancy/
 COPY crates/tetsu/Cargo.toml crates/tetsu/
 COPY benchmarks/Cargo.toml benchmarks/
 COPY benchmarks/cornucopia/Cargo.toml benchmarks/cornucopia/
-RUN for package in crates/* benchmarks/cornucopia; do mkdir -p "$package/src" && touch "$package/src/lib.rs"; done \
+COPY tools/format-templates/Cargo.toml tools/format-templates/
+RUN for package in crates/* benchmarks/cornucopia tools/format-templates; do \
+        mkdir -p "$package/src" && touch "$package/src/lib.rs"; \
+    done \
     && rm crates/tetsu/src/lib.rs \
-    && for package in crates/tetsu benchmarks; do \
+    && for package in crates/tetsu benchmarks tools/format-templates; do \
         mkdir -p "$package/src" && echo 'fn main() {}' >"$package/src/main.rs"; \
     done \
     && cargo build --release --locked -p tetsu \
-    && rm -r crates/*/src benchmarks/src benchmarks/cornucopia/src
+    && rm -r crates/*/src benchmarks/src benchmarks/cornucopia/src tools/format-templates/src
 COPY . .
 COPY --from=web /src/crates/tetsu/assets/build crates/tetsu/assets/build
 # Tetsu's own crates were built from stubs above; cleaning them makes sure only their real sources reach the binary.

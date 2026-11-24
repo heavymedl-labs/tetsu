@@ -22,10 +22,10 @@ business is a tenant, isolated in the database itself, and industries add only w
 
 - **Tenancy:** each business's address and page, kept apart by row-level security
 - **Audit:** a record of security events that is never lost
-- **Identity:** operators, who join with a passkey from a one-time invite link and log in with it at `/ops`, with
+- **Identity:** admins, who join with a passkey from a one-time invite link and log in with it at `/admin`, with
   server-side sessions whose tokens are stored only as hashes
 - **Domain events:** delivered once through an outbox, retried, and logged when they stop
-- **Mail:** operators' invites and notices, sent by SMTP to listed addresses and otherwise kept for a mailbox page
+- **Mail:** admins' invites and notices, sent by SMTP to listed addresses and otherwise kept for a mailbox page
 - **Operations:** JSON logs with alert fields, exported to any OTLP backend
 
 Next: login ([#20](https://github.com/heavymedl-labs/tetsu/issues/20)), then bookings and payments.
@@ -41,7 +41,7 @@ cargo tetsu serve       # http://localhost:8080
 ```
 
 `cargo tetsu` is an alias in `.cargo/config.toml` for `cargo run -q -p tetsu --`: it takes any `tetsu` command, such as
-`cargo tetsu operator create "Lee Park" lee@example.com`, and rebuilds first if anything changed. Run it from the repository's root,
+`cargo tetsu admin create "Lee Park" lee@example.com`, and rebuilds first if anything changed. Run it from the repository's root,
 where `tetsu` reads `.env`.
 
 One-time setup is in [crates/tetsu](crates/tetsu/README.md#run-locally). `scripts/check.sh` runs every check.

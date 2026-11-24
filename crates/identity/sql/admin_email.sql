@@ -1,3 +1,3 @@
 SELECT email
-FROM identity.operators
+FROM identity.admins
 WHERE id = $1;

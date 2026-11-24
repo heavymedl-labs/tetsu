@@ -1,11 +1,11 @@
--- Operators, who work for Tetsu itself, their sessions, and their join
--- links, and what the operator command does to them (ADR-0040, ADR-0048,
--- ADR-0059). All are global: an operator belongs to no business, and a session
+-- Admins, who work for Tetsu itself, their sessions, and their join
+-- links, and what the admin command does to them (ADR-0040, ADR-0048,
+-- ADR-0059). All are global: an admin belongs to no business, and a session
 -- or link is found by its token before any business is known.
 SET lock_timeout = '5s';
 SET statement_timeout = '30s';
 
-CREATE TABLE operators (
+CREATE TABLE admins (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     -- No control character or line break either, so no name can start a new
     -- line of output. Unique, so retrying a create finds the first instead of
@@ -14,18 +14,18 @@ CREATE TABLE operators (
         char_length(name) BETWEEN 1 AND 100
         AND name !~ '[[:cntrl:]\u2028\u2029]'
     ),
-    -- WebAuthn's user handle: random, so it says nothing about the operator
+    -- WebAuthn's user handle: random, so it says nothing about the admin
     -- (ADR-0040).
     user_handle uuid NOT NULL UNIQUE DEFAULT gen_random_uuid(),
     created_at timestamptz NOT NULL DEFAULT now(),
-    -- An operator is disabled rather than removed, so the audit record keeps
-    -- a name to point at. A disabled operator starts no session, uses none,
+    -- An admin is disabled rather than removed, so the audit record keeps
+    -- a name to point at. A disabled admin starts no session, uses none,
     -- and is issued no invite link (ADR-0059).
     disabled_at timestamptz
 );
 
-COMMENT ON TABLE operators IS
-'tetsu:global: operators work for Tetsu, not a business';
+COMMENT ON TABLE admins IS
+'tetsu:global: admins work for Tetsu, not a business';
 
 -- A session is kept under its token's SHA-256 hash, never the token
 -- (ADR-0047).
@@ -34,8 +34,8 @@ CREATE TABLE sessions (
     -- What a list of a person's sessions shows and ends them by: random, so
     -- it says nothing about the token, whose hash never leaves the database.
     id uuid NOT NULL UNIQUE DEFAULT gen_random_uuid(),
-    realm text NOT NULL CHECK (realm IN ('operator')),
-    operator_id bigint NOT NULL REFERENCES operators (id),
+    realm text NOT NULL CHECK (realm IN ('admin')),
+    admin_id bigint NOT NULL REFERENCES admins (id),
     started_at timestamptz NOT NULL,
     -- When a passkey last proved the person in this session: at its start for
     -- one a login began, and never for one joining began, which rests on the
@@ -51,13 +51,13 @@ WITH (fillfactor = 80);
 COMMENT ON TABLE sessions IS
 'tetsu:global: found by its token before any business is known';
 
-CREATE INDEX sessions_operator_id ON sessions (operator_id);
+CREATE INDEX sessions_admin_id ON sessions (admin_id);
 
--- Each operator's one open invite link, kept under its token's SHA-256
+-- Each admin's one open invite link, kept under its token's SHA-256
 -- hash, never the token, and good for an hour. A new link replaces the last.
 CREATE TABLE invites (
     token_hash bytea PRIMARY KEY CHECK (octet_length(token_hash) = 32),
-    operator_id bigint NOT NULL UNIQUE REFERENCES operators (id),
+    admin_id bigint NOT NULL UNIQUE REFERENCES admins (id),
     issued_at timestamptz NOT NULL,
     ends_at timestamptz NOT NULL
 );
@@ -65,14 +65,14 @@ CREATE TABLE invites (
 COMMENT ON TABLE invites IS
 'tetsu:global: found by its token before anyone is logged in';
 
--- An operator's passkeys, two at most (ADR-0057), each as webauthn-rs keeps
+-- An admin's passkeys, two at most (ADR-0057), each as webauthn-rs keeps
 -- it: a public key, a signature counter, and flags, never a secret.
 CREATE TABLE passkeys (
     credential_id bytea PRIMARY KEY CHECK (
         octet_length(credential_id) >= 16
         AND octet_length(credential_id) <= 1023
     ),
-    operator_id bigint NOT NULL REFERENCES operators (id),
+    admin_id bigint NOT NULL REFERENCES admins (id),
     -- Joining and adding store no passkey over 8 KiB; the table keeps a
     -- little more, so a counter that gains digits never fails a stored one.
     passkey jsonb NOT NULL CHECK (octet_length(passkey::text) <= 8320),
@@ -92,7 +92,7 @@ CREATE TABLE passkeys (
 COMMENT ON TABLE passkeys IS
 'tetsu:global: found by its credential before anyone is logged in';
 
-CREATE INDEX passkeys_operator_id ON passkeys (operator_id);
+CREATE INDEX passkeys_admin_id ON passkeys (admin_id);
 
 -- A passkey ceremony under way: the state webauthn-rs needs to finish it,
 -- under the hash of a token only the browser holds, good once and for ten
@@ -101,9 +101,9 @@ CREATE INDEX passkeys_operator_id ON passkeys (operator_id);
 CREATE TABLE ceremonies (
     token_hash bytea PRIMARY KEY CHECK (octet_length(token_hash) = 32),
     kind text NOT NULL CHECK (kind IN ('join', 'login', 'add')),
-    -- A join knows its operator and link, and adding a passkey its
-    -- operator; a login knows neither until the browser answers.
-    operator_id bigint REFERENCES operators (id),
+    -- A join knows its admin and link, and adding a passkey its
+    -- admin; a login knows neither until the browser answers.
+    admin_id bigint REFERENCES admins (id),
     link_hash bytea CHECK (octet_length(link_hash) = 32),
     -- The session an addition began from, which alone may finish it; the
     -- addition ends with it.
@@ -114,7 +114,7 @@ CREATE TABLE ceremonies (
     taken boolean NOT NULL DEFAULT FALSE,
     state jsonb NOT NULL CHECK (octet_length(state::text) <= 16384),
     ends_at timestamptz NOT NULL,
-    CHECK ((kind IN ('join', 'add')) = (operator_id IS NOT NULL)),
+    CHECK ((kind IN ('join', 'add')) = (admin_id IS NOT NULL)),
     CHECK ((kind = 'join') = (link_hash IS NOT NULL)),
     CHECK ((kind = 'add') = (session_hash IS NOT NULL)),
     CHECK (kind = 'add' OR NOT taken)
@@ -123,7 +123,7 @@ CREATE TABLE ceremonies (
 COMMENT ON TABLE ceremonies IS
 'tetsu:global: found by its token before anyone is logged in';
 
-CREATE INDEX ceremonies_operator_id ON ceremonies (operator_id);
+CREATE INDEX ceremonies_admin_id ON ceremonies (admin_id);
 
 -- A link holds one ceremony at most, however many begin at once.
 CREATE UNIQUE INDEX ceremonies_link_hash ON ceremonies (link_hash);
@@ -131,8 +131,8 @@ CREATE UNIQUE INDEX ceremonies_link_hash ON ceremonies (link_hash);
 -- Anyone may begin a login, so ended ceremonies are swept by when they end.
 CREATE INDEX ceremonies_ends_at ON ceremonies (ends_at);
 
--- An operator adds one passkey at a time, however many begin at once.
-CREATE UNIQUE INDEX ceremonies_addition ON ceremonies (operator_id)
+-- An admin adds one passkey at a time, however many begin at once.
+CREATE UNIQUE INDEX ceremonies_addition ON ceremonies (admin_id)
 WHERE kind = 'add';
 
 -- Ending a session finds the addition it began.
@@ -141,23 +141,23 @@ WHERE session_hash IS NOT NULL;
 
 -- The runner's default privileges give Identity's role every right on a new
 -- table; each is replaced by exactly what is granted below.
-REVOKE ALL ON operators, sessions, invites, passkeys, ceremonies
+REVOKE ALL ON admins, sessions, invites, passkeys, ceremonies
 FROM tetsu_identity;
-REVOKE ALL ON SEQUENCE operators_id_seq FROM tetsu_identity;
+REVOKE ALL ON SEQUENCE admins_id_seq FROM tetsu_identity;
 
--- Identity's role adds and reads operators, and reaches sessions and links
+-- Identity's role adds and reads admins, and reaches sessions and links
 -- only through the functions below, one token's hash a call, so no caller can
--- list them. Those functions read whether an operator is disabled, and lock
+-- list them. Those functions read whether an admin is disabled, and lock
 -- its row while they do, so a disable at the same moment never misses what
 -- they add.
-GRANT SELECT (id, name), INSERT (name) ON operators TO tetsu_identity;
+GRANT SELECT (id, name), INSERT (name) ON admins TO tetsu_identity;
 -- The public ID too, which audit records name a session by, never its hash.
 GRANT SELECT (
-    token_hash, id, realm, operator_id, started_at, proven_at, last_seen_at,
+    token_hash, id, realm, admin_id, started_at, proven_at, last_seen_at,
     ends_at
 ),
 INSERT (
-    token_hash, realm, operator_id, started_at, proven_at, last_seen_at,
+    token_hash, realm, admin_id, started_at, proven_at, last_seen_at,
     ends_at
 ),
 UPDATE (last_seen_at),
@@ -168,15 +168,15 @@ GRANT UPDATE (token_hash, issued_at, ends_at) ON invites
 TO tetsu_identity_lookup;
 GRANT SELECT (id, name, user_handle, created_at, disabled_at),
 UPDATE (disabled_at)
-ON operators TO tetsu_identity_lookup;
-GRANT SELECT (credential_id, operator_id, passkey, transports),
-INSERT (credential_id, operator_id, passkey, transports, created_at),
+ON admins TO tetsu_identity_lookup;
+GRANT SELECT (credential_id, admin_id, passkey, transports),
+INSERT (credential_id, admin_id, passkey, transports, created_at),
 UPDATE (passkey, last_used_at),
 DELETE
 ON passkeys TO tetsu_identity_lookup;
 GRANT SELECT, DELETE ON ceremonies TO tetsu_identity_lookup;
 GRANT INSERT (
-    token_hash, kind, operator_id, link_hash, session_hash, state, ends_at
+    token_hash, kind, admin_id, link_hash, session_hash, state, ends_at
 ) ON ceremonies TO tetsu_identity_lookup;
 GRANT UPDATE (token_hash, session_hash, taken, state, ends_at) ON ceremonies
 TO tetsu_identity_lookup;
@@ -189,15 +189,15 @@ TO tetsu_identity_lookup;
 -- timeout; a start reads the clock after its wait, so it is never dated
 -- before what held it up.
 
--- Starts a session now, only for an enabled operator, and removes the
--- operator's spent sessions in the realm, so they do not pile up. Only a login
--- and a redemption call it, each holding an enabled operator's row, so one
+-- Starts a session now, only for an enabled admin, and removes the
+-- admin's spent sessions in the realm, so they do not pile up. Only a login
+-- and a redemption call it, each holding an enabled admin's row, so one
 -- disabled or unknown is a fault, raised as TD001, Identity's own code. A
 -- session is proven only when a passkey login starts it (ADR-0069). It holds
--- the operator's row until it commits, so a disable waits for it and then ends
+-- the admin's row until it commits, so a disable waits for it and then ends
 -- the session it started.
 CREATE FUNCTION start_session(
-    wanted_hash bytea, wanted_realm text, wanted_operator bigint,
+    wanted_hash bytea, wanted_realm text, wanted_admin bigint,
     wanted_proven boolean
 )
 RETURNS void
@@ -207,33 +207,33 @@ AS $$
 DECLARE
     at timestamptz;
     absolute interval := CASE wanted_realm
-        WHEN 'operator' THEN interval '8 hours'
+        WHEN 'admin' THEN interval '8 hours'
     END;
     idle interval := CASE wanted_realm
-        WHEN 'operator' THEN interval '15 minutes'
+        WHEN 'admin' THEN interval '15 minutes'
     END;
 BEGIN
     PERFORM
-    FROM identity.operators AS o
-    WHERE o.id = wanted_operator AND o.disabled_at IS NULL
+    FROM identity.admins AS o
+    WHERE o.id = wanted_admin AND o.disabled_at IS NULL
     FOR SHARE;
     IF NOT FOUND THEN
-        RAISE EXCEPTION 'no enabled operator' USING ERRCODE = 'TD001';
+        RAISE EXCEPTION 'no enabled admin' USING ERRCODE = 'TD001';
     END IF;
-    -- After any wait for the operator's row, so the session starts when it
+    -- After any wait for the admin's row, so the session starts when it
     -- was stored, never before an end of sessions that held it up.
     at := clock_timestamp();
     DELETE FROM identity.sessions AS s
     WHERE
-        s.operator_id = wanted_operator
+        s.admin_id = wanted_admin
         AND s.realm = wanted_realm
         AND (at >= s.ends_at OR at >= s.last_seen_at + idle);
     INSERT INTO identity.sessions (
-        token_hash, realm, operator_id, started_at, proven_at, last_seen_at,
+        token_hash, realm, admin_id, started_at, proven_at, last_seen_at,
         ends_at
     )
     VALUES (
-        wanted_hash, wanted_realm, wanted_operator, at,
+        wanted_hash, wanted_realm, wanted_admin, at,
         CASE WHEN wanted_proven THEN at END, at, at + absolute
     );
 END
@@ -247,13 +247,13 @@ $$;
 -- find live is removed, and only if it is spent, so none is revived, and the
 -- last request never moves back. Only the realm asked for counts, so a token
 -- from another realm never passes as this one's (ADR-0040, ADR-0048).
--- A session of a disabled operator is never used, and is removed when
--- presented: a disable ends its operator's sessions, and this keeps any it
+-- A session of a disabled admin is never used, and is removed when
+-- presented: a disable ends its admin's sessions, and this keeps any it
 -- could miss from acting for them.
 CREATE FUNCTION use_session(wanted_hash bytea, wanted_realm text)
 RETURNS TABLE (
     realm text,
-    operator_id bigint,
+    admin_id bigint,
     started_at timestamptz,
     proven_at timestamptz,
     last_seen_at timestamptz,
@@ -265,30 +265,30 @@ AS $$
 DECLARE
     at timestamptz := clock_timestamp();
     idle interval := CASE wanted_realm
-        WHEN 'operator' THEN interval '15 minutes'
+        WHEN 'admin' THEN interval '15 minutes'
     END;
 BEGIN
     RETURN QUERY
     UPDATE identity.sessions AS s
     SET last_seen_at = greatest(s.last_seen_at, at)
-    FROM identity.operators AS o
+    FROM identity.admins AS o
     WHERE
         s.token_hash = wanted_hash
         AND s.realm = wanted_realm
         AND at < s.ends_at
         AND at < s.last_seen_at + idle
-        AND o.id = s.operator_id
+        AND o.id = s.admin_id
         AND o.disabled_at IS NULL
     RETURNING
-        s.realm, s.operator_id, s.started_at, s.proven_at, s.last_seen_at,
+        s.realm, s.admin_id, s.started_at, s.proven_at, s.last_seen_at,
         s.ends_at;
     IF NOT FOUND THEN
         DELETE FROM identity.sessions AS s
-        USING identity.operators AS o
+        USING identity.admins AS o
         WHERE
             s.token_hash = wanted_hash
             AND s.realm = wanted_realm
-            AND o.id = s.operator_id
+            AND o.id = s.admin_id
             AND (
                 at >= s.ends_at
                 OR at >= s.last_seen_at + idle
@@ -308,7 +308,7 @@ AS $$
     WITH clock AS (
         SELECT
             clock_timestamp() AS at,
-            CASE wanted_realm WHEN 'operator' THEN interval '15 minutes' END
+            CASE wanted_realm WHEN 'admin' THEN interval '15 minutes' END
                 AS idle
     ),
 
@@ -324,7 +324,7 @@ AS $$
 $$;
 
 -- Refuses any isolation level but read committed with TD002, naming what was
--- refused. Every function that waits on an operator's row and then checks what
+-- refused. Every function that waits on an admin's row and then checks what
 -- changed calls it first: under another level, a row committed while it waited
 -- escapes its checks. Only Identity's functions call it; no other role may.
 CREATE FUNCTION require_read_committed(what text)
@@ -339,13 +339,13 @@ BEGIN
 END
 $$;
 
--- Where an operator stands for join, after taking their row for update,
--- since both callers change what the operator holds: open, disabled, joined
+-- Where an admin stands for join, after taking their row for update,
+-- since both callers change what the admin holds: open, disabled, joined
 -- for one who holds a passkey already, or null for one who does not exist.
 -- What it checks stays true until the caller commits, under read committed
 -- only, so it refuses any other level with TD002. Only the functions below
 -- call it; no other role may.
-CREATE FUNCTION joining(wanted_operator bigint)
+CREATE FUNCTION joining(wanted_admin bigint)
 RETURNS text
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
@@ -355,15 +355,15 @@ DECLARE
 BEGIN
     PERFORM identity.require_read_committed('joining');
     SELECT o.disabled_at INTO was
-    FROM identity.operators AS o
-    WHERE o.id = wanted_operator
+    FROM identity.admins AS o
+    WHERE o.id = wanted_admin
     FOR NO KEY UPDATE;
     IF NOT FOUND THEN
         RETURN null;
     ELSIF was IS NOT NULL THEN
         RETURN 'disabled';
     ELSIF EXISTS (
-        SELECT FROM identity.passkeys AS p WHERE p.operator_id = wanted_operator
+        SELECT FROM identity.passkeys AS p WHERE p.admin_id = wanted_admin
     ) THEN
         RETURN 'joined';
     END IF;
@@ -371,16 +371,16 @@ BEGIN
 END
 $$;
 
--- Issues an operator's invite link, replacing any earlier one, and says
--- what it did: issued; disabled, for an operator issued none; joined, for
+-- Issues an admin's invite link, replacing any earlier one, and says
+-- what it did: issued; disabled, for an admin issued none; joined, for
 -- one who has a passkey already and adds another only after logging in
 -- (v5.0.0-6.4.1); or null for one that does not exist. It takes the
--- operator's row for update, since it replaces what they hold, so a passkey
+-- admin's row for update, since it replaces what they hold, so a passkey
 -- being stored for them is seen, and a ceremony being begun from the old link
 -- finishes first and then ends with it. That holds only under read committed,
 -- so it refuses any other level with TD002. It reads the clock once, so every
 -- link lasts exactly an hour.
-CREATE FUNCTION issue_invite(wanted_hash bytea, wanted_operator bigint)
+CREATE FUNCTION issue_invite(wanted_hash bytea, wanted_admin bigint)
 RETURNS text
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
@@ -389,18 +389,18 @@ DECLARE
     at timestamptz;
     standing text;
 BEGIN
-    standing := identity.joining(wanted_operator);
+    standing := identity.joining(wanted_admin);
     IF standing IS DISTINCT FROM 'open' THEN
         RETURN standing;
     END IF;
     at := clock_timestamp();
     -- A ceremony begun from the link this one replaces ends with it.
     DELETE FROM identity.ceremonies AS c
-    WHERE c.operator_id = wanted_operator AND c.kind = 'join';
+    WHERE c.admin_id = wanted_admin AND c.kind = 'join';
     INSERT INTO identity.invites
-        (token_hash, operator_id, issued_at, ends_at)
-    VALUES (wanted_hash, wanted_operator, at, at + interval '1 hour')
-    ON CONFLICT (operator_id) DO UPDATE
+        (token_hash, admin_id, issued_at, ends_at)
+    VALUES (wanted_hash, wanted_admin, at, at + interval '1 hour')
+    ON CONFLICT (admin_id) DO UPDATE
         SET
             token_hash = excluded.token_hash,
             issued_at = excluded.issued_at,
@@ -409,11 +409,11 @@ BEGIN
 END
 $$;
 
--- Every operator, oldest first, with how many passkeys each holds and how many
+-- Every admin, oldest first, with how many passkeys each holds and how many
 -- minutes their open invite link has left, if one is open. Only counts
 -- and times leave: never a credential or a token's hash. One reading of the
 -- clock, the statement's, serves every row.
-CREATE FUNCTION list_operators()
+CREATE FUNCTION list_admins()
 RETURNS TABLE (
     id bigint,
     name text,
@@ -432,7 +432,7 @@ AS $$
         o.disabled_at,
         (
             SELECT count(*) FROM identity.passkeys AS p
-            WHERE p.operator_id = o.id
+            WHERE p.admin_id = o.id
         ) AS passkeys,
         (
             SELECT
@@ -440,17 +440,17 @@ AS $$
                     extract(EPOCH FROM e.ends_at - statement_timestamp()) / 60
                 )::bigint
             FROM identity.invites AS e
-            WHERE e.operator_id = o.id AND e.ends_at > statement_timestamp()
+            WHERE e.admin_id = o.id AND e.ends_at > statement_timestamp()
         ) AS link_minutes
-    FROM identity.operators AS o
+    FROM identity.admins AS o
     ORDER BY o.id
 $$;
 
--- The operator an invite link names, while the link is open, the operator
+-- The admin an invite link names, while the link is open, the admin
 -- enabled, and no passkey theirs yet, with the user handle and name a
 -- registration needs; nothing otherwise. Reading a link uses nothing up.
 CREATE FUNCTION invitee(wanted_link bytea)
-RETURNS TABLE (operator_id bigint, user_handle bytea, name text)
+RETURNS TABLE (admin_id bigint, user_handle bytea, name text)
 LANGUAGE sql STABLE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
 AS $$
@@ -459,23 +459,23 @@ AS $$
         uuid_send(o.user_handle),
         o.name
     FROM identity.invites AS e
-    INNER JOIN identity.operators AS o ON e.operator_id = o.id
+    INNER JOIN identity.admins AS o ON e.admin_id = o.id
     WHERE
         e.token_hash = wanted_link
         AND e.ends_at > statement_timestamp()
         AND o.disabled_at IS NULL
         AND NOT EXISTS (
-            SELECT FROM identity.passkeys AS p WHERE p.operator_id = o.id
+            SELECT FROM identity.passkeys AS p WHERE p.admin_id = o.id
         )
 $$;
 
--- Takes an enabled operator's row in share mode, as a ceremony that will add
+-- Takes an enabled admin's row in share mode, as a ceremony that will add
 -- a passkey for them begins, so a disable or a passkey being stored waits for
--- it or is seen by it, sweeps the operator's ceremonies that have ended, and
--- says when, by the clock read after any wait; null for an operator not
+-- it or is seen by it, sweeps the admin's ceremonies that have ended, and
+-- says when, by the clock read after any wait; null for an admin not
 -- enabled. Under read committed only (TD002). Only the
 -- functions that begin such ceremonies call it; no other role may.
-CREATE FUNCTION holding(wanted_operator bigint)
+CREATE FUNCTION holding(wanted_admin bigint)
 RETURNS timestamptz
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
@@ -485,32 +485,32 @@ DECLARE
 BEGIN
     PERFORM identity.require_read_committed('beginning a ceremony');
     PERFORM
-    FROM identity.operators AS o
-    WHERE o.id = wanted_operator AND o.disabled_at IS NULL
+    FROM identity.admins AS o
+    WHERE o.id = wanted_admin AND o.disabled_at IS NULL
     FOR SHARE;
     IF NOT FOUND THEN
         RETURN null;
     END IF;
     at := clock_timestamp();
     DELETE FROM identity.ceremonies AS c
-    WHERE c.operator_id = wanted_operator AND c.ends_at <= at;
+    WHERE c.admin_id = wanted_admin AND c.ends_at <= at;
     RETURN at;
 END
 $$;
 
 -- Keeps a join ceremony's state under its token's hash, and says
--- whether it did: only while the link is open, its operator enabled, and no
+-- whether it did: only while the link is open, its admin enabled, and no
 -- passkey theirs, checked here rather than trusted from the caller. It takes
--- the operator's row first, so a disable or a passkey being stored waits for
+-- the admin's row first, so a disable or a passkey being stored waits for
 -- it or is seen by it, which holds only under read committed (TD002), and
 -- reads the clock after any wait. A ceremony lasts ten minutes, longer than
 -- the five a browser gives its authenticator, but never past its link. A link
 -- holds one ceremony at most, by a unique index: a newer one replaces it, as a
 -- new link replaces the last, so beginning again and again stores nothing
--- more. The operator's ceremonies that have ended go too.
+-- more. The admin's ceremonies that have ended go too.
 CREATE FUNCTION begin_join(
     wanted_hash bytea,
-    wanted_operator bigint,
+    wanted_admin bigint,
     wanted_link bytea,
     wanted_state jsonb
 )
@@ -521,27 +521,27 @@ AS $$
 DECLARE
     at timestamptz;
 BEGIN
-    at := identity.holding(wanted_operator);
+    at := identity.holding(wanted_admin);
     IF at IS NULL THEN
         RETURN false;
     END IF;
     INSERT INTO identity.ceremonies
-        (token_hash, kind, operator_id, link_hash, state, ends_at)
+        (token_hash, kind, admin_id, link_hash, state, ends_at)
     SELECT
         wanted_hash,
         'join',
-        e.operator_id,
+        e.admin_id,
         e.token_hash,
         wanted_state,
         least(at + interval '10 minutes', e.ends_at)
     FROM identity.invites AS e
     WHERE
         e.token_hash = wanted_link
-        AND e.operator_id = wanted_operator
+        AND e.admin_id = wanted_admin
         AND e.ends_at > at
         AND NOT EXISTS (
             SELECT FROM identity.passkeys AS p
-            WHERE p.operator_id = wanted_operator
+            WHERE p.admin_id = wanted_admin
         )
     ON CONFLICT (link_hash) DO UPDATE
         SET
@@ -596,12 +596,12 @@ BEGIN
 END
 $$;
 
--- The passkey a credential ID names, with its operator, their user handle,
+-- The passkey a credential ID names, with its admin, their user handle,
 -- and whether they are disabled, so a refused login names whose it was;
--- nothing for a credential no operator holds. Reading it changes nothing.
+-- nothing for a credential no admin holds. Reading it changes nothing.
 CREATE FUNCTION signer(wanted_credential bytea)
 RETURNS TABLE (
-    operator_id bigint, user_handle bytea, passkey text, disabled boolean
+    admin_id bigint, user_handle bytea, passkey text, disabled boolean
 )
 LANGUAGE sql STABLE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
@@ -612,16 +612,16 @@ AS $$
         p.passkey::text,
         o.disabled_at IS NOT NULL
     FROM identity.passkeys AS p
-    INNER JOIN identity.operators AS o ON p.operator_id = o.id
+    INNER JOIN identity.admins AS o ON p.admin_id = o.id
     WHERE p.credential_id = wanted_credential
 $$;
 
--- Logs an operator in with a passkey a login verified, and says what came of
--- it, with the new session's public ID: logged_in; disabled, for an operator
+-- Logs an admin in with a passkey a login verified, and says what came of
+-- it, with the new session's public ID: logged_in; disabled, for an admin
 -- disabled since the passkey was read; raced, for a passkey another login
 -- changed meanwhile, whose counter this one must not overwrite; or null for a
--- passkey that no longer exists or is no longer that operator's. It takes the
--- operator's row as a login does, so a disable waits for it and then ends the
+-- passkey that no longer exists or is no longer that admin's. It takes the
+-- admin's row as a login does, so a disable waits for it and then ends the
 -- session it starts, ends the session the browser presented, stores the
 -- passkey's new state only if it is still the one verified against, and starts
 -- the session, all in one transaction, under read committed only (TD002). The
@@ -635,7 +635,7 @@ $$;
 -- wrong size, or null fails with that database error.
 CREATE FUNCTION login(
     wanted_credential bytea,
-    wanted_operator bigint,
+    wanted_admin bigint,
     wanted_old jsonb,
     wanted_new jsonb,
     wanted_session bytea,
@@ -685,10 +685,10 @@ BEGIN
     END IF;
     SELECT o.id, o.disabled_at INTO who, was
     FROM identity.passkeys AS p
-    INNER JOIN identity.operators AS o ON p.operator_id = o.id
+    INNER JOIN identity.admins AS o ON p.admin_id = o.id
     WHERE p.credential_id = wanted_credential
     FOR SHARE OF o;
-    IF NOT FOUND OR who IS DISTINCT FROM wanted_operator THEN
+    IF NOT FOUND OR who IS DISTINCT FROM wanted_admin THEN
         RETURN NEXT;
         RETURN;
     ELSIF was IS NOT NULL THEN
@@ -700,7 +700,7 @@ BEGIN
     SET passkey = wanted_new, last_used_at = clock_timestamp()
     WHERE
         p.credential_id = wanted_credential
-        AND p.operator_id = wanted_operator
+        AND p.admin_id = wanted_admin
         AND p.passkey::text = wanted_old::text;
     IF NOT FOUND THEN
         -- A passkey removed while this waited is unknown; one changed is raced.
@@ -716,8 +716,8 @@ BEGIN
     -- The session the browser presented ends, whoever's it was, so no token a
     -- browser held before logging in outlives it (ADR-0059, v5.0.0-7.2.4).
     DELETE FROM identity.sessions AS s
-    WHERE s.token_hash = wanted_presented AND s.realm = 'operator';
-    PERFORM identity.start_session(wanted_session, 'operator', who, true);
+    WHERE s.token_hash = wanted_presented AND s.realm = 'admin';
+    PERFORM identity.start_session(wanted_session, 'admin', who, true);
     outcome := 'logged_in';
     SELECT s.id::text INTO session_id
     FROM identity.sessions AS s
@@ -726,15 +726,15 @@ BEGIN
 END
 $$;
 
--- The account a live operator session names, if the operator is enabled: their
+-- The account a live admin session names, if the admin is enabled: their
 -- user handle and name, and a row for each passkey they hold, with how the
--- browser said it can reach it and whether it is synced, as the operator's
--- page and the browser's list of their passkeys need. An operator who holds
+-- browser said it can reach it and whether it is synced, as the admin's
+-- page and the browser's list of their passkeys need. An admin who holds
 -- none has one row with no passkey. Reading it changes nothing, not even the
 -- session's last request.
 CREATE FUNCTION account(wanted_session bytea)
 RETURNS TABLE (
-    operator_id bigint,
+    admin_id bigint,
     user_handle bytea,
     name text,
     credential_id bytea,
@@ -754,11 +754,11 @@ AS $$
         (p.passkey #>> '{cred,backup_eligible}')::boolean,
         (p.passkey #>> '{cred,backup_state}')::boolean
     FROM identity.sessions AS s
-    INNER JOIN identity.operators AS o ON s.operator_id = o.id
-    LEFT JOIN identity.passkeys AS p ON o.id = p.operator_id
+    INNER JOIN identity.admins AS o ON s.admin_id = o.id
+    LEFT JOIN identity.passkeys AS p ON o.id = p.admin_id
     WHERE
         s.token_hash = wanted_session
-        AND s.realm = 'operator'
+        AND s.realm = 'admin'
         AND statement_timestamp() < s.ends_at
         AND statement_timestamp() < s.last_seen_at + interval '15 minutes'
         AND o.disabled_at IS NULL
@@ -768,12 +768,12 @@ $$;
 -- The account a session names, as account finds it, if a passkey proved the
 -- person in it within ten minutes, which makes it a fresh login (ADR-0048,
 -- ADR-0069, v5.0.0-7.5.1),
--- and the operator holds fewer than two passkeys (ADR-0057): what adding a
+-- and the admin holds fewer than two passkeys (ADR-0057): what adding a
 -- passkey needs, with the passkeys they hold, so a device that has one makes
 -- no second. Reading it changes nothing.
 CREATE FUNCTION adder(wanted_session bytea)
 RETURNS TABLE (
-    operator_id bigint,
+    admin_id bigint,
     user_handle bytea,
     name text,
     credential_id bytea,
@@ -791,22 +791,22 @@ AS $$
         s.proven_at > statement_timestamp() - interval '10 minutes'
         AND (
             SELECT count(*) FROM identity.passkeys AS p
-            WHERE p.operator_id = a.operator_id
+            WHERE p.admin_id = a.admin_id
         ) < 2
 $$;
 
 -- Keeps a ceremony for adding a passkey under its token's hash, for ten
 -- minutes, and says whether it did: only while the session is live and fresh,
--- names the operator, who is enabled and holds fewer than two passkeys,
--- checked here rather than trusted from the caller. It takes the operator's
+-- names the admin, who is enabled and holds fewer than two passkeys,
+-- checked here rather than trusted from the caller. It takes the admin's
 -- row first, so a removal or a disable waits for it or is seen by it, under
--- read committed only (TD002). An operator has one such ceremony at a time, by
+-- read committed only (TD002). An admin has one such ceremony at a time, by
 -- a unique index: a newer one replaces it. It remembers its session, which
 -- alone may finish it.
 CREATE FUNCTION begin_addition(
     wanted_hash bytea,
     wanted_session bytea,
-    wanted_operator bigint,
+    wanted_admin bigint,
     wanted_state jsonb
 )
 RETURNS boolean
@@ -814,35 +814,35 @@ LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
-    -- The guard, the operator's row, and the sweep come first.
-    at timestamptz := identity.holding(wanted_operator);
+    -- The guard, the admin's row, and the sweep come first.
+    at timestamptz := identity.holding(wanted_admin);
 BEGIN
     IF at IS NULL THEN
         RETURN false;
     END IF;
     BEGIN
         INSERT INTO identity.ceremonies
-            (token_hash, kind, operator_id, session_hash, state, ends_at)
+            (token_hash, kind, admin_id, session_hash, state, ends_at)
         SELECT
             wanted_hash,
             'add',
-            s.operator_id,
+            s.admin_id,
             s.token_hash,
             wanted_state,
             at + interval '10 minutes'
         FROM identity.sessions AS s
         WHERE
             s.token_hash = wanted_session
-            AND s.operator_id = wanted_operator
-            AND s.realm = 'operator'
+            AND s.admin_id = wanted_admin
+            AND s.realm = 'admin'
             AND at < s.ends_at
             AND at < s.last_seen_at + interval '15 minutes'
             AND s.proven_at > at - interval '10 minutes'
             AND (
                 SELECT count(*) FROM identity.passkeys AS p
-                WHERE p.operator_id = wanted_operator
+                WHERE p.admin_id = wanted_admin
             ) < 2
-        ON CONFLICT (operator_id) WHERE kind = 'add' DO UPDATE
+        ON CONFLICT (admin_id) WHERE kind = 'add' DO UPDATE
             SET
                 token_hash = excluded.token_hash,
                 session_hash = excluded.session_hash,
@@ -858,11 +858,11 @@ END
 $$;
 
 -- Takes an open addition by its token's hash, for the session that began it,
--- and returns its operator and state. It is marked taken, so it is taken once,
+-- and returns its admin and state. It is marked taken, so it is taken once,
 -- and only storing its passkey uses it up; a session that did not begin it
 -- leaves it as it was.
 CREATE FUNCTION take_addition(wanted_hash bytea, wanted_session bytea)
-RETURNS TABLE (operator_id bigint, state text)
+RETURNS TABLE (admin_id bigint, state text)
 LANGUAGE sql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
 AS $$
@@ -874,25 +874,25 @@ AS $$
         AND c.session_hash = wanted_session
         AND NOT c.taken
         AND c.ends_at > clock_timestamp()
-    RETURNING c.operator_id, c.state::text
+    RETURNING c.admin_id, c.state::text
 $$;
 
--- Stores an operator's added passkey and ends their other sessions, keeping the
+-- Stores an admin's added passkey and ends their other sessions, keeping the
 -- one that added it (ADR-0059, v5.0.0-7.4.3), and says what came of it, with
 -- how many live sessions it ended and the adding session's public ID: added;
 -- disabled; logged_out, for a session that ended or is not theirs; ended, for
 -- no open addition this session took, which leaves any other as it is; the one
 -- it finds it uses up, so the database itself ties the passkey to an addition a
--- fresh session began; full, for an operator who holds two already (ADR-0057);
+-- fresh session began; full, for an admin who holds two already (ADR-0057);
 -- oversized, as for a first passkey; taken, for a credential another passkey
--- has, even one stored a moment before; or null for an operator who does not
--- exist. It takes the operator's row for update, so what it checks stays true
+-- has, even one stored a moment before; or null for an admin who does not
+-- exist. It takes the admin's row for update, so what it checks stays true
 -- until it commits, under read committed only (TD002). The session need not
 -- still be fresh: an addition begun from a fresh one may take its ten minutes.
 CREATE FUNCTION add_passkey(
     wanted_addition bytea,
     wanted_session bytea,
-    wanted_operator bigint,
+    wanted_admin bigint,
     wanted_credential bytea,
     wanted_passkey jsonb,
     wanted_transports text
@@ -907,8 +907,8 @@ DECLARE
 BEGIN
     PERFORM identity.require_read_committed('adding a passkey');
     SELECT o.disabled_at INTO was
-    FROM identity.operators AS o
-    WHERE o.id = wanted_operator
+    FROM identity.admins AS o
+    WHERE o.id = wanted_admin
     FOR NO KEY UPDATE;
     at := clock_timestamp();
     sessions_ended := 0;
@@ -924,8 +924,8 @@ BEGIN
     FROM identity.sessions AS s
     WHERE
         s.token_hash = wanted_session
-        AND s.operator_id = wanted_operator
-        AND s.realm = 'operator'
+        AND s.admin_id = wanted_admin
+        AND s.realm = 'admin'
         AND at < s.ends_at
         AND at < s.last_seen_at + interval '15 minutes';
     IF NOT FOUND THEN
@@ -939,13 +939,13 @@ BEGIN
         AND c.kind = 'add'
         AND c.taken
         AND c.session_hash = wanted_session
-        AND c.operator_id = wanted_operator
+        AND c.admin_id = wanted_admin
         AND c.ends_at > at;
     IF NOT FOUND THEN
         added := 'ended';
     ELSIF (
         SELECT count(*) FROM identity.passkeys AS p
-        WHERE p.operator_id = wanted_operator
+        WHERE p.admin_id = wanted_admin
     ) >= 2 THEN
         added := 'full';
     ELSIF
@@ -956,10 +956,10 @@ BEGIN
     ELSE
         BEGIN
             INSERT INTO identity.passkeys
-                (credential_id, operator_id, passkey, transports, created_at)
+                (credential_id, admin_id, passkey, transports, created_at)
             VALUES (
                 wanted_credential,
-                wanted_operator,
+                wanted_admin,
                 wanted_passkey,
                 wanted_transports,
                 at
@@ -970,12 +970,12 @@ BEGIN
             WITH gone AS (
                 DELETE FROM identity.sessions AS s
                 WHERE
-                    s.operator_id = wanted_operator
+                    s.admin_id = wanted_admin
                     AND s.token_hash <> wanted_session
                 RETURNING
                     at < s.ends_at
                     AND at < s.last_seen_at + CASE s.realm
-                        WHEN 'operator' THEN interval '15 minutes'
+                        WHEN 'admin' THEN interval '15 minutes'
                     END AS live
             )
 
@@ -993,7 +993,7 @@ $$;
 -- removed whether or not it is still open, and returned only if it is.
 -- Additions are taken by take_addition, for their session alone.
 CREATE FUNCTION take_ceremony(wanted_hash bytea, wanted_kind text)
-RETURNS TABLE (operator_id bigint, link_hash bytea, state text)
+RETURNS TABLE (admin_id bigint, link_hash bytea, state text)
 LANGUAGE sql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
 AS $$
@@ -1003,34 +1003,34 @@ AS $$
             c.token_hash = wanted_hash
             AND c.kind = wanted_kind
             AND c.kind <> 'add'
-        RETURNING c.operator_id, c.link_hash, c.state, c.ends_at
+        RETURNING c.admin_id, c.link_hash, c.state, c.ends_at
     )
 
     SELECT
-        taken.operator_id,
+        taken.admin_id,
         taken.link_hash,
         taken.state::text
     FROM taken
     WHERE taken.ends_at > clock_timestamp()
 $$;
 
--- Stores an operator's first passkey and uses up the link that let them, in
+-- Stores an admin's first passkey and uses up the link that let them, in
 -- one transaction, and says what came of it: redeemed; disabled; joined,
--- for an operator who has a passkey already, as when two tabs finish one
+-- for an admin who has a passkey already, as when two tabs finish one
 -- link; oversized, for a credential ID outside the 16 to 1023 bytes WebAuthn
 -- allows or a passkey larger than the table keeps, measured as the table
 -- measures it; expired, for a link that ended or was replaced; taken, for a
--- credential another operator's passkey has, even one stored a moment before
--- (the operator's own passkeys were refused as joined already); or null
--- for an operator who does not exist. It takes the operator's row first, so a
+-- credential another admin's passkey has, even one stored a moment before
+-- (the admin's own passkeys were refused as joined already); or null
+-- for an admin who does not exist. It takes the admin's row first, so a
 -- link being issued, a disable, or another tab's passkey waits, and what it
 -- checks stays true until it commits, under read committed only, so it
 -- refuses any other level with TD002. Redeemed, it ends the session the
--- browser presented and starts the operator's, unproven: it rests on the link,
+-- browser presented and starts the admin's, unproven: it rests on the link,
 -- so it is never fresh until a passkey login proves them (ADR-0069).
 CREATE FUNCTION redeem_invite(
     wanted_link bytea,
-    wanted_operator bigint,
+    wanted_admin bigint,
     wanted_credential bytea,
     wanted_passkey jsonb,
     wanted_transports text,
@@ -1044,7 +1044,7 @@ AS $$
 DECLARE
     standing text;
 BEGIN
-    standing := identity.joining(wanted_operator);
+    standing := identity.joining(wanted_admin);
     IF standing IS DISTINCT FROM 'open' THEN
         RETURN standing;
     ELSIF
@@ -1053,22 +1053,22 @@ BEGIN
     THEN
         RETURN 'oversized';
     END IF;
-    -- A credential another operator's passkey has, however recently, undoes
+    -- A credential another admin's passkey has, however recently, undoes
     -- the link's use and is a refusal, recorded like any other.
     BEGIN
         DELETE FROM identity.invites AS e
         WHERE
             e.token_hash = wanted_link
-            AND e.operator_id = wanted_operator
+            AND e.admin_id = wanted_admin
             AND e.ends_at > clock_timestamp();
         IF NOT FOUND THEN
             RETURN 'expired';
         END IF;
         INSERT INTO identity.passkeys
-            (credential_id, operator_id, passkey, transports, created_at)
+            (credential_id, admin_id, passkey, transports, created_at)
         VALUES (
             wanted_credential,
-            wanted_operator,
+            wanted_admin,
             wanted_passkey,
             wanted_transports,
             clock_timestamp()
@@ -1077,47 +1077,47 @@ BEGIN
         RETURN 'taken';
     END;
     -- Any other ceremony of theirs could only be refused now; it goes too.
-    DELETE FROM identity.ceremonies AS c WHERE c.operator_id = wanted_operator;
+    DELETE FROM identity.ceremonies AS c WHERE c.admin_id = wanted_admin;
     DELETE FROM identity.sessions AS s
-    WHERE s.token_hash = wanted_presented AND s.realm = 'operator';
+    WHERE s.token_hash = wanted_presented AND s.realm = 'admin';
     PERFORM identity.start_session(
-        wanted_session, 'operator', wanted_operator, false
+        wanted_session, 'admin', wanted_admin, false
     );
     RETURN 'redeemed';
 END
 $$;
 
--- Ends every session an operator holds, in any realm, and says how many were
+-- Ends every session an admin holds, in any realm, and says how many were
 -- live as of `at`, spent ones going too. Only disabling and removing passkeys
--- call it, holding the operator's row; no other role may.
-CREATE FUNCTION end_every_session(wanted_operator bigint, at timestamptz)
+-- call it, holding the admin's row; no other role may.
+CREATE FUNCTION end_every_session(wanted_admin bigint, at timestamptz)
 RETURNS bigint
 LANGUAGE sql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
 AS $$
     WITH gone AS (
         DELETE FROM identity.sessions AS s
-        WHERE s.operator_id = wanted_operator
+        WHERE s.admin_id = wanted_admin
         RETURNING
             at < s.ends_at
             AND at < s.last_seen_at + CASE s.realm
-                WHEN 'operator' THEN interval '15 minutes'
+                WHEN 'admin' THEN interval '15 minutes'
             END AS live
     )
 
     SELECT count(*) FILTER (WHERE gone.live) FROM gone
 $$;
 
--- Disables an operator, then ends every session it holds in any realm, its
+-- Disables an admin, then ends every session it holds in any realm, its
 -- invite link, and any passkey ceremony under way (v5.0.0-7.4.2), and
 -- says whether it acted and how many live sessions and links it ended, spent
--- ones going too: done is false for an operator already
+-- ones going too: done is false for an admin already
 -- disabled, and null for one that does not exist. Each step is its own
 -- statement, so the deletes see what a login or link committed while the
--- lock waited on the operator's row. One statement would not, and nor would
+-- lock waited on the admin's row. One statement would not, and nor would
 -- repeatable read, which it refuses with TD002, as do enable, end_sessions,
 -- and the join functions.
-CREATE FUNCTION disable_operator(wanted_operator bigint)
+CREATE FUNCTION disable_admin(wanted_admin bigint)
 RETURNS TABLE (done boolean, sessions_ended bigint, links_ended bigint)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
@@ -1132,8 +1132,8 @@ BEGIN
     -- The row first, waiting out any enable, so its answer is the state it
     -- leaves, never "already disabled" over an enable about to commit.
     SELECT o.disabled_at INTO was
-    FROM identity.operators AS o
-    WHERE o.id = wanted_operator
+    FROM identity.admins AS o
+    WHERE o.id = wanted_admin
     FOR NO KEY UPDATE;
     IF NOT FOUND OR was IS NOT NULL THEN
         done := CASE WHEN FOUND THEN false END;
@@ -1141,31 +1141,31 @@ BEGIN
         RETURN;
     END IF;
     at := clock_timestamp();
-    UPDATE identity.operators AS o SET disabled_at = at
-    WHERE o.id = wanted_operator;
-    sessions_ended := identity.end_every_session(wanted_operator, at);
+    UPDATE identity.admins AS o SET disabled_at = at
+    WHERE o.id = wanted_admin;
+    sessions_ended := identity.end_every_session(wanted_admin, at);
     WITH gone AS (
         DELETE FROM identity.invites AS e
-        WHERE e.operator_id = wanted_operator
+        WHERE e.admin_id = wanted_admin
         RETURNING at < e.ends_at AS live
     )
 
     SELECT count(*) FILTER (WHERE gone.live) INTO links_ended FROM gone;
-    DELETE FROM identity.ceremonies AS c WHERE c.operator_id = wanted_operator;
+    DELETE FROM identity.ceremonies AS c WHERE c.admin_id = wanted_admin;
     done := true;
     RETURN NEXT;
 END
 $$;
 
--- Removes every passkey an operator holds, so they can be issued a link and
+-- Removes every passkey an admin holds, so they can be issued a link and
 -- join again, as when their only passkey is lost or unusable (ADR-0057).
 -- It ends their sessions and any ceremony too, since a session begun with a
 -- removed passkey must not outlive it (v5.0.0-7.4.3). Says how many passkeys
--- it removed and how many live sessions it ended, or nothing for an operator
--- who does not exist. Like a disable, it takes the operator's row for update
+-- it removed and how many live sessions it ended, or nothing for an admin
+-- who does not exist. Like a disable, it takes the admin's row for update
 -- first, so a login or a join being stored waits for it or is seen by
 -- it, under read committed only, so it refuses any other level with TD002.
-CREATE FUNCTION remove_passkeys(wanted_operator bigint)
+CREATE FUNCTION remove_passkeys(wanted_admin bigint)
 RETURNS TABLE (passkeys_removed bigint, sessions_ended bigint)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
@@ -1175,8 +1175,8 @@ DECLARE
 BEGIN
     PERFORM identity.require_read_committed('removing passkeys');
     PERFORM
-    FROM identity.operators AS o
-    WHERE o.id = wanted_operator
+    FROM identity.admins AS o
+    WHERE o.id = wanted_admin
     FOR NO KEY UPDATE;
     IF NOT FOUND THEN
         RETURN;
@@ -1184,23 +1184,23 @@ BEGIN
     at := clock_timestamp();
     WITH gone AS (
         DELETE FROM identity.passkeys AS p
-        WHERE p.operator_id = wanted_operator
-        RETURNING p.operator_id
+        WHERE p.admin_id = wanted_admin
+        RETURNING p.admin_id
     )
 
     SELECT count(*) INTO passkeys_removed FROM gone;
-    sessions_ended := identity.end_every_session(wanted_operator, at);
-    DELETE FROM identity.ceremonies AS c WHERE c.operator_id = wanted_operator;
+    sessions_ended := identity.end_every_session(wanted_admin, at);
+    DELETE FROM identity.ceremonies AS c WHERE c.admin_id = wanted_admin;
     RETURN NEXT;
 END
 $$;
 
--- Enables a disabled operator again, and says whether it acted: false for an
--- operator already enabled, null for one that does not exist. Like a disable,
+-- Enables a disabled admin again, and says whether it acted: false for an
+-- admin already enabled, null for one that does not exist. Like a disable,
 -- it takes the row first, so its answer is the state it leaves, which holds
 -- only under read committed, so it refuses any other level with TD002. Their
 -- sessions stay ended, and they log in afresh.
-CREATE FUNCTION enable_operator(wanted_operator bigint)
+CREATE FUNCTION enable_admin(wanted_admin bigint)
 RETURNS boolean
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
@@ -1210,24 +1210,24 @@ DECLARE
 BEGIN
     PERFORM identity.require_read_committed('enabling');
     SELECT o.disabled_at INTO was
-    FROM identity.operators AS o
-    WHERE o.id = wanted_operator
+    FROM identity.admins AS o
+    WHERE o.id = wanted_admin
     FOR NO KEY UPDATE;
     IF NOT FOUND THEN
         RETURN null;
     END IF;
-    UPDATE identity.operators AS o SET disabled_at = null
-    WHERE o.id = wanted_operator;
+    UPDATE identity.admins AS o SET disabled_at = null
+    WHERE o.id = wanted_admin;
     RETURN was IS NOT NULL;
 END
 $$;
 
--- Ends every session one operator holds in a realm, or every operator's when
+-- Ends every session one admin holds in a realm, or every admin's when
 -- none is named, and says how many were live, spent ones going too, or null
--- for an operator who does not exist (v5.0.0-7.4.5). It first takes the
--- operators' rows, so a login that holds one finishes before the delete,
--- which then ends it too. Operators are few, so taking every row holds little.
-CREATE FUNCTION end_sessions(wanted_realm text, wanted_operator bigint)
+-- for an admin who does not exist (v5.0.0-7.4.5). It first takes the
+-- admins' rows, so a login that holds one finishes before the delete,
+-- which then ends it too. Admins are few, so taking every row holds little.
+CREATE FUNCTION end_sessions(wanted_realm text, wanted_admin bigint)
 RETURNS bigint
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
@@ -1238,11 +1238,11 @@ DECLARE
 BEGIN
     PERFORM identity.require_read_committed('ending sessions');
     PERFORM
-    FROM identity.operators AS o
-    WHERE wanted_operator IS NULL OR o.id = wanted_operator
+    FROM identity.admins AS o
+    WHERE wanted_admin IS NULL OR o.id = wanted_admin
     ORDER BY o.id
     FOR NO KEY UPDATE;
-    IF NOT FOUND AND wanted_operator IS NOT NULL THEN
+    IF NOT FOUND AND wanted_admin IS NOT NULL THEN
         RETURN null;
     END IF;
     at := clock_timestamp();
@@ -1250,11 +1250,11 @@ BEGIN
         DELETE FROM identity.sessions AS s
         WHERE
             s.realm = wanted_realm
-            AND (wanted_operator IS NULL OR s.operator_id = wanted_operator)
+            AND (wanted_admin IS NULL OR s.admin_id = wanted_admin)
         RETURNING
             at < s.ends_at
             AND at < s.last_seen_at + CASE s.realm
-                WHEN 'operator' THEN interval '15 minutes'
+                WHEN 'admin' THEN interval '15 minutes'
             END AS live
     )
 
@@ -1267,20 +1267,20 @@ $$;
 -- lookups it calls, so a helper added later is no one's until granted. It may
 -- not call start_session; only login and redeem_invite do. The database cannot
 -- check a passkey's signature, though, so a caller with this role can do what
--- an operator can, for any operator: start a session through login and add a
--- passkey through an addition that session took, or remove an operator's
+-- an admin can, for any admin: start a session through login and add a
+-- passkey through an addition that session took, or remove an admin's
 -- passkeys and join, and log in, with its own through a new link. Database
 -- access stays the trust boundary (ADR-0061).
 REVOKE EXECUTE ON ALL ROUTINES IN SCHEMA identity FROM public;
 GRANT EXECUTE ON FUNCTION use_session(bytea, text), end_session(bytea, text),
-issue_invite(bytea, bigint), list_operators(), invitee(bytea),
+issue_invite(bytea, bigint), list_admins(), invitee(bytea),
 begin_join(bytea, bigint, bytea, jsonb), take_ceremony(bytea, text),
 begin_login(bytea, jsonb), signer(bytea), account(bytea),
 login(bytea, bigint, jsonb, jsonb, bytea, bytea), adder(bytea),
 begin_addition(bytea, bytea, bigint, jsonb), take_addition(bytea, bytea),
 add_passkey(bytea, bytea, bigint, bytea, jsonb, text),
 redeem_invite(bytea, bigint, bytea, jsonb, text, bytea, bytea),
-disable_operator(bigint), enable_operator(bigint), remove_passkeys(bigint),
+disable_admin(bigint), enable_admin(bigint), remove_passkeys(bigint),
 end_sessions(text, bigint)
 TO tetsu_identity;
 
@@ -1297,7 +1297,7 @@ ALTER FUNCTION holding(bigint) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION end_every_session(bigint, timestamptz)
 OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION issue_invite(bytea, bigint) OWNER TO tetsu_identity_lookup;
-ALTER FUNCTION list_operators() OWNER TO tetsu_identity_lookup;
+ALTER FUNCTION list_admins() OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION invitee(bytea) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION begin_join(bytea, bigint, bytea, jsonb)
 OWNER TO tetsu_identity_lookup;
@@ -1315,8 +1315,8 @@ ALTER FUNCTION login(bytea, bigint, jsonb, jsonb, bytea, bytea)
 OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION redeem_invite(bytea, bigint, bytea, jsonb, text, bytea, bytea)
 OWNER TO tetsu_identity_lookup;
-ALTER FUNCTION disable_operator(bigint) OWNER TO tetsu_identity_lookup;
-ALTER FUNCTION enable_operator(bigint) OWNER TO tetsu_identity_lookup;
+ALTER FUNCTION disable_admin(bigint) OWNER TO tetsu_identity_lookup;
+ALTER FUNCTION enable_admin(bigint) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION remove_passkeys(bigint) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION end_sessions(text, bigint) OWNER TO tetsu_identity_lookup;
 REVOKE CREATE ON SCHEMA identity FROM tetsu_identity_lookup;

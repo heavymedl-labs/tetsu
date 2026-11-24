@@ -37,14 +37,15 @@ pub fn files(json: &str) -> Result<Vec<(String, String)>, String> {
         .collect()
 }
 
-/// The files a page links to by name, the brand files (docs/brand) and the operator pages' scripts, by source and
+/// The files a page links to by name, the brand files (docs/brand) and the admin pages' scripts, by source and
 /// by the constant that names each one's URL.
-const LINKED: [(&str, &str); 5] = [
+const LINKED: [(&str, &str); 6] = [
     ("../docs/brand/tetsu-avatar.svg", "ICON"),
     ("../docs/brand/tetsu-avatar.png", "TOUCH_ICON"),
-    ("src/passkey/ops.ts", "PASSKEY_SCRIPT"),
-    ("src/session/ops.ts", "SESSION_SCRIPT"),
-    ("src/scheme/ops.ts", "SCHEME_SCRIPT"),
+    ("src/passkey/admin.ts", "PASSKEY_SCRIPT"),
+    ("src/session/admin.ts", "SESSION_SCRIPT"),
+    ("src/scheme/admin.ts", "SCHEME_SCRIPT"),
+    ("src/menu/admin.ts", "MENU_SCRIPT"),
 ];
 
 /// The text's font, Latin only, which every page preloads.
@@ -197,7 +198,7 @@ mod tests {
                 "assets/tetsu-avatar-Gh4.png".to_string(),
             ),
             (
-                "src/passkey/ops.ts".to_string(),
+                "src/passkey/admin.ts".to_string(),
                 "assets/passkey-Ij5.js".to_string(),
             ),
             (

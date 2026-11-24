@@ -1,6 +1,6 @@
 -- Mail (ADR-0044, ADR-0074): each message handed to the Mailer, once per
 -- key, and the messages kept for the mailbox page rather than sent. Both are
--- global: they hold mail to operators, who belong to no business. A
+-- global: they hold mail to admins, who belong to no business. A
 -- business's mail gets tables of its own when staff mail arrives (#111).
 SET lock_timeout = '5s';
 SET statement_timeout = '30s';
@@ -23,7 +23,7 @@ CREATE TABLE sends (
 );
 
 COMMENT ON TABLE sends IS
-'tetsu:global: mail to operators belongs to no business';
+'tetsu:global: mail to admins belongs to no business';
 
 -- A message kept rather than sent, as the mailbox page shows it. Kept a
 -- week, since it may hold a link, and the page is for reading what was just
@@ -46,7 +46,7 @@ CREATE TABLE captured (
 );
 
 COMMENT ON TABLE captured IS
-'tetsu:global: mail to operators belongs to no business';
+'tetsu:global: mail to admins belongs to no business';
 
 CREATE INDEX captured_newest ON captured (captured_at DESC);
 

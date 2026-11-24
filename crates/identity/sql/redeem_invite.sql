@@ -1,4 +1,4 @@
--- Stores an operator's first passkey, uses up their invite link, starts
+-- Stores an admin's first passkey, uses up their invite link, starts
 -- their session, unproven (ADR-0069), and names its device.
 SELECT
     r.redeemed,

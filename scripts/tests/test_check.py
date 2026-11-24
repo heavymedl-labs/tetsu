@@ -580,7 +580,10 @@ class CheckScript(unittest.TestCase):
 
     def test_fails_when_the_final_sweep_cannot_drop_the_test_databases(self):
         # Only the sweep's run fails, not the template format check's.
-        self.stub("cargo", f'echo "cargo $*" >> "{self.log}"; [[ "$*" != *drop_test_databases* ]]')
+        # POSIX shell, since CI's sh is dash.
+        self.stub(
+            "cargo", f'echo "cargo $*" >> "{self.log}"; case "$*" in *drop_test_databases*) exit 1;; esac'
+        )
         result = self.check()
         self.assertEqual(result.returncode, 1)
         self.assertIn("test databases were not dropped", result.stderr)

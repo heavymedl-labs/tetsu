@@ -1,8 +1,10 @@
 {#- Tetsu's shared components (ADR-0035), on the --tetsu-* tokens, in light and dark. Each adapted one names its
     source; their licenses are in THIRD-PARTY-NOTICES.md. -#}
 
-{#- An outline icon from Heroicons (MIT), drawn in the current text color. -#}
-{% macro icon(name) %}
+{#- An outline icon from Heroicons v2.2.0 (MIT), copied from its `optimized/24/outline` files, never drawn here, in the
+    current text color, sized by where it sits (#156): beside `text` 16px, in a `tile` 18px, and alone in a `button`,
+    the default, 20px. -#}
+{% macro icon(name, size = "button") %}
   <svg
     aria-hidden="true"
     xmlns="http://www.w3.org/2000/svg"
@@ -10,7 +12,7 @@
     viewBox="0 0 24 24"
     stroke-width="1.5"
     stroke="currentColor"
-    class="size-5"
+    class='shrink-0 {% if size == "text" %}size-4{% else if size == "tile" %}size-4.5{% else %}size-5{% endif %}'
   >
     {%- if name == "system" %}
       <path
@@ -32,6 +34,42 @@
       />
     {%- else if name == "check" %}
       <path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+    {%- else if name == "back" %}
+      <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+    {%- else if name == "close" %}
+      <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+    {%- else if name == "person" %}
+      <path
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"
+      />
+    {%- else if name == "shield" %}
+      <path
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z"
+      />
+    {%- else if name == "phone" %}
+      <path
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3"
+      />
+    {%- else if name == "key" %}
+      <path
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1 1 21.75 8.25Z"
+      />
+    {%- else if name == "inbox" %}
+      <path
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        d="M2.25 13.5h3.86a2.25 2.25 0 0 1 2.012 1.244l.256.512a2.25 2.25 0 0 0 2.013 1.244h3.218a2.25 2.25 0 0 0 2.013-1.244l.256-.512a2.25 2.25 0 0 1 2.013-1.244h3.859m-19.5.338V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 0 0-2.15-1.588H6.911a2.25 2.25 0 0 0-2.15 1.588L2.35 13.177a2.25 2.25 0 0 0-.1.661Z"
+      />
+    {%- else if name == "plus" %}
+      <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
     {%- else if name == "menu" %}
       <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
     {%- else %}
@@ -173,31 +211,34 @@
 
 {#- A header menu's look: a native popover under the button that opens it, which anchors itself as
     `[anchor-name:--tetsu-menu]` where the browser can anchor it, and sits under the header's corner where it cannot.
-    No page has two, so they share the anchor's name. The caller adds its width. -#}
+    No page has two, so they share the anchor's name. The caller adds its width, as `popovers:w-…`, since a browser
+    without popovers shows the menu in place, unstyled by this. -#}
 {% macro menu_style() -%}
-  inset-auto top-16 right-6 m-0 mt-2 rounded-xl border border-edge bg-surface p-2 text-ink shadow-lg
-  [position-anchor:--tetsu-menu] supports-[top:anchor(bottom)]:top-[anchor(bottom)]
-  supports-[top:anchor(bottom)]:right-[anchor(right)]
+  text-ink popovers:inset-auto popovers:top-16 popovers:right-6 popovers:m-0 popovers:mt-2 popovers:rounded-xl
+  popovers:border popovers:border-edge popovers:bg-surface popovers:p-2 popovers:shadow-lg
+  popovers:[position-anchor:--tetsu-menu] popovers:supports-[top:anchor(bottom)]:top-[anchor(bottom)]
+  popovers:supports-[top:anchor(bottom)]:right-[anchor(right)]
 {%- endmacro %}
 
 {#- A signed-in person's account menu (#148), for any realm: their initials, which open a menu with their name, their
     role in this realm (`role`), Account (`account`, marked current when `here` is it), and Log out, which posts
     `form`, the session's form token, to `logout`. It works without script, and Escape or a tap outside closes it.
     The button names its visible initials first, so speech input can say them, and the button and rows grow to 44px
-    under a coarse pointer. -#}
+    under a coarse pointer, the button's by an invisible ring around its 32px circle. A browser without popovers
+    shows Account and Log out in a row in the button's place. -#}
 {% macro account_menu(name, initials, role, account, logout, form, here) %}
   <button
     type="button"
     popovertarget="tetsu-account-menu"
-    class="flex size-8 cursor-pointer items-center justify-center rounded-full bg-ink/8 text-xs font-medium tracking-wide text-ink ring-1 ring-edge transition-colors [anchor-name:--tetsu-menu] hover:bg-ink/12 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent pointer-coarse:size-11"
+    class="flex size-8 cursor-pointer items-center justify-center rounded-full bg-ink/8 text-xs font-medium tracking-wide text-ink ring-1 ring-edge transition-colors [anchor-name:--tetsu-menu] hover:bg-ink/12 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent relative pointer-coarse:after:absolute pointer-coarse:after:-inset-1.5 pointer-coarse:after:content-[''] no-popovers:hidden"
   >{{ initials }}<span class="sr-only">, account menu, {{ name }}</span></button>
-  <div id="tetsu-account-menu" popover class="w-60 {% call menu_style() %}{% endcall %}">
-    <div class="px-3 pt-1.5 pb-2.5">
+  <div id="tetsu-account-menu" popover class="popovers:w-60 {% call menu_style() %}{% endcall %}">
+    <div class="px-3 pt-1.5 pb-2.5 no-popovers:hidden">
       <p class="text-mini font-medium break-words text-ink">{{ name }}</p>
       <p class="text-xs text-muted">{{ role }}</p>
     </div>
-    <div class="mx-1 border-t border-edge-soft"></div>
-    <ul role="list" class="mt-1.5 text-mini">
+    <div class="mx-1 border-t border-edge-soft no-popovers:hidden"></div>
+    <ul role="list" class="mt-1.5 text-mini no-popovers:mt-0 no-popovers:flex">
       <li><a
           href="{{ account }}"
           {% if here == account %}aria-current="page"{% endif %}
@@ -210,3 +251,136 @@
     </ul>
   </div>
 {% endmacro %}
+
+{#- Tetsu's mark, the slot T of docs/brand/tetsu-avatar.svg, in the current text color: booked slots filled, the hot one
+    in forge orange, and open ones outlined at 1px, as the icons' strokes are, at 16px. -#}
+{% macro mark() %}
+  <svg aria-hidden="true" viewBox="60 60 380 380" class="size-4 shrink-0">
+    {%- for (x, y) in [(80, 80), (200, 80), (200, 200), (200, 320)] %}
+      <rect x="{{ x }}" y="{{ y }}" width="100" height="100" rx="15" fill="currentColor" />
+    {%- endfor %}
+    <rect x="320" y="80" width="100" height="100" rx="15" class="fill-forge" />
+    {%- for (x, y) in [(80, 200), (320, 200), (80, 320), (320, 320)] %}
+      <rect
+        x="{{ x }}.75"
+        y="{{ y }}.75"
+        width="98.5"
+        height="98.5"
+        rx="15"
+        fill="none"
+        stroke="currentColor"
+        stroke-opacity="0.45"
+        stroke-width="1"
+        vector-effect="non-scaling-stroke"
+      />
+    {%- endfor %}
+  </svg>
+{% endmacro %}
+
+{#- The settings shell's pieces (#156), for any realm, after Linear's settings mode: see web/templates/settings.html.
+    A link in its sidebar, 28px tall, or 44px under a coarse pointer, marked current when `here` is its page. -#}
+{% macro settings_link(href, icon_name, label, here) %}
+  <li><a
+      href="{{ href }}"
+      {% if here == href %}aria-current="page"{% endif %}
+      class="flex h-7 items-center gap-2.5 rounded-md px-2 text-mini text-soft hover:bg-ink/5 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent aria-[current=page]:bg-ink/7 aria-[current=page]:text-ink pointer-coarse:h-11"
+    >{% call icon(icon_name, "text") %}{% endcall %}{{ label }}</a></li>
+{% endmacro %}
+
+{#- The skip link every page with a header or sidebar opens with, to its `main`, shown only once focused. -#}
+{% macro skip_link() %}
+  <a
+    href="#main"
+    class="sr-only rounded-lg bg-surface px-3 py-2 text-mini text-ink focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus-visible:outline-2 focus-visible:outline-accent"
+  >Skip to content</a>
+{% endmacro %}
+
+{#- A titled group of the sidebar's links, such as every realm's Personal pages; `id` names its title, so each copy of
+    the sidebar gives its own. The caller writes its `settings_link`s. -#}
+{% macro settings_group(id, label) %}
+  <p id="{{ id }}" class="mt-6 px-2 text-xs font-medium text-muted">{{ label }}</p>
+  <ul role="list" aria-labelledby="{{ id }}" class="mt-1 space-y-0.5">
+    {{ caller() }}
+  </ul>
+{% endmacro %}
+
+{#- The sidebar's first link, back to the realm's app at `href`, muted beside the pages under it. -#}
+{% macro settings_back(href) %}
+  <a
+    href="{{ href }}"
+    class="flex h-7 items-center gap-2.5 rounded-md px-2 text-mini text-muted hover:bg-ink/5 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent pointer-coarse:h-11"
+  >{% call icon("back", "text") %}{% endcall %}Back to app</a>
+{% endmacro %}
+
+{#- The narrow bar's link back to the realm's app at `href`, beside "Menu", which the settings shell's `bar_back` holds. -#}
+{% macro settings_bar_back(href) %}
+  <a
+    href="{{ href }}"
+    class="flex h-8 items-center gap-1 rounded-md px-1.5 text-mini font-medium text-ink hover:bg-ink/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent pointer-coarse:h-11"
+  >{% call icon("back", "text") %}{% endcall %}Settings</a>
+{% endmacro %}
+
+{#- The sidebar's foot: the person, by initials, name, and role in this realm, and Log out, which posts `form`, the
+    session's form token, to `logout`, so every settings page can log out (`v5.0.0-7.4.4`). -#}
+{% macro settings_account(name, initials, role, logout, form) %}
+  <div class="mt-auto flex items-center gap-2.5 border-t border-edge-soft px-2 pt-3">
+    <span
+      aria-hidden="true"
+      class="flex size-7 shrink-0 items-center justify-center rounded-full bg-ink/8 text-xs font-medium text-ink ring-1 ring-edge"
+    >{{ initials }}</span>
+    <span class="min-w-0 flex-1"><span class="block truncate text-mini text-ink">{{ name }}</span><span
+        class="block text-xs text-muted"
+      >{{ role }}</span></span>
+    <form method="post" action="{{ logout }}"><input type="hidden" name="form" value="{{ form }}"><button
+        type="submit"
+        class="{% call quiet_button_style(false) %}{% endcall %} text-muted"
+      >Log out</button></form>
+  </div>
+{% endmacro %}
+
+{#- A titled section of a settings page, with an optional line under its title. -#}
+{% macro settings_section(id, title, text) %}
+  <section aria-labelledby="{{ id }}" class="mt-12 first-of-type:mt-8">
+    <h2 id="{{ id }}" class="text-base font-medium text-ink">{{ title }}</h2>
+    {%- if !text.is_empty() %}<p class="mt-1 text-mini text-pretty text-muted">{{ text }}</p>{% endif %}
+    {{ caller() }}
+  </section>
+{% endmacro %}
+
+{#- A card of rows, as Linear's: a fill a step above the page, a hairline ring, and a soft shadow. It sets no margin,
+    so the caller places it. -#}
+{% macro settings_card_style() -%}
+  divide-y divide-edge-soft rounded-[10px] bg-fill/60 shadow-[0_0.5px_1px_1px_rgb(0_0_0/0.08)] ring-1 ring-ink/5
+{%- endmacro %}
+
+{#- A row of a card: its label, an optional line, and what the caller writes at its right. A row with a line puts
+    that under it below the small step, as Linear's do on a phone. -#}
+{% macro settings_row(label, text) %}
+  <div
+    class="flex justify-between px-4 py-3.5 {% if text.is_empty() %}items-center gap-6{% else %}flex-col items-start gap-1.5 sm:flex-row sm:items-center sm:gap-6{% endif %}"
+  >
+    <div class="min-w-0">
+      <p class="text-mini font-medium text-ink">{{ label }}</p>
+      {%- if !text.is_empty() %}<p class="mt-0.5 text-mini text-pretty text-muted">{{ text }}</p>{% endif %}
+    </div>
+    <div class="shrink-0">{{ caller() }}</div>
+  </div>
+{% endmacro %}
+
+{#- A list row's leading tile, holding an 18px icon, such as a session's device or a passkey. -#}
+{% macro settings_tile(icon_name) %}
+  <span
+    aria-hidden="true"
+    class="flex size-8 shrink-0 items-center justify-center rounded-md bg-ink/6 text-soft"
+  >{% call icon(icon_name, "tile") %}{% endcall %}</span>
+{% endmacro %}
+
+{#- A quiet button, a link's weight with a hover fill, for a row's action: 28px tall, or 44px under a coarse
+    pointer, and never wrapping; `danger` colors one that ends something. -#}
+{% macro quiet_button_style(danger) -%}
+  inline-flex h-7 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2.5 text-mini font-medium
+  whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-offset-2
+  focus-visible:outline-accent pointer-coarse:h-11 pointer-coarse:px-3 {% if danger %}text-danger hover:bg-danger/8{%
+    else
+  %}text-ink hover:bg-ink/7{% endif %}
+{%- endmacro %}

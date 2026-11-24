@@ -13,24 +13,24 @@ names no business that uses Tetsu. Its root page names fictional customers only 
 | `tetsu migrate` | Runs each module's new migrations |
 | `tetsu seed <file or folder>` | Creates the tenants in seed files, and skips any whose slug exists |
 | `tetsu seed --check <file or folder>` | Checks seed files without a database |
-| `tetsu serve` | Serves the public pages, and the operator pages at `/ops`, and delivers the events modules record to the audit record and the operators' notices, until SIGTERM or SIGINT, then finishes open requests for up to 10 seconds. Refuses to start before `migrate`, or while a tenant holds an address now reserved for Tetsu's own pages |
+| `tetsu serve` | Serves the public pages, and the admin pages at `/admin`, and delivers the events modules record to the audit record and the admins' notices, until SIGTERM or SIGINT, then finishes open requests for up to 10 seconds. Refuses to start before `migrate`, or while a tenant holds an address now reserved for Tetsu's own pages |
 | `tetsu check` | Checks the server version, every isolation rule in the catalog, and that no module's role sees a tenant-owned row with no tenant set; fails naming each problem. Run as the owner role |
 | `tetsu reset <schema>...` | Drops module schemas, then migrates, which builds them afresh. Only where `TETSU_DEMO` is true, and only modules' schemas; all or none |
 | `tetsu replay <schema> <event id>` | Makes an event that stopped retrying due again, from the outboxes of the module whose schema recorded it |
 | `tetsu rename <address> <new slug>` | Moves the tenant at an address, such as one a release has since reserved, to a new slug and its address |
-| `tetsu operator create <name> <email>` | Creates an operator, prints their invite link, good once and for an hour, and emails it to them ([ADR-0074](../../docs/adr/0074-operator-email-in-development.md)). Prints a link only to a terminal |
-| `tetsu operator invite <id>` | Prints a new invite link for an operator, replacing the last, and emails it if they have an address. Only to a terminal |
-| `tetsu operator list` | Lists operators: ID, name, whether they are enabled, their passkeys, and the minutes left on an open invite link |
-| `tetsu operator disable <id>` | Disables an operator, ending their sessions and invite link |
-| `tetsu operator email <id> <email>` | Sets an operator's email address, where their invites and notices go from now on ([ADR-0074](../../docs/adr/0074-operator-email-in-development.md)) |
-| `tetsu operator enable <id>` | Enables a disabled operator again; their sessions stay ended |
-| `tetsu operator remove-passkeys <id>` | Removes an operator's passkeys, as when their only one is lost, and ends their sessions, so they can be invited to join again |
-| `tetsu operator end-sessions <id \| --all>` | Ends one operator's sessions, or every operator's |
+| `tetsu admin create <name> <email>` | Creates an admin, prints their invite link, good once and for an hour, and emails it to them ([ADR-0074](../../docs/adr/0074-operator-email-in-development.md)). Prints a link only to a terminal |
+| `tetsu admin invite <id>` | Prints a new invite link for an admin, replacing the last, and emails it if they have an address. Only to a terminal |
+| `tetsu admin list` | Lists admins: ID, name, whether they are enabled, their passkeys, and the minutes left on an open invite link |
+| `tetsu admin disable <id>` | Disables an admin, ending their sessions and invite link |
+| `tetsu admin email <id> <email>` | Sets an admin's email address, where their invites and notices go from now on ([ADR-0074](../../docs/adr/0074-operator-email-in-development.md)) |
+| `tetsu admin enable <id>` | Enables a disabled admin again; their sessions stay ended |
+| `tetsu admin remove-passkeys <id>` | Removes an admin's passkeys, as when their only one is lost, and ends their sessions, so they can be invited to join again |
+| `tetsu admin end-sessions <id \| --all>` | Ends one admin's sessions, or every admin's |
 
 The deploy workflow runs `check`, `reset`, `replay`, and `rename` against the demo ([runbook](../../docs/operations/demo-environment.md)).
 
 `tetsu --env <name> <command>` runs any command with the settings in `.env.<name>` in place of `.env`, such as
-`cargo tetsu --env demo operator create "Ada Lovelace" ada@example.com` against the demo. The file must exist, and the environment
+`cargo tetsu --env demo admin create "Ada Lovelace" ada@example.com` against the demo. The file must exist, and the environment
 still wins over it ([ADR-0073](../../docs/adr/0073-settings-files-per-environment.md)), except that the mail
 settings come all from one or all from the other ([ADR-0078](../../docs/adr/0078-mail-settings-from-one-place.md)).
 
@@ -51,7 +51,7 @@ the request ID, realm, `http.request.method` (`OTHER` for one HTTP does not defi
 from info up, and other crates only warnings and errors, since no one has checked what they write; the exporter's
 own crates are never exported, and their warnings, such as a refused key, stay on standard output. No line names
 the path, query, or body, since those could carry a name, an email, a code, or a token. What a module reports for
-the operator, such as a page that could not load, is an `ERROR` line in the request's span. A line that raises an
+the admin, such as a page that could not load, is an `ERROR` line in the request's span. A line that raises an
 alert has an `alert` field, with the values ADR-0049's table lists. Other commands' output stays plain text.
 
 ## Pages and styles
@@ -70,10 +70,10 @@ The site's templates:
 
 | Path | Holds |
 | --- | --- |
-| `site.html` | The head tags of Tetsu's own pages, around the shared header and footer (`web/templates/site_header.html`, `site_footer.html`), whose color scheme control (`scheme.html`) the operator pages share |
+| `site.html` | The head tags of Tetsu's own pages, around the shared header and footer (`web/templates/site_header.html`, `site_footer.html`), whose color scheme control (`scheme.html`) the admin pages share |
 | `not_found.html` | The site's not-found page, around the shared one (`web/templates/not_found.html`), which Tenancy also shows |
 | `home.html`, `home/` | The root page, which lists its sections, one file each |
-| `home/panels/` | Each product picture on the root page |
+| `home/art/` | Each product picture on the root page, a drawing the formatter leaves as written (ADR-0083) |
 | `art/` | The wordmark and its booked slots (`brand.html`, shared with the hero board), the hero board, the figures, bands, and spot maps, drawn from rows of data where they can be, and the parts of the product pictures (`app.html`) |
 
 Every component, such as a button, a section, its heading, a features list, or a footer column, is a macro in
@@ -97,7 +97,7 @@ Once, with the test Postgres from [AGENTS.md](../../AGENTS.md#checks) running:
 cp .env.example .env
 cargo tetsu setup
 cargo tetsu seed crates/tetsu/tests/fixtures/sample.toml
-cargo tetsu operator create "Your Name" you@example.com   # prints your invite link; with no mail server, it is not emailed
+cargo tetsu admin create "Your Name" you@example.com   # prints your invite link; with no mail server, it is not emailed
 ```
 
 The test Postgres keeps its data in memory, so after it restarts the database is gone: run `cargo tetsu setup` again.
@@ -106,7 +106,7 @@ sets `TETSU_DEMO`. `serve` refuses to start while a migration is unapplied or ch
 its code, as after a rollback.
 
 To see the email it sends, invites included, run `scripts/mailpit.py you@example.com` in another terminal, with
-your operator's address. While it runs, `.env.mailpit` holds `.env`'s settings with mail sent to a local Mailpit,
+your admin's address. While it runs, `.env.mailpit` holds `.env`'s settings with mail sent to a local Mailpit,
 shown at `http://localhost:8025`: run Tetsu with `cargo tetsu --env mailpit`, as the steps it prints say. `.env`
 is never touched. Tetsu refuses mail settings exported in your shell beside the file's, so unset them first.
 
@@ -122,10 +122,10 @@ Stop the server when you are done.
 | `DATABASE_TLS` | `migrate`, `seed`, `serve` | `require` (the default) or `disable`, for local tests only ([ADR-0013](../../docs/adr/0013-postgres-tls.md)) |
 | `DATABASE_CA_FILE` | `migrate`, `seed`, `serve` | Optional: a PEM file of certificate authorities, such as a provider's own, trusted instead of the public ones. Refused with `DATABASE_TLS=disable` |
 | `TETSU_DEMO` | `serve` | `true` or `false`, with no default: whether every page says its business is a demo and asks not to be indexed, and whether the root page shows its fictional customers ([ADR-0018](../../docs/adr/0018-demo-businesses-as-data.md), [ADR-0037](../../docs/adr/0037-fictional-customers-on-tetsus-page.md)) |
-| `TETSU_ORIGIN` | `serve`, `operator create`, `operator invite` | The site's own origin, such as `https://tetsu-demo.onrender.com`: the operator pages' passkeys belong to it, only it may send them a state-changing request, and invite links point to it. `https`, or `http` for this machine alone, with no path. From `.env` only when `DATABASE_URL` is too |
+| `TETSU_ORIGIN` | `serve`, `admin create`, `admin invite` | The site's own origin, such as `https://tetsu-demo.onrender.com`: the admin pages' passkeys belong to it, only it may send them a state-changing request, and invite links point to it. `https`, or `http` for this machine alone, with no path. From `.env` only when `DATABASE_URL` is too |
 | `TETSU_LOG_FORMAT` | `serve` | `json` or `text`. Unset, logs are text a person reads when they reach a terminal, and JSON anywhere else ([ADR-0071](../../docs/adr/0071-readable-logs-in-a-terminal.md)) |
 | `TETSU_TRUSTED_PROXIES` | `serve` | How many proxies stand in front, each adding an `X-Forwarded-For` entry, from 0 to 10 with no default: `0` locally, `3` on Render. Rate limits key on the entry the first of them added ([ADR-0072](../../docs/adr/0072-rate-limits-by-network-address.md)) |
-| `TETSU_SMTP_HOST` | `serve`, `operator create`, `operator invite` | Optional: the SMTP server mail goes through, over implicit TLS ([ADR-0074](../../docs/adr/0074-operator-email-in-development.md)). Without it, every message is kept for the mailbox page, except an invite, which is never kept. From `.env` only when `DATABASE_URL` is too, as are the settings below, and all of them from one place: some exported and some from a file are refused |
+| `TETSU_SMTP_HOST` | `serve`, `admin create`, `admin invite` | Optional: the SMTP server mail goes through, over implicit TLS ([ADR-0074](../../docs/adr/0074-operator-email-in-development.md)). Without it, every message is kept for the mailbox page, except an invite, which is never kept. From `.env` only when `DATABASE_URL` is too, as are the settings below, and all of them from one place: some exported and some from a file are refused |
 | `TETSU_SMTP_PORT` | as above | The server's implicit-TLS port, `465` by default |
 | `TETSU_SMTP_USERNAME`, `TETSU_SMTP_PASSWORD` | as above | The server's login, required with a host. The password is a secret, never logged |
 | `TETSU_SMTP_CA_FILE` | as above | Optional: a PEM certificate authority the server is also trusted by, besides the public ones, such as the local Mailpit's, which `scripts/mailpit.py` sets in `.env.mailpit` while it runs |
