@@ -1,6 +1,6 @@
 # 0088. Admins apart from staff, one login flow in code
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-24
 
 ## Context
