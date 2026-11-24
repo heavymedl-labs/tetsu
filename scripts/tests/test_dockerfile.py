@@ -21,6 +21,16 @@ class Dockerfile(unittest.TestCase):
             self.assertIn(f"COPY crates/{crate}/Cargo.toml crates/{crate}/\n", dockerfile, crate)
             self.assertIn(name, packages, crate)
 
+    def test_every_workspace_member_is_copied(self):
+        """Cargo loads every member to build any one, so the dependency layer needs each manifest."""
+        dockerfile = (ROOT / "Dockerfile").read_text()
+        members = tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]["members"]
+        manifests = [manifest for member in members for manifest in sorted(ROOT.glob(f"{member}/Cargo.toml"))]
+        self.assertGreater(len(manifests), len(list(ROOT.glob("crates/*/Cargo.toml"))))
+        for manifest in manifests:
+            folder = manifest.parent.relative_to(ROOT).as_posix()
+            self.assertIn(f"COPY {folder}/Cargo.toml {folder}/\n", dockerfile, folder)
+
 
 if __name__ == "__main__":
     unittest.main()
