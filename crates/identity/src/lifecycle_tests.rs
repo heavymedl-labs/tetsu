@@ -166,13 +166,13 @@ async fn staying_logged_in_renews_the_session() {
     assert_eq!(ended.status, 401);
 }
 
-/// Every page a logged-in operator sees carries the session island and its script, with the form token staying
-/// logged in sends; the login page carries neither.
+/// Every operator page carries the session island and its script, with the form token staying logged in sends; the
+/// login page carries neither.
 #[tokio::test]
 async fn logged_in_pages_carry_the_session_island() {
     let (address, _database, cookie, _) = logged_in().await;
     let script = format!("<script type=\"module\" src=\"{SESSION_SCRIPT}\">");
-    for path in [PROFILE, "/admin/nowhere"] {
+    for path in [PROFILE, "/admin/settings/security", "/admin/mailbox"] {
         let page = get(address, path, &cookie).await;
         // Each page masks its form token afresh, so the island carries the one this page's logout form does.
         let island = format!("<tetsu-session form-token=\"{}\"", form_on(&page.body));
@@ -376,7 +376,7 @@ async fn operator_pages_arrive_in_the_kept_scheme() {
         ("/admin/login", "theme=dark"),
         ("/admin/join", "theme=dark"),
         (PROFILE, "theme=dark"),
-        ("/admin/nowhere", "theme=dark"),
+        ("/admin/mailbox", "theme=dark"),
     ] {
         let both = format!("{cookie}; {kept}");
         let sent = if path.starts_with("/admin/log") || path == "/admin/join" {

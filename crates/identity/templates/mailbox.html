@@ -11,10 +11,12 @@
     here.</p>
   {% if messages.is_empty() %}<p class="mt-8 text-mini text-muted">Nothing kept yet.</p>
   {% else %}<ol aria-label="Kept email" class="mt-8 space-y-4">
-      {% for message in messages %}<li class="p-4 {% call shared::settings_card_style() %}{% endcall %}">
-          <h2 class="text-mini font-medium text-ink">{{ message.subject }}</h2>
-          <p class="mt-1 text-xs text-muted">To {{ message.recipient }} · {{ message.ago }}</p>
-          <pre class="mt-3 font-sans text-mini break-words whitespace-pre-wrap text-soft">{{ message.text }}</pre>
+      {% for message in messages %}<li class="{% call shared::settings_card_style() %}{% endcall %}">
+          <div class="p-4">
+            <h2 class="text-mini font-medium text-ink">{{ message.subject }}</h2>
+            <p class="mt-1 text-xs text-muted">To {{ message.recipient }} · {{ message.ago }}</p>
+            <pre class="mt-3 font-sans text-mini break-words whitespace-pre-wrap text-soft">{{ message.text }}</pre>
+          </div>
         </li>
       {% endfor %}</ol>
   {% endif %}

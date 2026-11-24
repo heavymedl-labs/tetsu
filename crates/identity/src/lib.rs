@@ -18,8 +18,6 @@ mod account_tests;
 #[cfg(test)]
 mod adding_tests;
 #[cfg(test)]
-mod header_tests;
-#[cfg(test)]
 mod http_tests;
 #[cfg(test)]
 mod join_tests;
@@ -29,6 +27,8 @@ mod lifecycle_tests;
 mod limit_tests;
 #[cfg(test)]
 mod login_tests;
+#[cfg(test)]
+mod menu_tests;
 #[cfg(test)]
 mod refusal_tests;
 #[cfg(test)]

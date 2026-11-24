@@ -203,7 +203,7 @@ macro_rules! through_shell {
     )+};
 }
 
-through_shell!(ProfilePage, SecurityPage, MailboxPage, NotFoundPage);
+through_shell!(ProfilePage, SecurityPage, MailboxPage);
 
 /// A session as the operator's page lists it: its id, which ending it names, its device, whether that is a phone,
 /// which its icon shows, and how long ago it started and was last used.
@@ -250,7 +250,10 @@ struct Kept {
 #[derive(Template)]
 #[template(path = "not_found.html")]
 struct NotFoundPage {
-    shell: Shell,
+    demo: bool,
+    stylesheet: &'static str,
+    /// The radio the site footer's color scheme control checks, from the visitor's cookie (ADR-0070).
+    scheme: &'static str,
 }
 
 #[derive(Template)]
@@ -485,18 +488,21 @@ fn ago(at: SystemTime, now: SystemTime) -> String {
 }
 
 /// A path under `/admin` that Identity does not serve. Anyone without a live session is sent to log in, returning here
-/// after, as at `/admin`, so the operator pages cannot be mapped from outside; an operator is told it is not found.
+/// after, as at `/admin`, so the operator pages cannot be mapped from outside; an operator gets the site's not-found
+/// page, as any wrong address does.
 async fn elsewhere<S: OperatorStore>(
     State(served): Shared<S>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
     let web = &served.web;
-    match viewer(&served, &headers).await {
-        Ok(Some((account, form))) => (
+    match served.operators.session(cookies(&headers)).await {
+        Ok(Some(_)) => (
             StatusCode::NOT_FOUND,
             page(&NotFoundPage {
-                shell: Shell::of(web, &headers, account.name, form, ""),
+                demo: web.demo,
+                stylesheet: web.stylesheet,
+                scheme: scheme_of(&headers).as_str(),
             }),
         )
             .into_response(),

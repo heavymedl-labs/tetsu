@@ -536,7 +536,7 @@ async fn each_page_offers_one_passkey_island() {
 
 /// A passkey on one device is listed as one, not as synced.
 /// A path under `/admin` that Identity does not serve sends anyone logged out to log in, so no one can map the
-/// operator pages without a session, and tells a logged-in operator it is not found, on an operator page.
+/// operator pages without a session, and shows a logged-in operator the site's not-found page.
 #[tokio::test]
 async fn an_unknown_operator_path_is_a_login_or_not_found() {
     let (address, _database, cookie, _) = logged_in().await;
@@ -557,10 +557,11 @@ async fn an_unknown_operator_path_is_a_login_or_not_found() {
             (404, Some("no-store")),
             "{path}"
         );
+        // The site's own not-found page, as any wrong address gets.
         for shown in [
-            "<title>Not found – Tetsu</title>",
-            "viewBox=\"0 0 564 144\"",
-            "href=\"/admin\"",
+            "<title>Page not found – Tetsu</title>",
+            "aria-label=\"404\"",
+            "There is nothing booked at this address.",
         ] {
             assert!(page.body.contains(shown), "{shown} in {}", page.body);
         }

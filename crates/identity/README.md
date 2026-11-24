@@ -222,12 +222,12 @@ that starts the new one. Logging out is a plain form that clears the cookie and 
 operators have a home (#157), `/admin` sends them to Profile, where logging in and joining land too. Every operator
 page takes Linear's settings mode (#156): the shared settings shell, `web/templates/settings.html`, with a sidebar of
 Tetsu's wordmark, the Personal pages, a Platform group of pages only operators have, now the mailbox, and the
-operator with Log out at its foot, which below a laptop's width opens from "Menu" as a native popover, beside the
-initials menu (#148, `v5.0.0-7.4.4`). The not-found page alone keeps the #148 header: a skip link, Tetsu's wordmark
-home, and the operator's initials opening a menu, a native popover that works without script, with their name,
-"Operator", Account, and the Log out form. The header and menu are shared components in
-`web/templates/components.html`, which the public site's header uses too, so other realms can fill them. Pages before
-login and the refused and unavailable pages have none. Profile shows the
+operator with Log out at its foot, which below a tablet's width opens from "Menu" as a native popover, beside the
+initials menu (#148, `v5.0.0-7.4.4`). The initials open a menu, a native popover that works without script, with the
+operator's name, "Operator", Account, and the Log out form; it and the header it came with are shared components in
+`web/templates/components.html`, which the public site's header uses too. An address under `/admin` that no page
+holds gets the site's own not-found page, as any wrong address does. Pages before login and the refused and
+unavailable pages have no menu. Profile shows the
 operator's name, email address, and role; Security lists their sessions, then their passkeys. Security
 offers a second passkey only within ten minutes of logging in, as the database allows, and its
 `<tetsu-passkeys>` tells the operator's devices every passkey Tetsu holds, through the Signal API.
@@ -235,7 +235,7 @@ offers a second passkey only within ten minutes of logging in, as the database a
 The edges of a login follow [the operator lifecycles research](../../docs/research/identity/operator-lifecycles.md).
 A logged-in operator who opens the login page is sent on. A login returns to the page it was asked for, through
 `browser::return_path`, which accepts only `/admin` or a plain path under it, checked on the page and again when the
-login finishes. Every page a logged-in operator sees extends `logged_in.html`, which loads the session island in
+login finishes. Every operator page extends `account_shell.html`, which loads the session island in
 `web/src/session/`. `<tetsu-session>` reads `GET /admin/session`, the seconds to each limit by the database's clock,
 which renews nothing, each minute while its page is visible, so an ending no limit foretold is seen within a minute,
 and two minutes before a limit opens the page's dialog: before the idle limit to stay logged

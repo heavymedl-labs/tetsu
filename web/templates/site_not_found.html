@@ -1,0 +1,11 @@
+{#- The site's not-found page, whole: Tetsu's header and footer around the "404" drawn in booked slots
+    (not_found.html). Every address nothing answers gets it, a business's address no business holds and an operator's
+    address no page holds alike, so a wrong address looks the same wherever it is. It reads `demo`, `stylesheet`, and
+    `scheme`. -#}
+{% extends "../../../web/templates/page.html" %}
+{% block title %}Page not found – Tetsu{% endblock %}
+{% block data_scheme %}{{ scheme }}{% endblock %}
+{% block color_scheme %}{% include "../../../web/templates/color_scheme.html" %}{% endblock %}
+{% block body %}{% include "../../../web/templates/site_header.html" %}
+  {% include "../../../web/templates/not_found.html" %}{% endblock %}
+{% block footer %}{% include "../../../web/templates/site_footer.html" %}{% endblock %}

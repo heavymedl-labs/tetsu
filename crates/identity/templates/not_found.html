@@ -1,9 +1,2 @@
-{% extends "logged_in.html" %}
-{% import "../../../web/templates/components.html" as shared %}
-{% block title %}Not found – Tetsu{% endblock %}
-{% block noscript %}{% endblock %}
-{% block card %}
-  <h1 class="text-lg font-medium text-ink">Not found</h1>
-  <p class="mt-2 text-mini text-pretty text-muted">Nothing is at this address.</p>
-  <a href="/admin" class="mt-6 {% call shared::button_style(false, false, false) %}{% endcall %}">Back to your page</a>
-{% endblock %}
+{#- An operator's address no page holds gets the site's not-found page, as any wrong address does (ADR-0084). -#}
+{% extends "../../../web/templates/site_not_found.html" %}

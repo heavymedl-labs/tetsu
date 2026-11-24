@@ -57,7 +57,7 @@ async fn each_account_page_has_the_settings_shell() {
     }
 }
 
-/// Below a laptop's width the sidebar is a native popover that "Menu" opens, with its own close button, inside the
+/// Below a tablet's width the sidebar is a native popover that "Menu" opens, with its own close button, inside the
 /// menu island, which keeps focus where it shows; the narrow bar also carries the initials menu, so logout is one tap
 /// away.
 #[tokio::test]
