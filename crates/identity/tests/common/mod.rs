@@ -40,7 +40,7 @@ pub async fn with_kurt() -> (TestDatabase, Admins<impl AdminStore>, AdminId) {
     (database, admins, kurt)
 }
 
-/// Starts an admin's session as a passkey login would, as the test server's administrator, and returns its
+/// Starts an admin's session as a passkey login would, as the test server's database administrator, and returns its
 /// token: only the login function may start one, so Identity's role cannot call `start_session` (ADR-0048).
 pub async fn logged_in(database: &TestDatabase, admin: AdminId) -> SessionToken {
     let mut bytes = [0u8; 32];

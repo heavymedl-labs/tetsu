@@ -398,7 +398,7 @@ fn admin_pages(
     })
 }
 
-/// Logs what a module reports for the admin, as an error on the request it happened in.
+/// Logs what a module reports, as an error on the request it happened in.
 fn report(line: &str) {
     tracing::error!("{line}");
 }

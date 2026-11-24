@@ -258,7 +258,7 @@ async fn a_browser_without_a_session_has_no_time_left() {
     );
 }
 
-/// A login page whose check for a session storage refuses is unavailable, and reported to the admin.
+/// A login page whose check for a session storage refuses is unavailable, and logged.
 #[tokio::test]
 async fn a_login_page_that_cannot_check_the_session_is_unavailable() {
     let (address, database, cookie, _) = logged_in().await;

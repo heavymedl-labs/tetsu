@@ -509,7 +509,7 @@ mod tests {
             Some("https://evil.example"),
             Some("http://admin.example.com"),
             Some("https://admin.example.com:443"),
-            Some("https://OPS.example.com"),
+            Some("https://ADMIN.example.com"),
             Some("http://localhost:8081"),
         ] {
             assert!(!origins.allow(other), "{other:?}");

@@ -27,7 +27,7 @@ const POLICY: &str = "default-src 'none'; object-src 'none'; script-src 'self'; 
 const REFUSED: &str = "this request was refused";
 pub(crate) const UNAVAILABLE: &str = "logging in is unavailable. Try again in a minute";
 
-/// What the admin was told, from every test, since `report` is a plain function.
+/// What was logged, from every test, since `report` is a plain function.
 static REPORTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 fn report(line: &str) {
@@ -717,7 +717,7 @@ async fn logged_in_changes_need_the_session_and_its_form_token() {
     );
 }
 
-/// A failure of the server is unavailable to the browser, which learns nothing more, and reported to the admin.
+/// A failure of the server is unavailable to the browser, which learns nothing more, and logged.
 #[tokio::test]
 async fn failures_of_the_server_are_unavailable() {
     let revoke = |function: &str| {

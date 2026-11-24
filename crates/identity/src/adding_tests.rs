@@ -59,7 +59,7 @@ async fn logged_in() -> (
     (admins, database, kurt, session)
 }
 
-/// An addition taken for `session`, stored as the administrator, as storing a passkey needs one: any addition
+/// An addition taken for `session`, stored as the database administrator, as storing a passkey needs one: any addition
 /// the admin held is replaced.
 async fn taken(database: &TestDatabase, session: &CheckedSession, n: u8) -> TakenAddition {
     let addition = TakenAddition {

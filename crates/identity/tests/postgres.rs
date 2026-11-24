@@ -36,7 +36,7 @@ mod support {
         Origins::parse(&[ORIGIN]).expect("origins")
     }
 
-    /// Runs SQL as the test server's administrator, to move a session's times or stand in for a bad migration.
+    /// Runs SQL as the test server's database administrator, to move a session's times or stand in for a bad migration.
     pub async fn as_db_admin(database: &TestDatabase, sql: &str) {
         connect(database)
             .await

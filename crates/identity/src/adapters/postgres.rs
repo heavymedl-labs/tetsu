@@ -1373,8 +1373,8 @@ mod tests {
     #[tokio::test]
     async fn a_create_answer_that_cannot_be_read_is_a_storage_failure() {
         let (pool, database) = support::migrated().await;
-        let admin = tetsu_postgres::connect(&database).await.expect("connects");
-        admin
+        let db_admin = tetsu_postgres::connect(&database).await.expect("connects");
+        db_admin
             .batch_execute("ALTER TABLE identity.admins ALTER COLUMN id TYPE integer")
             .await
             .expect("alters");
@@ -1394,7 +1394,7 @@ mod tests {
                     .to_string()
             ))
         );
-        let left = admin
+        let left = db_admin
             .query_one("SELECT count(*) FROM identity.admins", &[])
             .await
             .expect("counts");
@@ -1438,8 +1438,8 @@ mod tests {
             )
             .await
             .expect("creates");
-        let admin = tetsu_postgres::connect(&database).await.expect("connects");
-        admin
+        let db_admin = tetsu_postgres::connect(&database).await.expect("connects");
+        db_admin
             .execute(
                 "INSERT INTO identity.passkeys (credential_id, admin_id, passkey, created_at)
                  VALUES (sha256('lee'::bytea), $1, '{}', now())",
@@ -1454,7 +1454,7 @@ mod tests {
                 lee.get()
             )))
         );
-        admin
+        db_admin
             .batch_execute(
                 "DROP FUNCTION identity.issue_invite(bytea, bigint);
                  CREATE FUNCTION identity.issue_invite(bytea, bigint) RETURNS text

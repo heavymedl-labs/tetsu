@@ -723,7 +723,7 @@ async fn outside_a_demo_environment_no_page_is_marked_as_a_demo() {
 }
 
 #[tokio::test]
-async fn a_page_that_cannot_load_tells_the_admin_why_but_not_the_visitor() {
+async fn a_page_that_cannot_load_logs_why_but_tells_the_visitor_nothing() {
     // Tenancy's tables go once it is serving, so every lookup fails.
     let database = fresh_database().await.expect("a test database");
     ready(&database);

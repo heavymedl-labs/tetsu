@@ -857,7 +857,7 @@ fn a_relying_party_needs_an_origin_with_a_domain() {
         "https://127.0.0.1",
         "http://admin.example.com",
         "https://admin.example.com/some/path",
-        "https://OPS.example.com",
+        "https://ADMIN.example.com",
         "https://admin.example.com:443",
         "https://user@admin.example.com",
     ];

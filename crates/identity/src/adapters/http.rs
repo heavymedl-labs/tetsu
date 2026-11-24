@@ -89,7 +89,7 @@ const UNAVAILABLE: &str = "logging in is unavailable. Try again in a minute";
 /// What the pages need from the composition root: the relying party and the origins state-changing requests
 /// must come from, whether this is the demo, the shared stylesheet's URL, the passkey script's, which every admin
 /// page loads, the session script's, which a logged-in admin's pages load too, and the color scheme control's,
-/// and where a failure the admin should see is reported (#27).
+/// and where a failure is reported for the log (#27).
 pub struct Web {
     pub party: RelyingParty,
     pub origins: Origins,
@@ -783,7 +783,7 @@ async fn logout<S: AdminStore>(
 }
 
 /// A page that says logging in is unavailable just now, for a request a person made by following a link or posting
-/// a form, with the detail reported to the admin, never shown.
+/// a form, with the detail logged, never shown.
 fn unavailable_page(web: &Web, what: &str, error: &Error) -> Response {
     (web.report)(&format!("identity: {what}: {error}"));
     let unavailable = UnavailablePage {
@@ -1017,8 +1017,8 @@ fn next(path: &str) -> Response {
     json_out(StatusCode::OK, &json!({ "next": path }))
 }
 
-/// A use case's answer: its response, its one refusal, or unavailable when the server failed, which the admin
-/// is told of through `report` and the browser only in general.
+/// A use case's answer: its response, its one refusal, or unavailable when the server failed, which is logged
+/// through `report`, and told to the browser only in general.
 fn answered(web: &Web, result: Result<Response, Error>) -> Response {
     match result {
         Ok(response) => response,

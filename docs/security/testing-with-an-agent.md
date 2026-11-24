@@ -92,13 +92,13 @@ done
 - **The baseline scan only looks.** The first run downloads ZAP's image, about 4 GB, which can take minutes to tens
   of minutes. Each scan then takes a minute or two.
 - **`zap-full-scan.py` also attacks,** and takes a few minutes per starting point. Swap it into the loop above, with
-  `-m 10` to cap its crawl at ten minutes, such as `zap-full-scan.py -t http://localhost:8080/ops/login -m 10 -r
+  `-m 10` to cap its crawl at ten minutes, such as `zap-full-scan.py -t http://localhost:8080/admin/login -m 10 -r
   full-login.html`. `docker stop tetsu-zap` ends a scan early.
 - **Exit code 2 means warnings to read;** 1 means a failure found, and 3 that ZAP broke.
 - **On macOS,** drop `--network host` and target `http://host.docker.internal:8080`.
 - **Logged in:** after joining, copy the `__Host-tetsu-admin` cookie's value, a long string of letters and digits
-  without the name in front, from Chrome's DevTools (Application, then Cookies), and scan `http://localhost:8080/ops` with this added to the scan's options, with the value in place
-  of `VALUE`. The cookie is a live session, so keep it out of reports you send, and log out afterwards.
+  without the name in front, from Chrome's DevTools (Application, then Cookies), and scan
+  `http://localhost:8080/admin` with this added to the scan's options, with the value in place of `VALUE`. The cookie is a live session, so keep it out of reports you send, and log out afterwards.
 
   ```text
   -z "-config replacer.full_list(0).description=auth -config replacer.full_list(0).enabled=true

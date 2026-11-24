@@ -347,9 +347,9 @@ async fn a_disable_waits_for_a_login_or_link_being_written_then_ends_it() {
             .create(&name("Kurt Medley"), None, &actor())
             .await
             .expect("creates");
-        // Only a login starts a session, so the administrator stands in for one.
-        let mut admin = connect(&database).await.expect("connects");
-        let writing = admin.transaction().await.expect("begins");
+        // Only a login starts a session, so the database administrator stands in for one.
+        let mut db_admin = connect(&database).await.expect("connects");
+        let writing = db_admin.transaction().await.expect("begins");
         writing
             .execute(writes, &[&kurt.get()])
             .await
@@ -383,9 +383,9 @@ async fn ending_sessions_waits_for_a_login_being_written() {
             .create(&name("Kurt Medley"), None, &actor())
             .await
             .expect("creates");
-        // Only a login starts a session, so the administrator stands in for one.
-        let mut admin = connect(&database).await.expect("connects");
-        let writing = admin.transaction().await.expect("begins");
+        // Only a login starts a session, so the database administrator stands in for one.
+        let mut db_admin = connect(&database).await.expect("connects");
+        let writing = db_admin.transaction().await.expect("begins");
         writing
             .execute(
                 "SELECT identity.start_session(sha256('a'::bytea), 'admin', $1, true)",
@@ -728,8 +728,8 @@ async fn spent_sessions_and_links_are_removed_but_not_counted() {
 async fn a_login_waiting_on_a_removal_finds_its_passkey_unknown() {
     let (database, pool) = kurt_and_pool().await;
     as_db_admin(&database, &passkey_for(1)).await;
-    let mut admin = connect(&database).await.expect("connects");
-    let removing = admin.transaction().await.expect("begins");
+    let mut db_admin = connect(&database).await.expect("connects");
+    let removing = db_admin.transaction().await.expect("begins");
     removing
         .execute("SELECT * FROM identity.remove_passkeys(1)", &[])
         .await
@@ -806,8 +806,8 @@ async fn an_addition_begun_as_its_session_ends_is_refused() {
         "SELECT identity.start_session(sha256('s'::bytea), 'admin', 1, true)",
     )
     .await;
-    let mut admin = connect(&database).await.expect("connects");
-    let ending = admin.transaction().await.expect("begins");
+    let mut db_admin = connect(&database).await.expect("connects");
+    let ending = db_admin.transaction().await.expect("begins");
     ending
         .execute("DELETE FROM identity.sessions", &[])
         .await
@@ -845,8 +845,8 @@ async fn a_session_starts_after_the_wait_that_held_it_up() {
         .create(&name("Kurt Medley"), None, &actor())
         .await
         .expect("creates");
-    let mut admin = connect(&database).await.expect("connects");
-    let holding = admin.transaction().await.expect("begins");
+    let mut db_admin = connect(&database).await.expect("connects");
+    let holding = db_admin.transaction().await.expect("begins");
     holding
         .execute(
             "SELECT FROM identity.admins WHERE id = 1 FOR NO KEY UPDATE",
@@ -854,7 +854,7 @@ async fn a_session_starts_after_the_wait_that_held_it_up() {
         )
         .await
         .expect("locks");
-    // Only a login starts a session, so the administrator stands in for one.
+    // Only a login starts a session, so the database administrator stands in for one.
     let mut client = connect(&database).await.expect("connects");
     let starting = tokio::spawn(async move {
         let writing = client.transaction().await.expect("begins");
@@ -940,8 +940,8 @@ async fn a_name_already_taken_is_refused_and_recorded() {
 #[tokio::test]
 async fn a_name_taken_while_a_create_waits_is_refused() {
     let (database, admins) = migrated().await;
-    let mut admin = connect(&database).await.expect("connects");
-    let writing = admin.transaction().await.expect("begins");
+    let mut db_admin = connect(&database).await.expect("connects");
+    let writing = db_admin.transaction().await.expect("begins");
     writing
         .execute(
             "INSERT INTO identity.admins (name) VALUES ('Kurt Medley')",

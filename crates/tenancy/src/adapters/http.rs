@@ -61,7 +61,7 @@ const THEME_CACHE: &str = "public, max-age=300";
 /// page, never another tenant's. It sets no fallback, since axum allows one per site and the composition root
 /// sets it (#90). With `demo`, every page says it shows
 /// demo businesses and asks search engines not to index it (ADR-0018). A page that could not be loaded is shown
-/// as unavailable, and `report` gets a line for the admin, since where such lines go is the composition
+/// as unavailable, and `report` gets a line for the log, since where such lines go is the composition
 /// root's choice (#27). Each page links `stylesheet`, the shared sheet's URL, which the composition root knows,
 /// and a tenant's page links its own theme sheet, `/<slug>/theme.css`, after it.
 pub fn router<S>(
@@ -77,7 +77,7 @@ where
 }
 
 /// The router, with the time a lookup may take and where failures are reported as parameters, so tests need not
-/// wait out the real timeout and can read what the admin would see.
+/// wait out the real timeout and can read what would be logged.
 fn routes<S>(
     tenants: Tenants<S>,
     demo: bool,
@@ -185,7 +185,7 @@ async fn lookup<S: TenantStore>(
     )))
 }
 
-/// What the admin sees when a page could not be loaded: the cause, and never the address, which is whatever
+/// What is logged when a page could not be loaded: the cause, and never the address, which is whatever
 /// the visitor put in the path, such as an email (ADR-0045). The log's JSON escapes control characters.
 fn failure_line(failure: &str) -> String {
     format!("tenancy: could not load a page: {failure}")
@@ -237,7 +237,7 @@ fn html(status: StatusCode, page: &impl Template) -> Response {
             body,
         )
             .into_response(),
-        // A compiled template fails only if writing fails, so there is nothing for the admin to act on.
+        // A compiled template fails only if writing fails, so there is nothing in the log to act on.
         Err(_) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
     }
 }
@@ -560,7 +560,7 @@ mod tests {
     }
 
     #[test]
-    fn the_admin_line_names_the_cause_and_never_the_address() {
+    fn the_log_line_names_the_cause_and_never_the_address() {
         assert_eq!(
             failure_line("db down"),
             "tenancy: could not load a page: db down"
@@ -637,7 +637,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_failure_reaches_the_admin_with_its_detail() {
+    async fn a_failure_is_logged_with_its_detail() {
         get(
             serving(Some(Failure::Storage), &[]).await,
             "/reported-studio",
