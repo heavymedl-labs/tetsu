@@ -525,7 +525,7 @@ async fn each_page_offers_one_passkey_island() {
             assert!(!page.body.contains(absent), "{absent} in {}", page.body);
         }
         for shown in [
-            format!("<tetsu-passkey action=\"{action}\""),
+            format!("<tetsu-passkey base=\"/admin\" action=\"{action}\""),
             "viewBox=\"0 0 564 144\"".to_string(),
             "<a href=\"/\" aria-label=\"Tetsu home\"".to_string(),
             "disabled:opacity-50 rounded-full font-medium focus-visible:outline-2".to_string(),

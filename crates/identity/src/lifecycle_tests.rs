@@ -175,7 +175,10 @@ async fn logged_in_pages_carry_the_session_island() {
     for path in [PROFILE, "/admin/settings/security", "/admin/mailbox"] {
         let page = get(address, path, &cookie).await;
         // Each page masks its form token afresh, so the island carries the one this page's logout form does.
-        let island = format!("<tetsu-session form-token=\"{}\"", form_on(&page.body));
+        let island = format!(
+            "<tetsu-session base=\"/admin\" form-token=\"{}\"",
+            form_on(&page.body)
+        );
         for shown in [&script, &island] {
             assert!(page.body.contains(shown.as_str()), "{shown} on {path}");
         }

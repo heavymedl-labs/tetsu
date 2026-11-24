@@ -5,6 +5,6 @@ afterEach(() => {
 });
 
 it("registers the scheme island with the browser's own document", async () => {
-  await import("./admin");
+  await import("./main");
   expect(customElements.get("tetsu-scheme")).toBeDefined();
 });

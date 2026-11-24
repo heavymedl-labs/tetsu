@@ -6,7 +6,7 @@
     heading, never on a button a keystroke meant for the page could press, and the island ignores a dismissal in
     its first second. -#}
 {% import "../../../web/templates/components.html" as shared %}
-<tetsu-session form-token="{{ form }}">
+<tetsu-session base="/admin" form-token="{{ form }}">
   <dialog
     aria-labelledby="tetsu-session-title"
     aria-describedby="tetsu-session-text"

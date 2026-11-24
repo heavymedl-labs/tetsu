@@ -1,14 +1,14 @@
-// The session island (ADR-0031): <tetsu-session form-token="…"> wraps the page's session dialog, which the server
-// renders. It reads how long the session has left without renewing it, opens the dialog two minutes before a limit,
+// The session island (ADR-0031): <tetsu-session base="/admin" form-token="…"> wraps the page's session dialog, which
+// the server renders, for the realm at `base`. It reads how long the session has left without renewing it, opens the dialog two minutes before a limit,
 // renews the session only when the person chooses to stay, keeps every tab of the site in step, and sends a page
 // whose session has ended to log in (docs/research/identity/operator-lifecycles.md).
 
 import { call, Refused } from "../shared/http";
-import { loggedOut } from "../shared/login";
+import { loggedOut, realmBase } from "../shared/login";
 import { Deadline, Timer } from "./timer";
 
-/** Where a page reads its session's time left (GET), and stays logged in (POST). */
-const SESSION = "/admin/session";
+/** Where a page reads its session's time left (GET), and stays logged in (POST), below its realm's base path. */
+const SESSION = "/session";
 
 /** How many seconds before a limit the dialog opens: HMRC's service timeout pattern warns with two minutes left. */
 export const WARN = 120;
@@ -26,13 +26,16 @@ export const SETTLE = 2;
 /** How many seconds after the dialog opens a dismissal is taken as meant for the page, not for it. */
 export const GRACE = 1;
 
-/** The parts of the browser the island uses, passed to `define` so tests can stand in for them. `channel` reaches
- * the site's other tabs, where the browser has one. */
+/** A channel to the other tabs of a realm. */
+type Tabs = Pick<BroadcastChannel, "postMessage" | "addEventListener">;
+
+/** The parts of the browser the island uses, passed to `define` so tests can stand in for them. `channel` opens a
+ * channel to other tabs by its name, where the browser has one. */
 export interface Browser {
   location: Pick<Location, "pathname" | "assign">;
   page: Pick<Document, "visibilityState" | "addEventListener">;
   window: Pick<Window, "addEventListener">;
-  channel: Pick<BroadcastChannel, "postMessage" | "addEventListener"> | undefined;
+  channel: (name: string) => Tabs | undefined;
 }
 
 /** Which limit is nearer: the idle one, which staying renews, or the absolute one, which only a new login does. */
@@ -47,12 +50,13 @@ export function spoken(seconds: number): string {
   return seconds === 1 ? "1 second" : `${seconds} seconds`;
 }
 
-/** The parts of a `<tetsu-session>` it works through, if it has them all. */
+/** The parts of a `<tetsu-session>` it works through, if it has them all and names a realm it knows. */
 interface Parts {
   dialog: HTMLDialogElement;
   stay: HTMLButtonElement;
   left: Element;
   logout: HTMLFormElement;
+  base: string;
 }
 
 function partsOf(host: HTMLElement): Parts | undefined {
@@ -60,10 +64,11 @@ function partsOf(host: HTMLElement): Parts | undefined {
   const stay = host.querySelector<HTMLButtonElement>("button[data-stay]");
   const left = host.querySelector("[data-left]");
   const logout = host.querySelector("form");
-  if (dialog === null || stay === null || left === null || logout === null) {
+  const base = realmBase(host.getAttribute("base"));
+  if (dialog === null || stay === null || left === null || logout === null || base === undefined) {
     return undefined;
   }
-  return { dialog, stay, left, logout };
+  return { dialog, stay, left, logout, base };
 }
 
 /** The island's clock: one timer at a time, set from what the server last said. */
@@ -83,13 +88,14 @@ class Clock {
     private readonly host: HTMLElement,
     private readonly parts: Parts,
     private readonly browser: Browser,
+    private readonly tabs: Tabs | undefined,
   ) {}
 
   /** Asks the server how long the session has left, which renews nothing, and sets the clock from its answer. A
    * hidden page does not ask, and lets its clock stop: it asks again once shown. */
   readonly check = async (): Promise<void> => {
     if (this.browser.page.visibilityState !== "hidden") {
-      await this.ask((signal) => call(SESSION, signal));
+      await this.ask((signal) => call(`${this.parts.base}${SESSION}`, signal));
     }
   };
 
@@ -99,8 +105,10 @@ class Clock {
   readonly stay = (): Promise<void> =>
     this.ask(async (signal) => {
       try {
-        const left = await call(SESSION, signal, { form: this.host.getAttribute("form-token") ?? "" });
-        this.browser.channel?.postMessage("renewed");
+        const left = await call(`${this.parts.base}${SESSION}`, signal, {
+          form: this.host.getAttribute("form-token") ?? "",
+        });
+        this.tabs?.postMessage("renewed");
         return left;
       } catch (error) {
         if (error instanceof Refused && error.status === 403) {
@@ -182,9 +190,9 @@ class Clock {
     if (error instanceof Refused && error.status === 401) {
       this.timer.stop();
       if (!this.heard) {
-        this.browser.channel?.postMessage("ended");
+        this.tabs?.postMessage("ended");
       }
-      this.browser.location.assign(loggedOut(this.browser.location.pathname));
+      this.browser.location.assign(loggedOut(this.parts.base, this.browser.location.pathname));
     }
   }
 
@@ -225,10 +233,11 @@ class Clock {
   };
 }
 
-/** The channel the site's tabs share, where the browser has one, so staying in one tab, or its session ending,
- * reaches the others (HMRC's `data-synchronise-tabs`). */
-export function channel(): Browser["channel"] {
-  return typeof BroadcastChannel === "function" ? new BroadcastChannel("tetsu-session") : undefined;
+/** A channel the tabs of one realm share, by its name, where the browser has one, so staying in one tab, or its
+ * session ending, reaches the others (HMRC's `data-synchronise-tabs`). Each realm has its own, as the realms share an
+ * origin until Tetsu has domains (ADR-0061), and one realm's logout must not speak for another's session. */
+export function channel(name: string): Tabs | undefined {
+  return typeof BroadcastChannel === "function" ? new BroadcastChannel(name) : undefined;
 }
 
 /** Readies a `<tetsu-session>`, once, if it has its parts: it checks at once, again when another tab says something
@@ -241,17 +250,19 @@ export function ready(host: HTMLElement, browser: Browser): void {
   }
   host.dataset.ready = "";
   // Logging out from the dialog, as "Log in again" before the 8 hour limit does, returns here after the next login.
-  parts.logout.setAttribute("action", `/admin/logout?next=${browser.location.pathname}`);
-  const clock = new Clock(host, parts, browser);
+  const logout = `${parts.base}/logout`;
+  parts.logout.setAttribute("action", `${logout}?next=${browser.location.pathname}`);
+  const tabs = browser.channel(`tetsu-session ${parts.base}`);
+  const clock = new Clock(host, parts, browser, tabs);
   parts.stay.addEventListener("click", clock.stay);
   parts.dialog.addEventListener("cancel", clock.cancelled);
-  browser.channel?.addEventListener("message", clock.told);
+  tabs?.addEventListener("message", clock.told);
   browser.window.addEventListener("online", clock.check);
   // Logging out from any form on the page ends the session in every tab, so the others leave at once.
   browser.page.addEventListener("submit", (event) => {
     const form = event.target;
-    if (form instanceof HTMLFormElement && form.getAttribute("action")?.startsWith("/admin/logout")) {
-      browser.channel?.postMessage("ended");
+    if (form instanceof HTMLFormElement && form.getAttribute("action")?.startsWith(logout)) {
+      tabs?.postMessage("ended");
     }
   });
   browser.page.addEventListener("visibilitychange", clock.check);
@@ -261,7 +272,7 @@ export function ready(host: HTMLElement, browser: Browser): void {
     }
   });
   // This page's load renewed the session, so a warning in another tab may be out of date.
-  browser.channel?.postMessage("renewed");
+  tabs?.postMessage("renewed");
   void clock.check();
 }
 

@@ -20,15 +20,18 @@ function browser() {
     location: { pathname: "/admin", assign: vi.fn() },
     page: { visibilityState: "visible" as DocumentVisibilityState, addEventListener: vi.fn(listen) },
     window: { addEventListener: vi.fn(listen) },
-    channel: { postMessage: vi.fn(), addEventListener: vi.fn(listen) },
+    tabs: { postMessage: vi.fn(), addEventListener: vi.fn(listen) },
+    channel: vi.fn((_name: string) => page.tabs),
   };
   return { page: page as unknown as Browser & typeof page, listeners };
 }
 
-/** A `<tetsu-session>` as the server renders it, with a dialog that opens and closes as a browser's does. */
-function island(inside = PARTS): HTMLElement {
+/** A `<tetsu-session>` as the server renders it, in the realm at `base`, or naming none for `null`, with a dialog
+ * that opens and closes as a browser's does. */
+function island(inside = PARTS, base: string | null = "/admin"): HTMLElement {
   const document = window.document.implementation.createHTMLDocument("test");
-  document.body.innerHTML = `<tetsu-session form-token="F1">${inside}</tetsu-session>`;
+  const realm = base === null ? "" : ` base="${base}"`;
+  document.body.innerHTML = `<tetsu-session form-token="F1"${realm}>${inside}</tetsu-session>`;
   const dialog = document.querySelector("dialog");
   if (dialog !== null) {
     dialog.showModal = vi.fn(() => dialog.setAttribute("open", ""));
@@ -118,7 +121,7 @@ describe("a session island's countdown", () => {
     expect([page.location.assign.mock.calls.length, asked.mock.calls.length]).toEqual([0, 1]);
     await elapse(1);
     expect(page.location.assign).toHaveBeenCalledWith("/admin/login?ended=1");
-    expect(page.channel.postMessage).toHaveBeenCalledWith("ended");
+    expect(page.tabs.postMessage).toHaveBeenCalledWith("ended");
   });
 
   it("keeps the dialog open, once open, as it counts down and when asked again", async () => {
@@ -168,7 +171,7 @@ describe("a session island's dialog", () => {
     (host.querySelector("[data-stay]") as HTMLButtonElement).click();
     await elapse(0);
     expect(asked).toHaveBeenLastCalledWith("/admin/session", expect.any(AbortSignal), { form: "F1" });
-    expect([dialog(host).open, page.channel.postMessage.mock.calls]).toEqual([
+    expect([dialog(host).open, page.tabs.postMessage.mock.calls]).toEqual([
       false,
       [["renewed"], ["renewed"]],
     ]);
@@ -186,7 +189,7 @@ describe("a session island's dialog", () => {
     (host.querySelector("[data-stay]") as HTMLButtonElement).click();
     await elapse(0);
     expect(asked).toHaveBeenLastCalledWith("/admin/session", expect.any(AbortSignal), { form: "" });
-    expect(page.channel.postMessage.mock.calls).toEqual([["renewed"]]);
+    expect(page.tabs.postMessage.mock.calls).toEqual([["renewed"]]);
     await elapse(RETRY);
     expect([asked.mock.calls.length, dialog(host).open]).toEqual([4, false]);
   });
@@ -289,7 +292,7 @@ describe("a session island among tabs", () => {
 describe("a session island alone", () => {
   it("works alone in a browser with no channel to other tabs, staying and ending alike", async () => {
     const { page } = browser();
-    const alone = { ...page, channel: undefined };
+    const alone = { ...page, channel: () => undefined };
     const host = island();
     answers([WARN, 28_000], [900, 27_900]);
     ready(host, alone);
@@ -310,6 +313,7 @@ describe("readying a session island", () => {
     answers([900, 28_800]);
     ready(host, page);
     expect(host.querySelector("form")?.getAttribute("action")).toBe("/admin/logout?next=/admin");
+    expect(page.channel.mock.calls).toEqual([["tetsu-session /admin"]]);
   });
 
   it("readies it once, however often it is connected", async () => {
@@ -343,6 +347,7 @@ describe("readying a session island", () => {
     define(registry, page);
     answers([900, 28_800]);
     const host = document.createElement("tetsu-session");
+    host.setAttribute("base", "/admin");
     host.innerHTML = PARTS;
     document.body.append(host);
     await elapse(0);
@@ -351,8 +356,43 @@ describe("readying a session island", () => {
   });
 });
 
+describe("a session island in its realm", () => {
+  it("leaves one in a realm it cannot trust, or none, alone", async () => {
+    for (const base of [null, "", "//evil.example", "/admin/session"]) {
+      const { page } = browser();
+      const host = island(PARTS, base);
+      ready(host, page);
+      await elapse(0);
+      expect([asked.mock.calls.length, host.dataset.ready], String(base)).toEqual([0, undefined]);
+    }
+  });
+  it("works in its own realm: reads and stays there, logs out there, and sends an ending to its login", async () => {
+    const { page, listeners } = browser();
+    page.location.pathname = "/app/settings/profile";
+    const host = island(PARTS.replace("/admin/logout", "/app/logout"), "/app");
+    answers([900, 28_800]);
+    ready(host, page);
+    await elapse(0);
+    expect(asked).toHaveBeenCalledWith("/app/session", expect.any(AbortSignal));
+    // Its own realm's channel, so an admin's logout in another tab never speaks for this session.
+    expect(page.channel.mock.calls).toEqual([["tetsu-session /app"]]);
+    expect(host.querySelector("form")?.getAttribute("action")).toBe("/app/logout?next=/app/settings/profile");
+    const form = (action: string) => {
+      const made = document.createElement("form");
+      made.setAttribute("action", action);
+      return { target: made };
+    };
+    listeners.submit?.(form("/admin/logout"));
+    listeners.submit?.(form("/app/logout"));
+    expect(page.tabs.postMessage.mock.calls).toEqual([["renewed"], ["ended"]]);
+    asked.mockRejectedValueOnce(new Refused("you are logged out; log in again", 401));
+    await elapse(900 - WARN);
+    expect(page.location.assign).toHaveBeenCalledWith("/app/login?ended=1&next=/app/settings/profile");
+  });
+});
+
 describe("channel", () => {
-  it("opens the channel the site's tabs share, or none in a browser without one", () => {
+  it("opens the channel a realm's tabs share by its name, or none in a browser without one", () => {
     const opened = vi.fn();
     vi.stubGlobal(
       "BroadcastChannel",
@@ -362,9 +402,12 @@ describe("channel", () => {
         }
       },
     );
-    expect([channel() !== undefined, opened.mock.calls]).toEqual([true, [["tetsu-session"]]]);
+    expect([channel("tetsu-session /admin") !== undefined, opened.mock.calls]).toEqual([
+      true,
+      [["tetsu-session /admin"]],
+    ]);
     vi.stubGlobal("BroadcastChannel", undefined);
-    expect(channel()).toBeUndefined();
+    expect(channel("tetsu-session /admin")).toBeUndefined();
     vi.unstubAllGlobals();
   });
 });
@@ -385,16 +428,16 @@ describe("a session island when the admin logs out", () => {
     for (const sent of [form("/admin/passkeys"), form(null), { target: document.createElement("div") }]) {
       listeners.submit?.(sent);
     }
-    expect(page.channel.postMessage.mock.calls).toEqual([["renewed"]]);
+    expect(page.tabs.postMessage.mock.calls).toEqual([["renewed"]]);
     for (const sent of [form("/admin/logout"), form("/admin/logout?next=/admin")]) {
       listeners.submit?.(sent);
     }
-    expect(page.channel.postMessage.mock.calls).toEqual([["renewed"], ["ended"], ["ended"]]);
+    expect(page.tabs.postMessage.mock.calls).toEqual([["renewed"], ["ended"], ["ended"]]);
   });
 
   it("logs out alone in a browser with no channel to other tabs", () => {
     const { page, listeners } = browser();
-    ready(island(), { ...page, channel: undefined });
+    ready(island(), { ...page, channel: () => undefined });
     const made = document.createElement("form");
     made.setAttribute("action", "/admin/logout");
     expect(() => listeners.submit?.({ target: made })).not.toThrow();
@@ -406,7 +449,7 @@ describe("a session island's doubts", () => {
     const { page } = browser();
     answers([900, 28_800]);
     ready(island(), page);
-    expect(page.channel.postMessage.mock.calls).toEqual([["renewed"]]);
+    expect(page.tabs.postMessage.mock.calls).toEqual([["renewed"]]);
   });
 
   it.each([{}, { idle: "50", absolute: 28_800 }, { idle: 900 }])(
@@ -515,13 +558,13 @@ describe("a session island's second doubts", () => {
     asked.mockRejectedValueOnce(new Refused("you are logged out; log in again", 401));
     ready(island(), page);
     await elapse(0);
-    page.channel.postMessage.mockClear();
+    page.tabs.postMessage.mockClear();
     listeners.message?.(new MessageEvent("message", { data: "ended" }));
     await elapse(SETTLE - 1);
     expect(asked).toHaveBeenCalledTimes(1);
     await elapse(1);
     expect(page.location.assign).toHaveBeenCalledWith("/admin/login?ended=1");
-    expect(page.channel.postMessage).not.toHaveBeenCalled();
+    expect(page.tabs.postMessage).not.toHaveBeenCalled();
   });
 });
 

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Refused } from "../shared/http";
-import { ceremony } from "./ceremony";
+import { type Asked, ceremony } from "./ceremony";
 import { type Browser, define, ready, said, signal } from "./island";
 
 // The ceremony is ceremony.test.ts's; here it only answers, so each island's handling of it shows.
@@ -28,14 +28,27 @@ function browser(passkeys: Partial<typeof PublicKeyCredential> = {}): Browser {
   };
 }
 
-/** A `<tetsu-passkey>` as the server renders it, with `attributes` and `inside` as its content. */
+/** A `<tetsu-passkey>` as the server renders it, with `attributes` and `inside` as its content, in the admins' realm
+ * unless `attributes` names another. */
 function island(
   attributes: string,
   inside = '<button type="button" disabled><span data-label>Go</span></button><p role="status"></p>',
 ): HTMLElement {
   const document = window.document.implementation.createHTMLDocument("test");
-  document.body.innerHTML = `<tetsu-passkey ${attributes}>${inside}</tetsu-passkey>`;
+  const realm = attributes.includes("base=") ? "" : 'base="/admin" ';
+  document.body.innerHTML = `<tetsu-passkey ${realm}${attributes}>${inside}</tetsu-passkey>`;
   return document.querySelector("tetsu-passkey") as HTMLElement;
+}
+
+/** `host` with no realm named at all. */
+function withoutBase(host: HTMLElement): HTMLElement {
+  host.removeAttribute("base");
+  return host;
+}
+
+/** A ceremony's arguments as the island passes them, asked `asked`. */
+function ran(asked: Asked) {
+  return [asked, device, expect.any(AbortSignal), expect.any(Function)] as const;
 }
 
 const button = (host: HTMLElement) => host.querySelector("button") as HTMLButtonElement;
@@ -56,7 +69,7 @@ function answering(next: string): void {
 
 /** Has the next ceremony send its last request, then lose the answer, as when the network drops. */
 function losingTheAnswer(): void {
-  run.mockImplementationOnce(async (_action, _sent, _device, _signal, finishing) => {
+  run.mockImplementationOnce(async (_asked, _device, _signal, finishing) => {
     finishing();
     throw new TypeError("Failed to fetch");
   });
@@ -74,7 +87,7 @@ describe("a passkey island", () => {
     expect([button(host).disabled, host.dataset.state]).toEqual([false, "ready"]);
     run.mockResolvedValue("/admin");
     await press(host);
-    expect(run).toHaveBeenCalledWith("login", {}, device, expect.any(AbortSignal), expect.any(Function));
+    expect(run).toHaveBeenCalledWith(...ran({ action: "login", base: "/admin", sent: {} }));
     expect(page.location.assign).toHaveBeenCalledWith("/admin");
     expect(page.history.replaceState).not.toHaveBeenCalled();
     expect([status(host), host.dataset.state]).toEqual(["Logged in.", "done"]);
@@ -113,7 +126,12 @@ describe("a passkey island that joins", () => {
     answering("/admin");
     await press(host);
     expect(run.mock.calls).toEqual([
-      ["join", { link: "L1" }, device, expect.any(AbortSignal), expect.any(Function)],
+      [
+        { action: "join", base: "/admin", sent: { link: "L1" } },
+        device,
+        expect.any(AbortSignal),
+        expect.any(Function),
+      ],
     ]);
     expect([status(host), host.dataset.state, host.querySelector("[data-label]")?.textContent]).toEqual([
       "Passkey created. Logging you in.",
@@ -140,6 +158,37 @@ describe("a passkey island whose join is refused", () => {
 });
 
 describe("a passkey island and what it sends", () => {
+  it("sends the page a login returns to, which the server checks again, or nothing the page lacks", async () => {
+    for (const [attributes, sent] of [
+      ['action="login" next="/admin/passkeys"', { next: "/admin/passkeys" }],
+      ['action="login"', {}],
+    ] as const) {
+      run.mockReset();
+      run.mockResolvedValue("/admin/passkeys");
+      const host = island(attributes);
+      ready(host, browser());
+      await press(host);
+      expect(run).toHaveBeenCalledWith(...ran({ action: "login", base: "/admin", sent: sent }));
+    }
+  });
+
+  it("sends the admin's form token when adding a passkey, or none the page lacks", async () => {
+    for (const [attributes, form] of [
+      ['action="add" form-token="F1"', "F1"],
+      ['action="add"', ""],
+    ] as const) {
+      run.mockReset();
+      run.mockResolvedValue("/admin");
+      const host = island(attributes);
+      ready(host, browser());
+      await press(host);
+      expect(run).toHaveBeenCalledWith(...ran({ action: "add", base: "/admin", sent: { form } }));
+      expect(status(host)).toBe("Passkey added.");
+    }
+  });
+});
+
+describe("a passkey island in its realm", () => {
   it("sends a person whose session ended to log in, to return here after", async () => {
     run.mockRejectedValueOnce(new Refused("you are logged out; log in again", 401));
     const host = island('action="add" form-token="F1"');
@@ -151,39 +200,15 @@ describe("a passkey island and what it sends", () => {
     expect([status(host), host.dataset.state]).toEqual(["You are logged out; log in again.", "failed"]);
   });
 
-  it("sends the page a login returns to, which the server checks again, or nothing the page lacks", async () => {
-    for (const [attributes, sent] of [
-      ['action="login" next="/admin/passkeys"', { next: "/admin/passkeys" }],
-      ['action="login"', {}],
-    ] as const) {
-      run.mockReset();
-      run.mockResolvedValue("/admin/passkeys");
-      const host = island(attributes);
-      ready(host, browser());
-      await press(host);
-      expect(run).toHaveBeenCalledWith("login", sent, device, expect.any(AbortSignal), expect.any(Function));
-    }
-  });
-
-  it("sends the admin's form token when adding a passkey, or none the page lacks", async () => {
-    for (const [attributes, form] of [
-      ['action="add" form-token="F1"', "F1"],
-      ['action="add"', ""],
-    ]) {
-      run.mockReset();
-      run.mockResolvedValue("/admin");
-      const host = island(attributes as string);
-      ready(host, browser());
-      await press(host);
-      expect(run).toHaveBeenCalledWith(
-        "add",
-        { form },
-        device,
-        expect.any(AbortSignal),
-        expect.any(Function),
-      );
-      expect(status(host)).toBe("Passkey added.");
-    }
+  it("runs its ceremony in its own realm, and sends a person whose session ended to that realm's login", async () => {
+    run.mockRejectedValueOnce(new Refused("you are logged out; log in again", 401));
+    const host = island('base="/app" action="add" form-token="F1"');
+    const page = browser();
+    page.location.pathname = "/app/settings/security";
+    ready(host, page);
+    await press(host);
+    expect(run).toHaveBeenCalledWith(...ran({ action: "add", base: "/app", sent: { form: "F1" } }));
+    expect(page.location.assign).toHaveBeenCalledWith("/app/login?ended=1&next=/app/settings/security");
   });
 });
 
@@ -208,13 +233,13 @@ describe("a passkey island pressed again", () => {
     const signals: AbortSignal[] = [];
     let second: (next: string) => void = () => undefined;
     run
-      .mockImplementationOnce((_action, _sent, _device, signal) => {
+      .mockImplementationOnce((_asked, _device, signal) => {
         signals.push(signal);
         return new Promise((_, refuse) =>
           signal.addEventListener("abort", () => refuse(new DOMException("ended", "AbortError"))),
         );
       })
-      .mockImplementationOnce((_action, _sent, _device, signal) => {
+      .mockImplementationOnce((_asked, _device, signal) => {
         signals.push(signal);
         return new Promise((resolve) => (second = resolve));
       });
@@ -246,7 +271,7 @@ describe("a passkey island whose join the server refuses or a later press ends",
     const host = island('action="join"');
     ready(host, browser());
     let first: AbortSignal | undefined;
-    run.mockImplementationOnce((_action, _sent, _device, signal) => {
+    run.mockImplementationOnce((_asked, _device, signal) => {
       first = signal;
       return new Promise((_, refuse) =>
         signal.addEventListener("abort", () => refuse(new DOMException("ended", "AbortError"))),
@@ -258,7 +283,7 @@ describe("a passkey island whose join the server refuses or a later press ends",
     button(host).click();
     await new Promise((settled) => setTimeout(settled));
     expect([status(host), host.dataset.state]).toEqual(["Waiting for your device…", "waiting"]);
-    expect(run.mock.calls.map(([action]) => action)).toEqual(["join", "join"]);
+    expect(run.mock.calls.map(([asked]) => asked.action)).toEqual(["join", "join"]);
   });
 });
 
@@ -275,7 +300,7 @@ describe("a passkey island whose join answer was lost", () => {
     ]);
     answering("/admin");
     await press(host);
-    expect(run).toHaveBeenCalledWith("login", {}, device, expect.any(AbortSignal), expect.any(Function));
+    expect(run).toHaveBeenCalledWith(...ran({ action: "login", base: "/admin", sent: {} }));
   });
 
   it("fails as usual when a login or an addition loses its answer, since neither spends a link", async () => {
@@ -304,7 +329,7 @@ const HINT = "Still waiting. Try the device you set up.";
 function hanging(): { signal?: AbortSignal } {
   const kept: { signal?: AbortSignal } = {};
   run.mockImplementationOnce(
-    (_action, _sent, _device, signal) =>
+    (_asked, _device, signal) =>
       new Promise((_, refuse) => {
         kept.signal = signal;
         signal.addEventListener("abort", () => refuse(signal.reason));
@@ -344,7 +369,7 @@ describe("a passkey island's clock", () => {
     const host = island('action="login"');
     ready(host, browser());
     let signal: AbortSignal | undefined;
-    run.mockImplementationOnce((_action, _sent, _device, given, finishing) => {
+    run.mockImplementationOnce((_asked, _device, given, finishing) => {
       signal = given;
       finishing();
       return new Promise(() => undefined);
@@ -437,7 +462,7 @@ describe("a passkey island finishing", () => {
     const host = island('action="join"');
     ready(host, browser());
     let answer: (error: unknown) => void = () => undefined;
-    run.mockImplementationOnce((_action, _sent, _device, _signal, finishing) => {
+    run.mockImplementationOnce((_asked, _device, _signal, finishing) => {
       finishing();
       return new Promise((_, refuse) => (answer = refuse));
     });
@@ -462,7 +487,7 @@ describe("a passkey island that cannot go on", () => {
     expect(page.location.assign).not.toHaveBeenCalled();
   });
 
-  it("is left as it is with no button, label, status, or action it knows", () => {
+  it("is left as it is with no button, label, status, action, or realm it knows", () => {
     for (const host of [
       // Each missing alone: the button, the label, and the status line.
       island('action="login"', '<span data-label>Go</span><p role="status"></p>'),
@@ -470,6 +495,10 @@ describe("a passkey island that cannot go on", () => {
       island('action="login"', '<button type="button" disabled><span data-label>Go</span></button>'),
       island('action="delete"'),
       island(""),
+      // A realm it cannot trust, or none.
+      island('base="//evil.example" action="login"'),
+      island('base="/admin/" action="login"'),
+      withoutBase(island('action="login"')),
     ]) {
       ready(host, browser());
       expect(host.dataset.state).toBeUndefined();
@@ -565,7 +594,7 @@ describe("define", () => {
     customElements.define("test-passkey", Passkey);
     customElements.define("test-passkeys", Passkeys);
     document.body.innerHTML =
-      '<test-passkey action="login"><button disabled><span data-label>Go</span></button><p role="status"></p></test-passkey>' +
+      '<test-passkey base="/admin" action="login"><button disabled><span data-label>Go</span></button><p role="status"></p></test-passkey>' +
       '<test-passkeys user="U1" credentials="A1"></test-passkeys>';
     expect((document.querySelector("test-passkey") as HTMLElement).dataset.state).toBe("ready");
     expect(told).toHaveBeenCalledWith({

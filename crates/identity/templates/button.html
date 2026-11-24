@@ -5,6 +5,7 @@
 {% import "../../../web/templates/components.html" as shared %}
 {% macro passkey(action, form = "", secondary = false, next = "") %}
   <tetsu-passkey
+    base="/admin"
     action="{{ action }}"
     {% if !form.is_empty() %}form-token="{{ form }}"{% endif %}
     {% if !next.is_empty() %}next="{{ next }}"{% endif %}
@@ -49,7 +50,7 @@
 {#- Adding a passkey as a row of a settings card (#156): its label, and at its right a quiet button that runs the
     island, with what the action came to under the row. -#}
 {% macro passkey_row(form) %}
-  <tetsu-passkey action="add" form-token="{{ form }}" class="group/passkey block">
+  <tetsu-passkey base="/admin" action="add" form-token="{{ form }}" class="group/passkey block">
     <div class="flex items-center justify-between gap-6 px-4 py-3.5">
       <p class="text-mini font-medium text-ink">{{ caller() }}</p>
       <button

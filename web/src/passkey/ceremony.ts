@@ -6,24 +6,31 @@ import { assertion, type CreationJSON, creation, type RequestJSON, registration,
 
 export type Action = "login" | "join" | "add";
 
+/** What a ceremony is asked to do: its action, in the realm at `base`, sending `sent` with both halves. */
+export interface Asked {
+  action: Action;
+  base: string;
+  sent: Record<string, string>;
+}
+
+/** Where each action's requests go, below its realm's base path. */
 const ENDPOINTS: Record<Action, string> = {
-  login: "/admin/login",
-  join: "/admin/join",
-  add: "/admin/passkeys",
+  login: "/login",
+  join: "/join",
+  add: "/passkeys",
 };
 
-/** Runs one ceremony on `device`, sending `sent` with both halves: the invite link, or the admin's form
- * token. `signal` ends it, its requests and the device's prompt alike, as when the person presses again, until
+/** Runs one ceremony on `device`, as `asked`, sending its `sent` with both halves: the invite link, or the person's
+ * form token. `signal` ends it, its requests and the device's prompt alike, as when the person presses again, until
  * `finishing` is called, just before the last request: from then the server may have kept what it sent, so the
  * caller lets nothing end it. Returns where the page goes once it is done. */
 export async function ceremony(
-  action: Action,
-  sent: Record<string, string>,
+  { action, base, sent }: Asked,
   device: CredentialsContainer,
   signal: AbortSignal,
   finishing: () => void,
 ): Promise<string> {
-  const endpoint = ENDPOINTS[action];
+  const endpoint = `${base}${ENDPOINTS[action]}`;
   const begun = await call(`${endpoint}/begin`, signal, sent);
   const signing = action === "login";
   const credential = signing

@@ -1,13 +1,13 @@
 // The passkey islands (ADR-0031): light-DOM Web Components that add behavior to markup the server renders.
 //
-// - <tetsu-passkey action="login|join|add" form-token="…" next="…"> wraps a button and a status line, and runs one
-//   passkey ceremony when the button is pressed. Its state is an attribute, data-state, of ready, waiting, done, or
+// - <tetsu-passkey base="/admin" action="login|join|add" form-token="…" next="…"> wraps a button and a status line,
+//   and runs one passkey ceremony in the realm at `base` when the button is pressed. Its state is an attribute, data-state, of ready, waiting, done, or
 //   failed, for styles to read (ADR-0032).
 // - <tetsu-passkeys user="…" credentials="…"> wraps the list of an admin's passkeys, and tells their devices every
 //   passkey Tetsu holds, so a device can hide one Tetsu removed.
 
 import { Refused } from "../shared/http";
-import { loggedOut } from "../shared/login";
+import { loggedOut, realmBase } from "../shared/login";
 import { type Action, ceremony } from "./ceremony";
 
 /** The parts of the browser the islands use, passed to `define` so tests can stand in for them. */
@@ -65,12 +65,13 @@ function sentFor(action: Action, host: HTMLElement, browser: Browser): Record<st
   return next === null ? {} : { next };
 }
 
-/** The parts of a `<tetsu-passkey>` it works through, if it has them all and names an action it knows. */
+/** The parts of a `<tetsu-passkey>` it works through, if it has them all and names an action and a realm it knows. */
 interface Parts {
   button: HTMLButtonElement;
   status: Element;
   label: Element;
   action: Action;
+  base: string;
 }
 
 function partsOf(host: HTMLElement): Parts | undefined {
@@ -78,10 +79,11 @@ function partsOf(host: HTMLElement): Parts | undefined {
   const status = host.querySelector("[role=status]");
   const label = host.querySelector("[data-label]");
   const action = ACTIONS.find((known) => host.getAttribute("action") === known);
-  if (button === null || status === null || label === null || action === undefined) {
+  const base = realmBase(host.getAttribute("base"));
+  if (button === null || status === null || label === null || action === undefined || base === undefined) {
     return undefined;
   }
-  return { button, status, label, action };
+  return { button, status, label, action, base };
 }
 
 /** Readies a `<tetsu-passkey>`, once: its button runs its action, if it has its parts and the browser can use
@@ -163,7 +165,8 @@ class Presses {
     this.say("Waiting for your device…", "waiting");
     this.startClock(controller);
     try {
-      const next = await ceremony(this.action, this.sent, this.island.device, controller.signal, () => {
+      const asked = { action: this.action, base: this.island.parts.base, sent: this.sent };
+      const next = await ceremony(asked, this.island.device, controller.signal, () => {
         this.lastSent.add(controller.signal);
         this.finishing();
       });
@@ -183,7 +186,9 @@ class Presses {
     // A session that ended goes to log in, which says so and returns here after.
     if (error instanceof Refused && error.status === 401) {
       this.say(said(error), "failed");
-      this.island.browser.location.assign(loggedOut(this.island.browser.location.pathname));
+      this.island.browser.location.assign(
+        loggedOut(this.island.parts.base, this.island.browser.location.pathname),
+      );
       return;
     }
     // A join whose last request went out but whose answer was lost may have kept the passkey and spent
