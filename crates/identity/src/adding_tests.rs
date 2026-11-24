@@ -19,7 +19,7 @@ use crate::{
 };
 
 fn not_adding() -> String {
-    "invalid: this passkey could not be added".to_string()
+    "invalid: this passkey couldn't be added".to_string()
 }
 
 /// Kurt Medley, joined and freshly logged in, and his live session, as a request that passed the checks for a

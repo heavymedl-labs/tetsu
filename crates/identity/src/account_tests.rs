@@ -131,7 +131,7 @@ async fn security_lists_sessions_then_passkeys() {
         "<tetsu-passkeys",
         "<ul role=\"list\" aria-label=\"Passkeys\"",
         "<tetsu-passkey action=\"add\"",
-        "Passkeys need JavaScript, which this browser has turned off.</p></noscript>",
+        "Turn on JavaScript to use passkeys.</p></noscript>",
     ] {
         assert!(page.body.contains(part), "{part}: {}", page.body);
     }

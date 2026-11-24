@@ -241,8 +241,7 @@ which renews nothing, each minute while its page is visible, so an ending no lim
 and two minutes before a limit opens the page's dialog: before the idle limit to stay logged
 in, a `POST` with the form token that renews the session, and before the 8 hour limit to log in again, a logout that returns to the page after the next login. It keeps the
 site's tabs in step over a `BroadcastChannel`, asks again when the page is shown, and sends a page whose session has
-ended to `/admin/login?ended=1`, which says the operator was logged out for their security. The login page says up
-front how long a session may sit idle (WCAG 2.2.6).
+ended to `/admin/login?ended=1`, which says the operator was logged out and how long a session may sit idle.
 
 ## Not yet
 

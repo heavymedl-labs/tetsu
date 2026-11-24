@@ -614,15 +614,13 @@ fn operator_token<'a>(cookies: impl IntoIterator<Item = &'a str>) -> Option<Sess
 /// One answer for every way a join can fail, so a browser learns nothing about which links or operators
 /// exist.
 fn not_joining() -> Error {
-    Error::Invalid(
-        "this invite has ended; if you have already joined, log in, or ask an operator for a new one".to_string(),
-    )
+    Error::Invalid("this invite has ended. Log in, or ask an operator for a new one".to_string())
 }
 
 /// One answer for every way a login can fail, so a browser learns nothing about which passkeys or operators
 /// exist (`v5.0.0-6.3.8`).
 fn not_logging_in() -> Error {
-    Error::Invalid("this login could not be completed".to_string())
+    Error::Invalid("this login didn't work. Try again".to_string())
 }
 
 /// A registration whose ceremony was taken: what kind it is, whose, and the state it began with.
@@ -634,7 +632,7 @@ struct Pending<'a> {
 
 /// One answer for every way adding a passkey can fail.
 fn not_adding() -> Error {
-    Error::Invalid("this passkey could not be added".to_string())
+    Error::Invalid("this passkey couldn't be added".to_string())
 }
 
 /// Why a login was refused before its passkey was verified: no operator holds the credential, theirs is

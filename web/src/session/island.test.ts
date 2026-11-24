@@ -148,9 +148,7 @@ describe("a session island when the server cannot say", () => {
   it("asks again in a minute when the server cannot say", async () => {
     const { page } = browser();
     const host = island();
-    asked.mockRejectedValueOnce(
-      new Refused("logging in is unavailable just now; try again in a minute", 503),
-    );
+    asked.mockRejectedValueOnce(new Refused("logging in is unavailable. Try again in a minute", 503));
     answers([900, 28_800]);
     ready(host, page);
     await elapse(RETRY - 1);
@@ -544,9 +542,7 @@ describe("a session island whose stay or read fails", () => {
     const { page, listeners } = browser();
     const host = island();
     answers([WARN, 28_000]);
-    asked.mockRejectedValueOnce(
-      new Refused("logging in is unavailable just now; try again in a minute", 503),
-    );
+    asked.mockRejectedValueOnce(new Refused("logging in is unavailable. Try again in a minute", 503));
     ready(host, page);
     await elapse(0);
     listeners.message?.(new MessageEvent("message", { data: "renewed" }));

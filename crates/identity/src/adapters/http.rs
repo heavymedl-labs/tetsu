@@ -84,7 +84,7 @@ const LARGEST_BODY: usize = 64 * 1024;
 /// What a refused request is told when nothing more may be said.
 const REFUSED: &str = "this request was refused";
 const LOGGED_OUT: &str = "you are logged out; log in again";
-const UNAVAILABLE: &str = "logging in is unavailable just now; try again in a minute";
+const UNAVAILABLE: &str = "logging in is unavailable. Try again in a minute";
 
 /// What the pages need from the composition root: the relying party and the origins state-changing requests
 /// must come from, whether this is the demo, the shared stylesheet's URL, the passkey script's, which every operator

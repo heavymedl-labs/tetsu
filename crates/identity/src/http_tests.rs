@@ -25,7 +25,7 @@ const POLICY: &str = "default-src 'none'; object-src 'none'; script-src 'self'; 
                       style-src 'self'; font-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; \
                       frame-ancestors 'none'";
 const REFUSED: &str = "this request was refused";
-pub(crate) const UNAVAILABLE: &str = "logging in is unavailable just now; try again in a minute";
+pub(crate) const UNAVAILABLE: &str = "logging in is unavailable. Try again in a minute";
 
 /// What the operator was told, from every test, since `report` is a plain function.
 static REPORTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -436,7 +436,11 @@ async fn a_stale_login_is_told_to_login_again_to_add_a_passkey() {
     .await;
     let page = get(address, "/admin/settings/security", &cookie).await;
     assert!(!page.body.contains("action=\"add\""), "{}", page.body);
-    assert!(page.body.contains("log out and log in"), "{}", page.body);
+    assert!(
+        page.body.contains("Log in again to add a passkey."),
+        "{}",
+        page.body
+    );
 }
 
 /// A login counts as fresh for under ten minutes, and one that starts after now counts too.
@@ -642,17 +646,17 @@ async fn refused_ceremonies_get_their_one_refusal() {
         (
             "/admin/login/finish",
             json!({"ceremony": 1}),
-            "this login could not be completed",
+            "this login didn't work. Try again",
         ),
         (
             "/admin/join/begin",
             json!({"link": "not a link"}),
-            "this invite has ended; if you have already joined, log in, or ask an operator for a new one",
+            "this invite has ended. Log in, or ask an operator for a new one",
         ),
         (
             "/admin/join/finish",
             json!({}),
-            "this invite has ended; if you have already joined, log in, or ask an operator for a new one",
+            "this invite has ended. Log in, or ask an operator for a new one",
         ),
     ];
     for (path, body, refusal) in said {
@@ -733,7 +737,7 @@ async fn failures_of_the_server_are_unavailable() {
     let out = logout(address, ORIGIN, &cookie, &form).await;
     assert_eq!(out.status, 503);
     assert!(
-        out.body.contains("Logging in is unavailable just now"),
+        out.body.contains("Logging in is unavailable"),
         "{}",
         out.body
     );

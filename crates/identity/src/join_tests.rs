@@ -209,7 +209,7 @@ pub(crate) fn failure(result: Result<(), Error>) -> String {
 
 fn not_joining() -> Result<OperatorId, Error> {
     Err(Error::Invalid(
-        "this invite has ended; if you have already joined, log in, or ask an operator for a new one".to_string(),
+        "this invite has ended. Log in, or ask an operator for a new one".to_string(),
     ))
 }
 

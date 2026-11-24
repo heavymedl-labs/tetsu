@@ -20,7 +20,7 @@ use crate::{Answer, OperatorId, Operators, Realm};
 type Rewrite = fn(&mut Value);
 
 fn not_logging_in() -> String {
-    "invalid: this login could not be completed".to_string()
+    "invalid: this login didn't work. Try again".to_string()
 }
 
 /// Kurt Medley, operator 1, joined with a passkey, and the passkey his device keeps. Joining logs him in, but the

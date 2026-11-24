@@ -112,12 +112,12 @@ describe("ceremony, creating a passkey", () => {
 
 describe("a ceremony that does not finish", () => {
   it("throws the server's refusal, in its words", async () => {
-    serve([400, { error: "this login could not be completed" }]);
+    serve([400, { error: "this login didn't work. Try again" }]);
     const refused = await ceremony("login", {}, device(signed), live(), vi.fn()).catch(
       (error: unknown) => error,
     );
     expect(refused).toBeInstanceOf(Refused);
-    expect((refused as Refused).message).toBe("this login could not be completed");
+    expect((refused as Refused).message).toBe("this login didn't work. Try again");
   });
 
   it("throws a plain refusal when the server gives no words, and when finishing is refused", async () => {

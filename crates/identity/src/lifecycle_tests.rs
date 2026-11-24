@@ -11,7 +11,7 @@ use crate::http_tests::{
 use crate::join_tests::{ORIGIN, as_admin};
 
 /// The notice the login page shows when a session ended under the operator, rather than by their logging out.
-const ENDED: &str = "For your security, we logged you out.";
+const ENDED: &str = "You were logged out. Sessions end after 15 minutes without activity.";
 
 /// A logged-in operator who opens the login page is sent on, to the page it would return to or their own, as
 /// Django's `redirect_authenticated_user` does; logging in again would only replace their session.
@@ -235,13 +235,16 @@ async fn logging_out_may_return_to_a_checked_page_after_the_next_login() {
     }
 }
 
-/// The login page says up front how long a session lasts without activity, so no one is surprised by it (WCAG 2.2.6).
+/// The login page says how long a session may sit idle once one has ended, where the limit matters, and keeps a
+/// first visit to the heading, the button, and one line.
 #[tokio::test]
 async fn the_login_page_says_how_long_a_session_may_sit_idle() {
     let (address, _database, _) = serving().await;
-    let page = get(address, "/admin/login", "").await;
-    let told = "For your security, we log you out after 15 minutes without activity.";
+    let told = "You were logged out. Sessions end after 15 minutes without activity.";
+    let page = get(address, "/admin/login?ended=1", "").await;
     assert!(page.body.contains(told), "{}", page.body);
+    let page = get(address, "/admin/login", "").await;
+    assert!(!page.body.contains("without activity"), "{}", page.body);
 }
 
 /// A browser with no session cookie at all has no time left to read.
@@ -302,16 +305,17 @@ async fn an_unreadable_time_left_is_unavailable() {
     }
 }
 
-/// What the pages say of the limits is what the database holds them to: the login page's idle limit and the session
-/// dialog's 8 hours, read from a session just begun. So changing a limit in one place without the other fails here.
+/// What the pages say of the limits is what the database holds them to: the idle limit the login page gives once a
+/// session ends, and the session dialog's 8 hours, read from a session just begun. So changing a limit in one place
+/// without the other fails here.
 #[tokio::test]
 async fn the_pages_say_the_limits_the_database_keeps() {
     let (address, _database, cookie, _) = logged_in().await;
     let (idle, absolute) = left(&get(address, "/admin/session", &cookie).await.json());
     let minutes = (idle + 59) / 60;
     let hours = (absolute + 3599) / 3600;
-    let login = get(address, "/admin/login", "").await;
-    let idle_told = format!("we log you out after {minutes} minutes without activity");
+    let login = get(address, "/admin/login?ended=1", "").await;
+    let idle_told = format!("Sessions end after {minutes} minutes without activity");
     assert!(
         login.body.contains(&idle_told),
         "{idle_told} in {}",
@@ -346,7 +350,7 @@ async fn joining_logs_in_with_a_session_that_is_never_fresh() {
     let page = get(address, "/admin/settings/security", &cookie).await;
     assert_eq!(page.status, 200);
     assert!(
-        page.body.contains("To add one, log out and log in"),
+        page.body.contains("Log in again to add a passkey."),
         "{}",
         page.body
     );
@@ -360,7 +364,7 @@ async fn joining_logs_in_with_a_session_that_is_never_fresh() {
     .await;
     assert_eq!(
         (begun.status, begun.json()),
-        (400, json!({ "error": "this passkey could not be added" }))
+        (400, json!({ "error": "this passkey couldn't be added" }))
     );
     let proven = "SELECT (proven_at IS NULL)::text FROM identity.sessions";
     assert_eq!(text(&database, proven).await, "true");

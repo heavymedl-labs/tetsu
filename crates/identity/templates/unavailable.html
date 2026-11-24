@@ -1,6 +1,6 @@
 {% extends "../../../web/templates/page.html" %}
 {% import "../../../web/templates/components.html" as ui %}
 {% block title %}Unavailable – Tetsu{% endblock %}
-{% block body %}{%
-    call ui::empty("503", "Unavailable", "Logging in is unavailable just now. Try again in a minute.")
-  %}{% endcall %}{% endblock %}
+{% block body %}{% call ui::empty("503", "Unavailable", "Logging in is unavailable. Try again in a minute.") %}{%
+    endcall
+  %}{% endblock %}
