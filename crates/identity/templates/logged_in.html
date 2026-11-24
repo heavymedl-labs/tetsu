@@ -12,7 +12,7 @@
 {% block before %}
   {% call shared::skip_link() %}{% endcall %}
   {% call shared::header_bar() %}{%
-      call shared::account_menu(name, initials, "Operator", "/ops/account/profile", "/ops/logout", form, here)
+      call shared::account_menu(name, initials, "Operator", "/admin/settings/profile", "/admin/logout", form, here)
     %}{% endcall %}{% endcall %}
 {% endblock %}
 {#- The page sits in a top-aligned column under the header, which carries the wordmark instead. #}

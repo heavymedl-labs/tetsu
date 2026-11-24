@@ -8,7 +8,7 @@ import { loggedOut } from "../shared/login";
 import { Deadline, Timer } from "./timer";
 
 /** Where a page reads its session's time left (GET), and stays logged in (POST). */
-const SESSION = "/ops/session";
+const SESSION = "/admin/session";
 
 /** How many seconds before a limit the dialog opens: HMRC's service timeout pattern warns with two minutes left. */
 export const WARN = 120;
@@ -241,7 +241,7 @@ export function ready(host: HTMLElement, browser: Browser): void {
   }
   host.dataset.ready = "";
   // Logging out from the dialog, as "Log in again" before the 8 hour limit does, returns here after the next login.
-  parts.logout.setAttribute("action", `/ops/logout?next=${browser.location.pathname}`);
+  parts.logout.setAttribute("action", `/admin/logout?next=${browser.location.pathname}`);
   const clock = new Clock(host, parts, browser);
   parts.stay.addEventListener("click", clock.stay);
   parts.dialog.addEventListener("cancel", clock.cancelled);
@@ -250,7 +250,7 @@ export function ready(host: HTMLElement, browser: Browser): void {
   // Logging out from any form on the page ends the session in every tab, so the others leave at once.
   browser.page.addEventListener("submit", (event) => {
     const form = event.target;
-    if (form instanceof HTMLFormElement && form.getAttribute("action")?.startsWith("/ops/logout")) {
+    if (form instanceof HTMLFormElement && form.getAttribute("action")?.startsWith("/admin/logout")) {
       browser.channel?.postMessage("ended");
     }
   });

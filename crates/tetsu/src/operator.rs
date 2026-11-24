@@ -396,7 +396,7 @@ fn listed(operator: &OperatorSummary) -> String {
 /// `Referer`, so it stays out of the server's logs. A browser's history keeps it, and a container run with a
 /// terminal (`docker run -t`) logs it, which is why it is good once and for an hour.
 fn link_url(origin: &str, token: &InviteToken) -> String {
-    format!("{origin}/ops/join#{}", token.to_text())
+    format!("{origin}/admin/join#{}", token.to_text())
 }
 
 #[cfg(test)]
@@ -567,7 +567,7 @@ mod tests {
         assert_eq!(created.len(), 3, "{created:?}");
         assert_eq!(created[0], "created operator 1, Kurt Medley");
         assert!(created[1].starts_with(
-            "invite link, good once and for an hour: https://ops.example.com/ops/join#"
+            "invite link, good once and for an hour: https://ops.example.com/admin/join#"
         ));
         assert!(created[2].starts_with("did not email the invite to kurt@example.com, since"));
         assert_eq!(office.captured().await.unwrap(), vec![]);
@@ -797,7 +797,7 @@ mod tests {
         let kurt = OperatorId::parse("1").unwrap();
         let created = said(&operators, &office, creating("Kurt Medley")).await;
         assert_eq!(created[0], "created operator 1, Kurt Medley");
-        let prefix = "invite link, good once and for an hour: https://ops.example.com/ops/join#";
+        let prefix = "invite link, good once and for an hour: https://ops.example.com/admin/join#";
         for line in [
             &created[1],
             &said(&operators, &office, Operator::Invite { id: kurt }).await[0],

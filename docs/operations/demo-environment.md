@@ -259,4 +259,4 @@ cargo tetsu --env demo operator list
 cargo tetsu --env demo operator email 1 you@example.com   # gives an operator made before addresses one
 ```
 
-Open the link to join with a passkey; it logs you in at `/ops`. Every other `operator` command works the same way.
+Open the link to join with a passkey; it logs you in and opens your Profile. Every other `operator` command works the same way.

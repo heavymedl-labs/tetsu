@@ -29,7 +29,7 @@
               </div>
             </div>
             {%- if !shown.presented && fresh %}
-              <form method="post" action="/ops/sessions/end">
+              <form method="post" action="/admin/sessions/end">
                 <input type="hidden" name="form" value="{{ form }}">
                 <input type="hidden" name="session" value="{{ shown.id }}">
                 <button type="submit" class="{% call shared::quiet_button_style(false) %}{% endcall %}">Log out<span
@@ -44,7 +44,7 @@
       {%- if sessions.len() > 1 && fresh %}
         {% call shared::settings_row("Log out of all other sessions", "") %}<form
             method="post"
-            action="/ops/sessions/end"
+            action="/admin/sessions/end"
           >
             <input type="hidden" name="form" value="{{ form }}"><button
               type="submit"

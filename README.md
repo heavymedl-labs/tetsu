@@ -22,7 +22,7 @@ business is a tenant, isolated in the database itself, and industries add only w
 
 - **Tenancy:** each business's address and page, kept apart by row-level security
 - **Audit:** a record of security events that is never lost
-- **Identity:** operators, who join with a passkey from a one-time invite link and log in with it at `/ops`, with
+- **Identity:** operators, who join with a passkey from a one-time invite link and log in with it at `/admin`, with
   server-side sessions whose tokens are stored only as hashes
 - **Domain events:** delivered once through an outbox, retried, and logged when they stop
 - **Mail:** operators' invites and notices, sent by SMTP to listed addresses and otherwise kept for a mailbox page

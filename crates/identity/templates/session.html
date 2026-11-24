@@ -23,7 +23,7 @@
       data-stay
       class="mt-6 {% call shared::button_style(false, false, true) %}{% endcall %}"
     >Stay logged in</button>
-    <form method="post" action="/ops/logout" class="mt-3">
+    <form method="post" action="/admin/logout" class="mt-3">
       <input type="hidden" name="form" value="{{ form }}">
       <button type="submit" class="{% call shared::button_style(true, false, true) %}{% endcall %}"><span data-idle
         >Log out</span><span data-absolute hidden>Log in again</span></button>

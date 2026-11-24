@@ -1,16 +1,16 @@
 {#- The settings shell (#156): any realm's account pages, after Linear's settings mode. From `lg`, a full-height sidebar
     headed by Tetsu's wordmark beside a panel that runs to the screen's right edge, shading from `surface` to
     `canvas`, its top and left borders fading out; the page never scrolls, the panel does, and a strip under the
-    panel holds the color scheme control and Tetsu's mark. Below `lg`, a bar with "Menu", a link back to the app, and
-    what the realm puts at the bar's end; "Menu" opens the sidebar as a native popover that Escape or a tap outside
-    closes. Its island, `<tetsu-menu>` (web/src/menu), moves focus in as it opens and closes it as focus leaves, so
-    focus never rests on what it covers. The control and mark sit at the page's foot. A browser without popovers shows
-    the menu in place, above the page, since its drawer's look applies only while it is open.
+    panel holds the color scheme control and Tetsu's mark. Below `lg`, a bar with "Menu", a link back to the realm's
+    app while it has one, and what the realm puts at the bar's end; "Menu" opens the sidebar as a native popover that
+    Escape or a tap outside closes. Its island, `<tetsu-menu>` (web/src/menu), moves focus in as it opens and closes
+    it as focus leaves, so focus never rests on what it covers. The control and mark sit at the page's foot. A browser
+    without popovers shows the menu in place, above the page, since its drawer's look applies only where popovers do.
 
     A realm's template extends this, gives the shared page's fields and `scheme`, the visitor's color scheme, and
     loads the menu's script. It fills `nav` and `menu`, its sidebar for the page and for the menu, each naming its
-    group with an id of its own; `back`, the app's address; `bar_end`; `content`, the page's `h1` and sections; and
-    `after`. -#}
+    groups with ids of their own; `bar_back`, with `settings_bar_back`, once the realm has an app to go back to;
+    `bar_end`; `content`, the page's `h1` and sections; and `after`. -#}
 {% extends "../../../web/templates/page.html" %}
 {% import "../../../web/templates/components.html" as ui %}
 {% block data_scheme %}{{ scheme }}{% endblock %}
@@ -37,10 +37,7 @@
           aria-label="Menu"
           class="inline-flex size-8 cursor-pointer items-center justify-center rounded-md text-soft hover:bg-ink/5 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent pointer-coarse:size-11"
         >{% call ui::icon("menu") %}{% endcall %}</button>
-        <a
-          href="{% block back %}{% endblock %}"
-          class="flex h-8 items-center gap-1 rounded-md px-1.5 text-mini font-medium text-ink hover:bg-ink/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent pointer-coarse:h-11"
-        >{% call ui::icon("back", "text") %}{% endcall %}Settings</a>
+        {% block bar_back %}{% endblock %}
       </div>
       {% block bar_end %}{% endblock %}
     </div>

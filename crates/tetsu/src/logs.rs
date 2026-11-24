@@ -336,13 +336,13 @@ mod tests {
     #[test]
     fn a_request_is_labelled_with_its_realm() {
         let realms = [
-            "/ops",
-            "/ops/login",
-            "/ops/logout",
+            "/admin",
+            "/admin/login",
+            "/admin/logout",
             "/",
             "/sample-studio",
-            "/ops-studio",
-            "/ops/nothing",
+            "/admin-studio",
+            "/admin/nothing",
         ]
         .map(realm_of);
         assert_eq!(

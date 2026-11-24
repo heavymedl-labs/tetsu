@@ -14,10 +14,10 @@ function answering(status: number, body: string) {
 
 describe("call", () => {
   it("posts its body as JSON and reads the JSON answer", async () => {
-    const fetch = answering(200, '{"next":"/ops"}');
+    const fetch = answering(200, '{"next":"/admin"}');
     const signal = new AbortController().signal;
-    expect(await call("/ops/login/begin", signal, { a: 1 })).toEqual({ next: "/ops" });
-    expect(fetch).toHaveBeenCalledWith("/ops/login/begin", {
+    expect(await call("/admin/login/begin", signal, { a: 1 })).toEqual({ next: "/admin" });
+    expect(fetch).toHaveBeenCalledWith("/admin/login/begin", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: '{"a":1}',
@@ -28,15 +28,15 @@ describe("call", () => {
   it("gets, sending nothing, when there is no body", async () => {
     const fetch = answering(200, '{"idle":900}');
     const signal = new AbortController().signal;
-    expect(await call("/ops/session", signal)).toEqual({ idle: 900 });
-    expect(fetch).toHaveBeenCalledWith("/ops/session", { signal });
-    await call("/ops/session");
-    expect(fetch).toHaveBeenLastCalledWith("/ops/session", { signal: null });
+    expect(await call("/admin/session", signal)).toEqual({ idle: 900 });
+    expect(fetch).toHaveBeenCalledWith("/admin/session", { signal });
+    await call("/admin/session");
+    expect(fetch).toHaveBeenLastCalledWith("/admin/session", { signal: null });
   });
 
   it("throws the server's refusal with its words and status", async () => {
     answering(401, '{"error":"you are logged out; log in again"}');
-    const refused = await call("/ops/session").catch((error: unknown) => error);
+    const refused = await call("/admin/session").catch((error: unknown) => error);
     expect(refused).toBeInstanceOf(Refused);
     expect([(refused as Refused).message, (refused as Refused).status]).toEqual([
       "you are logged out; log in again",
@@ -50,7 +50,7 @@ describe("call", () => {
       [502, "<h1>Bad gateway</h1>"],
     ] as const) {
       answering(status, body);
-      const refused = (await call("/ops/session").catch((error: unknown) => error)) as Refused;
+      const refused = (await call("/admin/session").catch((error: unknown) => error)) as Refused;
       expect([refused.message, refused.status]).toEqual(["this request was refused", status]);
     }
   });

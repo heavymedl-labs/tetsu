@@ -1,9 +1,10 @@
-//! Every logged-in operator page carries one header: Tetsu's wordmark home at left, and at right the operator's
-//! initials opening a menu with their name, "Operator", Account, and Log out (#148, `v5.0.0-7.4.4`). Pages before
-//! login, and the refused and unavailable pages, carry none.
+//! A logged-in operator's page outside the settings shell, which is only the not-found page while every other is in
+//! it (ADR-0084), carries one header: Tetsu's wordmark home at left, and at right the operator's initials opening a
+//! menu with their name, "Operator", Account, and Log out (#148, `v5.0.0-7.4.4`). Pages before login, and the
+//! refused and unavailable pages, carry none.
 
 use crate::adapters::http::initials;
-use crate::http_tests::{assert_in_order, get, logged_in, logs_out_from, send};
+use crate::http_tests::{PROFILE, assert_in_order, get, logged_in, logs_out_from, send};
 use crate::join_tests::{as_admin, replace};
 
 const MENU_BUTTON: &str = "popovertarget=\"tetsu-account-menu\"";
@@ -20,26 +21,28 @@ const HEADER_PARTS: [&str; 14] = [
     "<div id=\"tetsu-account-menu\" popover",
     ">Kurt Medley</p>",
     ">Operator</p>",
-    "href=\"/ops/account/profile\"",
+    "href=\"/admin/settings/profile\"",
     "pointer-coarse:py-3\">Account</a>",
-    "<form method=\"post\" action=\"/ops/logout\"",
+    "<form method=\"post\" action=\"/admin/logout\"",
     "name=\"form\" value=\"",
     "pointer-coarse:py-3\">Log out</button>",
     "<main id=\"main\"",
 ];
 
-/// Each logged-in page has the whole header, in order, and none marks Account, the operator's Profile, current.
+/// A logged-in page outside the settings shell has the whole header, in order, and marks nothing current.
 #[tokio::test]
 async fn every_logged_in_page_has_the_header_and_its_menu() {
     let (address, _database, cookie, _) = logged_in().await;
-    for (path, status) in [("/ops", 200), ("/ops/mailbox", 200), ("/ops/nowhere", 404)] {
-        let page = get(address, path, &cookie).await;
-        assert_eq!(page.status, status, "{path}");
-        assert_in_order(&page, &HEADER_PARTS, path);
-        assert_eq!(page.body.matches(MENU_BUTTON).count(), 1, "{path}");
-        // Account is the operator's Profile, which has its own shell (#156), so no page here marks it current.
-        assert!(!page.body.contains("aria-current=\"page\""), "{path}");
-    }
+    let path = "/admin/nowhere";
+    let page = get(address, path, &cookie).await;
+    assert_eq!(page.status, 404);
+    assert_in_order(&page, &HEADER_PARTS, path);
+    assert_eq!(page.body.matches(MENU_BUTTON).count(), 1);
+    assert!(
+        !page.body.contains("aria-current=\"page\""),
+        "{}",
+        page.body
+    );
 }
 
 /// Pages before login, and the refused and unavailable pages, show no menu.
@@ -47,8 +50,8 @@ async fn every_logged_in_page_has_the_header_and_its_menu() {
 async fn pages_without_a_session_show_no_menu() {
     let (address, database, cookie, form) = logged_in().await;
     let mut pages = vec![
-        get(address, "/ops/login", "").await,
-        get(address, "/ops/join", "").await,
+        get(address, "/admin/login", "").await,
+        get(address, "/admin/join", "").await,
     ];
     let elsewhere = [
         ("Origin", "https://evil.example"),
@@ -57,7 +60,7 @@ async fn pages_without_a_session_show_no_menu() {
     let refused = send(
         address,
         "POST",
-        "/ops/logout",
+        "/admin/logout",
         &elsewhere,
         &format!("form={form}"),
     )
@@ -69,7 +72,7 @@ async fn pages_without_a_session_show_no_menu() {
         "REVOKE EXECUTE ON FUNCTION identity.account(bytea) FROM tetsu_identity",
     )
     .await;
-    let unavailable = get(address, "/ops", &cookie).await;
+    let unavailable = get(address, "/admin/nowhere", &cookie).await;
     assert_eq!(unavailable.status, 503);
     pages.push(unavailable);
     for page in pages {
@@ -78,7 +81,7 @@ async fn pages_without_a_session_show_no_menu() {
 }
 
 /// An operator disabled since their session was checked has no account to name, so the mailbox and the
-/// not-found page send them to log in, as their account page does.
+/// not-found page send them to log in, as their Profile does.
 #[tokio::test]
 async fn a_page_without_an_account_goes_to_log_in() {
     let (address, database, cookie, _) = logged_in().await;
@@ -86,17 +89,17 @@ async fn a_page_without_an_account_goes_to_log_in() {
                    backup_eligible boolean, backup_state boolean)";
     let none = "SELECT 1::bigint, ''::bytea, ''::text, ''::bytea, ''::text, true, true WHERE false";
     replace(&database, "account(bytea)", returns, none).await;
-    for path in ["/ops/mailbox", "/ops/nowhere"] {
+    for path in ["/admin/mailbox", "/admin/nowhere"] {
         let page = get(address, path, &cookie).await;
-        let back = format!("/ops/login?next={path}");
+        let back = format!("/admin/login?next={path}");
         assert_eq!(
             (page.status, page.header("location")),
             (303, Some(back.as_str())),
             "{path}"
         );
     }
-    let account = get(address, "/ops", &cookie).await;
-    assert_eq!(account.header("location"), Some("/ops/login"));
+    let profile = get(address, PROFILE, &cookie).await;
+    assert_eq!(profile.header("location"), Some("/admin/login"));
 }
 
 /// The menu's initials are the first letters of the first and last words of the name, in capitals.
@@ -122,17 +125,15 @@ async fn a_page_whose_account_cannot_be_read_is_unavailable() {
         "REVOKE EXECUTE ON FUNCTION identity.account(bytea) FROM tetsu_identity",
     )
     .await;
-    for path in ["/ops/mailbox", "/ops/nowhere"] {
+    for path in ["/admin/mailbox", "/admin/nowhere"] {
         assert_eq!(get(address, path, &cookie).await.status, 503, "{path}");
     }
 }
 
-/// The menu's Log out on each logged-in page carries that page's own form token, so it logs the operator out.
+/// The menu's Log out carries the page's own form token, so it logs the operator out.
 #[tokio::test]
-async fn each_pages_menu_logs_out() {
-    for path in ["/ops", "/ops/mailbox", "/ops/nowhere"] {
-        logs_out_from(path).await;
-    }
+async fn the_menu_logs_out() {
+    logs_out_from("/admin/nowhere").await;
 }
 
 /// An operator's name is shown as text everywhere the header puts it, however it reads (`v5.0.0-3.2.2`).
@@ -144,18 +145,17 @@ async fn a_name_with_markup_is_shown_as_text() {
         "UPDATE identity.operators SET name = '<b>Ada</b> & \"Co\"'",
     )
     .await;
-    for path in ["/ops", "/ops/mailbox", "/ops/nowhere"] {
-        let page = get(address, path, &cookie).await;
-        assert!(!page.body.contains("<b>Ada"), "{path}: {}", page.body);
-        for escaped in [
-            "&#60;b&#62;Ada&#60;/b&#62; &#38; &#34;Co&#34;</p>",
-            ">&#60;&#34;<span class=\"sr-only\">, account menu, &#60;b&#62;Ada",
-        ] {
-            assert!(
-                page.body.contains(escaped),
-                "{escaped} on {path}: {}",
-                page.body
-            );
-        }
+    let path = "/admin/nowhere";
+    let page = get(address, path, &cookie).await;
+    assert!(!page.body.contains("<b>Ada"), "{path}: {}", page.body);
+    for escaped in [
+        "&#60;b&#62;Ada&#60;/b&#62; &#38; &#34;Co&#34;</p>",
+        ">&#60;&#34;<span class=\"sr-only\">, account menu, &#60;b&#62;Ada",
+    ] {
+        assert!(
+            page.body.contains(escaped),
+            "{escaped} on {path}: {}",
+            page.body
+        );
     }
 }

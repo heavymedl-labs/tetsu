@@ -1,4 +1,4 @@
-//! Identity's inbound HTTP adapter: the operator pages at `/ops`, and the JSON endpoints their passkey script calls
+//! Identity's inbound HTTP adapter: the operator pages at `/admin`, and the JSON endpoints their passkey script calls
 //! (ADR-0048). Every state-changing request is checked through [`Origins::admit`], and once logged in through
 //! [`Operators::session_for_change`], so no other site can act through a logged-in browser.
 
@@ -24,31 +24,32 @@ use crate::ports::OperatorStore;
 use crate::use_cases::Operators;
 use tetsu_kernel::{Mailbox, Requester, Scheme};
 
-const ACCOUNT: &str = "/ops";
-/// The operator's account (#156): who they are, and how they log in and where.
-const PROFILE: &str = "/ops/account/profile";
-const SECURITY: &str = "/ops/account/security";
-const LOGIN: &str = "/ops/login";
-const LOGIN_BEGIN: &str = "/ops/login/begin";
-const LOGIN_FINISH: &str = "/ops/login/finish";
-const JOIN: &str = "/ops/join";
-const JOIN_BEGIN: &str = "/ops/join/begin";
-const JOIN_FINISH: &str = "/ops/join/finish";
-const ADD_BEGIN: &str = "/ops/passkeys/begin";
-const ADD_FINISH: &str = "/ops/passkeys/finish";
-const LOGOUT: &str = "/ops/logout";
+/// The operators' realm (ADR-0084), which sends them to their Profile until it has a home of its own (#157).
+const HOME: &str = "/admin";
+/// The operator's account (#156): who they are, and how they log in and where. Logging in lands on Profile.
+const PROFILE: &str = "/admin/settings/profile";
+const SECURITY: &str = "/admin/settings/security";
+const LOGIN: &str = "/admin/login";
+const LOGIN_BEGIN: &str = "/admin/login/begin";
+const LOGIN_FINISH: &str = "/admin/login/finish";
+const JOIN: &str = "/admin/join";
+const JOIN_BEGIN: &str = "/admin/join/begin";
+const JOIN_FINISH: &str = "/admin/join/finish";
+const ADD_BEGIN: &str = "/admin/passkeys/begin";
+const ADD_FINISH: &str = "/admin/passkeys/finish";
+const LOGOUT: &str = "/admin/logout";
 /// Ending the operator's other sessions, one by its id or every one (ADR-0059).
-const END_SESSIONS: &str = "/ops/sessions/end";
+const END_SESSIONS: &str = "/admin/sessions/end";
 /// How long the browser's session has left (GET), and staying logged in (POST), for the session island.
-const SESSION: &str = "/ops/session";
+const SESSION: &str = "/admin/session";
 /// The operators' mailbox: email kept rather than sent (ADR-0074).
-const MAILBOX: &str = "/ops/mailbox";
-/// Any other path under `/ops`: a login for anyone logged out, and not found for an operator.
-const ELSEWHERE: &str = "/ops/{*rest}";
+const MAILBOX: &str = "/admin/mailbox";
+/// Any other path under `/admin`: a login for anyone logged out, and not found for an operator.
+const ELSEWHERE: &str = "/admin/{*rest}";
 
 /// Every path Identity serves, which the composition root checks each start with a name no tenant may hold.
 pub const PATHS: [&str; 16] = [
-    ACCOUNT,
+    HOME,
     PROFILE,
     SECURITY,
     LOGIN,
@@ -132,12 +133,6 @@ struct JoinPage {
 }
 
 #[derive(Template)]
-#[template(path = "account.html")]
-struct AccountPage {
-    shell: Shell,
-}
-
-#[derive(Template)]
 #[template(path = "account_profile.html")]
 struct ProfilePage {
     shell: Shell,
@@ -208,13 +203,7 @@ macro_rules! through_shell {
     )+};
 }
 
-through_shell!(
-    AccountPage,
-    ProfilePage,
-    SecurityPage,
-    MailboxPage,
-    NotFoundPage
-);
+through_shell!(ProfilePage, SecurityPage, MailboxPage, NotFoundPage);
 
 /// A session as the operator's page lists it: its id, which ending it names, its device, whether that is a phone,
 /// which its icon shows, and how long ago it started and was last used.
@@ -291,7 +280,7 @@ where
     S: OperatorStore + Send + Sync + 'static,
 {
     Router::new()
-        .route(ACCOUNT, get(account::<S>))
+        .route(HOME, get(home::<S>))
         .route(PROFILE, get(profile::<S>))
         .route(SECURITY, get(security::<S>))
         .route(LOGIN, get(login_page::<S>))
@@ -346,7 +335,7 @@ async fn login_page<S: OperatorStore>(
     let web = &served.web;
     let next = query(&uri, "next").and_then(return_path);
     match served.operators.session(cookies(&headers)).await {
-        Ok(Some(_)) => see_other(next.unwrap_or(ACCOUNT)),
+        Ok(Some(_)) => see_other(next.unwrap_or(PROFILE)),
         Ok(None) => {
             let ended = query(&uri, "ended") == Some("1");
             let mut shown = page(&LoginPage {
@@ -384,16 +373,13 @@ async fn join_page<S>(State(served): Shared<S>, headers: HeaderMap) -> Response 
     })
 }
 
-/// The logged-in operator's page, until their home is built (#157): links to their account and the mailbox. A
-/// browser with no live session is sent to log in.
-async fn account<S: OperatorStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
-    let web = &served.web;
-    match viewer(&served, &headers).await {
-        Ok(Some((account, form))) => page(&AccountPage {
-            shell: Shell::of(web, &headers, account.name, form, ACCOUNT),
-        }),
+/// The operators' realm itself (ADR-0084): until it has a home (#157), it sends a logged-in operator to their
+/// Profile, and anyone else to log in.
+async fn home<S: OperatorStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
+    match served.operators.session(cookies(&headers)).await {
+        Ok(Some(_)) => see_other(PROFILE),
         Ok(None) => see_other(LOGIN),
-        Err(error) => unavailable_page(web, "could not show an operator's page", &error),
+        Err(error) => unavailable_page(&served.web, "could not show an operator's page", &error),
     }
 }
 
@@ -498,8 +484,8 @@ fn ago(at: SystemTime, now: SystemTime) -> String {
     }
 }
 
-/// A path under `/ops` that Identity does not serve. Anyone without a live session is sent to log in, returning here
-/// after, as at `/ops`, so the operator pages cannot be mapped from outside; an operator is told it is not found.
+/// A path under `/admin` that Identity does not serve. Anyone without a live session is sent to log in, returning here
+/// after, as at `/admin`, so the operator pages cannot be mapped from outside; an operator is told it is not found.
 async fn elsewhere<S: OperatorStore>(
     State(served): Shared<S>,
     headers: HeaderMap,
@@ -711,7 +697,7 @@ async fn stepped<S: OperatorStore>(
             .await
             .map(|token| {
                 let to = sent["next"].as_str().and_then(return_path);
-                logged_in_at(&token, to.unwrap_or(ACCOUNT))
+                logged_in_at(&token, to.unwrap_or(PROFILE))
             }),
         Before::BeginJoin => operators
             .begin_join(&web.party, sent["link"].as_str().unwrap_or_default())
@@ -721,7 +707,7 @@ async fn stepped<S: OperatorStore>(
         Before::FinishJoin => operators
             .finish_join(&web.party, answer, &cookies(headers), &actor)
             .await
-            .map(|(_, token)| logged_in_at(&token, ACCOUNT)),
+            .map(|(_, token)| logged_in_at(&token, PROFILE)),
     }
 }
 
@@ -1095,11 +1081,11 @@ fn see_other(path: &str) -> Response {
         .into_response()
 }
 
-/// The login page, asked to return to `path` when that is a page a login may return to other than the operator's
-/// own, where a login goes anyway.
+/// The login page, asked to return to `path` when that is a page a login may return to other than the realm's own
+/// or Profile, where a login goes anyway.
 fn return_to(path: &str) -> String {
     return_path(path)
-        .filter(|path| *path != ACCOUNT)
+        .filter(|path| *path != HOME && *path != PROFILE)
         .map_or_else(|| LOGIN.to_string(), |path| format!("{LOGIN}?next={path}"))
 }
 

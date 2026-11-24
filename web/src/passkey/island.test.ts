@@ -17,7 +17,7 @@ function browser(passkeys: Partial<typeof PublicKeyCredential> = {}): Browser {
   return {
     location: {
       hash: "#L1",
-      pathname: "/ops/join",
+      pathname: "/admin/join",
       search: "?from=mail",
       hostname: "ops.example.com",
       assign: vi.fn(),
@@ -72,10 +72,10 @@ describe("a passkey island", () => {
     const page = browser();
     ready(host, page);
     expect([button(host).disabled, host.dataset.state]).toEqual([false, "ready"]);
-    run.mockResolvedValue("/ops");
+    run.mockResolvedValue("/admin");
     await press(host);
     expect(run).toHaveBeenCalledWith("login", {}, device, expect.any(AbortSignal), expect.any(Function));
-    expect(page.location.assign).toHaveBeenCalledWith("/ops");
+    expect(page.location.assign).toHaveBeenCalledWith("/admin");
     expect(page.history.replaceState).not.toHaveBeenCalled();
     expect([status(host), host.dataset.state]).toEqual(["Logged in.", "done"]);
   });
@@ -85,7 +85,7 @@ describe("a passkey island that joins", () => {
   it("takes an invite link from the address, and clears it from the bar at once", () => {
     const page = browser();
     ready(island('action="join"'), page);
-    expect(page.history.replaceState).toHaveBeenCalledWith(null, "", "/ops/join?from=mail");
+    expect(page.history.replaceState).toHaveBeenCalledWith(null, "", "/admin/join?from=mail");
   });
 
   it("says a page opened without its invite link cannot join, and keeps the button off", async () => {
@@ -110,7 +110,7 @@ describe("a passkey island that joins", () => {
     const host = island('action="join"');
     const page = browser();
     ready(host, page);
-    answering("/ops");
+    answering("/admin");
     await press(host);
     expect(run.mock.calls).toEqual([
       ["join", { link: "L1" }, device, expect.any(AbortSignal), expect.any(Function)],
@@ -120,7 +120,7 @@ describe("a passkey island that joins", () => {
       "done",
       "Go",
     ]);
-    expect(page.location.assign).toHaveBeenCalledWith("/ops");
+    expect(page.location.assign).toHaveBeenCalledWith("/admin");
   });
 });
 
@@ -144,20 +144,20 @@ describe("a passkey island and what it sends", () => {
     run.mockRejectedValueOnce(new Refused("you are logged out; log in again", 401));
     const host = island('action="add" form-token="F1"');
     const page = browser();
-    page.location.pathname = "/ops";
+    page.location.pathname = "/admin";
     ready(host, page);
     await press(host);
-    expect(page.location.assign).toHaveBeenCalledWith("/ops/login?ended=1");
+    expect(page.location.assign).toHaveBeenCalledWith("/admin/login?ended=1");
     expect([status(host), host.dataset.state]).toEqual(["You are logged out; log in again.", "failed"]);
   });
 
   it("sends the page a login returns to, which the server checks again, or nothing the page lacks", async () => {
     for (const [attributes, sent] of [
-      ['action="login" next="/ops/passkeys"', { next: "/ops/passkeys" }],
+      ['action="login" next="/admin/passkeys"', { next: "/admin/passkeys" }],
       ['action="login"', {}],
     ] as const) {
       run.mockReset();
-      run.mockResolvedValue("/ops/passkeys");
+      run.mockResolvedValue("/admin/passkeys");
       const host = island(attributes);
       ready(host, browser());
       await press(host);
@@ -171,7 +171,7 @@ describe("a passkey island and what it sends", () => {
       ['action="add"', ""],
     ]) {
       run.mockReset();
-      run.mockResolvedValue("/ops");
+      run.mockResolvedValue("/admin");
       const host = island(attributes as string);
       ready(host, browser());
       await press(host);
@@ -195,7 +195,7 @@ describe("a passkey island at work", () => {
     run.mockReturnValue(new Promise((resolve) => (finish = resolve)));
     button(host).click();
     expect([status(host), host.dataset.state]).toEqual(["Waiting for your device…", "waiting"]);
-    finish("/ops");
+    finish("/admin");
     await vi.waitFor(() => expect(host.dataset.state).toBe("done"));
   });
 });
@@ -224,7 +224,7 @@ describe("a passkey island pressed again", () => {
     await new Promise((settled) => setTimeout(settled));
     expect(signals.map((signal) => signal.aborted)).toEqual([true, false]);
     expect([status(host), host.dataset.state]).toEqual(["Waiting for your device…", "waiting"]);
-    second("/ops");
+    second("/admin");
     await vi.waitFor(() => expect(host.dataset.state).toBe("done"));
     expect(button(host).disabled).toBe(true);
     expect(page.location.assign).toHaveBeenCalledTimes(1);
@@ -279,7 +279,7 @@ describe("a passkey island whose join answer was lost", () => {
       "Your passkey may have been created. Continue with passkey to log in.",
       "Continue with passkey",
     ]);
-    answering("/ops");
+    answering("/admin");
     await press(host);
     expect(run).toHaveBeenCalledWith("login", {}, device, expect.any(AbortSignal), expect.any(Function));
   });
@@ -426,7 +426,7 @@ describe("a passkey island's clock, once a ceremony ends", () => {
   it("stops once a join is done, so nothing is said over it", async () => {
     const host = island('action="join"');
     ready(host, browser());
-    run.mockResolvedValueOnce("/ops");
+    run.mockResolvedValueOnce("/admin");
     button(host).click();
     await vi.advanceTimersByTimeAsync(61_000);
     expect(status(host)).toBe("Passkey created. Logging you in.");
@@ -436,7 +436,7 @@ describe("a passkey island's clock, once a ceremony ends", () => {
   it("stops once done, so nothing is said over it", async () => {
     const host = island('action="login"');
     ready(host, browser());
-    run.mockResolvedValueOnce("/ops");
+    run.mockResolvedValueOnce("/admin");
     button(host).click();
     await vi.advanceTimersByTimeAsync(61_000);
     expect([status(host), host.dataset.state]).toEqual(["Logged in.", "done"]);
@@ -519,7 +519,7 @@ describe("a passkey island in a browser without passkeys", () => {
     const page = browser();
     ready(host, page);
     ready(host, page);
-    run.mockResolvedValue("/ops");
+    run.mockResolvedValue("/admin");
     await press(host);
     expect(run).toHaveBeenCalledTimes(1);
   });

@@ -57,17 +57,17 @@ afterEach(() => {
 
 describe("ceremony", () => {
   it("logs in: begins, asks the device for a passkey, finishes, and says where to go", async () => {
-    const fetch = serve([200, { ceremony: "c1", options: fixture.request }], [200, { next: "/ops" }]);
+    const fetch = serve([200, { ceremony: "c1", options: fixture.request }], [200, { next: "/admin" }]);
     const phone = device(signed);
-    expect(await ceremony("login", {}, phone, live(), vi.fn())).toBe("/ops");
+    expect(await ceremony("login", {}, phone, live(), vi.fn())).toBe("/admin");
     const asked = phone.get.mock.calls[0]?.[0] as CredentialRequestOptions;
     expect(asked.signal).toBeInstanceOf(AbortSignal);
     expect(asked.publicKey?.rpId).toBe("ops.example.com");
     expect(phone.create).not.toHaveBeenCalled();
     expect(sent(fetch)).toEqual([
-      ["/ops/login/begin", {}],
+      ["/admin/login/begin", {}],
       [
-        "/ops/login/finish",
+        "/admin/login/finish",
         {
           ceremony: "c1",
           response: {
@@ -86,15 +86,15 @@ describe("ceremony", () => {
 describe("ceremony, creating a passkey", () => {
   it("joins and adds by creating a passkey, sending what the page gave with both halves", async () => {
     for (const [action, endpoint, extra] of [
-      ["join", "/ops/join", { link: "L" }],
-      ["add", "/ops/passkeys", { form: "F" }],
+      ["join", "/admin/join", { link: "L" }],
+      ["add", "/admin/passkeys", { form: "F" }],
     ] as const) {
       const fetch = serve(
         [200, { ceremony: "c2", options: fixture.creation }],
-        [200, { next: "/ops/login" }],
+        [200, { next: "/admin/login" }],
       );
       const laptop = device(created);
-      expect(await ceremony(action, extra, laptop, live(), vi.fn())).toBe("/ops/login");
+      expect(await ceremony(action, extra, laptop, live(), vi.fn())).toBe("/admin/login");
       expect(laptop.get).not.toHaveBeenCalled();
       const asked = laptop.create.mock.calls[0]?.[0] as CredentialCreationOptions;
       expect(asked.publicKey?.rp.name).toBe("Tetsu");
@@ -155,7 +155,7 @@ describe("a ceremony refused by the device or a proxy", () => {
   });
 
   it("says it is finishing just before its last request, once", async () => {
-    const fetch = serve([200, { ceremony: "c", options: fixture.request }], [200, { next: "/ops" }]);
+    const fetch = serve([200, { ceremony: "c", options: fixture.request }], [200, { next: "/admin" }]);
     const finishing = vi.fn(() => expect(fetch).toHaveBeenCalledTimes(1));
     await ceremony("login", {}, device(signed), live(), finishing);
     expect([finishing.mock.calls.length, fetch.mock.calls.length]).toEqual([1, 2]);
@@ -190,7 +190,7 @@ describe("a ceremony a later press ended", () => {
 
 describe("a ceremony's signal", () => {
   it("reaches both requests and the device's prompt, so ending it ends every part", async () => {
-    const fetch = serve([200, { ceremony: "c", options: fixture.request }], [200, { next: "/ops" }]);
+    const fetch = serve([200, { ceremony: "c", options: fixture.request }], [200, { next: "/admin" }]);
     const phone = device(signed);
     const signal = live();
     await ceremony("login", {}, phone, signal, vi.fn());

@@ -12,7 +12,7 @@ An operator may hold an email address ([ADR-0074](../../docs/adr/0074-operator-e
 `invite_message` renders their invite from templates, never kept for the mailbox, and `notices(mailer)` is an outbox
 consumer of Identity's own events that emails an operator when a login, an added passkey, or a join goes through, keyed on the event, with no link in it
 (`v5.0.0-6.3.5`, `v5.0.0-6.3.7`). A notice that cannot go just now is retried; one the mail server refuses is
-dropped. `/ops/mailbox` shows a logged-in operator the email kept rather than sent, newest first, as text, through
+dropped. `/admin/mailbox` shows a logged-in operator the email kept rather than sent, newest first, as text, through
 the kernel's `Mailbox` port, which Mail implements; a message's HTML is never shown.
 
 - **Session tokens are 256 random bits** from the operating system's source, written as 64 lowercase hexadecimal
@@ -27,10 +27,10 @@ the kernel's `Mailbox` port, which Mail implements; a message's HTML is never sh
   Requests at the same moment never end a live session or revive a spent one, and the last request never moves back.
 - **Logging out removes the session** on the server. It changes state, so it passes the origin and form-token
   checks first.
-- **An operator sees and ends their own sessions** at `/ops/account/security` (ADR-0059, `v5.0.0-7.5.2`), as Linear lists them:
+- **An operator sees and ends their own sessions** at `/admin/settings/security` (ADR-0059, `v5.0.0-7.5.2`), as Linear lists them:
   each live one by its public id, with the coarse device it started on, such as Firefox on Linux, when it started,
   and when it was last used, this one first. `sessions_of` finds them from the presented session alone and renews
-  none. `POST /ops/sessions/end` ends one other session, or every other one, passing logging out's checks, and only
+  none. `POST /admin/sessions/end` ends one other session, or every other one, passing logging out's checks, and only
   from a login within ten minutes, as adding a passkey needs (ADR-0048, `v5.0.0-7.5.1`); this session is never ended
   there. Each attempt that reaches storage is recorded as `identity.other_sessions_ended`, with the session it
   named, if any, the operator and the asking session's public id where storage found them, and how many ended, or
@@ -90,7 +90,7 @@ the kernel's `Mailbox` port, which Mail implements; a message's HTML is never sh
   command prints
   it only to a terminal, a guard against it landing in a log by accident; the trust boundary is access to the
   database. The token sits in the link's fragment, which a browser never sends to a server, though its history
-  keeps it. The page a link opens, `/ops/join`, reads the token from the fragment and clears it from the address
+  keeps it. The page a link opens, `/admin/join`, reads the token from the fragment and clears it from the address
   bar at once.
 - **Names are unique.** A create retried after its output was lost is refused, naming the operator who holds the
   name, rather than making a second.
@@ -209,37 +209,39 @@ the kernel's `Mailbox` port, which Mail implements; a message's HTML is never sh
 
 ## The operator pages
 
-`adapters/http.rs` serves `/ops/login`, `/ops/join`, `/ops`, the logged-in operator's page, and their account's
-`/ops/account/profile` and `/ops/account/security`, with the JSON
+`adapters/http.rs` serves the operators' realm at `/admin` ([ADR-0084](../../docs/adr/0084-realm-routes.md)):
+`/admin/login`, `/admin/join`, their account's `/admin/settings/profile` and `/admin/settings/security`, and
+`/admin/mailbox`, with the JSON
 endpoints the passkey islands in `web/src/passkey/` call: `<tetsu-passkey>` runs a page's one passkey action, and
 `<tetsu-passkeys>` wraps the operator's list of passkeys. Pages take Linear's look, as ADR-0035 gives Tetsu's own
 pages, in a layout of Tetsu's own, load only Tetsu's own script, under a policy of their own, and are never cached.
 Logging in is by passkey alone, as ADR-0040 sets for operators. Endpoints read only a JSON object sent as
 `application/json`, answer `no-store`, and give each ceremony's one refusal; a failure of the server is `503` to
 the browser and reported to the operator. Logging in ends the session the browser presented, in the transaction
-that starts the new one. Logging out is a plain form that clears the cookie and the browser's cache of the pages. Every
-logged-in page outside the account's pages shares one header (#148, `v5.0.0-7.4.4`): a skip link, Tetsu's wordmark home, and the operator's
-initials opening a menu, a native popover that works without script, with their name, "Operator", Account, and the
-Log out form. The header and menu are shared components in `web/templates/components.html`, which the public site's
-header uses too, so other realms can fill them. Pages before login and the refused and unavailable pages have none.
-Until the operator's home is built (#157), `/ops` links to the account's pages and the mailbox. The account's pages
-(#156) take Linear's settings mode instead of the header: the shared settings shell, `web/templates/settings.html`,
-with a sidebar of Tetsu's wordmark, "Back to app", the Personal pages, and the operator with Log out at its foot,
-which below a laptop's width opens from "Menu" as a native popover, beside the initials menu. Profile shows the
+that starts the new one. Logging out is a plain form that clears the cookie and the browser's cache of the pages. Until
+operators have a home (#157), `/admin` sends them to Profile, where logging in and joining land too. Every operator
+page takes Linear's settings mode (#156): the shared settings shell, `web/templates/settings.html`, with a sidebar of
+Tetsu's wordmark, the Personal pages, a Platform group of pages only operators have, now the mailbox, and the
+operator with Log out at its foot, which below a laptop's width opens from "Menu" as a native popover, beside the
+initials menu (#148, `v5.0.0-7.4.4`). The not-found page alone keeps the #148 header: a skip link, Tetsu's wordmark
+home, and the operator's initials opening a menu, a native popover that works without script, with their name,
+"Operator", Account, and the Log out form. The header and menu are shared components in
+`web/templates/components.html`, which the public site's header uses too, so other realms can fill them. Pages before
+login and the refused and unavailable pages have none. Profile shows the
 operator's name, email address, and role; Security lists their sessions, then their passkeys. Security
 offers a second passkey only within ten minutes of logging in, as the database allows, and its
 `<tetsu-passkeys>` tells the operator's devices every passkey Tetsu holds, through the Signal API.
 
 The edges of a login follow [the operator lifecycles research](../../docs/research/identity/operator-lifecycles.md).
 A logged-in operator who opens the login page is sent on. A login returns to the page it was asked for, through
-`browser::return_path`, which accepts only `/ops` or a plain path under it, checked on the page and again when the
+`browser::return_path`, which accepts only `/admin` or a plain path under it, checked on the page and again when the
 login finishes. Every page a logged-in operator sees extends `logged_in.html`, which loads the session island in
-`web/src/session/`. `<tetsu-session>` reads `GET /ops/session`, the seconds to each limit by the database's clock,
+`web/src/session/`. `<tetsu-session>` reads `GET /admin/session`, the seconds to each limit by the database's clock,
 which renews nothing, each minute while its page is visible, so an ending no limit foretold is seen within a minute,
 and two minutes before a limit opens the page's dialog: before the idle limit to stay logged
 in, a `POST` with the form token that renews the session, and before the 8 hour limit to log in again, a logout that returns to the page after the next login. It keeps the
 site's tabs in step over a `BroadcastChannel`, asks again when the page is shown, and sends a page whose session has
-ended to `/ops/login?ended=1`, which says the operator was logged out for their security. The login page says up
+ended to `/admin/login?ended=1`, which says the operator was logged out for their security. The login page says up
 front how long a session may sit idle (WCAG 2.2.6).
 
 ## Not yet

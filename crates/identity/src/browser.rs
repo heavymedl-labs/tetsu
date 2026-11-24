@@ -235,13 +235,13 @@ fn port_fits(scheme: &str, port: &str) -> bool {
 /// The longest return path a login keeps; an operator page's address is far shorter.
 const LONGEST_RETURN: usize = 120;
 
-/// Where a login may send the browser next, if `raw` is one of the operator pages: `/ops`, or a path under it
+/// Where a login may send the browser next, if `raw` is one of the operator pages: `/admin`, or a path under it
 /// written only in ASCII letters, digits, `-`, `_`, and `.`, with no empty, `.`, or `..` segment. So it can name no
 /// other site, scheme, or realm, and needs no decoding, which leaves nothing for a browser to read differently
 /// (OWASP, "Unvalidated Redirects and Forwards").
 #[must_use]
 pub fn return_path(raw: &str) -> Option<&str> {
-    let rest = raw.strip_prefix("/ops")?;
+    let rest = raw.strip_prefix("/admin")?;
     let plain = |segment: &str| {
         !matches!(segment, "" | "." | "..")
             && segment
@@ -263,33 +263,38 @@ mod tests {
 
     #[test]
     fn a_return_path_is_an_operator_page_written_plainly() {
-        for path in ["/ops", "/ops/passkeys", "/ops/a-b/c_d/e.f", "/ops/2026"] {
+        for path in [
+            "/admin",
+            "/admin/passkeys",
+            "/admin/a-b/c_d/e.f",
+            "/admin/2026",
+        ] {
             assert_eq!(return_path(path), Some(path), "{path}");
         }
     }
 
     #[test]
     fn a_return_path_names_no_other_site_scheme_or_page() {
-        let long = format!("/ops/{}", "a".repeat(200));
+        let long = format!("/admin/{}", "a".repeat(200));
         for path in [
             "",
             "/",
-            "/opsx",
-            "/ops/",
-            "//evil.example/ops",
-            "/ops//evil.example",
-            "/ops/../login",
-            "/ops/./a",
-            "/ops/a/..",
-            "/ops\\evil.example",
-            "/ops/%2e%2e",
-            "/ops/a?b",
-            "/ops/a#b",
-            "/ops/a b",
-            "/ops/é",
-            "https://evil.example/ops",
+            "/adminx",
+            "/admin/",
+            "//evil.example/admin",
+            "/admin//evil.example",
+            "/admin/../login",
+            "/admin/./a",
+            "/admin/a/..",
+            "/admin\\evil.example",
+            "/admin/%2e%2e",
+            "/admin/a?b",
+            "/admin/a#b",
+            "/admin/a b",
+            "/admin/é",
+            "https://evil.example/admin",
             "javascript:alert(1)",
-            "ops/a",
+            "admin/a",
             long.as_str(),
         ] {
             assert_eq!(return_path(path), None, "{path}");
@@ -299,17 +304,17 @@ mod tests {
     proptest! {
         #[test]
         fn a_return_path_is_either_refused_or_a_plain_operator_page(
-            raw in prop_oneof!["\\PC{0,40}", "/ops(/[a-z.%]{0,3}){0,4}"],
+            raw in prop_oneof!["\\PC{0,40}", "/admin(/[a-z.%]{0,3}){0,4}"],
         ) {
             if let Some(path) = return_path(&raw) {
-                prop_assert!(path == "/ops" || path.starts_with("/ops/"));
+                prop_assert!(path == "/admin" || path.starts_with("/admin/"));
                 // With a slash after it, an empty, `.`, or `..` segment shows as one of these anywhere in it.
                 let ended = format!("{path}/");
                 for bad in ["//", "/./", "/../", "%"] {
                     prop_assert!(!ended.contains(bad), "{} holds {}", path, bad);
                 }
             } else {
-                prop_assert_ne!(raw.as_str(), "/ops");
+                prop_assert_ne!(raw.as_str(), "/admin");
             }
         }
     }
@@ -472,9 +477,9 @@ mod tests {
             "http://localhost:80",
             "https://.",
             "https://-",
-            "https://ops..example.com",
+            "https://admin..example.com",
             "https://-ops.example.com",
-            "https://ops-.example.com",
+            "https://admin-.example.com",
             "https://ops_example.com",
             "https://ops.example.com:",
             "https://",

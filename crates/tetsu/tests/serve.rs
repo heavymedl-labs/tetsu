@@ -314,7 +314,7 @@ mod support {
         sent(
             server,
             &format!(
-                "POST /ops/login/begin HTTP/1.1\r\nHost: localhost\r\nOrigin: http://localhost:8080\r\n\
+                "POST /admin/login/begin HTTP/1.1\r\nHost: localhost\r\nOrigin: http://localhost:8080\r\n\
                  X-Forwarded-For: {forwarded}\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\
                  Connection: close\r\n\r\n{{}}"
             ),
@@ -348,7 +348,7 @@ async fn the_login_page_loads_its_script() {
     let database = fresh_database().await.expect("a test database");
     ready(&database);
     let server = start(&database);
-    let page = get(&server, "/ops/login");
+    let page = get(&server, "/admin/login");
     assert!(page.starts_with("HTTP/1.1 200"), "{page}");
     assert!(page.contains("script-src 'self'"), "{page}");
     assert!(

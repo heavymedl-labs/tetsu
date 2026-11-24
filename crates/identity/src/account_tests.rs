@@ -1,34 +1,40 @@
-//! The operator's account area (#156): Profile and Security pages in a settings shell any realm fills, after
-//! Linear's settings mode. Each page carries a skip link, a labelled settings `nav` headed by Tetsu's wordmark and
-//! "Back to app", then `main` with the page's `h1`; logout from the sidebar's foot and the narrow bar's initials
-//! menu (`v5.0.0-7.4.4`); and a narrow-screen menu that is a native popover, which a browser without popovers shows
-//! in place, above the page.
+//! The operator's pages in the settings shell any realm fills, after Linear's settings mode: Profile and Security
+//! (#156), and the mailbox in the Platform group only operators have (ADR-0084). Each page carries a skip link, a
+//! labelled settings `nav` headed by Tetsu's wordmark, then `main` with the page's `h1`; logout from the sidebar's
+//! foot and the narrow bar's initials menu (`v5.0.0-7.4.4`); and a narrow-screen menu that is a native popover, which
+//! a browser without popovers shows in place, above the page.
 
-use crate::http_tests::{MENU_SCRIPT, assert_in_order, get, logged_in, logs_out_from};
+use crate::http_tests::{MENU_SCRIPT, PROFILE, assert_in_order, get, logged_in, logs_out_from};
 use crate::join_tests::as_admin;
 
-const PROFILE: &str = "/ops/account/profile";
-const SECURITY: &str = "/ops/account/security";
+const SECURITY: &str = "/admin/settings/security";
+const MAILBOX: &str = "/admin/mailbox";
 
-/// What each account page holds, in the order a reader meets it.
-const SHELL_PARTS: [&str; 10] = [
+/// What each page in the shell holds, in the order a reader meets it.
+const SHELL_PARTS: [&str; 11] = [
     "<a href=\"#main\"",
     "<nav aria-label=\"Settings\"",
     "aria-label=\"Tetsu home\"",
-    "Back to app</a>",
     ">Personal</p>",
-    "href=\"/ops/account/profile\"",
-    "href=\"/ops/account/security\"",
-    "<form method=\"post\" action=\"/ops/logout\"",
+    "href=\"/admin/settings/profile\"",
+    "href=\"/admin/settings/security\"",
+    ">Platform</p>",
+    "href=\"/admin/mailbox\"",
+    "<form method=\"post\" action=\"/admin/logout\"",
     "<main id=\"main\"",
     "<h1",
 ];
 
-/// Each account page has the whole shell, in order, and marks only its own page as current in the sidebar.
+/// Each page in the shell has all of it, in order, and marks only its own page as current in the sidebar. Operators
+/// have no app outside it yet (#157), so nothing links back to one.
 #[tokio::test]
 async fn each_account_page_has_the_settings_shell() {
     let (address, _database, cookie, _) = logged_in().await;
-    for (path, title) in [(PROFILE, "Profile"), (SECURITY, "Security")] {
+    for (path, title) in [
+        (PROFILE, "Profile"),
+        (SECURITY, "Security"),
+        (MAILBOX, "Mailbox"),
+    ] {
         let page = get(address, path, &cookie).await;
         assert_eq!(page.status, 200, "{path}");
         assert_eq!(page.header("cache-control"), Some("no-store"), "{path}");
@@ -39,7 +45,8 @@ async fn each_account_page_has_the_settings_shell() {
                 .contains(&format!("<title>{title} – Tetsu</title>")),
             "{path}"
         );
-        for other in [PROFILE, SECURITY] {
+        assert!(!page.body.contains("Back to app"), "{path}");
+        for other in [PROFILE, SECURITY, MAILBOX] {
             let current = format!("href=\"{other}\" aria-current=\"page\"");
             assert_eq!(
                 page.body.contains(&current),
@@ -77,10 +84,10 @@ async fn the_narrow_menu_is_a_popover() {
     );
 }
 
-/// The sidebar's Log out carries the page's own form token, so it logs the operator out from either page.
+/// The sidebar's Log out carries the page's own form token, so it logs the operator out from any page in it.
 #[tokio::test]
 async fn each_account_page_logs_out() {
-    for path in [PROFILE, SECURITY] {
+    for path in [PROFILE, SECURITY, MAILBOX] {
         logs_out_from(path).await;
     }
 }
@@ -130,39 +137,34 @@ async fn security_lists_sessions_then_passkeys() {
     }
 }
 
-/// Anyone without a live session is sent to log in, and returns to the page after.
+/// Anyone without a live session is sent to log in, and returns to the page after: Profile, where a login lands
+/// anyway, needs no saying.
 #[tokio::test]
 async fn an_account_page_without_a_session_goes_to_log_in() {
     let (address, _database, _, _) = logged_in().await;
-    for path in [PROFILE, SECURITY] {
+    for (path, back) in [
+        (PROFILE, "/admin/login"),
+        (SECURITY, "/admin/login?next=/admin/settings/security"),
+        (MAILBOX, "/admin/login?next=/admin/mailbox"),
+    ] {
         let page = get(address, path, "").await;
-        let back = format!("/ops/login?next={path}");
         assert_eq!(
             (page.status, page.header("location")),
-            (303, Some(back.as_str())),
+            (303, Some(back)),
             "{path}"
         );
     }
 }
 
-/// Until the operator's home is built (#157), their page links to each account page and the mailbox.
+/// Until operators have a home (#157), their realm's own address sends them to their Profile, where logging in lands,
+/// and anyone without a session to log in (ADR-0084).
 #[tokio::test]
-async fn the_operators_page_links_to_their_account() {
+async fn the_realms_address_goes_to_profile() {
     let (address, _database, cookie, _) = logged_in().await;
-    let page = get(address, "/ops", &cookie).await;
-    for link in [PROFILE, SECURITY, "/ops/mailbox"] {
-        assert!(
-            page.body.contains(&format!("href=\"{link}\"")),
-            "{link}: {}",
-            page.body
-        );
+    for (cookie, to) in [(cookie.as_str(), PROFILE), ("", "/admin/login")] {
+        let page = get(address, "/admin", cookie).await;
+        assert_eq!((page.status, page.header("location")), (303, Some(to)));
     }
-    // Its passkeys moved to Security, and their notice with them.
-    assert!(
-        !page.body.contains("Passkeys need JavaScript"),
-        "{}",
-        page.body
-    );
 }
 
 /// A session on a phone shows a phone, and any other a desktop, whose icon the color scheme control's System also
