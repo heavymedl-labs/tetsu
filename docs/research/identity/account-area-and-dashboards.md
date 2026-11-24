@@ -151,7 +151,7 @@ Every realm gets the same personal pages, each its own URL with its own `h1`, `<
 
 Organization settings sit below the personal group in the same settings sidebar, hidden by whole group as Linear does. For staff, a "Business" group (details, locations, services, hours, booking page) shows to owners and managers, and a "Team" page lists staff in Linear's columns (name, email, role, joined, last seen) with invite, change role and remove, where removal ends that role's sessions (7.4.2). For operators, a "Platform" group (operators, businesses) waits for its triggers, as the earlier note advised.
 
-Suggested URLs, pending #8's host decision: operators at `/ops` (home), `/ops/mailbox`, `/ops/account/profile`, `/ops/account/security`; staff, whose identity spans businesses, at host-level `/account/...` for personal pages and `/<business>/...` and `/<business>/settings/...` for business work, so that a link names its business and the switcher can keep the current page; customers at the business's booking address plus `/account/...`. A Vercel-style `/b?to=...` redirect lets emails link to "your current business" without a slug.
+Each realm's addresses are set in [ADR-0084](../../adr/0084-realm-routes.md). A Vercel-style `/b?to=...` redirect lets emails link to "your current business" without a slug.
 
 ### What each realm's home shows
 
