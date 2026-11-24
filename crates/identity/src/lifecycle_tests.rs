@@ -343,15 +343,14 @@ async fn a_login_after_the_session_ended_clears_the_cache() {
 async fn joining_logs_in_with_a_session_that_is_never_fresh() {
     let (address, database, link) = serving().await;
     let (_, cookie) = join(address, &link).await;
-    let page = get(address, "/ops", &cookie).await;
+    let page = get(address, "/ops/account/security", &cookie).await;
     assert_eq!(page.status, 200);
     assert!(
-        page.body
-            .contains("To add a second passkey, log out and log in"),
+        page.body.contains("To add one, log out and log in"),
         "{}",
         page.body
     );
-    assert!(!page.body.contains("Add a second passkey"), "{}", page.body);
+    assert!(!page.body.contains("action=\"add\""), "{}", page.body);
     let begun = post(
         address,
         "/ops/passkeys/begin",

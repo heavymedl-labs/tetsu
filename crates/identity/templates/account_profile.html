@@ -1,0 +1,17 @@
+{#- The operator's Profile (#156): who they are, their name, their email address or that they have none, and their
+    role. Changing them comes with re-authentication, later. -#}
+{% extends "account_shell.html" %}
+{% import "../../../web/templates/components.html" as shared %}
+{% block title %}Profile – Tetsu{% endblock %}
+{% block content %}
+  <h1 class="text-2xl font-medium text-balance text-ink">Profile</h1>
+  <div class="mt-8 {% call shared::settings_card_style() %}{% endcall %}">
+    {% call shared::settings_row("Name", "Shown in your menu and on the email Tetsu sends for you.") %}<p
+        class="text-mini text-ink"
+      >{{ name }}</p>{% endcall %}
+    {% call shared::settings_row("Email", "Where invites and security notices go.") %}{% if let Some(email) = email %}<p
+          class="text-mini text-ink"
+        >{{ email }}</p>{% else %}<p class="text-mini text-muted">No email address</p>{% endif %}{% endcall %}
+    {% call shared::settings_row("Role", "") %}<p class="text-mini text-ink">Operator</p>{% endcall %}
+  </div>
+{% endblock %}

@@ -3,24 +3,24 @@
 //! login, and the refused and unavailable pages, carry none.
 
 use crate::adapters::http::initials;
-use crate::http_tests::{cookie_in, form_on, get, logged_in, send};
+use crate::http_tests::{assert_in_order, get, logged_in, logs_out_from, send};
 use crate::join_tests::{as_admin, replace};
 
 const MENU_BUTTON: &str = "popovertarget=\"tetsu-account-menu\"";
 
 /// What the header shows on a logged-in page, in the order a reader meets it. The button's name starts with the
-/// initials it shows, so speech input can say them (WCAG 2.5.3), and it and the menu's rows grow to 44px under a
-/// coarse pointer.
+/// initials it shows, so speech input can say them (WCAG 2.5.3), and its target and the menu's rows grow to 44px
+/// under a coarse pointer.
 const HEADER_PARTS: [&str; 14] = [
     "<a href=\"#main\"",
     "<header",
     "<a href=\"/\" aria-label=\"Tetsu home\"",
     MENU_BUTTON,
-    "pointer-coarse:size-11\">KM<span class=\"sr-only\">, account menu, Kurt Medley</span></button>",
+    "pointer-coarse:after:content-['']\">KM<span class=\"sr-only\">, account menu, Kurt Medley</span></button>",
     "<div id=\"tetsu-account-menu\" popover",
     ">Kurt Medley</p>",
     ">Operator</p>",
-    "href=\"/ops\"",
+    "href=\"/ops/account/profile\"",
     "pointer-coarse:py-3\">Account</a>",
     "<form method=\"post\" action=\"/ops/logout\"",
     "name=\"form\" value=\"",
@@ -28,26 +28,17 @@ const HEADER_PARTS: [&str; 14] = [
     "<main id=\"main\"",
 ];
 
-/// Each logged-in page has the whole header, in order, and only the Account page marks Account as current.
+/// Each logged-in page has the whole header, in order, and none marks Account, the operator's Profile, current.
 #[tokio::test]
 async fn every_logged_in_page_has_the_header_and_its_menu() {
     let (address, _database, cookie, _) = logged_in().await;
     for (path, status) in [("/ops", 200), ("/ops/mailbox", 200), ("/ops/nowhere", 404)] {
         let page = get(address, path, &cookie).await;
         assert_eq!(page.status, status, "{path}");
-        let mut from = 0;
-        for part in HEADER_PARTS {
-            let at = page.body[from..].find(part);
-            assert!(
-                at.is_some(),
-                "{part} after byte {from} on {path}: {}",
-                page.body
-            );
-            from += at.unwrap_or_default() + part.len();
-        }
+        assert_in_order(&page, &HEADER_PARTS, path);
         assert_eq!(page.body.matches(MENU_BUTTON).count(), 1, "{path}");
-        let current = page.body.contains("href=\"/ops\" aria-current=\"page\"");
-        assert_eq!(current, path == "/ops", "{path}");
+        // Account is the operator's Profile, which has its own shell (#156), so no page here marks it current.
+        assert!(!page.body.contains("aria-current=\"page\""), "{path}");
     }
 }
 
@@ -140,24 +131,7 @@ async fn a_page_whose_account_cannot_be_read_is_unavailable() {
 #[tokio::test]
 async fn each_pages_menu_logs_out() {
     for path in ["/ops", "/ops/mailbox", "/ops/nowhere"] {
-        let (address, _database, cookie, _) = logged_in().await;
-        let page = get(address, path, &cookie).await;
-        let headers = [
-            ("Origin", crate::join_tests::ORIGIN),
-            ("Cookie", cookie.as_str()),
-        ];
-        let body = format!("form={}", form_on(&page.body));
-        let logout = send(address, "POST", "/ops/logout", &headers, &body).await;
-        assert_eq!(logout.status, 303, "{path}");
-        assert!(
-            cookie_in(&logout).ends_with('='),
-            "{path}: the cookie is cleared"
-        );
-        assert_eq!(
-            get(address, "/ops", &cookie).await.status,
-            303,
-            "{path}: the session ended"
-        );
+        logs_out_from(path).await;
     }
 }
 

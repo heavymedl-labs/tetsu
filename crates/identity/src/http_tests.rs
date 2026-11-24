@@ -18,6 +18,7 @@ use crate::{Operators, Origins};
 
 const SCRIPT: &str = "/assets/passkey-test.js";
 pub(crate) const SESSION_SCRIPT: &str = "/assets/session-test.js";
+pub(crate) const MENU_SCRIPT: &str = "/assets/menu-test.js";
 const POLICY: &str = "default-src 'none'; object-src 'none'; script-src 'self'; connect-src 'self'; \
                       style-src 'self'; font-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; \
                       frame-ancestors 'none'";
@@ -103,6 +104,7 @@ pub(crate) async fn serve(
         script: SCRIPT,
         session_script: SESSION_SCRIPT,
         scheme_script: "/assets/scheme-test.js",
+        menu_script: MENU_SCRIPT,
         mailbox,
         report,
     };
@@ -296,6 +298,43 @@ async fn logged_in_with(mailbox: Arc<dyn Mailbox>) -> (SocketAddr, TestDatabase,
     (address, database, cookie, form_on(&page.body))
 }
 
+/// Fails unless each of `parts` appears in `page`, in order, naming the first that does not and where it was sought.
+pub(crate) fn assert_in_order(page: &Reply, parts: &[&str], path: &str) {
+    let mut from = 0;
+    for part in parts {
+        let at = page.body[from..].find(part);
+        assert!(
+            at.is_some(),
+            "{part} after byte {from} on {path}: {}",
+            page.body
+        );
+        from += at.unwrap_or_default() + part.len();
+    }
+}
+
+/// Logs a fresh operator out through the form on `path`, with that page's own form token, and checks the session
+/// ended: the cookie is cleared, and the page now sends them to log in.
+pub(crate) async fn logs_out_from(path: &str) {
+    let (address, _database, cookie, _) = logged_in().await;
+    let page = get(address, path, &cookie).await;
+    let headers = [
+        ("Origin", crate::join_tests::ORIGIN),
+        ("Cookie", cookie.as_str()),
+    ];
+    let body = format!("form={}", form_on(&page.body));
+    let logout = send(address, "POST", "/ops/logout", &headers, &body).await;
+    assert_eq!(logout.status, 303, "{path}");
+    assert!(
+        cookie_in(&logout).ends_with('='),
+        "{path}: the cookie is cleared"
+    );
+    assert_eq!(
+        get(address, path, &cookie).await.status,
+        303,
+        "{path}: the session ended"
+    );
+}
+
 /// One text value the database answers.
 pub(crate) async fn text(database: &TestDatabase, sql: &str) -> String {
     tetsu_postgres::connect(database)
@@ -348,7 +387,7 @@ pub(crate) async fn logout(address: SocketAddr, origin: &str, cookie: &str, form
 #[tokio::test]
 async fn an_operator_joins_logs_in_and_adds_a_passkey() {
     let (address, database, cookie, form) = logged_in().await;
-    let page = get(address, "/ops", &cookie).await;
+    let page = get(address, "/ops/account/security", &cookie).await;
     assert_eq!(
         (page.status, page.header("content-security-policy")),
         (200, Some(POLICY))
@@ -369,8 +408,11 @@ async fn an_operator_joins_logs_in_and_adds_a_passkey() {
         assert!(page.body.contains(shown), "{shown} in {}", page.body);
     }
     let added = add_passkey(address, &cookie, &form).await;
-    assert_eq!((added.status, added.json()), (200, json!({"next": "/ops"})));
-    let page = get(address, "/ops", &cookie).await;
+    assert_eq!(
+        (added.status, added.json()),
+        (200, json!({"next": "/ops/account/security"}))
+    );
+    let page = get(address, "/ops/account/security", &cookie).await;
     assert_eq!(
         page.body.matches("Synced passkey").count(),
         2,
@@ -390,7 +432,7 @@ async fn a_stale_login_is_told_to_login_again_to_add_a_passkey() {
         "UPDATE identity.sessions SET proven_at = now() - interval '11 minutes'",
     )
     .await;
-    let page = get(address, "/ops", &cookie).await;
+    let page = get(address, "/ops/account/security", &cookie).await;
     assert!(!page.body.contains("action=\"add\""), "{}", page.body);
     assert!(page.body.contains("log out and log in"), "{}", page.body);
 }
@@ -531,7 +573,7 @@ async fn a_passkey_on_one_device_is_listed_as_one() {
         "UPDATE identity.passkeys SET passkey = jsonb_set(passkey, '{cred,backup_state}', 'false')",
     )
     .await;
-    let page = get(address, "/ops", &cookie).await;
+    let page = get(address, "/ops/account/security", &cookie).await;
     assert!(page.body.contains("Passkey on one device"), "{}", page.body);
 }
 

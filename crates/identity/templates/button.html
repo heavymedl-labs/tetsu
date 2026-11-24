@@ -15,22 +15,53 @@
       disabled
       class="gap-2 disabled:cursor-not-allowed disabled:opacity-50 {% call shared::button_style(secondary, false, true) %}{% endcall %}"
     >
-      <span aria-hidden="true" class="hidden gap-[3px] group-data-[state=waiting]/passkey:inline-flex">
-        <span
-          class="size-[5px] rounded-[1px] bg-current motion-safe:animate-[tetsu-pending_900ms_ease-in-out_infinite]"
-        ></span>
-        <span
-          class="size-[5px] rounded-[1px] bg-current motion-safe:animate-[tetsu-pending_900ms_ease-in-out_150ms_infinite]"
-        ></span>
-        <span
-          class="size-[5px] rounded-[1px] bg-forge motion-safe:animate-[tetsu-pending_900ms_ease-in-out_300ms_infinite]"
-        ></span>
-      </span>
+      {% call pending() %}{% endcall %}
       <span data-label>{{ caller() }}</span></button>
-    <p
-      role="status"
-      aria-live="polite"
-      class="mt-3 min-h-5 text-mini text-pretty text-muted group-data-[state=done]/passkey:text-success group-data-[state=failed]/passkey:text-danger motion-safe:group-data-[state=done]/passkey:animate-[tetsu-note_240ms_ease-out_both] motion-safe:group-data-[state=failed]/passkey:animate-[tetsu-note_240ms_ease-out_both]"
-    ></p>
+    {% call status(false) %}{% endcall %}
+  </tetsu-passkey>
+{% endmacro %}
+
+{#- Three slots of the brand's grid booking in, which the island shows beside its button's label while it waits. -#}
+{% macro pending() %}
+  <span aria-hidden="true" class="hidden gap-[3px] group-data-[state=waiting]/passkey:inline-flex">
+    <span
+      class="size-[5px] rounded-[1px] bg-current motion-safe:animate-[tetsu-pending_900ms_ease-in-out_infinite]"
+    ></span>
+    <span
+      class="size-[5px] rounded-[1px] bg-current motion-safe:animate-[tetsu-pending_900ms_ease-in-out_150ms_infinite]"
+    ></span>
+    <span
+      class="size-[5px] rounded-[1px] bg-forge motion-safe:animate-[tetsu-pending_900ms_ease-in-out_300ms_infinite]"
+    ></span>
+  </span>
+{% endmacro %}
+
+{#- Where the island says what an action came to: failed or done, in its color, settling in. Under a button, or under a
+    settings card's `row`, where it takes no room until it says something. -#}
+{% macro status(row) %}
+  <p
+    role="status"
+    aria-live="polite"
+    class="{% if row %}px-4 pb-3 empty:hidden{% else %}mt-3{% endif %} min-h-5 text-mini text-pretty text-muted group-data-[state=done]/passkey:text-success group-data-[state=failed]/passkey:text-danger motion-safe:group-data-[state=done]/passkey:animate-[tetsu-note_240ms_ease-out_both] motion-safe:group-data-[state=failed]/passkey:animate-[tetsu-note_240ms_ease-out_both]"
+  ></p>
+{% endmacro %}
+
+{#- Adding a passkey as a row of a settings card (#156): its label, and at its right a quiet button that runs the
+    island, with what the action came to under the row. -#}
+{% macro passkey_row(form) %}
+  <tetsu-passkey action="add" form-token="{{ form }}" class="group/passkey block">
+    <div class="flex items-center justify-between gap-6 px-4 py-3.5">
+      <p class="text-mini font-medium text-ink">{{ caller() }}</p>
+      <button
+        type="button"
+        disabled
+        class="disabled:cursor-not-allowed disabled:opacity-50 {% call shared::quiet_button_style(false) %}{% endcall %}"
+      >
+        {% call pending() %}{% endcall %}
+        <span class="group-data-[state=waiting]/passkey:hidden">{% call shared::icon("plus", "text") %}{%
+            endcall
+          %}</span><span data-label>New passkey</span></button>
+    </div>
+    {% call status(true) %}{% endcall %}
   </tetsu-passkey>
 {% endmacro %}

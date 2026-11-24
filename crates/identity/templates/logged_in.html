@@ -10,12 +10,9 @@
 {% import "../../../web/templates/components.html" as shared %}
 {% block head %}{{ super() }}<script type="module" src="{{ session_script }}"></script>{% endblock %}
 {% block before %}
-  <a
-    href="#main"
-    class="sr-only rounded-lg bg-surface px-3 py-2 text-mini text-ink focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus-visible:outline-2 focus-visible:outline-accent"
-  >Skip to content</a>
+  {% call shared::skip_link() %}{% endcall %}
   {% call shared::header_bar() %}{%
-      call shared::account_menu(name, initials, "Operator", "/ops", "/ops/logout", form, here)
+      call shared::account_menu(name, initials, "Operator", "/ops/account/profile", "/ops/logout", form, here)
     %}{% endcall %}{% endcall %}
 {% endblock %}
 {#- The page sits in a top-aligned column under the header, which carries the wordmark instead. #}

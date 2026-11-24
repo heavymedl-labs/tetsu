@@ -1,0 +1,91 @@
+{#- The settings shell (#156): any realm's account pages, after Linear's settings mode. From `lg`, a full-height sidebar
+    headed by Tetsu's wordmark beside a panel that runs to the screen's right edge, shading from `surface` to
+    `canvas`, its top and left borders fading out; the page never scrolls, the panel does, and a strip under the
+    panel holds the color scheme control and Tetsu's mark. Below `lg`, a bar with "Menu", a link back to the app, and
+    what the realm puts at the bar's end; "Menu" opens the sidebar as a native popover that Escape or a tap outside
+    closes. Its island, `<tetsu-menu>` (web/src/menu), moves focus in as it opens and closes it as focus leaves, so
+    focus never rests on what it covers. The control and mark sit at the page's foot. A browser without popovers shows
+    the menu in place, above the page, since its drawer's look applies only while it is open.
+
+    A realm's template extends this, gives the shared page's fields and `scheme`, the visitor's color scheme, and
+    loads the menu's script. It fills `nav` and `menu`, its sidebar for the page and for the menu, each naming its
+    group with an id of its own; `back`, the app's address; `bar_end`; `content`, the page's `h1` and sections; and
+    `after`. -#}
+{% extends "../../../web/templates/page.html" %}
+{% import "../../../web/templates/components.html" as ui %}
+{% block data_scheme %}{{ scheme }}{% endblock %}
+{% block color_scheme %}{% include "../../../web/templates/color_scheme.html" %}{% endblock %}
+{% block footer %}{% endblock %}
+{% block body %}
+  {% call ui::skip_link() %}{% endcall %}
+  <div class="flex min-h-dvh flex-col lg:h-dvh lg:min-h-0 lg:flex-row">
+    <nav aria-label="Settings" class="hidden h-dvh w-60 shrink-0 flex-col px-3 pt-4 pb-3 lg:flex">
+      <a
+        href="/"
+        aria-label="Tetsu home"
+        class="mb-4 flex h-4 w-fit items-center px-2 text-ink focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
+      >{% include "../../../web/templates/wordmark.html" %}</a>
+      {% block nav %}{% endblock %}
+    </nav>
+    <div
+      class="sticky top-0 z-30 flex h-12 items-center justify-between gap-3 border-b border-edge-soft bg-canvas/90 px-(--tetsu-gutter) backdrop-blur-md lg:hidden"
+    >
+      <div class="flex items-center gap-1">
+        <button
+          type="button"
+          popovertarget="tetsu-settings-menu"
+          aria-label="Menu"
+          class="inline-flex size-8 cursor-pointer items-center justify-center rounded-md text-soft hover:bg-ink/5 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent pointer-coarse:size-11"
+        >{% call ui::icon("menu") %}{% endcall %}</button>
+        <a
+          href="{% block back %}{% endblock %}"
+          class="flex h-8 items-center gap-1 rounded-md px-1.5 text-mini font-medium text-ink hover:bg-ink/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent pointer-coarse:h-11"
+        >{% call ui::icon("back", "text") %}{% endcall %}Settings</a>
+      </div>
+      {% block bar_end %}{% endblock %}
+    </div>
+    <tetsu-menu class="contents"><div
+        id="tetsu-settings-menu"
+        popover
+        class="border-b border-edge-soft px-(--tetsu-gutter) py-3 text-ink motion-safe:transition-[translate,display,overlay] motion-safe:transition-discrete motion-safe:duration-200 motion-safe:ease-out backdrop:bg-black/40 backdrop:opacity-0 backdrop:transition-[opacity,display,overlay] backdrop:transition-discrete backdrop:duration-200 open:inset-y-0 open:right-auto open:left-0 open:m-0 open:flex open:h-dvh open:max-h-none open:w-72 open:max-w-[85vw] open:flex-col open:rounded-r-xl open:border-0 open:border-r open:border-edge open:bg-canvas open:px-3 open:backdrop:opacity-100 starting:open:-translate-x-full starting:open:backdrop:opacity-0 lg:hidden [&:not(:popover-open)]:-translate-x-full"
+      >
+        <div class="mb-3 flex items-center justify-between">
+          <a
+            href="/"
+            aria-label="Tetsu home"
+            class="ml-2 flex h-4 w-fit items-center text-ink focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
+          >{% include "../../../web/templates/wordmark.html" %}</a>
+          <button
+            type="button"
+            popovertarget="tetsu-settings-menu"
+            popovertargetaction="hide"
+            aria-label="Close menu"
+            class="inline-flex size-8 cursor-pointer items-center justify-center rounded-md text-muted hover:bg-ink/5 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent pointer-coarse:size-11"
+          >{% call ui::icon("close") %}{% endcall %}</button>
+        </div>
+        <nav aria-label="Settings" class="flex min-h-0 flex-1 flex-col">{% block menu %}{% endblock %}</nav>
+      </div></tetsu-menu>
+    <div
+      class="relative isolate flex min-w-0 flex-1 flex-col lg:mt-2 lg:mb-9 lg:h-[calc(100dvh-2.75rem)] lg:flex-none lg:grow lg:rounded-tl-xl lg:bg-linear-to-b lg:from-surface lg:to-canvas lg:before:pointer-events-none lg:before:absolute lg:before:inset-0 lg:before:rounded-tl-xl lg:before:border-t lg:before:border-l lg:before:border-edge-soft lg:before:content-[''] lg:before:[mask-image:linear-gradient(black_45%,transparent_92%),linear-gradient(to_right,black_55%,transparent_96%)] lg:before:[mask-composite:intersect]"
+    >
+      <main id="main" class="flex flex-1 flex-col lg:h-full lg:overflow-y-auto">
+        <div
+          class="mx-auto flex w-full max-w-160 flex-1 flex-col px-(--tetsu-gutter) pt-8 pb-4 lg:block lg:flex-none lg:px-4 lg:pt-14 lg:pb-12"
+        >
+          {% block content %}{% endblock %}
+          <footer
+            class="mt-auto flex items-center justify-end gap-3 pt-12 lg:fixed lg:right-3 lg:bottom-0 lg:h-9 lg:pt-0"
+          >
+            {%- include "../../../web/templates/scheme.html" %}
+            <a
+              href="/"
+              aria-label="Tetsu home"
+              class="flex rounded-sm text-soft hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            >{% call ui::mark() %}{% endcall %}</a>
+          </footer>
+        </div>
+      </main>
+    </div>
+  </div>
+  {% block after %}{% endblock %}
+{% endblock %}

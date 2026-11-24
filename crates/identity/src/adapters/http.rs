@@ -25,6 +25,9 @@ use crate::use_cases::Operators;
 use tetsu_kernel::{Mailbox, Requester, Scheme};
 
 const ACCOUNT: &str = "/ops";
+/// The operator's account (#156): who they are, and how they log in and where.
+const PROFILE: &str = "/ops/account/profile";
+const SECURITY: &str = "/ops/account/security";
 const LOGIN: &str = "/ops/login";
 const LOGIN_BEGIN: &str = "/ops/login/begin";
 const LOGIN_FINISH: &str = "/ops/login/finish";
@@ -44,8 +47,10 @@ const MAILBOX: &str = "/ops/mailbox";
 const ELSEWHERE: &str = "/ops/{*rest}";
 
 /// Every path Identity serves, which the composition root checks each start with a name no tenant may hold.
-pub const PATHS: [&str; 14] = [
+pub const PATHS: [&str; 16] = [
     ACCOUNT,
+    PROFILE,
+    SECURITY,
     LOGIN,
     LOGIN_BEGIN,
     LOGIN_FINISH,
@@ -93,6 +98,8 @@ pub struct Web {
     pub session_script: &'static str,
     /// The color scheme control's script, which every operator page loads (ADR-0070).
     pub scheme_script: &'static str,
+    /// The settings shell's menu script, which keeps focus where it shows (#156).
+    pub menu_script: &'static str,
     /// The messages Mail kept rather than sent, which the mailbox page shows (ADR-0074).
     pub mailbox: Arc<dyn Mailbox>,
     pub report: fn(&str),
@@ -128,6 +135,20 @@ struct JoinPage {
 #[template(path = "account.html")]
 struct AccountPage {
     shell: Shell,
+}
+
+#[derive(Template)]
+#[template(path = "account_profile.html")]
+struct ProfilePage {
+    shell: Shell,
+    /// The operator's email address, if they have one.
+    email: Option<String>,
+}
+
+#[derive(Template)]
+#[template(path = "account_security.html")]
+struct SecurityPage {
+    shell: Shell,
     user: String,
     credentials: String,
     passkeys: Vec<&'static str>,
@@ -148,6 +169,7 @@ struct Shell {
     /// The radio the color scheme control checks, from the visitor's cookie (ADR-0070).
     scheme: &'static str,
     session_script: &'static str,
+    menu_script: &'static str,
     name: String,
     /// The operator's initials, which the header's menu button shows.
     initials: String,
@@ -165,6 +187,7 @@ impl Shell {
             scheme_script: web.scheme_script,
             scheme: scheme_of(headers).as_str(),
             session_script: web.session_script,
+            menu_script: web.menu_script,
             initials: initials(&name),
             name,
             form,
@@ -185,13 +208,20 @@ macro_rules! through_shell {
     )+};
 }
 
-through_shell!(AccountPage, MailboxPage, NotFoundPage);
+through_shell!(
+    AccountPage,
+    ProfilePage,
+    SecurityPage,
+    MailboxPage,
+    NotFoundPage
+);
 
-/// A session as the operator's page lists it: its id, which ending it names, its device, and how long ago it
-/// started and was last used.
+/// A session as the operator's page lists it: its id, which ending it names, its device, whether that is a phone,
+/// which its icon shows, and how long ago it started and was last used.
 struct Shown {
     id: String,
     device: String,
+    phone: bool,
     started: String,
     last_seen: String,
     presented: bool,
@@ -199,11 +229,13 @@ struct Shown {
 
 impl Shown {
     fn of(listed: ListedSession, now: SystemTime) -> Self {
+        let device = listed
+            .device
+            .unwrap_or_else(|| "Unknown device".to_string());
         Self {
             id: listed.id.as_str().to_string(),
-            device: listed
-                .device
-                .unwrap_or_else(|| "Unknown device".to_string()),
+            phone: device.ends_with(" on iOS") || device.ends_with(" on Android"),
+            device,
             started: ago(listed.started_at, now),
             last_seen: ago(listed.last_seen_at, now),
             presented: listed.presented,
@@ -260,6 +292,8 @@ where
 {
     Router::new()
         .route(ACCOUNT, get(account::<S>))
+        .route(PROFILE, get(profile::<S>))
+        .route(SECURITY, get(security::<S>))
         .route(LOGIN, get(login_page::<S>))
         .route(LOGIN_BEGIN, before_route::<S>(Before::BeginLogin))
         .route(LOGIN_FINISH, before_route::<S>(Before::FinishLogin))
@@ -350,13 +384,46 @@ async fn join_page<S>(State(served): Shared<S>, headers: HeaderMap) -> Response 
     })
 }
 
-/// The logged-in operator's page: their name, their passkeys, and a form token for what they may do next. A
+/// The logged-in operator's page, until their home is built (#157): links to their account and the mailbox. A
 /// browser with no live session is sent to log in.
 async fn account<S: OperatorStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
+    let web = &served.web;
+    match viewer(&served, &headers).await {
+        Ok(Some((account, form))) => page(&AccountPage {
+            shell: Shell::of(web, &headers, account.name, form, ACCOUNT),
+        }),
+        Ok(None) => see_other(LOGIN),
+        Err(error) => unavailable_page(web, "could not show an operator's page", &error),
+    }
+}
+
+/// The operator's Profile (#156): their name, email address, and role. Anyone without a live session is sent to
+/// log in, returning here after.
+async fn profile<S: OperatorStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
+    let web = &served.web;
+    let (account, form) = match viewer(&served, &headers).await {
+        Ok(Some(viewer)) => viewer,
+        Ok(None) => return see_other(&return_to(PROFILE)),
+        Err(error) => return unavailable_page(web, "could not show an operator's profile", &error),
+    };
+    match served.operators.email(account.operator).await {
+        Ok(email) => page(&ProfilePage {
+            email: email.map(|email| email.as_str().to_string()),
+            shell: Shell::of(web, &headers, account.name, form, PROFILE),
+        }),
+        Err(error) => unavailable_page(web, "could not show an operator's profile", &error),
+    }
+}
+
+/// The operator's Security (#156): their sessions and passkeys. Anyone without a live session is sent to log in,
+/// returning here after.
+async fn security<S: OperatorStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
     match shown(&served, &headers).await {
         Ok(Some(page)) => page,
-        Ok(None) => see_other(LOGIN),
-        Err(error) => unavailable_page(&served.web, "could not show an operator's page", &error),
+        Ok(None) => see_other(&return_to(SECURITY)),
+        Err(error) => {
+            unavailable_page(&served.web, "could not show an operator's security", &error)
+        }
     }
 }
 
@@ -484,7 +551,7 @@ async fn shown<S: OperatorStore>(
     let web = &served.web;
     let now = SystemTime::now();
     Ok(account.map(|account| {
-        page(&AccountPage {
+        page(&SecurityPage {
             user: base64url(&account.user_handle),
             credentials: account
                 .passkeys
@@ -499,7 +566,7 @@ async fn shown<S: OperatorStore>(
                 .into_iter()
                 .map(|listed| Shown::of(listed, now))
                 .collect(),
-            shell: Shell::of(web, headers, account.name, form, ACCOUNT),
+            shell: Shell::of(web, headers, account.name, form, SECURITY),
         })
     }))
 }
@@ -686,7 +753,7 @@ async fn logged_in<S: OperatorStore>(
             operators
                 .finish_adding_passkey(&web.party, &checked, answer, &actor)
                 .await
-                .map(|()| next(ACCOUNT))
+                .map(|()| next(SECURITY))
         }
         LoggedIn::Stay => operators.time_left(cookies(&headers)).await.map(left_json),
     };
@@ -780,7 +847,7 @@ async fn end_sessions<S: OperatorStore>(
         .end_others(&web.origins, &change, only.as_ref(), device)
         .await
     {
-        Ok(Ending::Ended(_) | Ending::NotFresh) => see_other(ACCOUNT),
+        Ok(Ending::Ended(_) | Ending::NotFresh) => see_other(SECURITY),
         Ok(Ending::NoSession) => see_other(LOGIN),
         Ok(Ending::Refused(check)) => {
             refused_form(&served, &from, &headers, END_SESSIONS, check).await

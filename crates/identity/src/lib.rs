@@ -14,6 +14,8 @@ mod ports;
 mod use_cases;
 
 #[cfg(test)]
+mod account_tests;
+#[cfg(test)]
 mod adding_tests;
 #[cfg(test)]
 mod header_tests;

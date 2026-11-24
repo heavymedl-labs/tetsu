@@ -1,0 +1,29 @@
+{#- An operator's account pages (#156), in the settings shell any realm fills (web/templates/settings.html): the
+    sidebar's "Back to app" to the operator's page, its Personal pages, and the operator with Log out at its foot;
+    the narrow bar's initials menu (#148); and the session island, so the page warns before the session ends. A
+    page's struct is a `Shell`'s, as every logged-in operator page's is. -#}
+{% extends "../../../web/templates/settings.html" %}
+{% import "../../../web/templates/components.html" as shared %}
+{% block head %}<script type="module" src="{{ script }}"></script><script
+    type="module"
+    src="{{ scheme_script }}"
+  ></script><script type="module" src="{{ session_script }}"></script><script
+    type="module"
+    src="{{ menu_script }}"
+  ></script>{% endblock %}
+{#- The sidebar, for the page or for the narrow menu, each copy naming its group (`group`) with an id of its own. -#}
+{% macro sidebar(group, here, name, initials, form) %}
+  {% call shared::settings_back("/ops") %}{% endcall %}
+  {% call shared::settings_group(group, "Personal") %}
+    {%- call shared::settings_link("/ops/account/profile", "person", "Profile", here) %}{% endcall %}
+    {%- call shared::settings_link("/ops/account/security", "shield", "Security", here) %}{% endcall %}
+  {% endcall %}
+  {% call shared::settings_account(name, initials, "Operator", "/ops/logout", form) %}{% endcall %}
+{% endmacro %}
+{% block nav %}{% call sidebar("tetsu-personal", here, name, initials, form) %}{% endcall %}{% endblock %}
+{% block menu %}{% call sidebar("tetsu-personal-menu", here, name, initials, form) %}{% endcall %}{% endblock %}
+{% block back %}/ops{% endblock %}
+{% block bar_end %}{%
+    call shared::account_menu(name, initials, "Operator", "/ops/account/profile", "/ops/logout", form, here)
+  %}{% endcall %}{% endblock %}
+{% block after %}{% include "session.html" %}{% endblock %}

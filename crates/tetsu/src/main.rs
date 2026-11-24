@@ -395,6 +395,7 @@ fn operator_pages(
         script: assets::PASSKEY_SCRIPT,
         session_script: assets::SESSION_SCRIPT,
         scheme_script: assets::SCHEME_SCRIPT,
+        menu_script: assets::MENU_SCRIPT,
         mailbox,
         report,
     })

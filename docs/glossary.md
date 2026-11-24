@@ -131,6 +131,10 @@ when a hijacked account is replaced ([ADR-0041](adr/0041-account-recovery.md)).
 **Rigor tier.** The testing and review bar for an area, from 1 (highest) to 3,
 set by [ADR-0005](adr/0005-testing-and-performance.md).
 
+**Settings shell.** The layout every realm's account pages share, after Linear's settings mode: a sidebar of
+the realm's pages beside a panel, and below a laptop's width a bar whose "Menu" opens the sidebar as a popover
+(`web/templates/settings.html`, #156).
+
 **Shared capability.** Industry-neutral behavior the platform builds up front
 for more than one vertical, such as scheduling, booking, or the ledger.
 

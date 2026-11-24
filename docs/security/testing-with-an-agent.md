@@ -107,7 +107,8 @@ done
   ```
 
 **2. Checks of Tetsu's own promises,** with `curl` and Chrome. The operator pages are `/ops`, `/ops/login`,
-`/ops/join`, and `/ops/mailbox`. Requests go to `begin` and `finish` under `/ops/login`, `/ops/join`, and
+`/ops/join`, `/ops/mailbox`, and the account's `/ops/account/profile` and `/ops/account/security`, which holds the
+sessions and passkeys. Requests go to `begin` and `finish` under `/ops/login`, `/ops/join`, and
 `/ops/passkeys`, and to `/ops/logout` and `/ops/session`, as JSON from `Origin: http://localhost:8080`. A logged-in
 one also carries the session cookie and the hidden `form` field's value, which `/ops`'s page source shows.
 
@@ -117,7 +118,7 @@ one also carries the session cookie and the hidden `form` field's value, which `
 | Sessions | Reusing a session after Log out; changing the cookie; a session past its 15 idle minutes, which `GET /ops/session` counts down without renewing; after it, `/ops` sends you to log in |
 | Forged requests | A form posted from another origin, or without its token |
 | Rate limits | Many failed logins in a row, until a 429 with `Retry-After`; each further failure doubles the wait. Do this last: it can stop you joining or logging in for up to an hour. Earlier requests in the session count too, ZAP's included, so a limit can arrive sooner than ADR-0072's numbers |
-| Pages | `/ops` and `/ops/mailbox` logged out; the headers and policy on every page |
+| Pages | `/ops`, `/ops/mailbox`, and the account pages logged out; the headers and policy on every page |
 | Tenants | With a second seed file copied from `crates/tetsu/tests/fixtures/sample.toml`, one tenant's page or theme showing the other's name, locations, or colors. Tenants hold only public data so far |
 
 **3. By hand, optional.** ZAP's desktop app sits between Chrome and Tetsu to watch and replay requests. Move it off

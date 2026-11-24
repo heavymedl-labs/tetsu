@@ -39,12 +39,13 @@ pub fn files(json: &str) -> Result<Vec<(String, String)>, String> {
 
 /// The files a page links to by name, the brand files (docs/brand) and the operator pages' scripts, by source and
 /// by the constant that names each one's URL.
-const LINKED: [(&str, &str); 5] = [
+const LINKED: [(&str, &str); 6] = [
     ("../docs/brand/tetsu-avatar.svg", "ICON"),
     ("../docs/brand/tetsu-avatar.png", "TOUCH_ICON"),
     ("src/passkey/ops.ts", "PASSKEY_SCRIPT"),
     ("src/session/ops.ts", "SESSION_SCRIPT"),
     ("src/scheme/ops.ts", "SCHEME_SCRIPT"),
+    ("src/menu/ops.ts", "MENU_SCRIPT"),
 ];
 
 /// The text's font, Latin only, which every page preloads.

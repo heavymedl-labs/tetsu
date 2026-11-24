@@ -16,8 +16,10 @@ use crate::ports::OperatorStore;
 use crate::{Actor, Ending, OperatorName, SessionId};
 
 const FIREFOX: &str = "Mozilla/5.0 (X11; Linux x86_64) Firefox/140.0";
+/// The operator's Security page, which lists their sessions (#156).
+const SECURITY: &str = "/ops/account/security";
 const LISTED: &str = "Started ";
-const PRESENTED: &str = "This device";
+const PRESENTED: &str = "This session";
 const STALE: &str = "To log out your other sessions, log out and log in again";
 
 /// Kurt, joined, then logged in from `count` browsers: the server, the database, and each browser's cookie, oldest
@@ -83,7 +85,7 @@ async fn held(database: &TestDatabase) -> String {
 #[tokio::test]
 async fn the_page_lists_every_session_this_one_first() {
     let (address, _database, cookies) = logged_in_from(2).await;
-    let page = get(address, "/ops", &cookies[1]).await;
+    let page = get(address, SECURITY, &cookies[1]).await;
     assert_eq!(page.status, 200);
     assert_eq!(page.body.matches(LISTED).count(), 2, "{}", page.body);
     assert_eq!(page.body.matches(PRESENTED).count(), 1);
@@ -108,7 +110,7 @@ async fn the_page_lists_every_session_this_one_first() {
 async fn a_session_with_no_device_is_listed_as_unknown() {
     let (address, database, cookies) = logged_in_from(1).await;
     as_admin(&database, "UPDATE identity.sessions SET device = NULL").await;
-    let page = get(address, "/ops", &cookies[0]).await;
+    let page = get(address, SECURITY, &cookies[0]).await;
     assert!(page.body.contains("Unknown device"), "{}", page.body);
     // Alone, there is nothing else to end.
     assert_eq!(offered(&page.body), Vec::<String>::new());
@@ -119,16 +121,16 @@ async fn a_session_with_no_device_is_listed_as_unknown() {
 #[tokio::test]
 async fn one_other_session_ends_and_this_one_stays() {
     let (address, database, cookies) = logged_in_from(3).await;
-    let page = get(address, "/ops", &cookies[2]).await;
+    let page = get(address, SECURITY, &cookies[2]).await;
     let ids = offered(&page.body);
     let ended = end(address, &cookies[2], &form_on(&page.body), Some(&ids[0])).await;
     assert_eq!(
         (ended.status, ended.header("location")),
-        (303, Some("/ops"))
+        (303, Some(SECURITY))
     );
     assert_eq!(held(&database).await, "2");
-    assert_eq!(get(address, "/ops", &cookies[2]).await.status, 200);
-    let after = get(address, "/ops", &cookies[2]).await;
+    assert_eq!(get(address, SECURITY, &cookies[2]).await.status, 200);
+    let after = get(address, SECURITY, &cookies[2]).await;
     assert_eq!(after.body.matches(LISTED).count(), 2);
     assert!(!offered(&after.body).contains(&ids[0]));
     // The record names the session that asked, the newest, and the one it ended, by their public ids.
@@ -150,17 +152,17 @@ async fn one_other_session_ends_and_this_one_stays() {
 #[tokio::test]
 async fn every_other_session_ends_and_this_one_stays() {
     let (address, database, cookies) = logged_in_from(3).await;
-    let page = get(address, "/ops", &cookies[1]).await;
+    let page = get(address, SECURITY, &cookies[1]).await;
     let ended = end(address, &cookies[1], &form_on(&page.body), None).await;
     assert_eq!(
         (ended.status, ended.header("location")),
-        (303, Some("/ops"))
+        (303, Some(SECURITY))
     );
     assert_eq!(held(&database).await, "1");
     for gone in [&cookies[0], &cookies[2]] {
-        assert_eq!(get(address, "/ops", gone).await.status, 303);
+        assert_eq!(get(address, SECURITY, gone).await.status, 303);
     }
-    assert_eq!(get(address, "/ops", &cookies[1]).await.status, 200);
+    assert_eq!(get(address, SECURITY, &cookies[1]).await.status, 200);
 }
 
 /// Only a login from the last ten minutes may end other sessions: a stale one is told so on the page, and ends
@@ -168,21 +170,21 @@ async fn every_other_session_ends_and_this_one_stays() {
 #[tokio::test]
 async fn only_a_fresh_login_ends_other_sessions() {
     let (address, database, cookies) = logged_in_from(2).await;
-    let page = get(address, "/ops", &cookies[1]).await;
+    let page = get(address, SECURITY, &cookies[1]).await;
     let (form, ids) = (form_on(&page.body), offered(&page.body));
     as_admin(
         &database,
         "UPDATE identity.sessions SET proven_at = proven_at - interval '11 minutes'",
     )
     .await;
-    let stale = get(address, "/ops", &cookies[1]).await;
+    let stale = get(address, SECURITY, &cookies[1]).await;
     assert!(stale.body.contains(STALE), "{}", stale.body);
     assert_eq!(offered(&stale.body), Vec::<String>::new());
     for only in [Some(ids[0].as_str()), None] {
         let refused = end(address, &cookies[1], &form, only).await;
         assert_eq!(
             (refused.status, refused.header("location")),
-            (303, Some("/ops"))
+            (303, Some(SECURITY))
         );
     }
     assert_eq!(held(&database).await, "2");
@@ -203,11 +205,11 @@ async fn a_session_joining_began_ends_no_other() {
     let (passkey, joined) = join(address, &link).await;
     let login = login_sending(address, passkey, "", None).await;
     let other = cookie_in(&login);
-    let page = get(address, "/ops", &joined).await;
+    let page = get(address, SECURITY, &joined).await;
     assert!(page.body.contains(STALE), "{}", page.body);
     let refused = end(address, &joined, &form_on(&page.body), None).await;
     assert_eq!(refused.status, 303);
-    assert_eq!(get(address, "/ops", &other).await.status, 200);
+    assert_eq!(get(address, SECURITY, &other).await.status, 200);
     assert_eq!(held(&database).await, "2");
 }
 
@@ -241,14 +243,14 @@ async fn an_operator_never_lists_or_ends_anothers_sessions() {
         "SELECT id::text FROM identity.sessions WHERE operator_id = 1",
     )
     .await;
-    let page = get(address, "/ops", ada).await;
+    let page = get(address, SECURITY, ada).await;
     assert_eq!(page.body.matches(LISTED).count(), 1, "{}", page.body);
     assert!(!page.body.contains(&kurts_id));
     let tried = end(address, ada, &form_on(&page.body), Some(&kurts_id)).await;
     assert_eq!(tried.status, 303);
     let everything = end(address, ada, &form_on(&page.body), None).await;
     assert_eq!(everything.status, 303);
-    assert_eq!(get(address, "/ops", kurt).await.status, 200);
+    assert_eq!(get(address, SECURITY, kurt).await.status, 200);
     assert_eq!(held(&database).await, "2");
     // Both are recorded as Ada's, ending nothing.
     let adas = text(
@@ -270,7 +272,7 @@ async fn an_operator_never_lists_or_ends_anothers_sessions() {
 #[tokio::test]
 async fn an_ending_from_elsewhere_or_unchecked_is_refused() {
     let (address, database, cookies) = logged_in_from(2).await;
-    let page = get(address, "/ops", &cookies[1]).await;
+    let page = get(address, SECURITY, &cookies[1]).await;
     let form = form_on(&page.body);
     let elsewhere = [
         ("Origin", "https://evil.example"),
@@ -315,7 +317,7 @@ async fn an_ending_from_elsewhere_or_unchecked_is_refused() {
 #[tokio::test]
 async fn a_failing_store_is_unavailable() {
     let (address, database, cookies) = logged_in_from(2).await;
-    let page = get(address, "/ops", &cookies[1]).await;
+    let page = get(address, SECURITY, &cookies[1]).await;
     let form = form_on(&page.body);
     let revoke = |function: &str| {
         format!("REVOKE EXECUTE ON FUNCTION identity.{function} FROM tetsu_identity")
@@ -323,7 +325,7 @@ async fn a_failing_store_is_unavailable() {
     as_admin(&database, &revoke("end_other_sessions(bytea, uuid)")).await;
     assert_eq!(end(address, &cookies[1], &form, None).await.status, 503);
     as_admin(&database, &revoke("sessions_of(bytea)")).await;
-    assert_eq!(get(address, "/ops", &cookies[1]).await.status, 503);
+    assert_eq!(get(address, SECURITY, &cookies[1]).await.status, 503);
 }
 
 /// A browser's actor names its device, and one that named none has none; a command's actor is never asked.
@@ -384,7 +386,7 @@ async fn an_unreadable_list_is_unavailable() {
         )
         .await;
         assert_eq!(
-            get(address, "/ops", &cookies[0]).await.status,
+            get(address, SECURITY, &cookies[0]).await.status,
             503,
             "{shaped}"
         );
@@ -412,7 +414,7 @@ async fn a_form_that_is_not_text_is_refused() {
 #[tokio::test]
 async fn a_session_unreadable_while_ending_is_unavailable() {
     let (address, database, cookies) = logged_in_from(2).await;
-    let form = form_on(&get(address, "/ops", &cookies[1]).await.body);
+    let form = form_on(&get(address, SECURITY, &cookies[1]).await.body);
     as_admin(
         &database,
         "REVOKE EXECUTE ON FUNCTION identity.use_session(bytea, text) FROM tetsu_identity",
@@ -510,7 +512,7 @@ async fn listing_renews_no_other_session() {
         "UPDATE identity.sessions SET last_seen_at = last_seen_at - interval '5 minutes'",
     )
     .await;
-    assert_eq!(get(address, "/ops", &cookies[1]).await.status, 200);
+    assert_eq!(get(address, SECURITY, &cookies[1]).await.status, 200);
     let idle = "SELECT count(*)::text FROM identity.sessions
          WHERE last_seen_at < statement_timestamp() - interval '4 minutes'";
     assert_eq!(text(&database, idle).await, "1");
@@ -567,7 +569,7 @@ fn unreadable_endings() -> Vec<(String, String)> {
 async fn an_unreadable_ending_is_unavailable() {
     for (shaped, row) in unreadable_endings() {
         let (address, database, cookies) = logged_in_from(2).await;
-        let form = form_on(&get(address, "/ops", &cookies[1]).await.body);
+        let form = form_on(&get(address, SECURITY, &cookies[1]).await.body);
         as_admin(
             &database,
             &format!(

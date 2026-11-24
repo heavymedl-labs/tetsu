@@ -27,7 +27,7 @@ the kernel's `Mailbox` port, which Mail implements; a message's HTML is never sh
   Requests at the same moment never end a live session or revive a spent one, and the last request never moves back.
 - **Logging out removes the session** on the server. It changes state, so it passes the origin and form-token
   checks first.
-- **An operator sees and ends their own sessions** at `/ops` (ADR-0059, `v5.0.0-7.5.2`), as Linear lists them:
+- **An operator sees and ends their own sessions** at `/ops/account/security` (ADR-0059, `v5.0.0-7.5.2`), as Linear lists them:
   each live one by its public id, with the coarse device it started on, such as Firefox on Linux, when it started,
   and when it was last used, this one first. `sessions_of` finds them from the presented session alone and renews
   none. `POST /ops/sessions/end` ends one other session, or every other one, passing logging out's checks, and only
@@ -209,7 +209,8 @@ the kernel's `Mailbox` port, which Mail implements; a message's HTML is never sh
 
 ## The operator pages
 
-`adapters/http.rs` serves `/ops/login`, `/ops/join`, and `/ops`, the logged-in operator's page, with the JSON
+`adapters/http.rs` serves `/ops/login`, `/ops/join`, `/ops`, the logged-in operator's page, and their account's
+`/ops/account/profile` and `/ops/account/security`, with the JSON
 endpoints the passkey islands in `web/src/passkey/` call: `<tetsu-passkey>` runs a page's one passkey action, and
 `<tetsu-passkeys>` wraps the operator's list of passkeys. Pages take Linear's look, as ADR-0035 gives Tetsu's own
 pages, in a layout of Tetsu's own, load only Tetsu's own script, under a policy of their own, and are never cached.
@@ -217,12 +218,16 @@ Logging in is by passkey alone, as ADR-0040 sets for operators. Endpoints read o
 `application/json`, answer `no-store`, and give each ceremony's one refusal; a failure of the server is `503` to
 the browser and reported to the operator. Logging in ends the session the browser presented, in the transaction
 that starts the new one. Logging out is a plain form that clears the cookie and the browser's cache of the pages. Every
-logged-in page shares one header (#148, `v5.0.0-7.4.4`): a skip link, Tetsu's wordmark home, and the operator's
+logged-in page outside the account's pages shares one header (#148, `v5.0.0-7.4.4`): a skip link, Tetsu's wordmark home, and the operator's
 initials opening a menu, a native popover that works without script, with their name, "Operator", Account, and the
 Log out form. The header and menu are shared components in `web/templates/components.html`, which the public site's
 header uses too, so other realms can fill them. Pages before login and the refused and unavailable pages have none.
-The
-operator's page offers a second passkey only within ten minutes of logging in, as the database allows, and its
+Until the operator's home is built (#157), `/ops` links to the account's pages and the mailbox. The account's pages
+(#156) take Linear's settings mode instead of the header: the shared settings shell, `web/templates/settings.html`,
+with a sidebar of Tetsu's wordmark, "Back to app", the Personal pages, and the operator with Log out at its foot,
+which below a laptop's width opens from "Menu" as a native popover, beside the initials menu. Profile shows the
+operator's name, email address, and role; Security lists their sessions, then their passkeys. Security
+offers a second passkey only within ten minutes of logging in, as the database allows, and its
 `<tetsu-passkeys>` tells the operator's devices every passkey Tetsu holds, through the Signal API.
 
 The edges of a login follow [the operator lifecycles research](../../docs/research/identity/operator-lifecycles.md).

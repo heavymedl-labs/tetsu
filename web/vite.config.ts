@@ -25,6 +25,7 @@ export default defineConfig({
         passkey: resolve(here, "src/passkey/ops.ts"),
         session: resolve(here, "src/session/ops.ts"),
         scheme: resolve(here, "src/scheme/ops.ts"),
+        menu: resolve(here, "src/menu/ops.ts"),
         icon: resolve(here, "../docs/brand/tetsu-avatar.svg"),
         "touch-icon": resolve(here, "../docs/brand/tetsu-avatar.png"),
       },
