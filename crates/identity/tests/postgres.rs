@@ -160,6 +160,81 @@ async fn identity_follows_the_isolation_rules() {
     );
 }
 
+/// A staff member's roles and invites belong to each business: acting as Identity's role, a business sees only its
+/// own, and none without a business named (ADR-0042, ADR-0089).
+#[tokio::test]
+async fn staff_roles_and_invites_belong_to_their_business() {
+    let database = ready().await;
+    as_db_admin(
+        &database,
+        "INSERT INTO identity.staff (name, email) VALUES ('Ada Park', 'ada@example.com');
+         INSERT INTO identity.staff_roles (tenant_id, staff_id, role_name)
+           SELECT t, s.id, 'owner' FROM identity.staff AS s, generate_series(1, 2) AS t;
+         INSERT INTO identity.staff_invites (tenant_id, token_hash, staff_id, role_name, issued_at, ends_at)
+           SELECT t, sha256(t::text::bytea), s.id, 'owner', now(), now() + interval '7 days'
+           FROM identity.staff AS s, generate_series(1, 2) AS t",
+    )
+    .await;
+    let pool = pool(&database.as_app()).expect("a pool");
+    for tenant in [1_i64, 2] {
+        let mut client = pool.get().await.expect("a connection");
+        let transaction = tetsu_postgres::TenantTransaction::begin(&mut client, "identity", tenant)
+            .await
+            .expect("begins");
+        for table in ["staff_roles", "staff_invites"] {
+            let seen: Vec<i64> = transaction
+                .query(&format!("SELECT tenant_id FROM identity.{table}"), &[])
+                .await
+                .expect("reads")
+                .iter()
+                .map(|row| row.try_get(0).expect("a business"))
+                .collect();
+            assert_eq!(seen, [tenant], "{table} for business {tenant}");
+        }
+    }
+    for table in ["staff_roles", "staff_invites"] {
+        let mut client = pool.get().await.expect("a connection");
+        let unnamed = ModuleTransaction::begin(&mut client, "identity")
+            .await
+            .expect("begins");
+        let seen = unnamed
+            .query(&format!("SELECT tenant_id FROM identity.{table}"), &[])
+            .await
+            .expect("reads");
+        assert!(seen.is_empty(), "{table}: no business named, no rows");
+    }
+}
+
+/// A business writes only its own staff rows: in business 1's transaction, Identity's role cannot add a role or an
+/// invite to business 2 (ADR-0042, ADR-0089).
+#[tokio::test]
+async fn a_business_writes_only_its_own_staff_rows() {
+    let database = ready().await;
+    as_db_admin(
+        &database,
+        "INSERT INTO identity.staff (name, email) VALUES ('Ada Park', 'ada@example.com')",
+    )
+    .await;
+    let pool = pool(&database.as_app()).expect("a pool");
+    for write in [
+        "INSERT INTO identity.staff_roles (tenant_id, staff_id, role_name)
+           SELECT 2, id, 'manager' FROM identity.staff",
+        "INSERT INTO identity.staff_invites (tenant_id, token_hash, staff_id, role_name, issued_at, ends_at)
+           SELECT 2, sha256('x'::bytea), id, 'manager', now(), now() FROM identity.staff",
+    ] {
+        let mut client = pool.get().await.expect("a connection");
+        let transaction = tetsu_postgres::TenantTransaction::begin(&mut client, "identity", 1)
+            .await
+            .expect("begins");
+        let refused = transaction.execute(write, &[]).await.expect_err("refused");
+        assert_eq!(
+            refused.code(),
+            Some(&tokio_postgres::error::SqlState::INSUFFICIENT_PRIVILEGE),
+            "{write}"
+        );
+    }
+}
+
 /// A session starts now by Postgres's clock, lasts eight hours at most, and records each request on it.
 #[tokio::test]
 async fn a_started_session_is_found_by_its_token_and_records_each_request() {

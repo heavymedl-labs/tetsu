@@ -69,6 +69,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 12,
         sql: include_str!("../../migrations/0012_log_out.sql"),
     },
+    Migration {
+        version: 13,
+        sql: include_str!("../../migrations/0013_staff.sql"),
+    },
 ];
 /// Identity's schema, which names the role its transactions act as (ADR-0042).
 const SCHEMA: &str = "identity";
