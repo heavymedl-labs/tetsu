@@ -19,30 +19,30 @@ one as current intent. The [ADR index](docs/adr/README.md) says when to read eac
 
 ## Current phase
 
-The walking skeleton is in progress. The demo is deployed, and login
-([#20](https://github.com/heavymedl-labs/tetsu/issues/20)) is decided in ADR-0040 to ADR-0048 and built in the slices
-[ADR-0048](docs/adr/0048-sign-in-design.md) orders, starting with tenant isolation
-([#106](https://github.com/heavymedl-labs/tetsu/issues/106)). The [README](README.md)
-describes what is implemented.
+The walking skeleton is in progress, with login ([#20](https://github.com/heavymedl-labs/tetsu/issues/20)) built in
+the slices [ADR-0048](docs/adr/0048-sign-in-design.md) orders; the [README](README.md) says what is implemented.
+Start from the newest "Resume here" comment on each In Progress issue.
 
 ## Rules
 
 - Adopting a framework, library, service, or tool needs a `Proposed` ADR first. Only the maintainer accepts
   ADRs ([ADR-0001](docs/adr/0001-how-we-work.md)).
 - Evaluate what you adopt through the steps in [ADR-0010](docs/adr/0010-evaluating-technology.md).
-- Meet the rigor tier and performance rules for the area you change
-  ([ADR-0005](docs/adr/0005-testing-and-performance.md)).
+- Meet the rigor tier and performance rules for the area you change ([ADR-0005](docs/adr/0005-testing-and-performance.md)).
 - Settle an [open decision](docs/adr/README.md#open-decisions) only when its issue is your task, by proposing an
   ADR. Otherwise raise it on that issue and wait.
-- Follow the workflow in [CONTRIBUTING.md](CONTRIBUTING.md), with [Conventional Commits](CONTRIBUTING.md#commits).
-- Audit every change to docs, issues, or the project board, as
-  [CONTRIBUTING.md](CONTRIBUTING.md#docs-audit) describes.
+- Follow the workflow in [CONTRIBUTING.md](CONTRIBUTING.md), with [Conventional Commits](CONTRIBUTING.md#commits), and
+  keep the issue you work on current for the next agent ([handoffs](CONTRIBUTING.md#handoffs)).
+- Audit every change to docs, issues, or the project board, as [CONTRIBUTING.md](CONTRIBUTING.md#docs-audit) describes.
 - Read [CONSTRAINTS.md](CONSTRAINTS.md) before writing code, and do not weaken it to make a change pass. Add a
   language only once its row there is filled.
 - Clean up what you start: servers, containers, images, databases, and files in `/tmp`, including a headless
   browser's profile. Tests write them through `Scratch`. `scripts/clean.py` sweeps the rest after every check.
 - Type no settings into commands. They come from the environment or a local `.env`
   ([ADR-0050](docs/adr/0050-local-settings-file.md)), and a local default goes in `.env.example`.
+- Before building a slice, research how industry leaders do it, from boundaries to route names, in `docs/research`,
+  and show the maintainer the plan with that evidence before code. Explain a decision, with a recommendation, before
+  asking for it.
 
 ## Duties
 

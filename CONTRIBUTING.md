@@ -119,7 +119,8 @@ sets its status to Todo, and to Done when it closes. Keep the rest true:
   that nothing blocks. Keep Now to the few items actually next, and move the rest
   to Next.
 - Set an issue's status to In Progress when work on it starts, since no
-  workflow does. Closing it sets Done.
+  workflow does. Closing it sets Done. When scope grows, add criteria for it to
+  the issue at once.
 - When an issue waits on another, including a choice a Decision settles,
   link it with GitHub's "blocked by" relationship, so the wait shows on both
   issues and clears when the blocker closes.
@@ -133,6 +134,18 @@ sets its status to Todo, and to Done when it closes. Keep the rest true:
 - Before a session that filed or closed issues ends, run `scripts/check_board.py`.
   It names each issue that breaks these rules, its place in All open's order included, and says when the
   board is tidy.
+
+### Handoffs
+
+Work moves between agents, and none remembers another's session, so an In Progress issue holds where it stands:
+
+- Comment on the issue as each commit lands: what it did, by its short hash.
+- Keep the issue's body current: tick each criterion as it is met, and mark each part of its plan done, in progress,
+  or next.
+- Before a session ends, and before pausing, post a comment that starts **Resume here**: what is done and whether it
+  is pushed, the next step, what must happen first, such as a reset or another issue, and open points, linked where
+  they are written down rather than copied.
+- An agent picking the issue up starts from the newest **Resume here** comment, then reads what it links.
 
 ## Commits
 
