@@ -102,6 +102,25 @@ pub fn delivered(to: &Address, sent: Result<Delivery, MailError>) -> String {
     }
 }
 
+/// A fresh database migrated for Identity and Mail, a pool over it as the application, and a post office that keeps
+/// every message, for tests of the commands that email, kept while the test runs.
+#[cfg(test)]
+pub async fn mailing() -> (
+    tetsu_postgres::Pool,
+    tetsu_mail::PostOffice,
+    tetsu_postgres::test_support::TestDatabase,
+) {
+    let database = tetsu_postgres::test_support::migrated_database(&[
+        &tetsu_identity::Identity,
+        &tetsu_mail::Mail,
+    ])
+    .await
+    .unwrap();
+    let pool = tetsu_postgres::pool(&database.as_app()).unwrap();
+    let office = tetsu_mail::post_office(pool.clone(), None, tetsu_mail::Allowlist::default());
+    (pool, office, database)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -564,14 +564,7 @@ mod tests {
         PostOffice,
         tetsu_postgres::test_support::TestDatabase,
     ) {
-        let database = tetsu_postgres::test_support::migrated_database(&[
-            &tetsu_identity::Identity,
-            &tetsu_mail::Mail,
-        ])
-        .await
-        .unwrap();
-        let pool = tetsu_postgres::pool(&database.as_app()).unwrap();
-        let office = tetsu_mail::post_office(pool.clone(), None, tetsu_mail::Allowlist::default());
+        let (pool, office, database) = operator::mailing().await;
         (tetsu_identity::postgres_store(pool), office, database)
     }
 

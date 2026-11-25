@@ -280,14 +280,7 @@ mod tests {
     /// invite in the mailbox; a second invite to the same address under another name keeps the stored name.
     #[tokio::test]
     async fn an_invite_says_who_it_invites_and_prints_its_link() {
-        let database = tetsu_postgres::test_support::migrated_database(&[
-            &tetsu_identity::Identity,
-            &tetsu_mail::Mail,
-        ])
-        .await
-        .unwrap();
-        let pool = tetsu_postgres::pool(&database.as_app()).unwrap();
-        let office = tetsu_mail::post_office(pool.clone(), None, tetsu_mail::Allowlist::default());
+        let (pool, office, database) = operator::mailing().await;
         let accounts = tetsu_identity::postgres_staff_store(pool);
         let first = said(&accounts, &office, "Ada Park", "ada@example.com")
             .await

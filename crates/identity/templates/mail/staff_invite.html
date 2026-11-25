@@ -1,17 +1,7 @@
-{#- A staff member's invite to a business (ADR-0089): the link, plainly, with the business, the role, and how long
-    the link lasts. The business's name is the one piece of text its business chose, so it is escaped, as every
-    value here is, and never put in a link; a mail reader may still turn a URL in it into one, so business names
-    refuse URLs before owners name their own (#111). Mail readers ignore most stylesheets, so it has none. -#}
-<!DOCTYPE html>
-<html lang="en">
-  <head><meta charset="utf-8"><title>Your invite to Tetsu</title></head>
-  <body>
-    <p>Hello,</p>
-    <p>You're invited to work at {{ business }} on Tetsu, as {{ role }}. Open this link on the device that holds your
-      Tetsu passkey, or that will hold a new one:</p>
-    <p><a href="{{ link }}">{{ link }}</a></p>
-    <p>The link works once, for seven days. If you weren't expecting it, ignore this email; nothing happens unless the
-      link is opened.</p>
-    <p>Tetsu</p>
-  </body>
-</html>
+{#- A staff member's invite to a business (ADR-0089). The business's name is the one piece of text its business chose,
+    so it is escaped, as every value here is, and never put in a link; a mail reader may still turn a URL in it into
+    one, so business names refuse URLs before owners name their own (#111). -#}
+{% extends "mail/invite_layout.html" %}
+{% block invited %}You're invited to work at {{ business }} on Tetsu, as {{ role }}. Open this link on the device that
+  holds your Tetsu passkey, or that will hold a new one:{% endblock %}
+{% block lasts %}seven days{% endblock %}

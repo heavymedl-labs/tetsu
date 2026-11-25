@@ -1,0 +1,14 @@
+{#- Every invite's HTML (ADR-0074): the link, plainly, between what it invites to and how long it lasts. Mail readers
+    ignore most stylesheets, so it has none. -#}
+<!DOCTYPE html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>Your invite to Tetsu</title></head>
+  <body>
+    <p>Hello,</p>
+    <p>{% block invited %}{% endblock %}</p>
+    <p><a href="{{ link }}">{{ link }}</a></p>
+    <p>The link works once, for {% block lasts %}{% endblock %}. If you weren't expecting it, ignore this email; nothing
+      happens unless the link is opened.</p>
+    <p>Tetsu</p>
+  </body>
+</html>
