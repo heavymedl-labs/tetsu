@@ -33,10 +33,12 @@ mod menu_tests;
 mod refusal_tests;
 #[cfg(test)]
 mod sessions_tests;
+#[cfg(test)]
+mod staff_tests;
 
 pub use adapters::events::notices;
 pub use adapters::http::{PATHS, Web, router};
-pub use adapters::postgres::postgres_store;
+pub use adapters::postgres::{postgres_staff_store, postgres_store};
 pub use browser::{Change, CheckedSession, ForChange, Logout, Origins};
 pub use domain::{
     Account, AccountId, Actor, Addition, AdminName, AdminSummary, Answer, Ceremony, CeremonyKind,

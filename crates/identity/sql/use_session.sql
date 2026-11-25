@@ -1,7 +1,7 @@
 -- Records a request on a live session and returns it, or removes a spent one.
 SELECT
     s.realm,
-    s.admin_id,
+    s.admin_id AS account_id,
     s.started_at,
     s.proven_at,
     s.last_seen_at,

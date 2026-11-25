@@ -503,9 +503,7 @@ async fn finishing_refuses_what_no_longer_allows_it() {
 #[tokio::test]
 async fn storing_an_added_passkey_refuses_and_records_why() {
     let (admins, database, kurt, session) = logged_in().await;
-    let store = PostgresAdmins {
-        pool: app_pool(&database),
-    };
+    let store = PostgresAdmins::new(app_pool(&database));
     let fresh = |id: u8, size: usize| NewPasskey {
         credential_id: vec![id; size],
         passkey: "{}".to_string(),
@@ -555,9 +553,7 @@ async fn storing_an_added_passkey_refuses_and_records_why() {
 #[tokio::test]
 async fn an_addition_not_taken_or_a_credential_taken_adds_nothing() {
     let (_admins, database, _, session) = logged_in().await;
-    let store = PostgresAdmins {
-        pool: app_pool(&database),
-    };
+    let store = PostgresAdmins::new(app_pool(&database));
     let first: Vec<u8> = tetsu_postgres::connect(&database)
         .await
         .expect("connects")
@@ -594,12 +590,9 @@ async fn an_addition_not_taken_or_a_credential_taken_adds_nothing() {
 #[tokio::test]
 async fn failures_of_the_server_are_told_apart() {
     let (_admins, database, _, session) = logged_in().await;
-    let failing = Accounts::with_fill(
-        PostgresAdmins {
-            pool: app_pool(&database),
-        },
-        |_| Err(getrandom::Error::UNSUPPORTED),
-    );
+    let failing = Accounts::with_fill(PostgresAdmins::new(app_pool(&database)), |_| {
+        Err(getrandom::Error::UNSUPPORTED)
+    });
     assert_eq!(
         failure(
             failing

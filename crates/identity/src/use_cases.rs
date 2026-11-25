@@ -173,13 +173,13 @@ impl<S: LoginStore> Accounts<S> {
     /// names an admin who is disabled or holds a passkey; if no secure random source can be read; or if storage
     /// fails.
     pub async fn begin_join(&self, party: &RelyingParty, link: &str) -> Result<Ceremony, Error> {
-        let link = InviteToken::parse(link).ok_or_else(not_joining)?;
+        let link = InviteToken::parse(link).ok_or_else(not_joining::<S>)?;
         let invitee = self
             .store
             .invitee(&link.hash())
             .await
-            .map_err(|error| refusing(error, not_joining))?
-            .ok_or_else(not_joining)?;
+            .map_err(|error| refusing(error, not_joining::<S>))?
+            .ok_or_else(not_joining::<S>)?;
         let (options, state) =
             party.begin_registration(S::REALM, invitee.user_handle, &invitee.name, &[])?;
         let token = CeremonyToken::generate(self.fill)?;
@@ -187,11 +187,11 @@ impl<S: LoginStore> Accounts<S> {
             .store
             .begin_join(&token.hash(), invitee.admin, &link.hash(), &state)
             .await
-            .map_err(|error| refusing(error, not_joining))?;
+            .map_err(|error| refusing(error, not_joining::<S>))?;
         if begun {
             Ok(Ceremony { token, options })
         } else {
-            Err(not_joining())
+            Err(not_joining::<S>())
         }
     }
 
@@ -209,13 +209,13 @@ impl<S: LoginStore> Accounts<S> {
         cookies: &[&str],
         actor: &Actor,
     ) -> Result<(AccountId, SessionToken), Error> {
-        let held = CeremonyToken::parse(answer.ceremony).ok_or_else(not_joining)?;
+        let held = CeremonyToken::parse(answer.ceremony).ok_or_else(not_joining::<S>)?;
         let taken = self
             .store
             .take_join(&held.hash())
             .await
-            .map_err(|error| refusing(error, not_joining))?
-            .ok_or_else(not_joining)?;
+            .map_err(|error| refusing(error, not_joining::<S>))?
+            .ok_or_else(not_joining::<S>)?;
         let pending = Pending {
             kind: CeremonyKind::Join,
             admin: taken.admin,
@@ -224,16 +224,16 @@ impl<S: LoginStore> Accounts<S> {
         let passkey = self
             .registered(party, answer.response, &pending, actor)
             .await
-            .map_err(|error| refusing(error, not_joining))?;
+            .map_err(|error| refusing(error, not_joining::<S>))?;
         let (started, session) = self.session_start(cookies)?;
         match self
             .store
             .redeem_invite(&taken, &passkey, &session, actor)
             .await
-            .map_err(|error| refusing(error, not_joining))?
+            .map_err(|error| refusing(error, not_joining::<S>))?
         {
             Some(Redemption::Redeemed) => Ok((taken.admin, started)),
-            _ => Err(not_joining()),
+            _ => Err(not_joining::<S>()),
         }
     }
 
@@ -513,7 +513,7 @@ impl<S: LoginStore> Accounts<S> {
         cookies: impl IntoIterator<Item = &'a str>,
     ) -> Result<Option<TimeLeft>, Error> {
         match Self::token(cookies) {
-            Some(token) => self.store.session_left(&token.hash(), S::REALM).await,
+            Some(token) => self.store.session_left(&token.hash()).await,
             None => Ok(None),
         }
     }
@@ -574,10 +574,7 @@ impl<S: LoginStore> Accounts<S> {
             Ok(token) => token,
             Err(check) => return Ok(Logout::Refused(check)),
         };
-        let ended = self
-            .store
-            .delete_session(&token.hash(), S::REALM, actor)
-            .await?;
+        let ended = self.store.delete_session(&token.hash(), actor).await?;
         Ok(if ended {
             Logout::Ended
         } else {
@@ -597,7 +594,7 @@ impl<S: LoginStore> Accounts<S> {
     }
 
     async fn live(&self, token: &SessionToken) -> Result<Option<Session>, Error> {
-        self.store.use_session(&token.hash(), S::REALM).await
+        self.store.use_session(&token.hash()).await
     }
 
     /// The realm's session token among a request's cookies, if there is exactly one and it is well formed.
@@ -608,8 +605,20 @@ impl<S: LoginStore> Accounts<S> {
 
 /// One answer for every way a join can fail, so a browser learns nothing about which links or admins
 /// exist.
-fn not_joining() -> Error {
-    Error::Invalid("this invite has ended. Log in, or ask an admin for a new one".to_string())
+/// One answer for every way a join can fail, naming who issues a new invite in the store's realm.
+fn not_joining<S: LoginStore>() -> Error {
+    joining_refused(S::REALM)
+}
+
+/// [`not_joining`] for a realm, apart from any store, so each realm's wording is tested in one build.
+fn joining_refused(realm: Realm) -> Error {
+    let issuer = match realm {
+        Realm::Admin => "an admin",
+        Realm::Staff => "the business's owner",
+    };
+    Error::Invalid(format!(
+        "this invite has ended. Log in, or ask {issuer} for a new one"
+    ))
 }
 
 /// One answer for every way a login can fail, so a browser learns nothing about which passkeys or admins

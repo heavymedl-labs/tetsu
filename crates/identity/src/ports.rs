@@ -19,37 +19,34 @@ impl<T: LoginStore + AdminDirectory> AdminStore for T {}
 /// only by its token's hash and realm, one at a time (ADR-0048), and the store keeps each realm's limits beside its own
 /// clock, so no caller can stretch a session. Each realm's store works only on its own tables, and names its realm,
 /// which its use cases take from it. Each change that names an actor records an audit event naming it, with its outcome,
-/// in the same transaction (`v5.0.0-16.3.1`). The Postgres adapter implements it for admins, and tests may use their
-/// own.
+/// in the same transaction (`v5.0.0-16.3.1`). The Postgres adapter implements it for admins and for staff, and tests
+/// may use their own.
 pub trait LoginStore {
     /// The realm whose accounts this store keeps: every session it starts, finds, and ends is in it.
     const REALM: Realm;
 
-    /// Records a request on the live session stored under a token's hash in a realm, and returns it. A session
-    /// past either of the realm's limits is removed instead, and none is returned; one in another realm is none.
-    /// Checking and recording are one step, so requests at the same moment cannot end a live session or revive a
-    /// spent one.
+    /// Records a request on the live session stored under a token's hash in this store's realm, and returns it. A
+    /// session past either of the realm's limits is removed instead, and none is returned; one in another realm is
+    /// none. Checking and recording are one step, so requests at the same moment cannot end a live session or revive
+    /// a spent one.
     fn use_session(
         &self,
         hash: &[u8; 32],
-        realm: Realm,
     ) -> impl Future<Output = Result<Option<Session>, Error>> + Send;
 
-    /// How long the live session stored under a token's hash in a realm has left, read without counting as a
-    /// request, so it renews nothing and removes nothing; none for a session spent, of another realm, or of a
-    /// disabled admin, as [`Self::use_session`] would find.
+    /// How long the live session stored under a token's hash in this store's realm has left, read without counting
+    /// as a request, so it renews nothing and removes nothing; none for a session spent, of another realm, or of a
+    /// disabled account, as [`Self::use_session`] would find.
     fn session_left(
         &self,
         hash: &[u8; 32],
-        realm: Realm,
     ) -> impl Future<Output = Result<Option<TimeLeft>, Error>> + Send;
 
-    /// Removes a session in a realm, and says whether it was live when it ended, recording a live one's ending, by
-    /// `actor`'s device, under its account (#167).
+    /// Removes a session in this store's realm, and says whether it was live when it ended, recording a live one's
+    /// ending, by `actor`'s device, under its account (#167).
     fn delete_session(
         &self,
         hash: &[u8; 32],
-        realm: Realm,
         actor: &Actor,
     ) -> impl Future<Output = Result<bool, Error>> + Send;
 

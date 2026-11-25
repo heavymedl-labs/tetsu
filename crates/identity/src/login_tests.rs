@@ -414,9 +414,7 @@ fn changed(passkey: &str, field: &str, value: Value) -> String {
 #[tokio::test]
 async fn a_raced_disabled_or_missing_login_starts_no_session() {
     let (admins, database, kurt, _) = joined().await;
-    let store = PostgresAdmins {
-        pool: app_pool(&database),
-    };
+    let store = PostgresAdmins::new(app_pool(&database));
     let signer = stored_signer(&database, &store).await;
     // The passkey as another login read it, before a counter this one never saw.
     let stale = Signer {
@@ -467,9 +465,7 @@ async fn a_login_never_respells_a_stored_number() {
         "UPDATE identity.passkeys SET passkey = jsonb_set(passkey, '{cred,x}', '1')",
     )
     .await;
-    let store = PostgresAdmins {
-        pool: app_pool(&database),
-    };
+    let store = PostgresAdmins::new(app_pool(&database));
     let signer = stored_signer(&database, &store).await;
     let respelt = Signer {
         passkey: changed(&signer.passkey, "x", json!(1.0)),
@@ -492,9 +488,7 @@ async fn a_login_never_respells_a_stored_number() {
 #[tokio::test]
 async fn a_login_that_changes_more_of_a_passkey_than_it_may_is_a_fault() {
     let (_, database, _, _) = joined().await;
-    let store = PostgresAdmins {
-        pool: app_pool(&database),
-    };
+    let store = PostgresAdmins::new(app_pool(&database));
     let signer = stored_signer(&database, &store).await;
     let mut faults = Vec::new();
     for (field, value) in [

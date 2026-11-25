@@ -446,9 +446,7 @@ async fn newest_hash(database: &TestDatabase) -> [u8; 32] {
 #[tokio::test]
 async fn storage_says_why_it_ends_nothing() {
     let (_address, database, _cookies) = logged_in_from(2).await;
-    let store = PostgresAdmins {
-        pool: app_pool(&database),
-    };
+    let store = PostgresAdmins::new(app_pool(&database));
     let (hash, actor) = (
         newest_hash(&database).await,
         Actor::browser(Realm::Admin, None, None),

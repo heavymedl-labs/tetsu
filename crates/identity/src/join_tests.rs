@@ -26,12 +26,9 @@ pub(crate) const ORIGIN: &str = "https://admin.example.com";
 
 /// Identity over `database` with no secure random source, and what it says when it needs one.
 pub(crate) fn without_randomness(database: &TestDatabase) -> (Accounts<PostgresAdmins>, String) {
-    let failing = Accounts::with_fill(
-        PostgresAdmins {
-            pool: app_pool(database),
-        },
-        |_| Err(getrandom::Error::UNSUPPORTED),
-    );
+    let failing = Accounts::with_fill(PostgresAdmins::new(app_pool(database)), |_| {
+        Err(getrandom::Error::UNSUPPORTED)
+    });
     let unavailable = format!(
         "temporarily unavailable: no secure random source: {}",
         getrandom::Error::UNSUPPORTED
@@ -164,9 +161,7 @@ pub(crate) async fn with_link() -> (Accounts<PostgresAdmins>, TestDatabase, Acco
     let database = migrated_database(&[&Identity])
         .await
         .expect("a migrated test database");
-    let admins = Accounts::new(PostgresAdmins {
-        pool: app_pool(&database),
-    });
+    let admins = Accounts::new(PostgresAdmins::new(app_pool(&database)));
     let kurt = admins
         .create(
             &AdminName::parse("Kurt Medley").expect("a name"),
@@ -583,9 +578,7 @@ async fn an_undiscoverable_registration_is_refused() {
 async fn a_join_ends_the_admins_other_ceremonies() {
     let (admins, database, _, link) = with_link().await;
     let party = party();
-    let store = PostgresAdmins {
-        pool: app_pool(&database),
-    };
+    let store = PostgresAdmins::new(app_pool(&database));
     let first = admins.begin_join(&party, &link).await.expect("begins");
     let response = register(&first.options, ORIGIN, true).await;
     let taken = store
@@ -729,9 +722,7 @@ async fn redeeming() -> (
          VALUES (sha256('kurt'::bytea), 1, '{}', now())",
     )
     .await;
-    let store = PostgresAdmins {
-        pool: app_pool(&database),
-    };
+    let store = PostgresAdmins::new(app_pool(&database));
     let passkey = NewPasskey {
         credential_id: Sha256::digest(b"kurt").to_vec(),
         passkey: "{}".to_string(),
