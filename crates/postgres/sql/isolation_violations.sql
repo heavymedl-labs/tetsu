@@ -192,6 +192,7 @@ relations AS (
         c.relowner,
         m.schema_name,
         m.module_role,
+        m.lookup_role,
         pg_catalog.format('%I.%I', m.schema_name, c.relname) AS shown,
         coalesce(pg_catalog.obj_description(c.oid, 'pg_class'), '') AS declared
     FROM pg_catalog.pg_class AS c
@@ -495,6 +496,20 @@ INNER JOIN tenant_owned AS t ON i.inhparent = t.oid
 INNER JOIN relations AS child ON i.inhrelid = child.oid
 WHERE child.declared <> 'tetsu:tenant-owned'
 
+-- A child is read through its parent's policies and rights alone, so it sits
+-- in its parent's schema, and no module reaches another's rows through one.
+UNION ALL
+SELECT
+    pg_catalog.format('%I.%I', cn.nspname, c.relname)
+    || ' inherits from '
+    || parent.shown
+    || ', a table of another schema'
+FROM pg_catalog.pg_inherits AS i
+INNER JOIN relations AS parent ON i.inhparent = parent.oid
+INNER JOIN pg_catalog.pg_class AS c ON i.inhrelid = c.oid
+INNER JOIN pg_catalog.pg_namespace AS cn ON c.relnamespace = cn.oid
+WHERE cn.nspname <> parent.schema_name
+
 UNION ALL
 SELECT 'schema ' || wanted.name || ' does not exist'
 FROM unnest($1::text[]) AS wanted (name)
@@ -551,6 +566,23 @@ WHERE
         AND p.polcmd = '*'
         AND p.polwithcheck IS NULL
         AND pg_catalog.pg_get_expr(p.polqual, p.polrelid) = 'true',
+        FALSE
+    )
+    -- A module's lookup role may read its own tenant-owned tables, as ADR-0042
+    -- lets its one-input functions do before a tenant is known, and nothing
+    -- more: permissive policies for reading alone, with no check on rows, each
+    -- saying why, as a global table does. Only review of the functions keeps
+    -- them to one input; this keeps each way across tenants written down.
+    AND NOT coalesce(
+        p.polroles = ARRAY[(
+            SELECT r.oid FROM pg_catalog.pg_roles AS r
+            WHERE r.rolname = t.lookup_role
+        )]
+        AND p.polpermissive
+        AND p.polcmd = 'r'
+        AND p.polwithcheck IS NULL
+        AND pg_catalog.obj_description(p.oid, 'pg_policy')
+        ~ '^tetsu:lookup: \S',
         FALSE
     )
     AND (

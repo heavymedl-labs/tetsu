@@ -108,6 +108,13 @@ the application's own filters as a second layer.
   multiply them.)
 - **Staff identities and their passkeys are global,** as ADR-0040's realms require, while staff roles are
   tenant-owned. "Which businesses can I work at" is one such function, keyed on the logged-in identity.
+  (Clarified 2026-11-24, with the maintainer's approval: such a function reads a tenant-owned table through
+  permissive, read-only policies for its own module's lookup role, with no check on rows, since row security binds
+  the function's owner too, and each policy says why, as `tetsu:lookup: <why>`, as a global table does. The catalog
+  check keeps each way across tenants declared; review of each function's body keeps it to one input. Writes stay
+  with the module role in a tenant transaction, and a table that inherits another sits in its parent's schema.
+  Staff invites, found by their link before their business is known, are another such lookup
+  ([ADR-0089](0089-staff-join-and-login.md)).)
   Customer accounts belong to one business, so they are ordinary tenant-owned rows.
 
 ### Addresses and hosts

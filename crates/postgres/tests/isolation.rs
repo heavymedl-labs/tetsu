@@ -294,6 +294,79 @@ async fn a_tenant_policy_must_say_the_tenant_rule() {
     .await;
 }
 
+/// A module's lookup role may read its own tenant-owned tables, as ADR-0042 lets its one-input functions do, such as
+/// finding an invite by its link before the business is known (#111), through a policy that says why.
+#[tokio::test]
+async fn a_lookup_role_may_read_its_modules_tenant_owned_tables() {
+    let read = format!(
+        "{} CREATE POLICY lookup ON good FOR SELECT TO tetsu_checked_lookup USING (true);
+         COMMENT ON POLICY lookup ON good IS 'tetsu:lookup: invites, by their link';",
+        tenant_owned("good")
+    );
+    assert_eq!(problems(read, "").await, Vec::<String>::new());
+}
+
+/// A lookup policy that does not say why, or says nothing after the marker, is caught, so every way across tenants
+/// is written down for review.
+#[tokio::test]
+async fn a_lookup_policy_must_say_why() {
+    let not_the_rule = "has policy lookup that is not the tenant rule for tetsu_checked alone";
+    for comment in [
+        "",
+        "COMMENT ON POLICY lookup ON good IS 'tetsu:lookup: ';",
+        "COMMENT ON POLICY lookup ON good IS 'invites';",
+    ] {
+        caught(
+            format!(
+                "{} CREATE POLICY lookup ON good FOR SELECT TO tetsu_checked_lookup USING (true); {comment}",
+                tenant_owned("good")
+            ),
+            not_the_rule,
+        )
+        .await;
+    }
+}
+
+/// A table inheriting another module's tenant-owned table is caught, since a query of the parent reads the child's
+/// rows under the parent's policies alone.
+#[tokio::test]
+async fn a_child_of_another_schemas_table_is_caught() {
+    let parent: &'static str = tenant_owned("parent")
+        .replace("tetsu_checked", "tetsu_checked_other")
+        .leak();
+    let child = "CREATE TABLE theirs () INHERITS (checked_other.parent);
+         COMMENT ON TABLE theirs IS 'tetsu:tenant-owned';"
+        .to_string();
+    let found = problems(child, parent).await;
+    let expected = "checked.theirs inherits from checked_other.parent, a table of another schema";
+    assert!(
+        found.iter().any(|problem| problem == expected),
+        "{expected} among {found:?}"
+    );
+}
+
+/// A lookup role's policy reads and nothing more: one that writes, checks rows, restricts, or names another module's
+/// lookup role is caught.
+#[tokio::test]
+async fn a_lookup_policy_that_does_more_than_read_is_caught() {
+    let not_the_rule = "has policy lookup that is not the tenant rule for tetsu_checked alone";
+    for policy in [
+        "CREATE POLICY lookup ON good TO tetsu_checked_lookup USING (true);",
+        "CREATE POLICY lookup ON good FOR DELETE TO tetsu_checked_lookup USING (true);",
+        "CREATE POLICY lookup ON good FOR INSERT TO tetsu_checked_lookup WITH CHECK (true);",
+        "CREATE POLICY lookup ON good AS RESTRICTIVE FOR SELECT TO tetsu_checked_lookup USING (true);",
+        "CREATE POLICY lookup ON good FOR SELECT TO tetsu_checked_other_lookup USING (true);",
+        "CREATE POLICY lookup ON good FOR SELECT TO tetsu_checked_lookup, tetsu_checked USING (true);",
+    ] {
+        let said = "COMMENT ON POLICY lookup ON good IS 'tetsu:lookup: test';";
+        caught(
+            format!("{} {policy} {said}", tenant_owned("good")),
+            not_the_rule,
+        )
+        .await;
+    }
+}
+
 #[tokio::test]
 async fn the_app_role_s_rights_on_sequences_and_records_are_caught() {
     let found = problems(
