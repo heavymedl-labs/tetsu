@@ -31,7 +31,9 @@ mod support {
             .env("DATABASE_URL", settings.url())
             .env("DATABASE_TLS", "disable")
             .env("TETSU_DEMO", "true")
-            .env("TETSU_ORIGIN", "http://localhost:8080")
+            .env("TETSU_SERVES", "site,admin,staff")
+            .env("TETSU_ADMIN_ORIGIN", "http://localhost:8080")
+            .env("TETSU_STAFF_ORIGIN", "http://localhost:8080")
             .env("TETSU_TRUSTED_PROXIES", "0");
         // A developer's or CI's own OpenTelemetry settings never reach a test server.
         // Export and mail settings in the shell that runs the tests never reach a test server.
@@ -253,6 +255,20 @@ mod support {
         }
     }
 
+    /// Stops a server with SIGTERM, as a host does, and waits for it to finish cleanly, so what it records at exit,
+    /// such as coverage, is written.
+    pub fn stop(server: &mut Server) {
+        let pid = server.child.id().to_string();
+        assert!(
+            Command::new("kill")
+                .args(["-TERM", &pid])
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(server.child.wait().unwrap().success());
+    }
+
     /// What one visit sends to a stand-in backend answering `status`, with the server stopped by SIGTERM so it
     /// flushes: the requests the backend received, and the lines the server wrote after it started.
     #[cfg(unix)]
@@ -337,7 +353,7 @@ use std::process::Command;
 use support::{KEY, exported, one_visit_exported};
 use support::{
     begin_login, get, logged, message, ready, refused, served, start, start_marked, start_with,
-    tetsu,
+    stop, tetsu,
 };
 use tetsu_postgres::test_support::fresh_database;
 
@@ -658,12 +674,72 @@ async fn it_refuses_to_start_without_its_origin() {
     let database = fresh_database().await.expect("a test database");
     ready(&database);
     let output = tetsu(&database, &["serve"])
-        .env_remove("TETSU_ORIGIN")
+        .env_remove("TETSU_ADMIN_ORIGIN")
         .output()
         .expect("the binary runs");
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("TETSU_ORIGIN must be set"), "{stderr}");
+    assert!(
+        stderr.contains("TETSU_ADMIN_ORIGIN must be set"),
+        "{stderr}"
+    );
+}
+
+#[tokio::test]
+async fn it_refuses_to_start_without_saying_what_it_serves() {
+    let database = fresh_database().await.expect("a test database");
+    ready(&database);
+    let output = tetsu(&database, &["serve"])
+        .env_remove("TETSU_SERVES")
+        .output()
+        .expect("the binary runs");
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("TETSU_SERVES must list"), "{stderr}");
+}
+
+/// A service on the staff's own host serves their pages, sends its root to them, and serves no admin page
+/// (ADR-0040, #169).
+#[tokio::test]
+async fn a_staff_host_serves_the_staffs_pages_alone() {
+    let database = fresh_database().await.expect("a test database");
+    ready(&database);
+    let (mut server, before) = start_with(&database, &[("TETSU_SERVES", "staff")]);
+    assert!(before.is_empty(), "{before:?}");
+    let root = get(&server, "/");
+    assert!(
+        root.to_ascii_lowercase().contains("\r\nlocation: /app\r\n"),
+        "{root}"
+    );
+    assert!(get(&server, "/app/login").starts_with("HTTP/1.1 200"));
+    for elsewhere in ["/admin/login", "/admin/mailbox", "/sample-gym"] {
+        let page = get(&server, elsewhere);
+        assert!(page.starts_with("HTTP/1.1 404"), "{elsewhere}: {page}");
+    }
+    stop(&mut server);
+}
+
+/// A service on the admins' own host serves their pages and the assets they load, sends its root to them, and
+/// serves no business's page and no staff page (ADR-0040, #169).
+#[tokio::test]
+async fn an_admin_host_serves_the_admins_pages_alone() {
+    let database = fresh_database().await.expect("a test database");
+    ready(&database);
+    let (mut server, before) = start_with(&database, &[("TETSU_SERVES", "admin")]);
+    assert!(before.is_empty(), "{before:?}");
+    let root = get(&server, "/");
+    assert!(root.starts_with("HTTP/1.1 303"), "{root}");
+    assert!(
+        root.to_ascii_lowercase()
+            .contains("\r\nlocation: /admin\r\n"),
+        "{root}"
+    );
+    assert!(get(&server, "/admin/login").starts_with("HTTP/1.1 200"));
+    for elsewhere in ["/app/login", "/sample-gym"] {
+        let page = get(&server, elsewhere);
+        assert!(page.starts_with("HTTP/1.1 404"), "{elsewhere}: {page}");
+    }
+    stop(&mut server);
 }
 
 #[tokio::test]

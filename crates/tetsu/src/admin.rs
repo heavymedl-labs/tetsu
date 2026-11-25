@@ -14,7 +14,7 @@ use tetsu_identity::{
 use tetsu_kernel::{Address, Mailer};
 
 use crate::operator::{self, Acting};
-use crate::settings::Local;
+use crate::settings::{self, Local};
 
 /// An admin command, with what it acts on.
 #[derive(Debug, PartialEq, Eq)]
@@ -103,7 +103,7 @@ pub async fn run(
     }
     let local = local()?;
     let origin = if issues_link {
-        operator::link_origin(&local)?
+        operator::link_origin(&local, settings::ADMIN_ORIGIN)?
     } else {
         String::new()
     };
@@ -431,15 +431,14 @@ mod tests {
             true,
         )
         .await;
-        assert_eq!(refused, Err("TETSU_ORIGIN must be set".into()));
+        assert_eq!(refused, Err("TETSU_ADMIN_ORIGIN must be set".into()));
     }
 
     /// Mail settings that are wrong stop a command that issues a link before it touches the database, and a
     /// stray `.env` cannot reroute a named database's mail.
     #[tokio::test]
     async fn wrong_mail_settings_stop_a_link_before_anything_is_made() {
-        let base =
-            "DATABASE_URL=postgres://127.0.0.1:1/none\nTETSU_ORIGIN=https://admin.example.com\n";
+        let base = "DATABASE_URL=postgres://127.0.0.1:1/none\nTETSU_ADMIN_ORIGIN=https://admin.example.com\n";
         let invite = || Admin::Invite {
             id: AccountId::parse("7").unwrap(),
         };

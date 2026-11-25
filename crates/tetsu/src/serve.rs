@@ -13,7 +13,7 @@ use axum::extract::rejection::PathRejection;
 use axum::extract::{ConnectInfo, Path, Request, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
 use axum::middleware::Next;
-use axum::response::{IntoResponse, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{MethodRouter, get};
 use tetsu_kernel::{Requester, Scheme};
 use tower_http::CompressionLevel;
@@ -68,17 +68,26 @@ const IMMUTABLE: &str = "public, max-age=31536000, immutable";
 /// A fixed address keeps its name when its file changes, so a client keeps it a day.
 const DAILY: &str = "public, max-age=86400";
 
+/// How this service serves: whether it is the demo, how many proxies stand in front (ADR-0072), and, for a host
+/// that serves a realm but not the site, the realm's home its root sends visitors to (#169).
+#[derive(Debug, Clone, Copy)]
+pub struct Site {
+    pub demo: bool,
+    pub proxies: usize,
+    pub home: Option<&'static str>,
+}
+
 /// The whole site: its own routes, then the modules' routers, then `not_found` at any path none of them
 /// answers, which is [`not_found`] outside tests. Modules set no fallback, since axum panics when two merged
 /// routers both have one (#90). In a demo environment every response also asks search engines not to index it
 /// (ADR-0018).
-pub fn app(
-    modules: Router,
-    demo: bool,
-    proxies: usize,
-    not_found: fn(bool, Scheme) -> Response,
-) -> Router {
-    site_routes(demo)
+pub fn app(modules: Router, site: Site, not_found: fn(bool, Scheme) -> Response) -> Router {
+    let Site {
+        demo,
+        proxies,
+        home,
+    } = site;
+    site_routes(demo, home)
         .into_iter()
         .fold(Router::new(), |site, (path, route)| site.route(path, route))
         .merge(modules)
@@ -198,28 +207,13 @@ fn html_body(status: StatusCode, body: Option<Bytes>) -> Response {
 /// Tetsu's own routes. Every route the site adds goes here, never straight into [`app`], and each starts with a
 /// name no tenant may hold, which a test checks, so none hides a tenant. Identity's routes are checked the same
 /// way.
-fn site_routes(demo: bool) -> Vec<(&'static str, MethodRouter)> {
-    // The root page depends only on `demo`, the stylesheet's name, which hold while the process runs, and the
-    // visitor's color scheme, so it is rendered once in each scheme here rather than on every request. Each response
-    // shares its bytes.
-    let homes = [Scheme::System, Scheme::Light, Scheme::Dark].map(|scheme| {
-        HomePage {
-            demo,
-            stylesheet: assets::STYLESHEET,
-            scheme: scheme.as_str(),
-        }
-        .render()
-        .ok()
-        .map(Bytes::from)
-    });
+fn site_routes(demo: bool, home: Option<&'static str>) -> Vec<(&'static str, MethodRouter)> {
+    let root = match home {
+        Some(home) => get(move || std::future::ready(Redirect::to(home).into_response())),
+        None => home_page(demo),
+    };
     vec![
-        (
-            "/",
-            get(move |headers: HeaderMap| {
-                let home = homes[scheme_of(&headers) as usize].clone();
-                std::future::ready(html_body(StatusCode::OK, home))
-            }),
-        ),
+        ("/", root),
         (
             "/favicon.ico",
             get(move || std::future::ready(favicon(demo))),
@@ -235,6 +229,26 @@ fn site_routes(demo: bool) -> Vec<(&'static str, MethodRouter)> {
             }),
         ),
     ]
+}
+
+/// The site's home page. It depends only on `demo`, the stylesheet's name, which hold while the process runs, and the
+/// visitor's color scheme, so it is rendered once in each scheme here rather than on every request. Each response
+/// shares its bytes.
+fn home_page(demo: bool) -> MethodRouter {
+    let homes = [Scheme::System, Scheme::Light, Scheme::Dark].map(|scheme| {
+        HomePage {
+            demo,
+            stylesheet: assets::STYLESHEET,
+            scheme: scheme.as_str(),
+        }
+        .render()
+        .ok()
+        .map(Bytes::from)
+    });
+    get(move |headers: HeaderMap| {
+        let home = homes[scheme_of(&headers) as usize].clone();
+        std::future::ready(html_body(StatusCode::OK, home))
+    })
 }
 
 /// Whether a response is a page, by its content type.
@@ -443,16 +457,30 @@ mod tests {
             .into_response()
     }
 
-    /// Sends one request to the site on a port of its own, and returns the raw response.
-    async fn send_to(demo: bool, request: &str) -> String {
+    /// The site's settings in a test: no proxy, and the site's own root unless a realm's `home` is given.
+    const fn site(demo: bool, home: Option<&'static str>) -> Site {
+        Site {
+            demo,
+            proxies: 0,
+            home,
+        }
+    }
+
+    /// Serves the site on a port of its own until the test ends, and says where.
+    async fn serving(site: Site) -> std::net::SocketAddr {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         tokio::spawn(run(
             listener,
-            app(module(), demo, 0, not_found),
+            app(module(), site, not_found),
             std::future::pending(),
             GRACE,
         ));
+        address
+    }
+
+    /// Sends one raw request to `address`, and returns the raw response.
+    async fn sent(address: std::net::SocketAddr, request: &str) -> String {
         let mut stream = TcpStream::connect(address).await.unwrap();
         stream.write_all(request.as_bytes()).await.unwrap();
         let mut raw = String::new();
@@ -460,21 +488,42 @@ mod tests {
         raw
     }
 
+    /// Sends one request to the site on a port of its own, and returns the raw response.
+    async fn send_to(demo: bool, request: &str) -> String {
+        sent(serving(site(demo, None)).await, request).await
+    }
+
     async fn send(request: &str) -> String {
         send_to(true, request).await
+    }
+
+    /// A host that serves a realm but not the site sends `/` to the realm's home, and still serves the assets its
+    /// pages load and the site's not-found page elsewhere.
+    #[tokio::test]
+    async fn a_realms_own_host_sends_its_root_to_the_realms_home() {
+        let address = serving(site(true, Some("/admin"))).await;
+        let ask = |path: &'static str| async move {
+            sent(
+                address,
+                &format!("GET {path} HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n"),
+            )
+            .await
+        };
+        let root = ask("/").await;
+        assert!(root.starts_with("HTTP/1.1 303"), "{root}");
+        assert!(
+            root.to_ascii_lowercase()
+                .contains("\r\nlocation: /admin\r\n"),
+            "{root}"
+        );
+        assert!(ask(assets::STYLESHEET).await.starts_with("HTTP/1.1 200"));
+        assert!(ask("/nowhere").await.starts_with("HTTP/1.1 404"));
     }
 
     /// Asks the demo site for a path as a browser that accepts brotli and gzip does, and returns the response's
     /// head and how many bytes its body took to send.
     async fn as_sent(path: &str) -> (String, usize) {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        tokio::spawn(run(
-            listener,
-            app(module(), true, 0, not_found),
-            std::future::pending(),
-            GRACE,
-        ));
+        let address = serving(site(true, None)).await;
         let mut stream = TcpStream::connect(address).await.unwrap();
         let request = format!(
             "GET {path} HTTP/1.1\r\nHost: test\r\nAccept-Encoding: br, gzip\r\nConnection: close\r\n\r\n"
@@ -622,7 +671,7 @@ mod tests {
     /// starts with a segment no slug may be.
     #[test]
     fn every_route_the_site_serves_starts_with_a_reserved_name() {
-        for (path, _) in site_routes(true) {
+        for (path, _) in site_routes(true, None) {
             let segment = path.trim_start_matches('/').split('/').next().unwrap_or("");
             if !segment.is_empty() {
                 assert!(tetsu_tenancy::Slug::parse(segment).is_err(), "{path}");
@@ -704,7 +753,7 @@ mod tests {
         };
         let server = tokio::spawn(run(
             listener,
-            app(module(), true, 0, not_found),
+            app(module(), site(true, None), not_found),
             shutdown,
             grace,
         ));

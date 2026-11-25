@@ -157,7 +157,7 @@ mod tests {
         );
     }
 
-    /// Behind three proxies, as on Render, the requester is the third entry from the right, across every header,
+    /// Behind three proxies, as in production today, the requester is the third entry from the right, across every header,
     /// whatever the client put before it; anything else falls back to the connection.
     #[test]
     fn the_requester_is_the_entry_the_first_trusted_proxy_added() {

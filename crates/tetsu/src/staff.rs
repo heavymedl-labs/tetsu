@@ -11,7 +11,7 @@ use tetsu_kernel::{Address, Mailer};
 use tetsu_tenancy::{Slug, TenantStore, Tenants};
 
 use crate::operator::{self, Acting};
-use crate::settings::Local;
+use crate::settings::{self, Local};
 
 /// A staff command, with what it acts on.
 #[derive(Debug, PartialEq, Eq)]
@@ -57,7 +57,7 @@ pub async fn run(
     let local = local()?;
     let acting = Acting {
         by: operator::who(),
-        origin: operator::link_origin(&local)?,
+        origin: operator::link_origin(&local, settings::STAFF_ORIGIN)?,
     };
     let (smtp, allow) = crate::mail(&local)?;
     let pool = crate::connect(&local).await?;
@@ -248,7 +248,7 @@ mod tests {
         let staff = inviting("fern-studio", "Ada Park", "ada@example.com");
         assert_eq!(
             run(staff, || Ok(Local::default()), true).await,
-            Err("TETSU_ORIGIN must be set".into())
+            Err("TETSU_STAFF_ORIGIN must be set".into())
         );
     }
 

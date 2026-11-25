@@ -217,8 +217,9 @@ pub fn database(var: impl Fn(&str) -> Result<String, VarError>) -> Result<Settin
 }
 
 /// How many proxies stand in front of `tetsu serve`, each adding an `X-Forwarded-For` entry, from
-/// `TETSU_TRUSTED_PROXIES`: `0` locally, `3` on Render, as measured (ADR-0072). It has no default, since a wrong
-/// count lets a client choose the address its rate limits key on, or puts every client under one.
+/// `TETSU_TRUSTED_PROXIES`: `0` locally, and in production as many as its host puts in front, as measured
+/// (ADR-0072). It has no default, since a wrong count lets a client choose the address its rate limits key on, or
+/// puts every client under one.
 ///
 /// # Errors
 /// Fails if the setting is missing or not a whole number up to 10.
@@ -231,7 +232,7 @@ pub fn proxies(var: impl Fn(&str) -> Result<String, VarError>) -> Result<usize, 
         })
 }
 
-/// Where `tetsu serve` listens. A host such as Render sets `PORT` and expects every interface, so with `PORT` it
+/// Where `tetsu serve` listens. A host that sets `PORT` expects every interface, so with `PORT` it
 /// listens on `0.0.0.0`. Without it, it listens on this machine only, at port 8080.
 pub fn listen(var: impl Fn(&str) -> Result<String, VarError>) -> Result<SocketAddr, String> {
     match value(&var, "PORT")? {
@@ -245,15 +246,59 @@ pub fn listen(var: impl Fn(&str) -> Result<String, VarError>) -> Result<SocketAd
     }
 }
 
-/// The site's own origin, from `TETSU_ORIGIN`, such as `https://tetsu-demo.onrender.com`: invite links point
-/// there, and only it may send a state-changing request (ADR-0048). It is written as a browser sends an origin,
-/// `https`, or `http` for this machine alone, with no path, so a typo fails here rather than in a link.
-pub fn origin(var: impl Fn(&str) -> Result<String, VarError>) -> Result<String, String> {
-    let origin = value(&var, "TETSU_ORIGIN")?.ok_or("TETSU_ORIGIN must be set")?;
+/// The admins' origin, such as `https://admin.example.com`: their passkeys belong to its host, and
+/// their invite links point there (ADR-0040).
+pub const ADMIN_ORIGIN: &str = "TETSU_ADMIN_ORIGIN";
+/// The staff's origin, such as `https://app.example.com`, as [`ADMIN_ORIGIN`] is the admins'.
+pub const STAFF_ORIGIN: &str = "TETSU_STAFF_ORIGIN";
+
+/// An origin from the setting `name`, one of the two above: only it may send its realm's pages a state-changing
+/// request (ADR-0048). It is written as a browser sends an origin, `https`, or `http` for this machine alone, with no
+/// path, so a typo fails here rather than in a link.
+pub fn origin(
+    var: impl Fn(&str) -> Result<String, VarError>,
+    name: &str,
+) -> Result<String, String> {
+    let origin = value(&var, name)?.ok_or(format!("{name} must be set"))?;
     tetsu_identity::Origins::parse(&[origin.as_str()]).map_err(|_| {
-        format!("TETSU_ORIGIN must be an origin such as https://example.com, not {origin:?}")
+        format!("{name} must be an origin such as https://example.com, not {origin:?}")
     })?;
     Ok(origin)
+}
+
+/// What a service serves, from `TETSU_SERVES` (#169): the site, the admins' pages, the staff's, or several, as this
+/// machine does. Each realm in production is a service of its own, on its realm's host (ADR-0092).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Serves {
+    pub site: bool,
+    pub admin: bool,
+    pub staff: bool,
+}
+
+/// What `TETSU_SERVES` lists: one or more of `site`, `admin`, and `staff`, each once, separated by commas. It has no
+/// default, so a host never serves a realm by omission.
+pub fn serves(var: impl Fn(&str) -> Result<String, VarError>) -> Result<Serves, String> {
+    let wrong = || {
+        "TETSU_SERVES must list one or more of site, admin, and staff, each once, separated by commas".to_string()
+    };
+    let listed = value(&var, "TETSU_SERVES")?.ok_or_else(wrong)?;
+    let mut serves = Serves {
+        site: false,
+        admin: false,
+        staff: false,
+    };
+    for part in listed.split(',').map(str::trim) {
+        let flag = match part {
+            "site" => &mut serves.site,
+            "admin" => &mut serves.admin,
+            "staff" => &mut serves.staff,
+            _ => return Err(wrong()),
+        };
+        if std::mem::replace(flag, true) {
+            return Err(wrong());
+        }
+    }
+    Ok(serves)
 }
 
 /// Whether this environment holds demo businesses, from `TETSU_DEMO`. It must be `true` or `false`, with no
@@ -822,10 +867,83 @@ mod tests {
     }
 
     fn origin_from(value: Option<&str>) -> Result<String, String> {
-        origin(|name| match (name, value) {
-            ("TETSU_ORIGIN", Some(value)) => Ok(value.to_string()),
+        origin(
+            |name| match (name, value) {
+                ("TETSU_ADMIN_ORIGIN", Some(value)) => Ok(value.to_string()),
+                _ => Err(VarError::NotPresent),
+            },
+            ADMIN_ORIGIN,
+        )
+    }
+
+    fn serving(value: Option<&str>) -> Result<Serves, String> {
+        serves(|name| match (name, value) {
+            ("TETSU_SERVES", Some(value)) => Ok(value.to_string()),
             _ => Err(VarError::NotPresent),
         })
+    }
+
+    /// Each realm's origin is its own setting, read and checked as the site's is.
+    #[test]
+    fn each_realm_has_an_origin_of_its_own() {
+        let var = |name: &str| match name {
+            "TETSU_ADMIN_ORIGIN" => Ok("https://admin.example.com".to_string()),
+            "TETSU_STAFF_ORIGIN" => Ok("https://app.example.com/".to_string()),
+            _ => Err(VarError::NotPresent),
+        };
+        assert_eq!(
+            origin(var, ADMIN_ORIGIN),
+            Ok("https://admin.example.com".to_string())
+        );
+        assert!(
+            origin(var, STAFF_ORIGIN)
+                .is_err_and(|why| why.starts_with("TETSU_STAFF_ORIGIN must be an origin")),
+        );
+        assert_eq!(
+            origin(|_| Err(VarError::NotPresent), STAFF_ORIGIN),
+            Err("TETSU_STAFF_ORIGIN must be set".into())
+        );
+    }
+
+    /// A service serves the parts `TETSU_SERVES` lists, each once, in any order, and nothing else; there is no
+    /// default, so a host never serves a realm by omission.
+    #[test]
+    fn a_service_serves_what_it_lists() {
+        assert_eq!(
+            serving(Some("site,admin,staff")),
+            Ok(Serves {
+                site: true,
+                admin: true,
+                staff: true
+            })
+        );
+        assert_eq!(
+            serving(Some(" staff , site ")),
+            Ok(Serves {
+                site: true,
+                admin: false,
+                staff: true
+            })
+        );
+        assert_eq!(
+            serving(Some("admin")),
+            Ok(Serves {
+                site: false,
+                admin: true,
+                staff: false
+            })
+        );
+        let wrong = "TETSU_SERVES must list one or more of site, admin, and staff, each once, separated by commas";
+        for bad in [
+            None,
+            Some(""),
+            Some("ops"),
+            Some("site,site"),
+            Some("site,,admin"),
+            Some("Site"),
+        ] {
+            assert_eq!(serving(bad), Err(wrong.into()), "{bad:?}");
+        }
     }
 
     fn marked(value: Option<&str>) -> Result<bool, String> {
@@ -837,18 +955,21 @@ mod tests {
 
     #[test]
     fn the_origin_is_written_as_a_browser_sends_it() {
-        for good in ["https://tetsu-demo.onrender.com", "http://localhost:8080"] {
+        for good in ["https://tetsu.example.com", "http://localhost:8080"] {
             assert_eq!(origin_from(Some(good)), Ok(good.to_string()));
         }
-        assert_eq!(origin_from(None), Err("TETSU_ORIGIN must be set".into()));
+        assert_eq!(
+            origin_from(None),
+            Err("TETSU_ADMIN_ORIGIN must be set".into())
+        );
         for bad in [
-            "tetsu-demo.onrender.com",
-            "https://tetsu-demo.onrender.com/",
-            "http://tetsu-demo.onrender.com",
+            "tetsu.example.com",
+            "https://tetsu.example.com/",
+            "http://tetsu.example.com",
         ] {
             assert!(
                 origin_from(Some(bad))
-                    .is_err_and(|why| why.starts_with("TETSU_ORIGIN must be an origin")),
+                    .is_err_and(|why| why.starts_with("TETSU_ADMIN_ORIGIN must be an origin")),
                 "{bad}"
             );
         }
@@ -1135,10 +1256,10 @@ mod tests {
                 "Authorization=Basic%20MTIzOmtleQ==, X-Scope = a%2Cb",
             ),
             ("OTEL_EXPORTER_OTLP_COMPRESSION", "gzip"),
-            ("OTEL_SERVICE_NAME", "tetsu-demo"),
+            ("OTEL_SERVICE_NAME", "tetsu-web"),
             (
                 "OTEL_RESOURCE_ATTRIBUTES",
-                "deployment.environment.name=demo",
+                "deployment.environment.name=production",
             ),
         ])
         .unwrap()
@@ -1147,10 +1268,10 @@ mod tests {
         assert_eq!(export.headers["x-scope"], "a%2Cb");
         assert_eq!(export.headers.len(), 2);
         assert!(export.gzip);
-        assert_eq!(export.service_name, "tetsu-demo");
+        assert_eq!(export.service_name, "tetsu-web");
         assert_eq!(
             export.resource,
-            vec![("deployment.environment.name".into(), "demo".into())]
+            vec![("deployment.environment.name".into(), "production".into())]
         );
     }
 
@@ -1354,8 +1475,8 @@ mod tests {
             ("A B=x", 1),
         ] {
             assert_eq!(
-                parse(text, ".env.demo"),
-                Err(format!(".env.demo line {line} is not NAME=value")),
+                parse(text, ".env.production"),
+                Err(format!(".env.production line {line} is not NAME=value")),
                 "{text}"
             );
         }
@@ -1397,12 +1518,12 @@ mod tests {
     /// `--env <name>` first chooses `.env.<name>`, and the command follows it; anything else leaves `.env` chosen.
     #[test]
     fn a_leading_env_chooses_an_environment_s_file() {
-        let args = words(&["--env", "demo-2", "admin", "list"]);
+        let args = words(&["--env", "production-2", "admin", "list"]);
         let (source, rest) = Source::chosen(&args).unwrap();
-        assert_eq!(source, Source::Named("demo-2".into()));
-        assert_eq!(source.file(), ".env.demo-2");
+        assert_eq!(source, Source::Named("production-2".into()));
+        assert_eq!(source.file(), ".env.production-2");
         assert_eq!(rest, &args[2..]);
-        for args in [words(&[]), words(&["admin", "--env", "demo"])] {
+        for args in [words(&[]), words(&["admin", "--env", "production"])] {
             let (source, rest) = Source::chosen(&args).unwrap();
             assert_eq!((source.file(), rest), (".env".into(), &args[..]));
         }
@@ -1433,13 +1554,13 @@ mod tests {
     #[test]
     fn an_environment_s_file_must_exist() {
         let folder = tetsu_postgres::test_support::Scratch::folder("named-env").unwrap();
-        let demo = Source::Named("demo".into());
+        let demo = Source::Named("production".into());
         let missing = Local::load(&folder, &demo).unwrap_err();
         assert!(
-            missing.starts_with(".env.demo could not be read: "),
+            missing.starts_with(".env.production could not be read: "),
             "{missing}"
         );
-        std::fs::write(folder.join(".env.demo"), "TETSU_TEST_FOLLOWER=x\n").unwrap();
+        std::fs::write(folder.join(".env.production"), "TETSU_TEST_FOLLOWER=x\n").unwrap();
         let local = Local::load(&folder, &demo).unwrap();
         assert_eq!(
             local.or(Err(VarError::NotPresent), "TETSU_TEST_FOLLOWER"),
@@ -1448,11 +1569,14 @@ mod tests {
         let refused = local
             .beside("TETSU_TEST_LEAD", &["TETSU_TEST_FOLLOWER"])
             .unwrap_err();
-        assert!(refused.contains("comes from .env.demo but"), "{refused}");
-        std::fs::write(folder.join(".env.demo"), "not a setting\n").unwrap();
+        assert!(
+            refused.contains("comes from .env.production but"),
+            "{refused}"
+        );
+        std::fs::write(folder.join(".env.production"), "not a setting\n").unwrap();
         assert_eq!(
             Local::load(&folder, &demo),
-            Err(".env.demo line 1 is not NAME=value".into())
+            Err(".env.production line 1 is not NAME=value".into())
         );
     }
 }

@@ -305,14 +305,52 @@ async fn ready(
     let pool = migrated(local).await?;
     let office = std::sync::Arc::new(tetsu_mail::post_office(pool.clone(), smtp, allow));
     let dispatcher = delivery(&pool, &office).await?;
-    let admins = admin_pages(local, demo, office)?;
-    let tenants = tetsu_tenancy::postgres_store(pool.clone());
-    refuse_reserved_addresses(&tenants).await?;
-    let modules = tetsu_tenancy::router(tenants, demo, assets::STYLESHEET, report).merge(
-        tetsu_identity::router(tetsu_identity::postgres_store(pool), admins),
-    );
-    let app = serve::app(modules, demo, proxies, serve::not_found);
+    refuse_reserved_addresses(&tetsu_tenancy::postgres_store(pool.clone())).await?;
+    let (modules, home) = served(local, demo, &office, pool)?;
+    let site = serve::Site {
+        demo,
+        proxies,
+        home,
+    };
+    let app = serve::app(modules, site, serve::not_found);
     Ok((bind(address).await?, app, dispatcher))
+}
+
+/// The routers of what `TETSU_SERVES` names, and where the root sends a visitor on a host that serves a realm but
+/// not the site. Each realm is served only on its own host (ADR-0040, #169); this machine serves every one.
+fn served(
+    local: &settings::Local,
+    demo: bool,
+    office: &std::sync::Arc<tetsu_mail::PostOffice>,
+    pool: tetsu_postgres::Pool,
+) -> Result<(axum::Router, Option<&'static str>), String> {
+    let serves = settings::serves(|name| local.var(name))?;
+    let mut modules = axum::Router::new();
+    if serves.site {
+        let tenants = tetsu_tenancy::postgres_store(pool.clone());
+        modules = modules.merge(tetsu_tenancy::router(
+            tenants,
+            demo,
+            assets::STYLESHEET,
+            report,
+        ));
+    }
+    if serves.admin {
+        let pages = realm_pages(local, demo, office, settings::ADMIN_ORIGIN)?;
+        let admins = tetsu_identity::postgres_store(pool.clone());
+        modules = modules.merge(tetsu_identity::router(admins, pages));
+    }
+    if serves.staff {
+        let pages = realm_pages(local, demo, office, settings::STAFF_ORIGIN)?;
+        let staff = tetsu_identity::postgres_staff_store(pool);
+        modules = modules.merge(tetsu_identity::router(staff, pages));
+    }
+    let home = match serves {
+        settings::Serves { site: true, .. } => None,
+        settings::Serves { admin: true, .. } => Some("/admin"),
+        _ => Some("/app"),
+    };
+    Ok((modules, home))
 }
 
 /// A pool to the database once no module's database is behind its code (#164).
@@ -387,15 +425,16 @@ async fn delivery(
         .map_err(|error| explain(&*error))
 }
 
-/// What Identity's admin pages need: their passkeys belong to the site's own origin, the only one that may send
-/// them a state-changing request.
-fn admin_pages(
+/// What a realm's pages need: their passkeys belong to the realm's own origin, from the setting `name`, the only one
+/// that may send them a state-changing request.
+fn realm_pages(
     local: &settings::Local,
     demo: bool,
-    mailbox: std::sync::Arc<dyn tetsu_kernel::Mailbox>,
+    office: &std::sync::Arc<tetsu_mail::PostOffice>,
+    name: &str,
 ) -> Result<tetsu_identity::Web, String> {
-    local.beside("DATABASE_URL", &["TETSU_ORIGIN"])?;
-    let origin = settings::origin(|name| local.var(name))?;
+    local.beside("DATABASE_URL", &[name])?;
+    let origin = settings::origin(|name| local.var(name), name)?;
     Ok(tetsu_identity::Web {
         party: tetsu_identity::RelyingParty::new(&origin).map_err(|error| error.to_string())?,
         origins: tetsu_identity::Origins::parse(&[&origin]).map_err(|error| error.to_string())?,
@@ -405,7 +444,7 @@ fn admin_pages(
         session_script: assets::SESSION_SCRIPT,
         scheme_script: assets::SCHEME_SCRIPT,
         menu_script: assets::MENU_SCRIPT,
-        mailbox,
+        mailbox: office.clone(),
         report,
     })
 }
@@ -515,6 +554,41 @@ fn summary(modules: &[&dyn Module]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A service mounts what `TETSU_SERVES` names, and a host without the site sends its root to its realm's home;
+    /// building the routers reaches no database.
+    #[tokio::test]
+    async fn a_service_mounts_what_it_serves() {
+        let pool = tetsu_postgres::pool(&tetsu_postgres::Settings::from_values(
+            "postgres://nobody@127.0.0.1:1/none",
+            Some("disable"),
+        ))
+        .unwrap();
+        let office = std::sync::Arc::new(tetsu_mail::post_office(
+            pool.clone(),
+            None,
+            tetsu_mail::Allowlist::default(),
+        ));
+        let origins = "DATABASE_URL=postgres://nobody@127.0.0.1:1/none\nTETSU_ADMIN_ORIGIN=https://admin.example.com\nTETSU_STAFF_ORIGIN=https://app.example.com\n";
+        for (serves, home) in [
+            ("site,admin,staff", None),
+            ("site", None),
+            ("admin", Some("/admin")),
+            ("admin,staff", Some("/admin")),
+            ("staff", Some("/app")),
+        ] {
+            let local = settings::Local::file_only(&format!("{origins}TETSU_SERVES={serves}\n"));
+            let (_, found) = served(&local, true, &office, pool.clone()).unwrap();
+            assert_eq!(found, home, "{serves}");
+        }
+        let missing = settings::Local::file_only(
+            "DATABASE_URL=postgres://nobody@127.0.0.1:1/none\nTETSU_SERVES=staff\n",
+        );
+        assert_eq!(
+            served(&missing, true, &office, pool).map(|(_, home)| home),
+            Err("TETSU_STAFF_ORIGIN must be set".into())
+        );
+    }
 
     /// Each way a database is behind its code gets the fix for it.
     #[test]

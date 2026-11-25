@@ -34,11 +34,12 @@ pub fn link_url(origin: &str, path: &str, token: &InviteToken) -> String {
     format!("{origin}{path}#{}", token.to_text())
 }
 
-/// Where a link points. A link holds a live token, so a `.env` may name the origin only when it names the database
-/// too, and never point a real database's links at another site.
-pub fn link_origin(local: &Local) -> Result<String, String> {
-    local.beside("DATABASE_URL", &["TETSU_ORIGIN"])?;
-    settings::origin(|name| local.var(name))
+/// Where a link to a realm's pages points, from that realm's origin setting `name`. A link holds a live token, so a
+/// `.env` may name the origin only when it names the database too, and never point a real database's links at
+/// another site.
+pub fn link_origin(local: &Local, name: &str) -> Result<String, String> {
+    local.beside("DATABASE_URL", &[name])?;
+    settings::origin(|name| local.var(name), name)
 }
 
 /// Who is logged in to run the command, read from the process's own environment and never from `.env`, which
@@ -164,15 +165,15 @@ mod tests {
     /// database's links to another site.
     #[test]
     fn a_link_points_where_its_database_is_named() {
-        let origin = "TETSU_ORIGIN=https://elsewhere.example\n";
-        let refused = link_origin(&Local::file_only(origin)).unwrap_err();
+        let origin = "TETSU_ADMIN_ORIGIN=https://elsewhere.example\n";
+        let refused = link_origin(&Local::file_only(origin), settings::ADMIN_ORIGIN).unwrap_err();
         assert!(
-            refused.starts_with("TETSU_ORIGIN comes from .env but DATABASE_URL does not"),
+            refused.starts_with("TETSU_ADMIN_ORIGIN comes from .env but DATABASE_URL does not"),
             "{refused}"
         );
         let both = format!("{origin}DATABASE_URL=postgres://localhost/tetsu\n");
         assert_eq!(
-            link_origin(&Local::file_only(&both)),
+            link_origin(&Local::file_only(&both), settings::ADMIN_ORIGIN),
             Ok("https://elsewhere.example".into())
         );
     }

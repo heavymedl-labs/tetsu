@@ -24,7 +24,7 @@ mod support {
             .args(args)
             .current_dir(&*folder)
             .env("DATABASE_URL", "postgres://unused@127.0.0.1:1/unused")
-            .env("TETSU_ORIGIN", "https://tetsu.example")
+            .env("TETSU_STAFF_ORIGIN", "https://tetsu.example")
             .output()
             .expect("the binary runs")
     }

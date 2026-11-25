@@ -95,7 +95,7 @@ little now. It would need to admit the host Render's health checks send, which w
 
 - **One image, one setting per realm's origin, and one naming what a service serves.** Every service knows every
   realm's origin, so it can link across hosts, such as an invite link to the staff host; each serves only its own
-  realm's routes, and every other path is the site's not-found page. The site keeps `TETSU_ORIGIN`.
+  realm's routes, and every other path is the site's not-found page. The site itself needs no origin setting yet.
 - **Realms keep their paths on their own hosts:** admins at `/admin` on the admin host and staff at `/app` on the app
   host, as ADR-0084 has them, so no route, test, or reserved name changes. `/` on the admin and app hosts sends a
   visitor to the realm's home, as Shopify's admin host opens on the admin.

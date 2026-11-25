@@ -34,7 +34,7 @@ mod support {
             .env("DATABASE_URL", settings.url())
             .env("DATABASE_TLS", "disable")
             .env_remove("DATABASE_CA_FILE")
-            .env_remove("TETSU_ORIGIN")
+            .env_remove("TETSU_ADMIN_ORIGIN")
             .env_remove("SUDO_USER")
             .env("USER", "tester")
             .output()
@@ -154,7 +154,7 @@ async fn a_stray_env_file_cannot_turn_off_tls_for_a_named_database() {
     );
 }
 
-/// `--env demo` reads the demo's settings from `.env.demo` in place of `.env`, so a hosted environment's admins
+/// `--env production` reads production's settings from `.env.production` in place of `.env`, so a hosted environment's admins
 /// are reached with nothing typed (ADR-0073).
 #[tokio::test]
 async fn an_environment_s_file_names_the_database_it_reaches() {
@@ -162,7 +162,7 @@ async fn an_environment_s_file_names_the_database_it_reaches() {
     let folder = Scratch::folder("admin-named-env").expect("a folder");
     let url = database.as_app().url().to_string();
     std::fs::write(
-        folder.join(".env.demo"),
+        folder.join(".env.production"),
         format!("DATABASE_URL={url}\nDATABASE_TLS=disable\n"),
     )
     .expect("writes");
@@ -172,12 +172,12 @@ async fn an_environment_s_file_names_the_database_it_reaches() {
     )
     .expect("writes");
     let output = Command::new(env!("CARGO_BIN_EXE_tetsu"))
-        .args(["--env", "demo", "admin", "list"])
+        .args(["--env", "production", "admin", "list"])
         .current_dir(&folder)
         .env_remove("DATABASE_URL")
         .env_remove("DATABASE_TLS")
         .env_remove("DATABASE_CA_FILE")
-        .env_remove("TETSU_ORIGIN")
+        .env_remove("TETSU_ADMIN_ORIGIN")
         .output()
         .expect("the binary runs");
     assert!(output.status.success(), "{output:?}");
