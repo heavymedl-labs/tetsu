@@ -107,6 +107,36 @@ Either shape can give that: separate tables through grants, one table through a 
   inside businesses. [ADR-0057](../../adr/0057-operator-passkeys-before-level-2.md): admin passkey rules tighten
   before the Level 2 review, so the realms' credential rules will differ.
 
+## Sessions follow their accounts
+
+**Takeaway:**
+
+Added 2026-11-24, when building staff sessions asked whether they share the admins' table. Where one store keeps every
+realm's accounts, it keeps every realm's sessions beside them, told apart by a realm column: Keycloak's sessions
+carry a `REALM_ID`, and its cleanup deletes by realm. Where a platform keeps its workforce apart, as the leaders above
+do, the workforce's sessions live in that separate system too, and GitLab, which keeps admins in its one user table,
+raises an admin's own session with "Admin Mode" rather than a second store. So sessions go where their accounts go:
+with separate admin and staff tables (ADR-0088), a table per realm keeps every session's key a real foreign key to
+its own account table, as GitLab's rule for polymorphic links asks, where one shared table needs a nullable key per
+realm and a check that one is set.
+
+**Cited Findings:**
+
+- Keycloak keeps online and offline sessions in the same tables with a flag, and its purge deletes from
+  `OFFLINE_USER_SESSION` by `REALM_ID`, according to a Keycloak forum post and a keycloak-dev thread rather than its
+  documentation ([Keycloak forum](https://forum.keycloak.org/t/technical-documentation-on-how-the-user-session-clearing-process-is-implemented/29652);
+  [keycloak-dev](https://groups.google.com/g/keycloak-dev/c/ujWCcOE-GyI)).
+- GitLab's Admin Mode raises an administrator's own session for six hours, regenerating its ID on entry, and GitLab
+  Dedicated for Government recommends dedicated admin accounts or Admin Mode
+  ([GitLab: sign-in restrictions](https://docs.gitlab.com/administration/settings/sign_in_restrictions/);
+  [GitLab: authentication development guidelines](https://docs.gitlab.com/development/authentication/);
+  [GitLab Dedicated for Government](https://docs.gitlab.com/security/dedicated_for_government_secure_config_guide/)).
+- [GitLab: polymorphic associations](https://docs.gitlab.com/development/database/polymorphic_associations/): "use
+  a separate table for every type you would otherwise store in the same table".
+- No OWASP guidance found asks for privileged sessions in a separate store; the
+  [Session Management Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html)
+  was read through a search summary.
+
 ## How each shape fits Tetsu
 
 | | One account table, realm in each key | Exclusive arc | Separate tables per realm |
