@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-24
+- Sessions as one table superseded by [ADR-0090](0090-a-session-table-per-realm.md): a table per realm
 
 ## Context
 
