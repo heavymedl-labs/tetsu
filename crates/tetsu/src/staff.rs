@@ -109,14 +109,14 @@ async fn invited(
         .await
         .map_err(|error| error.to_string())?;
     let url = operator::link_url(&acting.origin, "/app/join", &issued.token);
-    let mut said = who(&issued, invite, called);
+    let mut said = whom(&issued, invite, called);
     said.push(format!("invite link, good once and for seven days: {url}"));
     said.push(emailed(mailer, invite, called, &url, &issued.token).await);
     Ok(said)
 }
 
 /// Whom an invite made or found, and whether they keep a name other than the one given.
-fn who(issued: &StaffInvite, invite: &NewStaffInvite, called: &str) -> Vec<String> {
+fn whom(issued: &StaffInvite, invite: &NewStaffInvite, called: &str) -> Vec<String> {
     let staff = issued.staff.get();
     let role = invite.role.as_str();
     let mut said = vec![if issued.created {
