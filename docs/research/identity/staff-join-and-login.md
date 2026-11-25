@@ -152,6 +152,47 @@ for its module's role, so a lookup role, whose functions run with row security f
 - **Sessions:** a staff session belongs to the person, as ADR-0048 has it, and switching business issues a new token
   (ADR-0040); with one business per person in this slice, there is nothing to switch yet.
 
+## Redeeming an invite binds it to one account
+
+A second pass, on 2026-11-25, asked how redeeming works once the invite is found: who may accept it, what accepting
+proves, and how a one-time link survives mail scanners.
+
+**Takeaway:**
+
+An emailed invite is accepted only by the account it names: a new person proves the email by redeeming the link, and
+someone who already has an account logs in as that account first. A mismatch should refuse without spending the
+invite, which Auth0 does not do. Scanners follow links in mail, so opening a link must spend nothing; only a person's
+explicit action may.
+
+**Cited Findings:**
+
+- Auth0 requires the accepting account's email to match the invited one, and marks it verified on acceptance; an
+  invite opened while logged in as another account is spent without adding anyone, and the fix is a new invite
+  ([Auth0: invite members](https://auth0.com/docs/manage-users/organizations/configure-organizations/invite-members);
+  [Auth0 Support](https://support.auth0.com/center/s/article/auth0-organization-invitation-disappears-without-being-accepted)).
+- GitHub lets an email invite be accepted only by an account with that verified email
+  ([GitHub Docs](https://docs.github.com/en/organizations/managing-membership-in-your-organization/inviting-users-to-join-your-organization)).
+- Clerk accepts an invite by a new sign-up, whose email the invite verifies, or by an existing user's sign-in with the
+  same ticket ([Clerk: accept organization invitations](https://clerk.com/docs/guides/development/custom-flows/organizations/accept-organization-invitations)).
+- Outlook Safe Links and Mimecast open links in mail before the person does, spending one-time tokens a GET redeems;
+  the fixes are a page whose button redeems it, or a code ([Descope: email scanners](https://docs.descope.com/flows/use-cases/email-scanner);
+  [Supabase discussion](https://github.com/orgs/supabase/discussions/41618)). Tetsu's join link already keeps its
+  token in the address's fragment, which no browser sends, and redeems it only from the page's own POST.
+
+## Recommendations for redeeming
+
+- **One account per invite, chosen when it is issued.** `tetsu staff invite` names a staff member by email: an
+  existing one, or a new one it creates without a passkey. The invite holds that `staff_id`, so nothing at redemption
+  chooses an account.
+- **A new person joins as an admin does:** the link's page registers their first passkey and starts their session,
+  which proves the email (as Auth0 and Clerk do).
+- **Someone with a passkey logs in, then accepts:** the page asks them to log in, and accepting checks that the
+  session's staff member is the invite's. A session of anyone else is refused, and the invite stays unspent.
+- **All in one transaction, in the business's own scope:** spending the invite comes first, by deleting it where
+  `app.tenant_id` names its business, so a second tab finds nothing; the passkey and session go through the staff
+  functions; then the role is added. Any failure undoes all of it.
+- **The same routes as admins:** `/app/join`, its token in the fragment, after ADR-0084.
+
 ## Gaps
 
 - The pages were read through search summaries, not opened; Shopify's `/store/<handle>` path comes from a third-party
