@@ -61,7 +61,7 @@ impl tetsu_kernel::Module for Identity {
     fn storage(&self) -> Option<tetsu_kernel::Storage> {
         Some(tetsu_kernel::Storage {
             schema: "identity",
-            migrations: adapters::postgres::MIGRATIONS,
+            migrations: adapters::postgres::MIGRATIONS.as_slice(),
         })
     }
 }

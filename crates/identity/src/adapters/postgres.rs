@@ -1,7 +1,7 @@
 //! Identity's Postgres adapter. Driver types stay in this file (ADR-0007).
 
 use std::fmt::Write;
-use std::sync::OnceLock;
+use std::sync::{LazyLock, OnceLock};
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -19,61 +19,104 @@ use crate::domain::{
 use crate::ports::{AdminDirectory, AdminStore, LoginStore};
 use crate::use_cases::Accounts;
 
-pub const MIGRATIONS: &[Migration] = &[
-    Migration {
-        version: 1,
-        sql: include_str!("../../migrations/0001_admins.sql"),
-    },
-    // Identity records what the admin command does, for the audit record (ADR-0043, ADR-0045).
-    Migration {
-        version: 2,
-        sql: tetsu_postgres::OUTBOX,
-    },
-    Migration {
-        version: 3,
-        sql: include_str!("../../migrations/0003_session_left.sql"),
-    },
-    Migration {
-        version: 4,
-        sql: include_str!("../../migrations/0004_rate_limits.sql"),
-    },
-    Migration {
-        version: 5,
-        sql: include_str!("../../migrations/0005_admin_email.sql"),
-    },
-    Migration {
-        version: 6,
-        sql: tetsu_postgres::INBOX,
-    },
-    Migration {
-        version: 7,
-        sql: include_str!("../../migrations/0007_set_admin_email.sql"),
-    },
-    Migration {
-        version: 8,
-        sql: include_str!("../../migrations/0008_session_list.sql"),
-    },
-    Migration {
-        version: 9,
-        sql: tetsu_postgres::INBOX_DELIVERY,
-    },
-    Migration {
-        version: 10,
-        sql: include_str!("../../migrations/0010_refusal_limit.sql"),
-    },
-    Migration {
-        version: 11,
-        sql: include_str!("../../migrations/0011_validate_refusal_limit.sql"),
-    },
-    Migration {
-        version: 12,
-        sql: include_str!("../../migrations/0012_log_out.sql"),
-    },
-    Migration {
-        version: 13,
-        sql: include_str!("../../migrations/0013_staff.sql"),
-    },
+/// The login flow every realm shares, written once as the admin realm's (ADR-0091).
+const LOGIN_FLOW: &str = include_str!("../../migrations/0014_login.sql");
+
+/// Each name of the admin realm's that staff's copy of the login flow swaps for its own (ADR-0091). Every table
+/// and function is swapped schema-qualified, so a word that only resembles one, such as `'login'`, is left alone.
+const STAFF: &[(&str, &str)] = &[
+    ("identity.admin_sessions", "identity.staff_sessions"),
+    ("identity.admins", "identity.staff"),
+    ("identity.passkeys", "identity.staff_passkeys"),
+    ("identity.ceremonies", "identity.staff_ceremonies"),
+    ("admin_id", "staff_id"),
+    ("wanted_admin", "wanted_staff"),
+    ("'admin'", "'staff'"),
+    ("identity.start_session", "identity.staff_start_session"),
+    ("identity.use_session", "identity.staff_use_session"),
+    ("identity.session_left", "identity.staff_session_left"),
+    (
+        "identity.describe_session",
+        "identity.staff_describe_session",
+    ),
+    ("identity.log_out", "identity.staff_log_out"),
+    ("identity.holding", "identity.staff_holding"),
+    ("identity.begin_login", "identity.staff_begin_login"),
+    ("identity.take_ceremony", "identity.staff_take_ceremony"),
+    ("identity.signer", "identity.staff_signer"),
+    ("identity.login", "identity.staff_login"),
+    ("identity.account", "identity.staff_account"),
+    ("identity.sessions_of", "identity.staff_sessions_of"),
+    (
+        "identity.end_other_sessions",
+        "identity.staff_end_other_sessions",
+    ),
+    ("identity.adder", "identity.staff_adder"),
+    ("identity.begin_addition", "identity.staff_begin_addition"),
+    ("identity.take_addition", "identity.staff_take_addition"),
+    ("identity.add_passkey", "identity.staff_add_passkey"),
+    (
+        "identity.end_every_session",
+        "identity.staff_end_every_session",
+    ),
 ];
+
+/// Staff's copy of the login flow, rendered once from the admin realm's.
+static STAFF_LOGIN: LazyLock<String> = LazyLock::new(|| tetsu_postgres::render(LOGIN_FLOW, STAFF));
+
+pub static MIGRATIONS: LazyLock<Vec<Migration>> = LazyLock::new(|| {
+    vec![
+        Migration {
+            version: 1,
+            sql: include_str!("../../migrations/0001_admins.sql"),
+        },
+        // Identity records what the admin command does, for the audit record (ADR-0043, ADR-0045).
+        Migration {
+            version: 2,
+            sql: tetsu_postgres::OUTBOX,
+        },
+        Migration {
+            version: 4,
+            sql: include_str!("../../migrations/0004_rate_limits.sql"),
+        },
+        Migration {
+            version: 5,
+            sql: include_str!("../../migrations/0005_admin_email.sql"),
+        },
+        Migration {
+            version: 6,
+            sql: tetsu_postgres::INBOX,
+        },
+        Migration {
+            version: 7,
+            sql: include_str!("../../migrations/0007_set_admin_email.sql"),
+        },
+        Migration {
+            version: 9,
+            sql: tetsu_postgres::INBOX_DELIVERY,
+        },
+        Migration {
+            version: 10,
+            sql: include_str!("../../migrations/0010_refusal_limit.sql"),
+        },
+        Migration {
+            version: 11,
+            sql: include_str!("../../migrations/0011_validate_refusal_limit.sql"),
+        },
+        Migration {
+            version: 13,
+            sql: include_str!("../../migrations/0013_staff.sql"),
+        },
+        Migration {
+            version: 14,
+            sql: LOGIN_FLOW,
+        },
+        Migration {
+            version: 15,
+            sql: STAFF_LOGIN.as_str(),
+        },
+    ]
+});
 /// Identity's schema, which names the role its transactions act as (ADR-0042).
 const SCHEMA: &str = "identity";
 
@@ -1299,6 +1342,78 @@ mod tests {
         pub fn actor() -> crate::Actor {
             crate::Actor::parse("kurt@workstation").expect("an actor")
         }
+    }
+
+    /// The login flow's text with its comments removed, so a check reads only what Postgres runs.
+    fn code(sql: &str) -> String {
+        sql.lines()
+            .map(|line| line.split_once("--").map_or(line, |(code, _)| code))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Each function 0001 creates for admins alone, schema-qualified; the session limits, the passkey cap, and the
+    /// isolation guard serve every realm.
+    fn admin_functions() -> Vec<String> {
+        const SHARED: [&str; 4] = [
+            "absolute_limit",
+            "idle_limit",
+            "passkey_cap",
+            "require_read_committed",
+        ];
+        include_str!("../../migrations/0001_admins.sql")
+            .lines()
+            .filter_map(|line| line.strip_prefix("CREATE FUNCTION "))
+            .filter_map(|rest| rest.split_once('(').map(|(name, _)| name))
+            .filter(|name| !SHARED.contains(name))
+            .map(|name| format!("identity.{name}"))
+            .collect()
+    }
+
+    /// Staff's copy of the login flow names nothing of the admin realm's: no table, whole or unqualified, and no
+    /// function, shared or admins' own, in any case, so none of its functions reaches an admin's row (ADR-0091).
+    #[test]
+    fn staff_login_names_nothing_of_the_admins() {
+        let admins = admin_functions();
+        assert!(admins.len() >= 10, "{admins:?}");
+        let mut forbidden: Vec<&str> = STAFF.iter().map(|(from, _)| *from).collect();
+        forbidden.extend(admins.iter().map(String::as_str));
+        forbidden.extend([
+            "admins",
+            "admin_sessions",
+            "passkeys",
+            "ceremonies",
+            "invites",
+        ]);
+        assert_eq!(
+            tetsu_postgres::leftovers(&code(&STAFF_LOGIN).to_lowercase(), &forbidden),
+            Vec::<&str>::new()
+        );
+    }
+
+    /// Migration 15 is stored as rendered, and an applied migration never changes, so a change to the login flow,
+    /// the swaps, or the renderer that alters it fails here before any database refuses it.
+    #[test]
+    fn the_rendered_staff_login_is_pinned() {
+        use sha2::{Digest, Sha256};
+        let digest =
+            Sha256::digest(STAFF_LOGIN.as_bytes())
+                .iter()
+                .fold(String::new(), |mut hex, byte| {
+                    write!(hex, "{byte:02x}").expect("writes to a string");
+                    hex
+                });
+        assert_eq!(
+            digest,
+            "0b7b37ee69177d0878832bbac061effcb8a4defc3af4abd2e61f3504364a5471"
+        );
+    }
+
+    /// Every swap names something the admin realm's login flow holds, so the list holds no stale name.
+    #[test]
+    fn every_staff_swap_is_used() {
+        let froms: Vec<&str> = STAFF.iter().map(|(from, _)| *from).collect();
+        assert_eq!(tetsu_postgres::leftovers(&code(LOGIN_FLOW), &froms), froms);
     }
 
     /// A commit Postgres refused was rolled back, so it is a storage failure, never sorted as worth retrying.
