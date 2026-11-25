@@ -29,7 +29,7 @@ AS $$
             extract(EPOCH FROM s.last_seen_at + clock.idle - clock.at)
         )::bigint,
         floor(extract(EPOCH FROM s.ends_at - clock.at))::bigint
-    FROM identity.sessions AS s
+    FROM identity.admin_sessions AS s
     INNER JOIN identity.admins AS o ON s.admin_id = o.id
     CROSS JOIN clock
     WHERE

@@ -78,7 +78,11 @@ fn offered(page: &str) -> Vec<String> {
 
 /// How many of the admin's sessions the database holds.
 async fn held(database: &TestDatabase) -> String {
-    text(database, "SELECT count(*)::text FROM identity.sessions").await
+    text(
+        database,
+        "SELECT count(*)::text FROM identity.admin_sessions",
+    )
+    .await
 }
 
 /// The page lists every live session, this one first and marked, with the device each started on.
@@ -109,7 +113,11 @@ async fn the_page_lists_every_session_this_one_first() {
 #[tokio::test]
 async fn a_session_with_no_device_is_listed_as_unknown() {
     let (address, database, cookies) = logged_in_from(1).await;
-    as_db_admin(&database, "UPDATE identity.sessions SET device = NULL").await;
+    as_db_admin(
+        &database,
+        "UPDATE identity.admin_sessions SET device = NULL",
+    )
+    .await;
     let page = get(address, SECURITY, &cookies[0]).await;
     assert!(page.body.contains("Unknown device"), "{}", page.body);
     // Alone, there is nothing else to end.
@@ -136,7 +144,7 @@ async fn one_other_session_ends_and_this_one_stays() {
     // The record names the session that asked, the newest, and the one it ended, by their public ids.
     let asking = text(
         &database,
-        "SELECT id::text FROM identity.sessions ORDER BY started_at DESC LIMIT 1",
+        "SELECT id::text FROM identity.admin_sessions ORDER BY started_at DESC LIMIT 1",
     )
     .await;
     assert_eq!(
@@ -174,7 +182,7 @@ async fn only_a_fresh_login_ends_other_sessions() {
     let (form, ids) = (form_on(&page.body), offered(&page.body));
     as_db_admin(
         &database,
-        "UPDATE identity.sessions SET proven_at = proven_at - interval '11 minutes'",
+        "UPDATE identity.admin_sessions SET proven_at = proven_at - interval '11 minutes'",
     )
     .await;
     let stale = get(address, SECURITY, &cookies[1]).await;
@@ -190,7 +198,7 @@ async fn only_a_fresh_login_ends_other_sessions() {
     assert_eq!(held(&database).await, "2");
     let asking = text(
         &database,
-        "SELECT id::text FROM identity.sessions ORDER BY started_at DESC LIMIT 1",
+        "SELECT id::text FROM identity.admin_sessions ORDER BY started_at DESC LIMIT 1",
     )
     .await;
     let stale = |named: &str| format!("refused - {asking} {named} stale admin-1@Firefox on Linux");
@@ -236,7 +244,7 @@ async fn an_admin_never_lists_or_ends_anothers_sessions() {
     let (kurt, ada) = (&cookies[0], &cookies[1]);
     let kurts_id = text(
         &database,
-        "SELECT id::text FROM identity.sessions WHERE admin_id = 1",
+        "SELECT id::text FROM identity.admin_sessions WHERE admin_id = 1",
     )
     .await;
     let page = get(address, SECURITY, ada).await;
@@ -251,7 +259,7 @@ async fn an_admin_never_lists_or_ends_anothers_sessions() {
     // Both are recorded as Ada's, ending nothing.
     let adas = text(
         &database,
-        "SELECT id::text FROM identity.sessions WHERE admin_id = 2",
+        "SELECT id::text FROM identity.admin_sessions WHERE admin_id = 2",
     )
     .await;
     let unchanged = |named: &str| format!("unchanged 0 {adas} {named} - admin-2@Firefox on Linux");
@@ -298,7 +306,7 @@ async fn an_ending_from_elsewhere_or_unchecked_is_refused() {
         );
     }
     assert_eq!(held(&database).await, "2");
-    as_db_admin(&database, "DELETE FROM identity.sessions").await;
+    as_db_admin(&database, "DELETE FROM identity.admin_sessions").await;
     let ended = end(address, &cookies[1], &form, None).await;
     assert_eq!(
         (ended.status, ended.header("location")),
@@ -422,7 +430,7 @@ async fn a_session_unreadable_while_ending_is_unavailable() {
 async fn newest_hash(database: &TestDatabase) -> [u8; 32] {
     let hex = text(
         database,
-        "SELECT encode(token_hash, 'hex') FROM identity.sessions ORDER BY started_at DESC LIMIT 1",
+        "SELECT encode(token_hash, 'hex') FROM identity.admin_sessions ORDER BY started_at DESC LIMIT 1",
     )
     .await;
     let bytes: Vec<u8> = (0..hex.len())
@@ -447,7 +455,7 @@ async fn storage_says_why_it_ends_nothing() {
     );
     let asking = text(
         &database,
-        "SELECT id::text FROM identity.sessions ORDER BY started_at DESC LIMIT 1",
+        "SELECT id::text FROM identity.admin_sessions ORDER BY started_at DESC LIMIT 1",
     )
     .await;
     let mut expected = Vec::new();
@@ -459,13 +467,13 @@ async fn storage_says_why_it_ends_nothing() {
             "refused - - - ended".to_string(),
         ),
         (
-            "UPDATE identity.sessions SET proven_at = proven_at - interval '11 minutes'",
+            "UPDATE identity.admin_sessions SET proven_at = proven_at - interval '11 minutes'",
             hash,
             Ending::NotFresh,
             format!("refused - {asking} - stale"),
         ),
         (
-            "UPDATE identity.sessions SET last_seen_at = last_seen_at - interval '16 minutes'",
+            "UPDATE identity.admin_sessions SET last_seen_at = last_seen_at - interval '16 minutes'",
             hash,
             Ending::NoSession,
             "refused - - - ended".to_string(),
@@ -491,11 +499,11 @@ async fn storage_says_why_it_ends_nothing() {
 async fn joining_names_the_device_once() {
     let (address, database, link) = serving().await;
     let _ = join(address, &link).await;
-    let device = "SELECT coalesce(string_agg(device, ' '), '-') FROM identity.sessions";
+    let device = "SELECT coalesce(string_agg(device, ' '), '-') FROM identity.admin_sessions";
     assert_eq!(text(&database, device).await, "Firefox on Linux");
     as_db_admin(
         &database,
-        "SELECT identity.describe_session(token_hash, 'Edge on Windows') FROM identity.sessions",
+        "SELECT identity.describe_session(token_hash, 'Edge on Windows') FROM identity.admin_sessions",
     )
     .await;
     assert_eq!(text(&database, device).await, "Firefox on Linux");
@@ -507,11 +515,11 @@ async fn listing_renews_no_other_session() {
     let (address, database, cookies) = logged_in_from(2).await;
     as_db_admin(
         &database,
-        "UPDATE identity.sessions SET last_seen_at = last_seen_at - interval '5 minutes'",
+        "UPDATE identity.admin_sessions SET last_seen_at = last_seen_at - interval '5 minutes'",
     )
     .await;
     assert_eq!(get(address, SECURITY, &cookies[1]).await.status, 200);
-    let idle = "SELECT count(*)::text FROM identity.sessions
+    let idle = "SELECT count(*)::text FROM identity.admin_sessions
          WHERE last_seen_at < statement_timestamp() - interval '4 minutes'";
     assert_eq!(text(&database, idle).await, "1");
 }

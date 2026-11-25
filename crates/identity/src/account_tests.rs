@@ -182,7 +182,7 @@ async fn a_session_shows_the_kind_of_device_it_is_on() {
     ] {
         as_db_admin(
             &database,
-            &format!("UPDATE identity.sessions SET device = '{device}'"),
+            &format!("UPDATE identity.admin_sessions SET device = '{device}'"),
         )
         .await;
         let page = get(address, SECURITY, &cookie).await;

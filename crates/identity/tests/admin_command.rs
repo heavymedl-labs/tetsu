@@ -177,7 +177,7 @@ async fn a_disabled_admin_is_logged_out_and_logs_in_nowhere() {
         Ok(disabled(false, 0, 0)),
         "already disabled"
     );
-    for table in ["sessions", "invites"] {
+    for table in ["admin_sessions", "invites"] {
         assert_eq!(
             number(&database, &format!("SELECT count(*) FROM identity.{table}")).await,
             0,
@@ -280,7 +280,7 @@ async fn sessions_end_for_one_admin_or_all() {
     assert_eq!(admins.end_sessions(kurt, &actor()).await, Ok(2));
     assert_eq!(admins.end_sessions(kurt, &actor()).await, Ok(0));
     assert_eq!(
-        number(&database, "SELECT count(*) FROM identity.sessions").await,
+        number(&database, "SELECT count(*) FROM identity.admin_sessions").await,
         1,
         "Lee's remains"
     );
@@ -332,7 +332,7 @@ async fn admins_are_listed_oldest_first() {
 async fn a_disable_waits_for_a_login_or_link_being_written_then_ends_it() {
     for (table, writes) in [
         (
-            "sessions",
+            "admin_sessions",
             "SELECT identity.start_session(sha256('a'::bytea), 'admin', $1, true)",
         ),
         (
@@ -404,7 +404,7 @@ async fn ending_sessions_waits_for_a_login_being_written() {
         writing.commit().await.expect("commits");
         assert_eq!(ending.await.expect("finishes"), Ok(1), "all: {all}");
         assert_eq!(
-            number(&database, "SELECT count(*) FROM identity.sessions").await,
+            number(&database, "SELECT count(*) FROM identity.admin_sessions").await,
             0
         );
     }
@@ -423,7 +423,7 @@ async fn an_admin_enabled_again_logs_in_afresh() {
     admins.disable(kurt, &actor()).await.expect("disables");
     assert_eq!(admins.enable(kurt, &actor()).await, Ok(true));
     assert_eq!(
-        number(&database, "SELECT count(*) FROM identity.sessions").await,
+        number(&database, "SELECT count(*) FROM identity.admin_sessions").await,
         0,
         "sessions stay ended"
     );
@@ -686,13 +686,13 @@ async fn changes_that_wait_on_an_admin_need_read_committed() {
 async fn spent_sessions_and_links_are_removed_but_not_counted() {
     let (database, admins, kurt) = with_kurt().await;
     let spent = "SELECT identity.start_session(sha256('a'::bytea), 'admin', 1, true);
-                 UPDATE identity.sessions SET last_seen_at = last_seen_at - interval '16 minutes';
+                 UPDATE identity.admin_sessions SET last_seen_at = last_seen_at - interval '16 minutes';
                  SELECT identity.issue_invite(sha256('b'::bytea), 1);
                  UPDATE identity.invites SET ends_at = now() - interval '1 second'";
     as_db_admin(&database, spent).await;
     assert_eq!(admins.end_sessions(kurt, &actor()).await, Ok(0));
     assert_eq!(
-        number(&database, "SELECT count(*) FROM identity.sessions").await,
+        number(&database, "SELECT count(*) FROM identity.admin_sessions").await,
         0
     );
     as_db_admin(&database, spent).await;
@@ -705,7 +705,7 @@ async fn spent_sessions_and_links_are_removed_but_not_counted() {
     assert_eq!(
         number(
             &database,
-            "SELECT (SELECT count(*) FROM identity.sessions) + (SELECT count(*) FROM identity.invites)"
+            "SELECT (SELECT count(*) FROM identity.admin_sessions) + (SELECT count(*) FROM identity.invites)"
         )
         .await,
         0
@@ -760,7 +760,7 @@ async fn a_login_waiting_on_a_removal_finds_its_passkey_unknown() {
     removing.commit().await.expect("commits");
     assert_eq!(signing.await.expect("finishes"), None);
     assert_eq!(
-        number(&database, "SELECT count(*) FROM identity.sessions").await,
+        number(&database, "SELECT count(*) FROM identity.admin_sessions").await,
         0
     );
 }
@@ -809,7 +809,7 @@ async fn an_addition_begun_as_its_session_ends_is_refused() {
     let mut db_admin = connect(&database).await.expect("connects");
     let ending = db_admin.transaction().await.expect("begins");
     ending
-        .execute("DELETE FROM identity.sessions", &[])
+        .execute("DELETE FROM identity.admin_sessions", &[])
         .await
         .expect("ends");
     let beginning = tokio::spawn(async move {
@@ -879,7 +879,7 @@ async fn a_session_starts_after_the_wait_that_held_it_up() {
     let started: std::time::SystemTime = connect(&database)
         .await
         .expect("connects")
-        .query_one("SELECT started_at FROM identity.sessions", &[])
+        .query_one("SELECT started_at FROM identity.admin_sessions", &[])
         .await
         .expect("reads")
         .try_get(0)

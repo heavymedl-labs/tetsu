@@ -23,7 +23,7 @@ AS $$
                 AS idle
     )
 
-    DELETE FROM identity.sessions AS s
+    DELETE FROM identity.admin_sessions AS s
     USING clock
     WHERE s.token_hash = wanted_hash AND s.realm = wanted_realm
     RETURNING

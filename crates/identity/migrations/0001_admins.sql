@@ -29,7 +29,7 @@ COMMENT ON TABLE admins IS
 
 -- A session is kept under its token's SHA-256 hash, never the token
 -- (ADR-0047).
-CREATE TABLE sessions (
+CREATE TABLE admin_sessions (
     token_hash bytea PRIMARY KEY CHECK (octet_length(token_hash) = 32),
     -- What a list of a person's sessions shows and ends them by: random, so
     -- it says nothing about the token, whose hash never leaves the database.
@@ -48,10 +48,10 @@ CREATE TABLE sessions (
 -- room on the page keeps each rewrite there (ADR-0060).
 WITH (fillfactor = 80);
 
-COMMENT ON TABLE sessions IS
+COMMENT ON TABLE admin_sessions IS
 'tetsu:global: found by its token before any business is known';
 
-CREATE INDEX sessions_admin_id ON sessions (admin_id);
+CREATE INDEX admin_sessions_admin_id ON admin_sessions (admin_id);
 
 -- Each admin's one open invite link, kept under its token's SHA-256
 -- hash, never the token, and good for an hour. A new link replaces the last.
@@ -108,7 +108,7 @@ CREATE TABLE ceremonies (
     -- The session an addition began from, which alone may finish it; the
     -- addition ends with it.
     session_hash bytea CHECK (octet_length(session_hash) = 32)
-    REFERENCES sessions (token_hash) ON DELETE CASCADE,
+    REFERENCES admin_sessions (token_hash) ON DELETE CASCADE,
     -- An addition taken to be verified, which only storing its passkey may
     -- then use up.
     taken boolean NOT NULL DEFAULT FALSE,
@@ -141,7 +141,7 @@ WHERE session_hash IS NOT NULL;
 
 -- The runner's default privileges give Identity's role every right on a new
 -- table; each is replaced by exactly what is granted below.
-REVOKE ALL ON admins, sessions, invites, passkeys, ceremonies
+REVOKE ALL ON admins, admin_sessions, invites, passkeys, ceremonies
 FROM tetsu_identity;
 REVOKE ALL ON SEQUENCE admins_id_seq FROM tetsu_identity;
 
@@ -161,7 +161,7 @@ INSERT (
     ends_at
 ),
 UPDATE (last_seen_at),
-DELETE ON sessions TO tetsu_identity_lookup;
+DELETE ON admin_sessions TO tetsu_identity_lookup;
 -- Replacing a link reads every column its upsert sets, issued_at included.
 GRANT SELECT, INSERT, DELETE ON invites TO tetsu_identity_lookup;
 GRANT UPDATE (token_hash, issued_at, ends_at) ON invites
@@ -223,12 +223,12 @@ BEGIN
     -- After any wait for the admin's row, so the session starts when it
     -- was stored, never before an end of sessions that held it up.
     at := clock_timestamp();
-    DELETE FROM identity.sessions AS s
+    DELETE FROM identity.admin_sessions AS s
     WHERE
         s.admin_id = wanted_admin
         AND s.realm = wanted_realm
         AND (at >= s.ends_at OR at >= s.last_seen_at + idle);
-    INSERT INTO identity.sessions (
+    INSERT INTO identity.admin_sessions (
         token_hash, realm, admin_id, started_at, proven_at, last_seen_at,
         ends_at
     )
@@ -269,7 +269,7 @@ DECLARE
     END;
 BEGIN
     RETURN QUERY
-    UPDATE identity.sessions AS s
+    UPDATE identity.admin_sessions AS s
     SET last_seen_at = greatest(s.last_seen_at, at)
     FROM identity.admins AS o
     WHERE
@@ -283,7 +283,7 @@ BEGIN
         s.realm, s.admin_id, s.started_at, s.proven_at, s.last_seen_at,
         s.ends_at;
     IF NOT FOUND THEN
-        DELETE FROM identity.sessions AS s
+        DELETE FROM identity.admin_sessions AS s
         USING identity.admins AS o
         WHERE
             s.token_hash = wanted_hash
@@ -313,7 +313,7 @@ AS $$
     ),
 
     ended AS (
-        DELETE FROM identity.sessions AS s
+        DELETE FROM identity.admin_sessions AS s
         USING clock
         WHERE s.token_hash = wanted_hash AND s.realm = wanted_realm
         RETURNING clock.at < s.ends_at AND clock.at < s.last_seen_at + clock.idle
@@ -715,12 +715,12 @@ BEGIN
     END IF;
     -- The session the browser presented ends, whoever's it was, so no token a
     -- browser held before logging in outlives it (ADR-0059, v5.0.0-7.2.4).
-    DELETE FROM identity.sessions AS s
+    DELETE FROM identity.admin_sessions AS s
     WHERE s.token_hash = wanted_presented AND s.realm = 'admin';
     PERFORM identity.start_session(wanted_session, 'admin', who, true);
     outcome := 'logged_in';
     SELECT s.id::text INTO session_id
-    FROM identity.sessions AS s
+    FROM identity.admin_sessions AS s
     WHERE s.token_hash = wanted_session;
     RETURN NEXT;
 END
@@ -753,7 +753,7 @@ AS $$
         p.transports,
         (p.passkey #>> '{cred,backup_eligible}')::boolean,
         (p.passkey #>> '{cred,backup_state}')::boolean
-    FROM identity.sessions AS s
+    FROM identity.admin_sessions AS s
     INNER JOIN identity.admins AS o ON s.admin_id = o.id
     LEFT JOIN identity.passkeys AS p ON o.id = p.admin_id
     WHERE
@@ -786,7 +786,7 @@ SET search_path = pg_catalog, pg_temp
 AS $$
     SELECT a.*
     FROM identity.account(wanted_session) AS a
-    INNER JOIN identity.sessions AS s ON s.token_hash = wanted_session
+    INNER JOIN identity.admin_sessions AS s ON s.token_hash = wanted_session
     WHERE
         s.proven_at > statement_timestamp() - interval '10 minutes'
         AND (
@@ -830,7 +830,7 @@ BEGIN
             s.token_hash,
             wanted_state,
             at + interval '10 minutes'
-        FROM identity.sessions AS s
+        FROM identity.admin_sessions AS s
         WHERE
             s.token_hash = wanted_session
             AND s.admin_id = wanted_admin
@@ -921,7 +921,7 @@ BEGIN
         RETURN;
     END IF;
     SELECT s.id::text INTO session_id
-    FROM identity.sessions AS s
+    FROM identity.admin_sessions AS s
     WHERE
         s.token_hash = wanted_session
         AND s.admin_id = wanted_admin
@@ -968,7 +968,7 @@ BEGIN
             -- Every other session ends; the one that added stays
             -- (ADR-0059, v5.0.0-7.4.3).
             WITH gone AS (
-                DELETE FROM identity.sessions AS s
+                DELETE FROM identity.admin_sessions AS s
                 WHERE
                     s.admin_id = wanted_admin
                     AND s.token_hash <> wanted_session
@@ -1078,7 +1078,7 @@ BEGIN
     END;
     -- Any other ceremony of theirs could only be refused now; it goes too.
     DELETE FROM identity.ceremonies AS c WHERE c.admin_id = wanted_admin;
-    DELETE FROM identity.sessions AS s
+    DELETE FROM identity.admin_sessions AS s
     WHERE s.token_hash = wanted_presented AND s.realm = 'admin';
     PERFORM identity.start_session(
         wanted_session, 'admin', wanted_admin, false
@@ -1096,7 +1096,7 @@ LANGUAGE sql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
 AS $$
     WITH gone AS (
-        DELETE FROM identity.sessions AS s
+        DELETE FROM identity.admin_sessions AS s
         WHERE s.admin_id = wanted_admin
         RETURNING
             at < s.ends_at
@@ -1247,7 +1247,7 @@ BEGIN
     END IF;
     at := clock_timestamp();
     WITH gone AS (
-        DELETE FROM identity.sessions AS s
+        DELETE FROM identity.admin_sessions AS s
         WHERE
             s.realm = wanted_realm
             AND (wanted_admin IS NULL OR s.admin_id = wanted_admin)

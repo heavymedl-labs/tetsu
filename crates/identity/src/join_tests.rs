@@ -256,9 +256,10 @@ async fn redemptions(database: &TestDatabase) -> Vec<Value> {
 /// How many passkeys, links, ceremonies, and sessions are stored, in that order.
 pub(crate) async fn held(database: &TestDatabase) -> [i64; 4] {
     let mut counts = [0; 4];
-    for (count, table) in counts
-        .iter_mut()
-        .zip(["passkeys", "invites", "ceremonies", "sessions"])
+    for (count, table) in
+        counts
+            .iter_mut()
+            .zip(["passkeys", "invites", "ceremonies", "admin_sessions"])
     {
         *count = number(database, &format!("SELECT count(*) FROM identity.{table}")).await;
     }
@@ -1059,7 +1060,7 @@ async fn joining_ends_the_session_the_browser_presented() {
     .await;
     let cookie = format!("{}={earlier}", crate::Realm::Admin.cookie_name());
     let held_earlier = format!(
-        "SELECT count(*) FROM identity.sessions WHERE token_hash = sha256(decode('{earlier}', 'hex'))"
+        "SELECT count(*) FROM identity.admin_sessions WHERE token_hash = sha256(decode('{earlier}', 'hex'))"
     );
     let refused = admins
         .finish_join(
@@ -1090,7 +1091,7 @@ async fn joining_ends_the_session_the_browser_presented() {
         .expect("joins");
     assert_eq!(number(&database, &held_earlier).await, 0);
     let started = format!(
-        "SELECT count(*) FROM identity.sessions
+        "SELECT count(*) FROM identity.admin_sessions
          WHERE token_hash = sha256(decode('{}', 'hex')) AND proven_at IS NULL",
         token.to_text()
     );

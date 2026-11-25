@@ -218,7 +218,7 @@ async fn malformed_input_and_an_ended_session_are_not_recorded() {
     )
     .await;
     assert_eq!(text_body.status, 415);
-    as_db_admin(&database, "DELETE FROM identity.sessions").await;
+    as_db_admin(&database, "DELETE FROM identity.admin_sessions").await;
     let ended = script(
         address,
         "/admin/session",

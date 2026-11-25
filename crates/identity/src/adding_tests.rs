@@ -124,7 +124,7 @@ async fn a_live_session_finds_its_account() {
     let (admins, database, kurt, session) = logged_in().await;
     as_db_admin(
         &database,
-        "UPDATE identity.sessions SET started_at = now() - interval '2 hours'",
+        "UPDATE identity.admin_sessions SET started_at = now() - interval '2 hours'",
     )
     .await;
     let account = admins
@@ -361,10 +361,11 @@ async fn adding_a_passkey_ends_the_admins_other_sessions() {
     .await;
     let (added, _) = add(&admins, &session, |response| response).await;
     assert_eq!(added, Ok(()));
-    let left = "SELECT count(*) FROM identity.sessions WHERE token_hash <> sha256('other'::bytea)";
+    let left =
+        "SELECT count(*) FROM identity.admin_sessions WHERE token_hash <> sha256('other'::bytea)";
     assert_eq!(
         [
-            number(&database, "SELECT count(*) FROM identity.sessions").await,
+            number(&database, "SELECT count(*) FROM identity.admin_sessions").await,
             number(&database, left).await
         ],
         [1, 1]
@@ -423,7 +424,7 @@ async fn one_addition_is_open_at_a_time_and_ends_with_its_session() {
             .expect("begins");
     }
     assert_eq!(number(&database, open).await, 1);
-    as_db_admin(&database, "DELETE FROM identity.sessions").await;
+    as_db_admin(&database, "DELETE FROM identity.admin_sessions").await;
     assert_eq!(number(&database, open).await, 0, "it ends with its session");
 }
 
@@ -433,7 +434,7 @@ async fn a_session_that_is_not_fresh_adds_no_passkey() {
     let (admins, database, _, session) = logged_in().await;
     as_db_admin(
         &database,
-        "UPDATE identity.sessions SET proven_at = now() - interval '11 minutes'",
+        "UPDATE identity.admin_sessions SET proven_at = now() - interval '11 minutes'",
     )
     .await;
     assert_eq!(
@@ -474,7 +475,7 @@ async fn finishing_refuses_what_no_longer_allows_it() {
         let (response, _) = register_keeping(&ceremony.options, ORIGIN, true).await;
         as_db_admin(
             &database,
-            "UPDATE identity.sessions SET last_seen_at = now() - interval '16 minutes'",
+            "UPDATE identity.admin_sessions SET last_seen_at = now() - interval '16 minutes'",
         )
         .await;
         let answer = Answer {
@@ -582,7 +583,7 @@ async fn an_addition_not_taken_or_a_credential_taken_adds_nothing() {
         ],
         [Ok(Some(Addition::Ended)), Ok(Some(Addition::Taken))]
     );
-    let described = "SELECT count(*) FROM identity.outbox_global AS o, identity.sessions AS s
+    let described = "SELECT count(*) FROM identity.outbox_global AS o, identity.admin_sessions AS s
                      WHERE o.event_type = 'identity.passkey_added' AND o.payload ->> 'session' = s.id::text
                        AND o.payload -> 'flags' ?& array['backup_eligible', 'backup_state', 'user_verified']";
     assert_eq!(number(&database, described).await, 2);

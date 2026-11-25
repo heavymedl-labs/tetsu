@@ -42,7 +42,7 @@ pub(crate) async fn joined() -> (Accounts<PostgresAdmins>, TestDatabase, Account
         )
         .await
         .expect("joins");
-    as_db_admin(&database, "DELETE FROM identity.sessions").await;
+    as_db_admin(&database, "DELETE FROM identity.admin_sessions").await;
     (admins, database, kurt, kept)
 }
 
@@ -100,7 +100,7 @@ async fn an_admin_logs_in_with_their_passkey() {
     let used = "SELECT count(*) FROM identity.passkeys WHERE last_used_at IS NOT NULL";
     assert_eq!(
         [
-            number(&database, "SELECT count(*) FROM identity.sessions").await,
+            number(&database, "SELECT count(*) FROM identity.admin_sessions").await,
             number(&database, used).await
         ],
         [1, 1]
@@ -111,7 +111,7 @@ async fn an_admin_logs_in_with_their_passkey() {
     );
     assert_eq!(logins(&database).await, [json!(["changed", null])]);
     let described = "SELECT count(*) FROM identity.outbox_global AS o, identity.passkeys AS p,
-                     identity.sessions AS s
+                     identity.admin_sessions AS s
                      WHERE o.payload ->> 'credential' = encode(p.credential_id, 'hex')
                        AND o.payload ->> 'session' = s.id::text
                        AND o.payload -> 'flags' ?& array['backup_eligible', 'backup_state', 'user_verified']";
@@ -158,7 +158,7 @@ async fn hostile_logins_are_refused() {
         "an answer with no user handle still names its credential"
     );
     let reasons = "handle_mismatch not_verified malformed malformed malformed malformed";
-    let sessions = number(&database, "SELECT count(*) FROM identity.sessions").await;
+    let sessions = number(&database, "SELECT count(*) FROM identity.admin_sessions").await;
     assert_eq!(
         (sessions, logins(&database).await),
         (
@@ -235,7 +235,7 @@ async fn logging_in_ends_the_session_the_browser_presented() {
     .await;
     let cookie = format!("{}={earlier}", Realm::Admin.cookie_name());
     let held = format!(
-        "SELECT count(*) FROM identity.sessions WHERE token_hash = sha256(decode('{earlier}', 'hex'))"
+        "SELECT count(*) FROM identity.admin_sessions WHERE token_hash = sha256(decode('{earlier}', 'hex'))"
     );
     let mut ended = Vec::new();
     for hostile in [true, false] {
@@ -256,7 +256,7 @@ async fn logging_in_ends_the_session_the_browser_presented() {
     }
     assert_eq!(ended, [1, 0], "a refused login leaves it; a login ends it");
     assert_eq!(
-        number(&database, "SELECT count(*) FROM identity.sessions").await,
+        number(&database, "SELECT count(*) FROM identity.admin_sessions").await,
         1
     );
 }
@@ -297,7 +297,7 @@ async fn counters_move_forward_and_a_counter_gone_back_is_refused_and_recorded()
     let counter = "SELECT (passkey #>> '{cred,counter}')::bigint FROM identity.passkeys";
     assert_eq!(
         [
-            number(&database, "SELECT count(*) FROM identity.sessions").await,
+            number(&database, "SELECT count(*) FROM identity.admin_sessions").await,
             number(&database, counter).await
         ],
         [3, 6]

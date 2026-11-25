@@ -54,7 +54,7 @@ mod support {
             .expect("connects")
             .query_one(
                 &format!(
-                    "SELECT count(*) > 0 AND bool_and({condition}) AS met FROM identity.sessions"
+                    "SELECT count(*) > 0 AND bool_and({condition}) AS met FROM identity.admin_sessions"
                 ),
                 &[],
             )
@@ -85,7 +85,7 @@ mod support {
             .await
             .expect("connects")
             .query_one(
-                &format!("SELECT count(*) AS n FROM identity.sessions WHERE {condition}"),
+                &format!("SELECT count(*) AS n FROM identity.admin_sessions WHERE {condition}"),
                 &[],
             )
             .await
@@ -177,7 +177,7 @@ async fn a_started_session_is_found_by_its_token_and_records_each_request() {
     );
     as_db_admin(
         &database,
-        "UPDATE identity.sessions SET last_seen_at = last_seen_at - interval '10 minutes'",
+        "UPDATE identity.admin_sessions SET last_seen_at = last_seen_at - interval '10 minutes'",
     )
     .await;
     let session = admins
@@ -246,7 +246,7 @@ async fn an_idle_session_ends_and_is_removed() {
     as_db_admin(
         &database,
         &format!(
-            "UPDATE identity.sessions SET last_seen_at = now() - interval '{} seconds'",
+            "UPDATE identity.admin_sessions SET last_seen_at = now() - interval '{} seconds'",
             idle_seconds() - 10
         ),
     )
@@ -262,7 +262,7 @@ async fn an_idle_session_ends_and_is_removed() {
     as_db_admin(
         &database,
         &format!(
-            "UPDATE identity.sessions SET last_seen_at = now() - interval '{} seconds'",
+            "UPDATE identity.admin_sessions SET last_seen_at = now() - interval '{} seconds'",
             idle_seconds()
         ),
     )
@@ -279,7 +279,11 @@ async fn an_idle_session_ends_and_is_removed() {
 async fn a_busy_session_still_ends_at_its_absolute_limit() {
     let (database, admins, kurt) = with_kurt().await;
     let token = logged_in(&database, kurt).await;
-    as_db_admin(&database, "UPDATE identity.sessions SET ends_at = now()").await;
+    as_db_admin(
+        &database,
+        "UPDATE identity.admin_sessions SET ends_at = now()",
+    )
+    .await;
     assert_eq!(admins.session([text(&token).as_str()]).await, Ok(None));
     assert!(
         !stored(&database, "true").await,
@@ -294,7 +298,7 @@ async fn the_last_request_never_moves_back() {
     let token = logged_in(&database, kurt).await;
     as_db_admin(
         &database,
-        "UPDATE identity.sessions SET last_seen_at = now() + interval '1 minute'",
+        "UPDATE identity.admin_sessions SET last_seen_at = now() + interval '1 minute'",
     )
     .await;
     admins
@@ -430,7 +434,7 @@ async fn identitys_role_cannot_list_sessions() {
         .await
         .expect("begins");
     let refused = transaction
-        .query("SELECT token_hash FROM identity.sessions", &[])
+        .query("SELECT token_hash FROM identity.admin_sessions", &[])
         .await
         .expect_err("refused");
     assert_eq!(
@@ -447,8 +451,8 @@ async fn another_realms_session_is_neither_used_nor_ended() {
     let token = logged_in(&database, kurt).await;
     as_db_admin(
         &database,
-        "ALTER TABLE identity.sessions DROP CONSTRAINT sessions_realm_check;
-         UPDATE identity.sessions SET realm = 'staff', last_seen_at = now() - interval '1 hour'",
+        "ALTER TABLE identity.admin_sessions DROP CONSTRAINT admin_sessions_realm_check;
+         UPDATE identity.admin_sessions SET realm = 'staff', last_seen_at = now() - interval '1 hour'",
     )
     .await;
     assert_eq!(admins.session([text(&token).as_str()]).await, Ok(None));
@@ -574,7 +578,7 @@ async fn an_admin_id_of_the_wrong_type_is_an_error() {
     let (database, admins) = migrated().await;
     as_db_admin(
         &database,
-        "ALTER TABLE identity.sessions DROP CONSTRAINT sessions_admin_id_fkey;
+        "ALTER TABLE identity.admin_sessions DROP CONSTRAINT admin_sessions_admin_id_fkey;
          ALTER TABLE identity.invites DROP CONSTRAINT invites_admin_id_fkey;
          ALTER TABLE identity.passkeys DROP CONSTRAINT passkeys_admin_id_fkey;
          ALTER TABLE identity.ceremonies DROP CONSTRAINT ceremonies_admin_id_fkey;
@@ -638,7 +642,7 @@ async fn a_refused_commit_ends_no_session() {
         &database,
         "CREATE FUNCTION identity.refuse() RETURNS trigger LANGUAGE plpgsql
          AS $$ BEGIN RAISE EXCEPTION 'refused at commit'; END $$;
-         CREATE CONSTRAINT TRIGGER refuse AFTER DELETE ON identity.sessions
+         CREATE CONSTRAINT TRIGGER refuse AFTER DELETE ON identity.admin_sessions
          DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION identity.refuse()",
     )
     .await;
@@ -671,7 +675,7 @@ async fn a_change_needs_the_realms_origin_and_the_sessions_form_token() {
     let other = logged_in(&database, kurt).await;
     as_db_admin(
         &database,
-        "UPDATE identity.sessions SET last_seen_at = now() - interval '10 minutes'",
+        "UPDATE identity.admin_sessions SET last_seen_at = now() - interval '10 minutes'",
     )
     .await;
     let (session, form, others) = (
@@ -740,7 +744,7 @@ async fn requests_at_the_same_moment_never_revive_a_spent_session() {
     as_db_admin(
         &database,
         &format!(
-            "UPDATE identity.sessions SET last_seen_at = now() - interval '{} seconds'",
+            "UPDATE identity.admin_sessions SET last_seen_at = now() - interval '{} seconds'",
             idle_seconds()
         ),
     )
@@ -774,14 +778,14 @@ async fn starting_a_session_removes_only_the_admins_spent_ones() {
         &format!(
             "WITH kurts AS (
                  SELECT token_hash, row_number() OVER (ORDER BY token_hash) AS n
-                 FROM identity.sessions WHERE admin_id = {kurt}
+                 FROM identity.admin_sessions WHERE admin_id = {kurt}
              )
-             UPDATE identity.sessions AS s
+             UPDATE identity.admin_sessions AS s
              SET ends_at = CASE WHEN k.n = 1 THEN now() ELSE s.ends_at END,
                  last_seen_at = CASE WHEN k.n = 2
                      THEN now() - interval '{idle} seconds' ELSE s.last_seen_at END
              FROM kurts AS k WHERE s.token_hash = k.token_hash;
-             UPDATE identity.sessions SET ends_at = now() WHERE admin_id = {ana}",
+             UPDATE identity.admin_sessions SET ends_at = now() WHERE admin_id = {ana}",
             kurt = kurt.get(),
             ana = ana.get(),
             idle = idle_seconds()
@@ -810,7 +814,7 @@ async fn a_spent_session_refreshed_meanwhile_is_not_removed() {
     as_db_admin(
         &database,
         &format!(
-            "UPDATE identity.sessions SET last_seen_at = now() - interval '{} seconds'",
+            "UPDATE identity.admin_sessions SET last_seen_at = now() - interval '{} seconds'",
             idle_seconds() + 1
         ),
     )
@@ -819,7 +823,7 @@ async fn a_spent_session_refreshed_meanwhile_is_not_removed() {
     let refresh = holder.transaction().await.expect("begins");
     refresh
         .execute(
-            "UPDATE identity.sessions SET last_seen_at = clock_timestamp()",
+            "UPDATE identity.admin_sessions SET last_seen_at = clock_timestamp()",
             &[],
         )
         .await
@@ -844,7 +848,11 @@ async fn a_spent_session_refreshed_meanwhile_is_not_removed() {
 async fn logging_out_a_spent_session_has_nothing_to_end() {
     let (database, admins, kurt) = with_kurt().await;
     let token = logged_in(&database, kurt).await;
-    as_db_admin(&database, "UPDATE identity.sessions SET ends_at = now()").await;
+    as_db_admin(
+        &database,
+        "UPDATE identity.admin_sessions SET ends_at = now()",
+    )
+    .await;
     let (jar, form) = (text(&token), token.form_token().expect("a form token"));
     let logout = Change::new([jar.as_str()], Some(ORIGIN), None, &form);
     assert_eq!(
@@ -857,7 +865,7 @@ async fn logging_out_a_spent_session_has_nothing_to_end() {
     as_db_admin(
         &database,
         &format!(
-            "UPDATE identity.sessions SET last_seen_at = now() - interval '{} seconds'
+            "UPDATE identity.admin_sessions SET last_seen_at = now() - interval '{} seconds'
              WHERE token_hash = sha256(decode('{}', 'hex'))",
             idle_seconds(),
             token.to_text()
@@ -890,7 +898,7 @@ async fn logging_out_just_inside_the_idle_limit_is_recorded() {
     as_db_admin(
         &database,
         &format!(
-            "UPDATE identity.sessions SET last_seen_at = now() - interval '{} seconds'",
+            "UPDATE identity.admin_sessions SET last_seen_at = now() - interval '{} seconds'",
             idle_seconds() - 10
         ),
     )
@@ -970,7 +978,7 @@ async fn each_session_has_a_random_public_id() {
     assert!(
         stored(
             &database,
-            "id IS NOT NULL AND (SELECT count(DISTINCT id) FROM identity.sessions) = 3"
+            "id IS NOT NULL AND (SELECT count(DISTINCT id) FROM identity.admin_sessions) = 3"
         )
         .await
     );

@@ -6,9 +6,10 @@ SET statement_timeout = '30s';
 -- The device a session started on, as coarsely as the list of sessions shows
 -- it, such as Firefox on Linux, and none when the browser named none. It goes
 -- with the session (ADR-0059).
-ALTER TABLE sessions ADD COLUMN device text
+ALTER TABLE admin_sessions ADD COLUMN device text
 CHECK (device IS NULL OR length(device) BETWEEN 1 AND 64);
-GRANT SELECT (id, device), UPDATE (device) ON sessions TO tetsu_identity_lookup;
+GRANT SELECT (id, device), UPDATE (device) ON admin_sessions
+TO tetsu_identity_lookup;
 
 -- Names the device a session just started on, once: login and joining call it
 -- with the session they start, in the same statement. A session already named
@@ -18,7 +19,7 @@ RETURNS void
 LANGUAGE sql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
 AS $$
-    UPDATE identity.sessions AS s
+    UPDATE identity.admin_sessions AS s
     SET device = wanted_device
     WHERE s.token_hash = wanted_hash AND s.device IS NULL
 $$;
@@ -46,9 +47,9 @@ AS $$
         s.last_seen_at,
         s.device,
         s.token_hash = wanted_session
-    FROM identity.sessions AS mine
+    FROM identity.admin_sessions AS mine
     INNER JOIN identity.admins AS o ON mine.admin_id = o.id
-    INNER JOIN identity.sessions AS s
+    INNER JOIN identity.admin_sessions AS s
         ON mine.admin_id = s.admin_id AND mine.realm = s.realm
     WHERE
         mine.token_hash = wanted_session
@@ -88,7 +89,7 @@ DECLARE
 BEGIN
     PERFORM identity.require_read_committed('ending other sessions');
     SELECT s.admin_id INTO who
-    FROM identity.sessions AS s
+    FROM identity.admin_sessions AS s
     WHERE s.token_hash = wanted_session AND s.realm = 'admin';
     IF who IS NULL THEN
         reason := 'ended';
@@ -105,7 +106,7 @@ BEGIN
     at := clock_timestamp();
     SELECT s.id::text, s.proven_at > at - interval '10 minutes'
     INTO asking, fresh
-    FROM identity.sessions AS s
+    FROM identity.admin_sessions AS s
     WHERE
         s.token_hash = wanted_session
         AND s.realm = 'admin'
@@ -120,7 +121,7 @@ BEGIN
         RETURN;
     END IF;
     WITH gone AS (
-        DELETE FROM identity.sessions AS s
+        DELETE FROM identity.admin_sessions AS s
         WHERE
             s.admin_id = who
             AND s.realm = 'admin'

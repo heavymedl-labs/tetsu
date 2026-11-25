@@ -95,7 +95,7 @@ async fn logging_out_clears_the_browsers_cache_of_the_pages() {
 async fn away(database: &tetsu_postgres::test_support::TestDatabase, minutes: u32) {
     as_db_admin(
         database,
-        &format!("UPDATE identity.sessions SET last_seen_at = last_seen_at - interval '{minutes} minutes'"),
+        &format!("UPDATE identity.admin_sessions SET last_seen_at = last_seen_at - interval '{minutes} minutes'"),
     )
     .await;
 }
@@ -114,7 +114,7 @@ fn left(answer: &Value) -> (i64, i64) {
 async fn a_page_reads_its_sessions_time_left_without_renewing_it() {
     let (address, database, cookie, _) = logged_in().await;
     away(&database, 5).await;
-    let seen = "SELECT last_seen_at::text FROM identity.sessions";
+    let seen = "SELECT last_seen_at::text FROM identity.admin_sessions";
     let before = text(&database, seen).await;
     let answer = get(address, "/admin/session", &cookie).await;
     assert_eq!(
@@ -372,7 +372,7 @@ async fn joining_logs_in_with_a_session_that_is_never_fresh() {
         (begun.status, begun.json()),
         (400, json!({ "error": "this passkey couldn't be added" }))
     );
-    let proven = "SELECT (proven_at IS NULL)::text FROM identity.sessions";
+    let proven = "SELECT (proven_at IS NULL)::text FROM identity.admin_sessions";
     assert_eq!(text(&database, proven).await, "true");
 }
 

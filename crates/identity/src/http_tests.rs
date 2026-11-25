@@ -431,7 +431,7 @@ async fn a_stale_login_is_told_to_login_again_to_add_a_passkey() {
     let (address, database, cookie, _) = logged_in().await;
     as_db_admin(
         &database,
-        "UPDATE identity.sessions SET proven_at = now() - interval '11 minutes'",
+        "UPDATE identity.admin_sessions SET proven_at = now() - interval '11 minutes'",
     )
     .await;
     let page = get(address, "/admin/settings/security", &cookie).await;
@@ -485,7 +485,7 @@ async fn logging_out_is_recorded() {
     let (address, database, cookie, form) = logged_in().await;
     let ended = text(
         &database,
-        "SELECT admin_id || ' ' || id FROM identity.sessions",
+        "SELECT admin_id || ' ' || id FROM identity.admin_sessions",
     )
     .await;
     let headers = [

@@ -55,7 +55,7 @@ the kernel's `Mailbox` port, which Mail implements; a message's HTML is never sh
   refused unrecorded.
 - **Session tokens compare in constant time,** as form tokens do.
 - **Every table is global** ([ADR-0042](../../docs/adr/0042-tenant-isolation.md)): `identity.admins`, which
-  Identity's role adds to and reads, and `identity.sessions`, `invites`, `passkeys`, and `ceremonies`, which
+  Identity's role adds to and reads, and `identity.admin_sessions`, `invites`, `passkeys`, and `ceremonies`, which
   it reaches only through lookup functions that take one hash a call, so nothing lists links, a session lists only
   its own admin's sessions, and no realm uses or ends another's.
 - **Each admin has a random WebAuthn user handle,** which says nothing about them, and each session a random
