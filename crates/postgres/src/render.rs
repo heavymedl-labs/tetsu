@@ -18,22 +18,20 @@ fn whole(text: &str, at: usize, found: &str) -> bool {
 
 /// `source` with each whole name in `swaps` replaced by its pair, as `admin_sessions` by `staff_sessions` or
 /// `'admin'` by `'staff'`. A name that is part of a longer one, such as `admins` in `admins_id_seq`, is left alone, so
-/// each longer name needs a swap of its own.
+/// each longer name needs a swap of its own. An empty name swaps nothing.
 #[must_use]
 pub fn render(source: &str, swaps: &[(&str, &str)]) -> String {
     let mut rendered = String::with_capacity(source.len());
-    let mut at = 0;
-    'scan: while at < source.len() {
-        for (from, to) in swaps {
-            if source[at..].starts_with(from) && whole(source, at, from) {
-                rendered.push_str(to);
-                at += from.len();
-                continue 'scan;
-            }
-        }
-        let next = source[at..].chars().next().map_or(1, char::len_utf8);
-        rendered.push_str(&source[at..at + next]);
-        at += next;
+    let mut rest = source;
+    // Each step takes at least one character off what is left, so the scan always ends.
+    while let Some(next) = rest.chars().next() {
+        let at = source.len() - rest.len();
+        let swap = swaps.iter().find(|(from, _)| {
+            !from.is_empty() && rest.starts_with(from) && whole(source, at, from)
+        });
+        let (taken, after) = rest.split_at(swap.map_or(next.len_utf8(), |(from, _)| from.len()));
+        rendered.push_str(swap.map_or(taken, |(_, to)| to));
+        rest = after;
     }
     rendered
 }
@@ -102,6 +100,15 @@ mod tests {
             "-- Tetsu admin · ünï staff"
         );
         assert_eq!(render("", &STAFF), "");
+    }
+
+    /// An empty name swaps nothing, so the scan still ends.
+    #[test]
+    fn an_empty_name_swaps_nothing() {
+        assert_eq!(
+            render("a admins", &[("", "x"), ("admins", "staff")]),
+            "a staff"
+        );
     }
 
     /// Leftovers are the forbidden names still whole in the text, never one inside a longer name.
