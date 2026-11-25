@@ -878,7 +878,11 @@ async fn logout<S: AdminStore>(
     let change = change(&headers, field(&body, "form").unwrap_or_default());
     match served
         .admins
-        .end_session(&served.web.origins, &change)
+        .end_session(
+            &served.web.origins,
+            &change,
+            &browser(S::REALM, &headers, None),
+        )
         .await
     {
         Ok(Logout::Refused(check)) => {

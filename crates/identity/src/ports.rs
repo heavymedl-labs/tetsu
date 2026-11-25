@@ -44,11 +44,13 @@ pub trait LoginStore {
         realm: Realm,
     ) -> impl Future<Output = Result<Option<TimeLeft>, Error>> + Send;
 
-    /// Removes a session in a realm, and says whether it was live when it ended.
+    /// Removes a session in a realm, and says whether it was live when it ended, recording a live one's ending, by
+    /// `actor`'s device, under its account (#167).
     fn delete_session(
         &self,
         hash: &[u8; 32],
         realm: Realm,
+        actor: &Actor,
     ) -> impl Future<Output = Result<bool, Error>> + Send;
 
     /// The admin an invite link's hash names, while the link is open, the admin enabled, and no passkey

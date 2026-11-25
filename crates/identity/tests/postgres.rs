@@ -64,6 +64,21 @@ mod support {
             .expect("reads")
     }
 
+    /// How many logouts the outbox holds.
+    pub async fn logouts_recorded(database: &TestDatabase) -> i64 {
+        connect(database)
+            .await
+            .expect("connects")
+            .query_one(
+                "SELECT count(*) AS n FROM identity.outbox_global WHERE event_type = 'identity.logged_out'",
+                &[],
+            )
+            .await
+            .expect("counts logouts")
+            .try_get("n")
+            .expect("reads")
+    }
+
     /// How many stored sessions meet a condition.
     pub async fn count(database: &TestDatabase, condition: &str) -> i64 {
         connect(database)
@@ -118,8 +133,8 @@ mod common;
 
 use common::{actor, logged_in, migrated, name, ready, with_kurt};
 use support::{
-    as_db_admin, cookie, count, idle_seconds, origins, replaced_use_session, stored, text,
-    use_session_with_wrong,
+    as_db_admin, cookie, count, idle_seconds, logouts_recorded, origins, replaced_use_session,
+    stored, text, use_session_with_wrong,
 };
 
 /// Identity keeps its tables in the one schema it owns, under its own name (ADR-0003, ADR-0042).
@@ -334,7 +349,9 @@ async fn logging_out_ends_the_session_once_its_checks_pass() {
     let logout = |origin| Change::new([jar.as_str()], origin, None, &form);
     let from_elsewhere = logout(Some("https://evil.example"));
     assert_eq!(
-        admins.end_session(&origins(), &from_elsewhere).await,
+        admins
+            .end_session(&origins(), &from_elsewhere, &actor())
+            .await,
         Ok(Logout::Refused(FailedCheck::Origin))
     );
     assert!(
@@ -347,12 +364,12 @@ async fn logging_out_ends_the_session_once_its_checks_pass() {
     );
     let own = logout(Some(ORIGIN));
     assert_eq!(
-        admins.end_session(&origins(), &own).await,
+        admins.end_session(&origins(), &own, &actor()).await,
         Ok(Logout::Ended)
     );
     assert_eq!(admins.session([jar.as_str()]).await, Ok(None));
     assert_eq!(
-        admins.end_session(&origins(), &own).await,
+        admins.end_session(&origins(), &own, &actor()).await,
         Ok(Logout::NothingToEnd),
         "nothing left to end"
     );
@@ -367,7 +384,7 @@ async fn logging_out_leaves_the_admins_other_sessions() {
     let (jar, form) = (text(&token), token.form_token().expect("a form token"));
     let logout = Change::new([jar.as_str()], Some(ORIGIN), None, &form);
     assert_eq!(
-        admins.end_session(&origins(), &logout).await,
+        admins.end_session(&origins(), &logout, &actor()).await,
         Ok(Logout::Ended)
     );
     assert!(
@@ -438,7 +455,7 @@ async fn another_realms_session_is_neither_used_nor_ended() {
     let (jar, form) = (text(&token), token.form_token().expect("a form token"));
     let logout = Change::new([jar.as_str()], Some(ORIGIN), None, &form);
     assert_eq!(
-        admins.end_session(&origins(), &logout).await,
+        admins.end_session(&origins(), &logout, &actor()).await,
         Ok(Logout::NothingToEnd),
         "not this realm's to end"
     );
@@ -596,9 +613,9 @@ async fn a_statement_that_cannot_be_prepared_is_an_error() {
     let token = logged_in(&database, kurt).await;
     let (jar, form) = (text(&token), token.form_token().expect("a form token"));
     let logout = Change::new([jar.as_str()], Some(ORIGIN), None, &form);
-    as_db_admin(&database, "DROP FUNCTION identity.end_session(bytea, text)").await;
+    as_db_admin(&database, "DROP FUNCTION identity.log_out(bytea, text)").await;
     assert!(matches!(
-        admins.end_session(&origins(), &logout).await,
+        admins.end_session(&origins(), &logout, &actor()).await,
         Err(Error::Storage(_))
     ));
     as_db_admin(&database, "DROP FUNCTION identity.use_session(bytea, text)").await;
@@ -630,7 +647,8 @@ async fn a_refused_commit_ends_no_session() {
         admins
             .end_session(
                 &origins(),
-                &Change::new([jar.as_str()], Some(ORIGIN), None, &form)
+                &Change::new([jar.as_str()], Some(ORIGIN), None, &form),
+                &actor(),
             )
             .await,
         Err(Error::Storage(
@@ -704,7 +722,7 @@ async fn a_change_with_a_malformed_cookie_finds_no_session() {
         Ok(ForChange::Refused(FailedCheck::Cookie))
     );
     assert_eq!(
-        admins.end_session(&origins(), &malformed).await,
+        admins.end_session(&origins(), &malformed, &actor()).await,
         Ok(Logout::Refused(FailedCheck::Cookie))
     );
 }
@@ -849,7 +867,7 @@ async fn logging_out_a_spent_session_has_nothing_to_end() {
     let (jar, form) = (text(&token), token.form_token().expect("a form token"));
     let logout = Change::new([jar.as_str()], Some(ORIGIN), None, &form);
     assert_eq!(
-        admins.end_session(&origins(), &logout).await,
+        admins.end_session(&origins(), &logout, &actor()).await,
         Ok(Logout::NothingToEnd)
     );
     assert_eq!(
@@ -857,27 +875,88 @@ async fn logging_out_a_spent_session_has_nothing_to_end() {
         1,
         "removed; one live session left"
     );
+    assert_eq!(
+        logouts_recorded(&database).await,
+        0,
+        "nothing ended, so nothing recorded"
+    );
 }
 
-/// A lookup that, against its contract, returns no row says no session ended.
+/// A session just inside its idle limit is live, so logging out of it ends it and records that it did (#167).
+#[tokio::test]
+async fn logging_out_just_inside_the_idle_limit_is_recorded() {
+    let (database, admins, kurt) = with_kurt().await;
+    let token = logged_in(&database, kurt).await;
+    as_db_admin(
+        &database,
+        &format!(
+            "UPDATE identity.sessions SET last_seen_at = now() - interval '{} seconds'",
+            idle_seconds() - 10
+        ),
+    )
+    .await;
+    let (jar, form) = (text(&token), token.form_token().expect("a form token"));
+    let logout = Change::new([jar.as_str()], Some(ORIGIN), None, &form);
+    assert_eq!(
+        admins.end_session(&origins(), &logout, &actor()).await,
+        Ok(Logout::Ended)
+    );
+    assert_eq!(logouts_recorded(&database).await, 1);
+}
+
+/// A logout that finds no session, as when another request removed it first, ended nothing and records nothing.
 #[tokio::test]
 async fn an_end_that_returns_nothing_ended_nothing() {
     let (database, admins, kurt) = with_kurt().await;
     let token = logged_in(&database, kurt).await;
     as_db_admin(
         &database,
-        "DROP FUNCTION identity.end_session(bytea, text);
-         CREATE FUNCTION identity.end_session(bytea, text) RETURNS SETOF boolean
-         LANGUAGE sql AS 'SELECT true WHERE false';
-         GRANT EXECUTE ON FUNCTION identity.end_session(bytea, text) TO tetsu_identity",
+        "DROP FUNCTION identity.log_out(bytea, text);
+         CREATE FUNCTION identity.log_out(bytea, text)
+         RETURNS TABLE (live boolean, session_id uuid, account_id bigint)
+         LANGUAGE sql AS 'SELECT true, NULL::uuid, NULL::bigint WHERE false';
+         GRANT EXECUTE ON FUNCTION identity.log_out(bytea, text) TO tetsu_identity",
     )
     .await;
     let (jar, form) = (text(&token), token.form_token().expect("a form token"));
     let logout = Change::new([jar.as_str()], Some(ORIGIN), None, &form);
     assert_eq!(
-        admins.end_session(&origins(), &logout).await,
+        admins.end_session(&origins(), &logout, &actor()).await,
         Ok(Logout::NothingToEnd)
     );
+    assert_eq!(logouts_recorded(&database).await, 0);
+}
+
+/// A logout whose answer storage gives in the wrong shape fails, and records nothing, rather than guessing what ended.
+#[tokio::test]
+async fn a_logout_answered_in_the_wrong_shape_fails() {
+    for (live, answer) in [
+        ("text", "SELECT 'yes', gen_random_uuid(), 1::bigint"),
+        ("boolean", "SELECT true, NULL::uuid, 1::bigint"),
+        ("boolean", "SELECT true, gen_random_uuid(), NULL::bigint"),
+    ] {
+        let (database, admins, kurt) = with_kurt().await;
+        let token = logged_in(&database, kurt).await;
+        as_db_admin(
+            &database,
+            &format!(
+                "DROP FUNCTION identity.log_out(bytea, text);
+                 CREATE FUNCTION identity.log_out(bytea, text)
+                 RETURNS TABLE (live {live}, session_id uuid, account_id bigint)
+                 LANGUAGE sql AS $$ {answer} $$;
+                 GRANT EXECUTE ON FUNCTION identity.log_out(bytea, text) TO tetsu_identity"
+            ),
+        )
+        .await;
+        let (jar, form) = (text(&token), token.form_token().expect("a form token"));
+        let logout = Change::new([jar.as_str()], Some(ORIGIN), None, &form);
+        let ended = admins.end_session(&origins(), &logout, &actor()).await;
+        assert!(
+            matches!(ended, Err(Error::Storage(_))),
+            "{answer}: {ended:?}"
+        );
+        assert_eq!(logouts_recorded(&database).await, 0, "{answer}");
+    }
 }
 
 /// Each session has its own random public id, apart from its token, for a list of sessions to show.

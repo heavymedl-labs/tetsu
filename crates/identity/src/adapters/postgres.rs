@@ -65,6 +65,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 11,
         sql: include_str!("../../migrations/0011_validate_refusal_limit.sql"),
     },
+    Migration {
+        version: 12,
+        sql: include_str!("../../migrations/0012_log_out.sql"),
+    },
 ];
 /// Identity's schema, which names the role its transactions act as (ADR-0042).
 const SCHEMA: &str = "identity";
@@ -74,7 +78,7 @@ const ADMIN_EMAIL: &str = include_str!("../../sql/admin_email.sql");
 const SET_ADMIN_EMAIL: &str = include_str!("../../sql/set_admin_email.sql");
 const USE_SESSION: &str = include_str!("../../sql/use_session.sql");
 const SESSION_LEFT: &str = include_str!("../../sql/session_left.sql");
-const END_SESSION: &str = include_str!("../../sql/end_session.sql");
+const LOG_OUT: &str = include_str!("../../sql/log_out.sql");
 const ISSUE_INVITE: &str = include_str!("../../sql/issue_invite.sql");
 const DISABLE_ADMIN: &str = include_str!("../../sql/disable_admin.sql");
 const END_ADMIN_SESSIONS: &str = include_str!("../../sql/end_admin_sessions.sql");
@@ -329,11 +333,17 @@ impl LoginStore for PostgresAdmins {
             .transpose()
     }
 
-    async fn delete_session(&self, hash: &[u8; 32], realm: Realm) -> Result<bool, Error> {
-        let rows = self
-            .query(END_SESSION, &[&hash.as_slice(), &realm.as_str()])
+    async fn delete_session(
+        &self,
+        hash: &[u8; 32],
+        realm: Realm,
+        actor: &Actor,
+    ) -> Result<bool, Error> {
+        let parameters: [&(dyn ToSql + Sync); 2] = [&hash.as_slice(), &realm.as_str()];
+        let ended = self
+            .decided(LOG_OUT, &parameters, |rows| logged_out(rows, realm, actor))
             .await?;
-        rows.first().map_or(Ok(false), |row| column(row, "ended"))
+        Ok(ended.unwrap_or(false))
     }
 
     async fn invitee(&self, link: &[u8; 32]) -> Result<Option<Invitee>, Error> {
@@ -1217,6 +1227,23 @@ fn ending(rows: &[Row], only: Option<&str>, actor: &Actor) -> Decided<Ending> {
     });
     let recorded = event("identity.other_sessions_ended", actor, outcome, payload);
     Ok((Some(answer), Some(recorded)))
+}
+
+/// What logging out did, and its record: a live session's ending names its account, at the device `actor` acted from,
+/// and the session; one already spent, or none, records nothing, since the person ended nothing (#167).
+fn logged_out(rows: &[Row], realm: Realm, actor: &Actor) -> Decided<bool> {
+    let Some(row) = rows.first() else {
+        return Ok((Some(false), None));
+    };
+    if !column::<bool>(row, "live")? {
+        return Ok((Some(false), None));
+    }
+    let session: String = column(row, "session_id")?;
+    let account = AccountId::new(column(row, "account_id")?);
+    let named = Actor::browser(realm, Some(account), actor.device());
+    let payload = json!({ "admin_id": account.get(), "session": session });
+    let recorded = event("identity.logged_out", &named, "changed", payload);
+    Ok((Some(true), Some(recorded)))
 }
 
 /// A stored realm Identity does not know is an error, never a session in some default realm.

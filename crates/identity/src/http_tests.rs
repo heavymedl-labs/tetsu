@@ -478,6 +478,43 @@ async fn logging_out_clears_the_cookie() {
     assert_eq!(page.header("location"), Some("/admin/login"));
 }
 
+/// Logging out records its ending once, naming the admin at the device they logged out from, and the session; a
+/// second logout with the same cookie ends nothing, and records nothing more (#167, `v5.0.0-16.3.1`).
+#[tokio::test]
+async fn logging_out_is_recorded() {
+    let (address, database, cookie, form) = logged_in().await;
+    let ended = text(
+        &database,
+        "SELECT admin_id || ' ' || id FROM identity.sessions",
+    )
+    .await;
+    let headers = [
+        ("Origin", ORIGIN),
+        ("Cookie", cookie.as_str()),
+        (
+            "User-Agent",
+            "Mozilla/5.0 (X11; Linux x86_64) Firefox/140.0",
+        ),
+    ];
+    let body = format!("form={form}");
+    for _ in 0..2 {
+        let out = send(address, "POST", "/admin/logout", &headers, &body).await;
+        assert_eq!(out.status, 303);
+    }
+    let recorded = text(
+        &database,
+        "SELECT coalesce(string_agg(concat_ws(' ', payload->>'actor', payload->>'outcome',
+             payload->>'admin_id', payload->>'session'), '|'), '')
+         FROM identity.outbox_global WHERE event_type = 'identity.logged_out'",
+    )
+    .await;
+    let (admin, session) = ended.split_once(' ').expect("an admin and a session");
+    assert_eq!(
+        recorded,
+        format!("admin-{admin}@Firefox on Linux changed {admin} {session}")
+    );
+}
+
 /// The pages before login load Tetsu's own script under the admin pages' policy, and are kept by no cache. A
 /// browser with no live session asking for the admin's page is sent to log in.
 #[tokio::test]
@@ -733,7 +770,7 @@ async fn failures_of_the_server_are_unavailable() {
         (page.status, page.header("cache-control")),
         (503, Some("no-store"))
     );
-    as_db_admin(&database, &revoke("end_session(bytea, text)")).await;
+    as_db_admin(&database, &revoke("log_out(bytea, text)")).await;
     let out = logout(address, ORIGIN, &cookie, &form).await;
     assert_eq!(out.status, 503);
     assert!(

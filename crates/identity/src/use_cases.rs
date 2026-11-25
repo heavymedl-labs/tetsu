@@ -559,7 +559,8 @@ impl<S: LoginStore> Accounts<S> {
 
     /// Logs out: ends the session on the server, so its token logs no one in again (`v5.0.0-7.4.1`). Logging out
     /// changes state, so it passes the same checks as [`Self::session_for_change`], and a refused request ends
-    /// nothing. A session that had already ended is removed too, and reported as nothing to end.
+    /// nothing. A session that had already ended is removed too, and reported as nothing to end. A live session's
+    /// ending is recorded, naming its account at `actor`'s device (#167).
     ///
     /// # Errors
     /// Fails if storage fails.
@@ -567,12 +568,16 @@ impl<S: LoginStore> Accounts<S> {
         &self,
         origins: &Origins,
         change: &Change<'_>,
+        actor: &Actor,
     ) -> Result<Logout, Error> {
         let token = match change.verified(S::REALM, origins) {
             Ok(token) => token,
             Err(check) => return Ok(Logout::Refused(check)),
         };
-        let ended = self.store.delete_session(&token.hash(), S::REALM).await?;
+        let ended = self
+            .store
+            .delete_session(&token.hash(), S::REALM, actor)
+            .await?;
         Ok(if ended {
             Logout::Ended
         } else {

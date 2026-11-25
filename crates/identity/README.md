@@ -199,7 +199,8 @@ the kernel's `Mailbox` port, which Mail implements; a message's HTML is never sh
   `identity.passkeys_removed`; joining, logging in, and adding a passkey record `identity.invite_redeemed`,
   `identity.logged_in`, and `identity.passkey_added`, as described above. Listing changes nothing and records
   nothing. A command refused before it reaches the database, such as one printing a link to a pipe, records no
-  event. Logging out records no event of its own; a refused one is recorded as above.
+  event. Logging out a live session records `identity.logged_out`, naming the admin at their device and the
+  session; one already spent ends nothing and records nothing, and a refused one is recorded as above (#167).
 - **Who ran a command** is `user@host`: the first of `SUDO_USER`, `USER`, and `LOGNAME` that is set, and the
   first real line of `/etc/hostname`, with `unknown` for a part that is missing, not UTF-8, or would not show
   safely. It is asserted, not proven: every command
