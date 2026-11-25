@@ -2,7 +2,8 @@
 //! or made, and the invite is written in the business's own transaction, replacing any open one of theirs there.
 
 use tetsu_identity::{
-    Actor, BusinessId, Error, Identity, PersonName, Role, StaffInvite, postgres_staff_store,
+    Actor, BusinessId, Error, Identity, NewStaffInvite, PersonName, Role, StaffInvite,
+    postgres_staff_store,
 };
 use tetsu_kernel::Address;
 use tetsu_postgres::test_support::{TestDatabase, migrated_database};
@@ -66,7 +67,15 @@ mod support {
         at: &str,
     ) -> Result<StaffInvite, Error> {
         postgres_staff_store(pool(&database.as_app()).expect("a pool"))
-            .invite_staff(business, &name(who), &email(at), Role::Owner, &actor())
+            .invite_staff(
+                &NewStaffInvite {
+                    business,
+                    name: name(who),
+                    email: email(at),
+                    role: Role::Owner,
+                },
+                &actor(),
+            )
             .await
     }
 
@@ -97,13 +106,13 @@ mod support {
     }
 
     /// Runs `sql` as Identity's role in a business's own transaction, left open, then issues an invite through the use
-    /// case, and commits only once the invite waits on a lock the open transaction holds, so the two overlap;
-    /// returns what the invite came to.
+    /// case, `then`, which starts only now, and commits only once the invite waits on a lock the open transaction
+    /// holds, so the two overlap; returns what the invite came to.
     pub async fn issued_meanwhile(
         database: &TestDatabase,
         business: BusinessId,
         sql: &str,
-        then: (BusinessId, &str, &str),
+        then: impl Future<Output = Result<StaffInvite, Error>>,
     ) -> Result<StaffInvite, Error> {
         let held = pool(&database.as_app()).expect("a pool");
         let mut client = held.get().await.expect("a connection");
@@ -115,7 +124,7 @@ mod support {
             waits_for_a_lock(database).await;
             open.commit().await.expect("commits");
         };
-        let (issued, ()) = tokio::join!(invite(database, then.0, then.1, then.2), committing);
+        let (issued, ()) = tokio::join!(then, committing);
         issued
     }
 
@@ -182,6 +191,18 @@ async fn a_new_email_makes_a_staff_member_and_invites_them_for_seven_days() {
         invitee(&database, &issued).await,
         [format!("3|{id}|Ada Park|owner|false")]
     );
+}
+
+/// An operator's invite is recorded in Tetsu's record, naming its business, and the business's own record learns
+/// nothing of it, such as whether the person was staff already (ADR-0089).
+#[tokio::test]
+async fn an_operators_invite_is_recorded_for_tetsu_alone() {
+    let database = ready().await;
+    let id = invite(&database, FERN, "Ada Park", "ada@example.com")
+        .await
+        .expect("issues")
+        .staff
+        .get();
     assert_eq!(
         rows(
             &database,
@@ -192,8 +213,6 @@ async fn a_new_email_makes_a_staff_member_and_invites_them_for_seven_days() {
             r#"identity.staff_invited|{{"role": "owner", "actor": "kurt@workstation", "reason": null, "created": true, "outcome": "changed", "staff_id": {id}, "business_id": 3}}"#
         )]
     );
-    // The business's own record learns nothing of the operator's invite, such as whether the person is staff
-    // elsewhere.
     assert_eq!(
         rows(
             &database,
@@ -313,7 +332,7 @@ async fn invites_at_once_to_one_new_email_make_one_staff_member() {
         &database,
         FERN,
         &issuing("fern"),
-        (OAK, "Ada Park", "Ada@Example.com"),
+        invite(&database, OAK, "Ada Park", "Ada@Example.com"),
     )
     .await
     .expect("issues");
@@ -337,7 +356,7 @@ async fn invites_at_once_at_one_business_leave_the_later_one() {
         &database,
         FERN,
         &issuing("first"),
-        (FERN, "Ada Park", "ada@example.com"),
+        invite(&database, FERN, "Ada Park", "ada@example.com"),
     )
     .await
     .expect("issues");
@@ -348,7 +367,7 @@ async fn invites_at_once_at_one_business_leave_the_later_one() {
         &database,
         OAK,
         &issuing("x").replace("Ada Park', 'ada@", "Bo Lim', 'bo@"),
-        (OAK, "Bo Lim", "bo@example.com"),
+        invite(&database, OAK, "Bo Lim", "bo@example.com"),
     )
     .await
     .expect("issues");
@@ -377,7 +396,7 @@ async fn invites_at_once_that_find_no_open_invite_leave_the_later_one() {
         &database,
         FERN,
         &issuing("first"),
-        (FERN, "Ada Park", "ada@example.com"),
+        invite(&database, FERN, "Ada Park", "ada@example.com"),
     )
     .await
     .expect("issues");
@@ -408,7 +427,7 @@ async fn an_invite_during_a_join_finds_the_role_it_gives() {
         &database,
         FERN,
         &joining,
-        (FERN, "Ada Park", "ada@example.com"),
+        invite(&database, FERN, "Ada Park", "ada@example.com"),
     )
     .await;
     assert!(

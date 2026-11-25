@@ -4,7 +4,8 @@
 //! only to the invited address, as an admin's is.
 
 use tetsu_identity::{
-    Accounts, BusinessId, PersonName, Role, StaffDirectory, staff_invite_message,
+    Accounts, BusinessId, InviteToken, NewStaffInvite, PersonName, Role, StaffDirectory,
+    StaffInvite, staff_invite_message,
 };
 use tetsu_kernel::{Address, Mailer};
 use tetsu_tenancy::{Slug, TenantStore, Tenants};
@@ -69,13 +70,14 @@ pub async fn run(
         email,
         role,
     } = staff;
-    let (id, business) = found(&tenants, &business).await?;
-    let invite = Invite {
-        name: &name,
-        email: &email,
+    let (id, called) = found(&tenants, &business).await?;
+    let invite = NewStaffInvite {
+        business: id,
+        name,
+        email,
         role,
     };
-    invited(&accounts, &office, (id, &business), &invite, &acting).await
+    invited(&accounts, &office, &invite, &called, &acting).await
 }
 
 /// The business at a slug's address: its ID, for Identity, and its name, for the email.
@@ -93,54 +95,62 @@ async fn found(
     }
 }
 
-/// Who an invite is for, and as what.
-struct Invite<'a> {
-    name: &'a PersonName,
-    email: &'a Address,
-    role: Role,
-}
-
-/// Invites a person to a business through Identity's use cases, prints the link, and emails it, saying what came of
-/// each.
+/// Invites a person to a business called `called` through Identity's use cases, prints the link, and emails it,
+/// saying what came of each.
 async fn invited(
     accounts: &Accounts<impl StaffDirectory>,
     mailer: &impl Mailer,
-    (id, business): (BusinessId, &str),
-    invite: &Invite<'_>,
+    invite: &NewStaffInvite,
+    called: &str,
     acting: &Acting,
 ) -> Result<Vec<String>, String> {
     let issued = accounts
-        .invite_staff(id, invite.name, invite.email, invite.role, &acting.by)
+        .invite_staff(invite, &acting.by)
         .await
         .map_err(|error| error.to_string())?;
+    let url = operator::link_url(&acting.origin, "/app/join", &issued.token);
+    let mut said = who(&issued, invite, called);
+    said.push(format!("invite link, good once and for seven days: {url}"));
+    said.push(emailed(mailer, invite, called, &url, &issued.token).await);
+    Ok(said)
+}
+
+/// Whom an invite made or found, and whether they keep a name other than the one given.
+fn who(issued: &StaffInvite, invite: &NewStaffInvite, called: &str) -> Vec<String> {
     let staff = issued.staff.get();
     let role = invite.role.as_str();
     let mut said = vec![if issued.created {
         format!(
-            "created staff member {staff}, {}, and invited them to {business} as {role}",
+            "created staff member {staff}, {}, and invited them to {called} as {role}",
             invite.name.as_str()
         )
     } else {
-        format!("invited staff member {staff} to {business} as {role}")
+        format!("invited staff member {staff} to {called} as {role}")
     }];
     if issued.renamed {
         said.push(format!(
             "staff member {staff} keeps the name they have, which only they change"
         ));
     }
-    let url = operator::link_url(&acting.origin, "/app/join", &issued.token);
-    said.push(format!("invite link, good once and for seven days: {url}"));
-    let to = invite.email;
-    said.push(
-        match staff_invite_message(to.clone(), business, invite.role, &url, &issued.token) {
-            Some(message) => operator::delivered(to, mailer.send(&message).await),
-            None => format!(
-                "could not write the invite email for {}; the link above still works",
-                to.as_str()
-            ),
-        },
-    );
-    Ok(said)
+    said
+}
+
+/// What came of emailing an invite's link to the address it invites.
+async fn emailed(
+    mailer: &impl Mailer,
+    invite: &NewStaffInvite,
+    called: &str,
+    url: &str,
+    token: &InviteToken,
+) -> String {
+    let to = &invite.email;
+    match staff_invite_message(to.clone(), called, invite.role, url, token) {
+        Some(message) => operator::delivered(to, mailer.send(&message).await),
+        None => format!(
+            "could not write the invite email for {}; the link above still works",
+            to.as_str()
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -257,16 +267,13 @@ mod tests {
         name: &str,
         email: &str,
     ) -> Result<Vec<String>, String> {
-        let (name, email) = (
-            PersonName::parse(name).unwrap(),
-            Address::parse(email).unwrap(),
-        );
-        let invite = Invite {
-            name: &name,
-            email: &email,
+        let invite = NewStaffInvite {
+            business: FERN,
+            name: PersonName::parse(name).unwrap(),
+            email: Address::parse(email).unwrap(),
             role: Role::Owner,
         };
-        invited(accounts, office, (FERN, "Fern Studio"), &invite, &acting()).await
+        invited(accounts, office, &invite, "Fern Studio", &acting()).await
     }
 
     /// Inviting says who was made or found, prints the seven-day link to the staff join page, and never keeps the

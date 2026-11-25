@@ -13,9 +13,9 @@ use tokio_postgres::types::{FromSql, ToSql};
 
 use crate::domain::{
     Account, AccountId, Actor, Addition, AdminSummary, BusinessId, CeremonyKind, Disabling, Ending,
-    Error, FailedCheck, HeldPasskey, Invitee, Issue, ListedSession, Login, NewPasskey, PersonName,
-    RateLimit, Realm, Redemption, Refusal, Removal, Role, Session, SessionId, SessionStart, Signer,
-    StaffIssue, TakenAddition, TakenCeremony, TimeLeft,
+    Error, FailedCheck, HeldPasskey, Invitee, Issue, ListedSession, Login, NewPasskey,
+    NewStaffInvite, PersonName, RateLimit, Realm, Redemption, Refusal, Removal, Role, Session,
+    SessionId, SessionStart, Signer, StaffIssue, TakenAddition, TakenCeremony, TimeLeft,
 };
 use crate::ports::{AdminDirectory, AdminStore, LoginStore, StaffDirectory, StaffStore};
 use crate::use_cases::Accounts;
@@ -1083,13 +1083,16 @@ impl AdminDirectory for PostgresAdmins {
 impl StaffDirectory for PostgresStaff {
     async fn issue_staff_invite(
         &self,
-        business: BusinessId,
+        invite: &NewStaffInvite,
         hash: &[u8; 32],
-        name: &PersonName,
-        email: &Address,
-        role: Role,
         actor: &Actor,
     ) -> Result<StaffIssue, Error> {
+        let NewStaffInvite {
+            business,
+            name,
+            email,
+            role,
+        } = invite;
         let parameters: [&(dyn ToSql + Sync); 4] = [
             &hash.as_slice(),
             &name.as_str(),
@@ -1102,7 +1105,7 @@ impl StaffDirectory for PostgresStaff {
             Place::ForTetsu(business.get()),
             STAFF_ISSUE_INVITE,
             &parameters,
-            |rows| staff_issuance(rows, business, role, actor),
+            |rows| staff_issuance(rows, *business, *role, actor),
         )
         .await?
         .ok_or_else(answered_nothing)

@@ -941,6 +941,16 @@ pub enum StaffIssue {
     Member,
 }
 
+/// A staff invite to issue: to which business, whom, by email, and as what. A name is used only for someone new,
+/// since only a staff member changes their own (ADR-0040).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewStaffInvite {
+    pub business: BusinessId,
+    pub name: PersonName,
+    pub email: tetsu_kernel::Address,
+    pub role: Role,
+}
+
 /// A staff invite issued: its link's token, and who it invites.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StaffInvite {

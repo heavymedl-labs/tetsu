@@ -2,11 +2,11 @@
 
 use crate::browser::{Change, CheckedSession, ForChange, Logout, Origins};
 use crate::domain::{
-    Account, AccountId, Actor, Addition, AdminSummary, Answer, BusinessId, Ceremony, CeremonyKind,
+    Account, AccountId, Actor, Addition, AdminSummary, Answer, Ceremony, CeremonyKind,
     CeremonyToken, Device, Disabling, Ending, Error, FailedCheck, Fill, InviteToken, Issue,
-    ListedSession, Login, NewPasskey, PersonName, RateLimit, Realm, Redemption, Refusal, Removal,
-    Role, Session, SessionId, SessionStart, SessionToken, Signer, StaffInvite, StaffIssue,
-    TimeLeft,
+    ListedSession, Login, NewPasskey, NewStaffInvite, PersonName, RateLimit, Realm, Redemption,
+    Refusal, Removal, Session, SessionId, SessionStart, SessionToken, Signer, StaffInvite,
+    StaffIssue, TimeLeft,
 };
 use crate::passkeys::RelyingParty;
 use crate::ports::{AdminDirectory, LoginStore, StaffDirectory};
@@ -164,28 +164,25 @@ impl<S: AdminDirectory> Accounts<S> {
 }
 
 impl<S: StaffDirectory> Accounts<S> {
-    /// Invites the staff member `email` names to a business with a role, by a link good once and for seven days,
+    /// Invites the staff member an email names to a business with a role, by a link good once and for seven days,
     /// making them with no passkey if no staff member has that email, and replacing any open invite of theirs there
     /// (ADR-0089). Records whether one was issued, never the token. The command prints the link only to its own
-    /// terminal and emails it only to `email`.
+    /// terminal and emails it only to the invite's email.
     ///
     /// # Errors
     /// Fails with [`Error::Invalid`] for a staff member who is disabled or holds a role at the business already,
     /// each named as such, if no secure random source can be read, or if storage fails.
     pub async fn invite_staff(
         &self,
-        business: BusinessId,
-        name: &PersonName,
-        email: &Address,
-        role: Role,
+        invite: &NewStaffInvite,
         actor: &Actor,
     ) -> Result<StaffInvite, Error> {
         let token = InviteToken::generate(self.fill)?;
         let issue = self
             .store
-            .issue_staff_invite(business, &token.hash(), name, email, role, actor)
+            .issue_staff_invite(invite, &token.hash(), actor)
             .await?;
-        let to = email.as_str();
+        let to = invite.email.as_str();
         match issue {
             StaffIssue::Issued {
                 staff,

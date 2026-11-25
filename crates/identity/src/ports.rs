@@ -1,9 +1,9 @@
 //! The driven port Identity calls out through.
 
 use crate::domain::{
-    Account, AccountId, Actor, Addition, AdminSummary, BusinessId, Disabling, Ending, Error,
-    FailedCheck, Invitee, Issue, ListedSession, Login, NewPasskey, PersonName, RateLimit, Realm,
-    Redemption, Refusal, Removal, Role, Session, SessionId, SessionStart, Signer, StaffIssue,
+    Account, AccountId, Actor, Addition, AdminSummary, Disabling, Ending, Error, FailedCheck,
+    Invitee, Issue, ListedSession, Login, NewPasskey, NewStaffInvite, PersonName, RateLimit, Realm,
+    Redemption, Refusal, Removal, Session, SessionId, SessionStart, Signer, StaffIssue,
     TakenAddition, TakenCeremony, TimeLeft,
 };
 use std::future::Future;
@@ -299,17 +299,13 @@ pub trait AdminDirectory {
 /// audit event naming its actor, with its outcome, in the business's transaction but Tetsu's record, since whether
 /// the person was staff already, or disabled, may be from another business.
 pub trait StaffDirectory {
-    /// Invites the staff member `email` names to `business` with `role`, under an invite link's hash, good once and
-    /// for seven days, making them, named `name` and with no passkey, if no staff member has that email. A new invite
-    /// replaces any open one of theirs at the business. A disabled staff member, or one who holds a role there
-    /// already, is issued none.
+    /// Issues `invite` under an invite link's hash, good once and for seven days, making the staff member its email
+    /// names, with its name and no passkey, if there is none. A new invite replaces any open one of theirs at the
+    /// business. A disabled staff member, or one who holds a role there already, is issued none.
     fn issue_staff_invite(
         &self,
-        business: BusinessId,
+        invite: &NewStaffInvite,
         hash: &[u8; 32],
-        name: &PersonName,
-        email: &Address,
-        role: Role,
         actor: &Actor,
     ) -> impl Future<Output = Result<StaffIssue, Error>> + Send;
 }

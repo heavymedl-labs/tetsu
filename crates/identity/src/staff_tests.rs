@@ -63,6 +63,16 @@ async fn events(database: &TestDatabase, outbox: &str, kind: &str) -> Vec<Value>
         .collect()
 }
 
+/// Ada Park's invite to the business as its owner.
+fn ada() -> crate::NewStaffInvite {
+    crate::NewStaffInvite {
+        business: crate::BusinessId::new(BUSINESS),
+        name: crate::PersonName::parse("Ada Park").expect("a name"),
+        email: tetsu_kernel::Address::parse("ada@example.com").expect("an address"),
+        role: crate::Role::Owner,
+    }
+}
+
 /// The cookie a browser sends back with a staff session's token.
 fn cookie(token: &SessionToken) -> String {
     format!("{}={}", Realm::Staff.cookie_name(), token.to_text())
@@ -317,18 +327,7 @@ async fn an_issued_invite_joins_its_staff_member_and_a_replaced_one_does_not() {
         .await
         .expect("a migrated test database");
     let staff = crate::postgres_staff_store(app_pool(&database));
-    let issue = || async {
-        staff
-            .invite_staff(
-                crate::BusinessId::new(BUSINESS),
-                &crate::PersonName::parse("Ada Park").expect("a name"),
-                &tetsu_kernel::Address::parse("ada@example.com").expect("an address"),
-                crate::Role::Owner,
-                &actor(),
-            )
-            .await
-            .expect("issues")
-    };
+    let issue = || async { staff.invite_staff(&ada(), &actor()).await.expect("issues") };
     let old = issue().await;
     let new = issue().await;
     assert!(
@@ -352,13 +351,7 @@ async fn an_invite_without_randomness_or_storage_invites_no_one() {
         .expect("a migrated test database");
     let invite = |staff: Accounts<PostgresStaff>| async move {
         staff
-            .invite_staff(
-                crate::BusinessId::new(BUSINESS),
-                &crate::PersonName::parse("Ada Park").expect("a name"),
-                &tetsu_kernel::Address::parse("ada@example.com").expect("an address"),
-                crate::Role::Owner,
-                &actor(),
-            )
+            .invite_staff(&ada(), &actor())
             .await
             .map(drop)
             .map_err(|error| error.to_string())
@@ -393,20 +386,8 @@ async fn an_invite_without_randomness_or_storage_invites_no_one() {
 #[tokio::test]
 async fn an_invite_to_a_member_or_a_disabled_staff_member_is_refused() {
     let (staff, database, _) = invited().await;
-    let (name, email, by) = (
-        crate::PersonName::parse("Ada Park").expect("a name"),
-        tetsu_kernel::Address::parse("ada@example.com").expect("an address"),
-        actor(),
-    );
-    let invite = || {
-        staff.invite_staff(
-            crate::BusinessId::new(BUSINESS),
-            &name,
-            &email,
-            crate::Role::Owner,
-            &by,
-        )
-    };
+    let (ada, by) = (ada(), actor());
+    let invite = || staff.invite_staff(&ada, &by);
     as_db_admin(
         &database,
         "INSERT INTO identity.staff_roles (tenant_id, staff_id, role_name) SELECT 3, id, 'owner' FROM identity.staff",
