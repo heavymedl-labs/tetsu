@@ -1,10 +1,12 @@
 -- The login flow every realm shares, written once as the admin realm's
 -- (ADR-0091): starting, using, and ending sessions, logging in, and adding
--- passkeys. Version 15 renders this file for staff, swapping each name of the
--- admin realm's for staff's own, so each realm's functions read only its own
--- tables. Every name a swap changes is written whole and schema-qualified, and
--- a test fails if the staff copy still names anything of the admins'. Joining,
--- and managing accounts, differ by realm and are written out apart.
+-- passkeys, and joining by an invite link up to using the link up. Version 15
+-- renders this file for staff, swapping each name of the admin realm's for
+-- staff's own, so each realm's functions read only its own tables. Every name a
+-- swap changes is written whole and schema-qualified, and a test fails if the
+-- staff copy still names anything of the admins'. Using a link up, accepting
+-- an invite, and managing accounts differ by realm and are written out apart:
+-- admins' in 0001, whose join functions call these, and staff's in 0016.
 SET lock_timeout = '5s';
 SET statement_timeout = '30s';
 
@@ -28,6 +30,11 @@ INSERT (credential_id, admin_id, passkey, transports, created_at),
 UPDATE (passkey, last_used_at)
 ON identity.passkeys TO tetsu_identity_lookup;
 GRANT SELECT, DELETE ON identity.ceremonies TO tetsu_identity_lookup;
+-- An invite is read here and used up where each realm keeps its links. The
+-- admins' lookup reads every column already (0001); this grant is for the
+-- staff copy, which reads only these.
+GRANT SELECT (token_hash, admin_id, ends_at) ON identity.invites
+TO tetsu_identity_lookup;
 GRANT INSERT (
     token_hash, kind, admin_id, link_hash, session_hash, state, ends_at
 ) ON identity.ceremonies TO tetsu_identity_lookup;
@@ -235,6 +242,163 @@ BEGIN
     DELETE FROM identity.ceremonies AS c
     WHERE c.admin_id = wanted_admin AND c.ends_at <= at;
     RETURN at;
+END
+$$;
+
+-- Where an admin stands for join, after taking their row for update,
+-- since both callers change what the admin holds: open, disabled, joined
+-- for one who holds a passkey already, or null for one who does not exist.
+-- What it checks stays true until the caller commits, under read committed
+-- only, so it refuses any other level with TD002. Only Identity's functions
+-- that issue or redeem a link call it; no other role may.
+CREATE FUNCTION identity.joining(wanted_admin bigint)
+RETURNS text
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    was timestamptz;
+BEGIN
+    PERFORM identity.require_read_committed('joining');
+    SELECT o.disabled_at INTO was
+    FROM identity.admins AS o
+    WHERE o.id = wanted_admin
+    FOR NO KEY UPDATE;
+    IF NOT FOUND THEN
+        RETURN null;
+    ELSIF was IS NOT NULL THEN
+        RETURN 'disabled';
+    ELSIF EXISTS (
+        SELECT FROM identity.passkeys AS p WHERE p.admin_id = wanted_admin
+    ) THEN
+        RETURN 'joined';
+    END IF;
+    RETURN 'open';
+END
+$$;
+
+-- Keeps a join ceremony's state under its token's hash, and says
+-- whether it did: only while the link is open, its admin enabled, and no
+-- passkey theirs, checked here rather than trusted from the caller. It takes
+-- the admin's row first, so a disable or a passkey being stored waits for
+-- it or is seen by it, which holds only under read committed (TD002), and
+-- reads the clock after any wait. A ceremony lasts ten minutes, longer than
+-- the five a browser gives its authenticator, but never past its link. A link
+-- holds one ceremony at most, by a unique index: a newer one replaces it, as a
+-- new link replaces the last, so beginning again and again stores nothing
+-- more. The admin's ceremonies that have ended go too.
+CREATE FUNCTION identity.begin_join(
+    wanted_hash bytea,
+    wanted_admin bigint,
+    wanted_link bytea,
+    wanted_state jsonb
+)
+RETURNS boolean
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    at timestamptz;
+BEGIN
+    at := identity.holding(wanted_admin);
+    IF at IS NULL THEN
+        RETURN false;
+    END IF;
+    INSERT INTO identity.ceremonies
+        (token_hash, kind, admin_id, link_hash, state, ends_at)
+    SELECT
+        wanted_hash,
+        'join',
+        e.admin_id,
+        e.token_hash,
+        wanted_state,
+        least(at + interval '10 minutes', e.ends_at)
+    FROM identity.invites AS e
+    WHERE
+        e.token_hash = wanted_link
+        AND e.admin_id = wanted_admin
+        AND e.ends_at > at
+        AND NOT EXISTS (
+            SELECT FROM identity.passkeys AS p
+            WHERE p.admin_id = wanted_admin
+        )
+    ON CONFLICT (link_hash) DO UPDATE
+        SET
+            token_hash = excluded.token_hash,
+            state = excluded.state,
+            ends_at = excluded.ends_at;
+    RETURN FOUND;
+END
+$$;
+
+-- Joins an account by its invite link: stores its first passkey and starts its
+-- session, and says what came of it: redeemed; disabled; joined, for an
+-- account that has a passkey already, as when two tabs finish one link;
+-- oversized, for a credential ID outside the 16 to 1023 bytes WebAuthn allows
+-- or a passkey larger than the table keeps, measured as the table measures
+-- it; expired, for a link that ended, was replaced, or names someone else;
+-- taken, for a credential another account's passkey has, even one stored a
+-- moment before; or null for an account that does not exist. It reads the
+-- link and leaves it for its caller to use up in the same transaction, which
+-- each realm does where its links live. It takes the account's row first, so
+-- a link being issued, a disable, or another tab's passkey waits, and what it
+-- checks stays true until it commits, under read committed only (TD002). The
+-- session it starts rests on the link, so it is never fresh until a passkey
+-- login proves them (ADR-0069). Only a redemption calls it; no other role may.
+CREATE FUNCTION identity.join_by_link(
+    wanted_link bytea,
+    wanted_admin bigint,
+    wanted_credential bytea,
+    wanted_passkey jsonb,
+    wanted_transports text,
+    wanted_session bytea,
+    wanted_presented bytea
+)
+RETURNS text
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    standing text;
+BEGIN
+    standing := identity.joining(wanted_admin);
+    IF standing IS DISTINCT FROM 'open' THEN
+        RETURN standing;
+    ELSIF
+        octet_length(wanted_credential) NOT BETWEEN 16 AND 1023
+        OR octet_length(wanted_passkey::text) > 8192
+    THEN
+        RETURN 'oversized';
+    ELSIF NOT EXISTS (
+        SELECT FROM identity.invites AS e
+        WHERE
+            e.token_hash = wanted_link
+            AND e.admin_id = wanted_admin
+            AND e.ends_at > clock_timestamp()
+    ) THEN
+        RETURN 'expired';
+    END IF;
+    BEGIN
+        INSERT INTO identity.passkeys
+            (credential_id, admin_id, passkey, transports, created_at)
+        VALUES (
+            wanted_credential,
+            wanted_admin,
+            wanted_passkey,
+            wanted_transports,
+            clock_timestamp()
+        );
+    EXCEPTION WHEN unique_violation THEN
+        RETURN 'taken';
+    END;
+    -- Any other ceremony of theirs could only be refused now; it goes too.
+    DELETE FROM identity.ceremonies AS c WHERE c.admin_id = wanted_admin;
+    DELETE FROM identity.admin_sessions AS s
+    WHERE s.token_hash = wanted_presented AND s.realm = 'admin';
+    PERFORM identity.start_session(
+        wanted_session, 'admin', wanted_admin, false
+    );
+    RETURN 'redeemed';
 END
 $$;
 
@@ -834,7 +998,9 @@ $$;
 -- PUBLIC may run (ADR-0042). No statement here revokes on the schema's other
 -- functions, which a runner that is no superuser may not do once another role
 -- owns them. Identity's role may run the ones it calls; start_session,
--- holding, and end_every_session only other functions call. The database
+-- holding, joining, and end_every_session only other functions call, and
+-- join_by_link is granted only where a realm's caller uses its links up, as
+-- staff's does; admins' runs only through redeem_invite. The database
 -- cannot check a passkey's signature, so a caller with this role can start a
 -- session through login and add a passkey through an addition that session
 -- took, for any account. Database access stays the trust boundary (ADR-0061).
@@ -845,6 +1011,7 @@ identity.take_ceremony(bytea, text), identity.signer(bytea),
 identity.login(bytea, bigint, jsonb, jsonb, bytea, bytea),
 identity.account(bytea), identity.sessions_of(bytea),
 identity.end_other_sessions(bytea, uuid), identity.adder(bytea),
+identity.begin_join(bytea, bigint, bytea, jsonb),
 identity.begin_addition(bytea, bytea, bigint, jsonb),
 identity.take_addition(bytea, bytea),
 identity.add_passkey(bytea, bytea, bigint, bytea, jsonb, text)
@@ -863,6 +1030,13 @@ ALTER FUNCTION identity.describe_session(bytea, text)
 OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION identity.log_out(bytea, text) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION identity.holding(bigint) OWNER TO tetsu_identity_lookup;
+ALTER FUNCTION identity.joining(bigint) OWNER TO tetsu_identity_lookup;
+ALTER FUNCTION identity.begin_join(bytea, bigint, bytea, jsonb)
+OWNER TO tetsu_identity_lookup;
+ALTER FUNCTION identity.join_by_link(
+    bytea, bigint, bytea, jsonb, text, bytea, bytea
+)
+OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION identity.begin_login(bytea, jsonb)
 OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION identity.take_ceremony(bytea, text)

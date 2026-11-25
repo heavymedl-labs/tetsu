@@ -29,6 +29,7 @@ const STAFF: &[(&str, &str)] = &[
     ("identity.admins", "identity.staff"),
     ("identity.passkeys", "identity.staff_passkeys"),
     ("identity.ceremonies", "identity.staff_ceremonies"),
+    ("identity.invites", "identity.staff_invites"),
     ("admin_id", "staff_id"),
     ("wanted_admin", "wanted_staff"),
     ("'admin'", "'staff'"),
@@ -41,6 +42,9 @@ const STAFF: &[(&str, &str)] = &[
     ),
     ("identity.log_out", "identity.staff_log_out"),
     ("identity.holding", "identity.staff_holding"),
+    ("identity.joining", "identity.staff_joining"),
+    ("identity.begin_join", "identity.staff_begin_join"),
+    ("identity.join_by_link", "identity.staff_join_by_link"),
     ("identity.begin_login", "identity.staff_begin_login"),
     ("identity.take_ceremony", "identity.staff_take_ceremony"),
     ("identity.signer", "identity.staff_signer"),
@@ -114,6 +118,10 @@ pub static MIGRATIONS: LazyLock<Vec<Migration>> = LazyLock::new(|| {
         Migration {
             version: 15,
             sql: STAFF_LOGIN.as_str(),
+        },
+        Migration {
+            version: 16,
+            sql: include_str!("../../migrations/0016_staff_join.sql"),
         },
     ]
 });
@@ -1375,7 +1383,10 @@ mod tests {
     #[test]
     fn staff_login_names_nothing_of_the_admins() {
         let admins = admin_functions();
-        assert!(admins.len() >= 10, "{admins:?}");
+        assert!(
+            admins.contains(&"identity.redeem_invite".to_string()),
+            "{admins:?}"
+        );
         let mut forbidden: Vec<&str> = STAFF.iter().map(|(from, _)| *from).collect();
         forbidden.extend(admins.iter().map(String::as_str));
         forbidden.extend([
@@ -1405,7 +1416,7 @@ mod tests {
                 });
         assert_eq!(
             digest,
-            "0b7b37ee69177d0878832bbac061effcb8a4defc3af4abd2e61f3504364a5471"
+            "a0a8051a8191e636b59b2850a50a5561f1c430dd595a174686df87403d5cef2b"
         );
     }
 

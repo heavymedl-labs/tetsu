@@ -1,7 +1,9 @@
 -- Admins, who work for Tetsu itself, their sessions, and their join
 -- links, and what the admin command does to them (ADR-0040, ADR-0048,
 -- ADR-0059). All are global: an admin belongs to no business, and a session
--- or link is found by its token before any business is known.
+-- or link is found by its token before any business is known. The login flow
+-- they share with staff is in 0014, which the join functions here call: they
+-- are not run until then.
 SET lock_timeout = '5s';
 SET statement_timeout = '30s';
 
@@ -227,38 +229,6 @@ BEGIN
 END
 $$;
 
--- Where an admin stands for join, after taking their row for update,
--- since both callers change what the admin holds: open, disabled, joined
--- for one who holds a passkey already, or null for one who does not exist.
--- What it checks stays true until the caller commits, under read committed
--- only, so it refuses any other level with TD002. Only the functions below
--- call it; no other role may.
-CREATE FUNCTION joining(wanted_admin bigint)
-RETURNS text
-LANGUAGE plpgsql VOLATILE SECURITY DEFINER
-SET search_path = pg_catalog, pg_temp
-AS $$
-DECLARE
-    was timestamptz;
-BEGIN
-    PERFORM identity.require_read_committed('joining');
-    SELECT o.disabled_at INTO was
-    FROM identity.admins AS o
-    WHERE o.id = wanted_admin
-    FOR NO KEY UPDATE;
-    IF NOT FOUND THEN
-        RETURN null;
-    ELSIF was IS NOT NULL THEN
-        RETURN 'disabled';
-    ELSIF EXISTS (
-        SELECT FROM identity.passkeys AS p WHERE p.admin_id = wanted_admin
-    ) THEN
-        RETURN 'joined';
-    END IF;
-    RETURN 'open';
-END
-$$;
-
 -- Issues an admin's invite link, replacing any earlier one, and says
 -- what it did: issued; disabled, for an admin issued none; joined, for
 -- one who has a passkey already and adds another only after logging in
@@ -357,74 +327,10 @@ AS $$
         )
 $$;
 
--- Keeps a join ceremony's state under its token's hash, and says
--- whether it did: only while the link is open, its admin enabled, and no
--- passkey theirs, checked here rather than trusted from the caller. It takes
--- the admin's row first, so a disable or a passkey being stored waits for
--- it or is seen by it, which holds only under read committed (TD002), and
--- reads the clock after any wait. A ceremony lasts ten minutes, longer than
--- the five a browser gives its authenticator, but never past its link. A link
--- holds one ceremony at most, by a unique index: a newer one replaces it, as a
--- new link replaces the last, so beginning again and again stores nothing
--- more. The admin's ceremonies that have ended go too.
-CREATE FUNCTION begin_join(
-    wanted_hash bytea,
-    wanted_admin bigint,
-    wanted_link bytea,
-    wanted_state jsonb
-)
-RETURNS boolean
-LANGUAGE plpgsql VOLATILE SECURITY DEFINER
-SET search_path = pg_catalog, pg_temp
-AS $$
-DECLARE
-    at timestamptz;
-BEGIN
-    at := identity.holding(wanted_admin);
-    IF at IS NULL THEN
-        RETURN false;
-    END IF;
-    INSERT INTO identity.ceremonies
-        (token_hash, kind, admin_id, link_hash, state, ends_at)
-    SELECT
-        wanted_hash,
-        'join',
-        e.admin_id,
-        e.token_hash,
-        wanted_state,
-        least(at + interval '10 minutes', e.ends_at)
-    FROM identity.invites AS e
-    WHERE
-        e.token_hash = wanted_link
-        AND e.admin_id = wanted_admin
-        AND e.ends_at > at
-        AND NOT EXISTS (
-            SELECT FROM identity.passkeys AS p
-            WHERE p.admin_id = wanted_admin
-        )
-    ON CONFLICT (link_hash) DO UPDATE
-        SET
-            token_hash = excluded.token_hash,
-            state = excluded.state,
-            ends_at = excluded.ends_at;
-    RETURN FOUND;
-END
-$$;
-
--- Stores an admin's first passkey and uses up the link that let them, in
--- one transaction, and says what came of it: redeemed; disabled; joined,
--- for an admin who has a passkey already, as when two tabs finish one
--- link; oversized, for a credential ID outside the 16 to 1023 bytes WebAuthn
--- allows or a passkey larger than the table keeps, measured as the table
--- measures it; expired, for a link that ended or was replaced; taken, for a
--- credential another admin's passkey has, even one stored a moment before
--- (the admin's own passkeys were refused as joined already); or null
--- for an admin who does not exist. It takes the admin's row first, so a
--- link being issued, a disable, or another tab's passkey waits, and what it
--- checks stays true until it commits, under read committed only, so it
--- refuses any other level with TD002. Redeemed, it ends the session the
--- browser presented and starts the admin's, unproven: it rests on the link,
--- so it is never fresh until a passkey login proves them (ADR-0069).
+-- Redeems an admin's invite link: joins them by it, as join_by_link does, and
+-- then uses the link up, in one transaction, saying what came of it as
+-- join_by_link does. Their row is held from the start, so a link being issued
+-- waits, and the link join_by_link found open is still there to use up.
 CREATE FUNCTION redeem_invite(
     wanted_link bytea,
     wanted_admin bigint,
@@ -439,48 +345,16 @@ LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
-    standing text;
+    outcome text;
 BEGIN
-    standing := identity.joining(wanted_admin);
-    IF standing IS DISTINCT FROM 'open' THEN
-        RETURN standing;
-    ELSIF
-        octet_length(wanted_credential) NOT BETWEEN 16 AND 1023
-        OR octet_length(wanted_passkey::text) > 8192
-    THEN
-        RETURN 'oversized';
-    END IF;
-    -- A credential another admin's passkey has, however recently, undoes
-    -- the link's use and is a refusal, recorded like any other.
-    BEGIN
-        DELETE FROM identity.invites AS e
-        WHERE
-            e.token_hash = wanted_link
-            AND e.admin_id = wanted_admin
-            AND e.ends_at > clock_timestamp();
-        IF NOT FOUND THEN
-            RETURN 'expired';
-        END IF;
-        INSERT INTO identity.passkeys
-            (credential_id, admin_id, passkey, transports, created_at)
-        VALUES (
-            wanted_credential,
-            wanted_admin,
-            wanted_passkey,
-            wanted_transports,
-            clock_timestamp()
-        );
-    EXCEPTION WHEN unique_violation THEN
-        RETURN 'taken';
-    END;
-    -- Any other ceremony of theirs could only be refused now; it goes too.
-    DELETE FROM identity.ceremonies AS c WHERE c.admin_id = wanted_admin;
-    DELETE FROM identity.admin_sessions AS s
-    WHERE s.token_hash = wanted_presented AND s.realm = 'admin';
-    PERFORM identity.start_session(
-        wanted_session, 'admin', wanted_admin, false
+    outcome := identity.join_by_link(
+        wanted_link, wanted_admin, wanted_credential, wanted_passkey,
+        wanted_transports, wanted_session, wanted_presented
     );
-    RETURN 'redeemed';
+    IF outcome = 'redeemed' THEN
+        DELETE FROM identity.invites AS e WHERE e.token_hash = wanted_link;
+    END IF;
+    RETURN outcome;
 END
 $$;
 
@@ -649,8 +523,7 @@ GRANT EXECUTE ON FUNCTION absolute_limit(text), idle_limit(text),
 passkey_cap(text)
 TO tetsu_identity_lookup;
 GRANT EXECUTE ON FUNCTION issue_invite(bytea, bigint), list_admins(),
-invitee(bytea), begin_join(bytea, bigint, bytea, jsonb),
-redeem_invite(bytea, bigint, bytea, jsonb, text, bytea, bytea),
+invitee(bytea), redeem_invite(bytea, bigint, bytea, jsonb, text, bytea, bytea),
 disable_admin(bigint), enable_admin(bigint), remove_passkeys(bigint),
 end_sessions(text, bigint)
 TO tetsu_identity;
@@ -659,12 +532,9 @@ TO tetsu_identity;
 -- and no longer after.
 GRANT CREATE ON SCHEMA identity TO tetsu_identity_lookup;
 ALTER FUNCTION require_read_committed(text) OWNER TO tetsu_identity_lookup;
-ALTER FUNCTION joining(bigint) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION issue_invite(bytea, bigint) OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION list_admins() OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION invitee(bytea) OWNER TO tetsu_identity_lookup;
-ALTER FUNCTION begin_join(bytea, bigint, bytea, jsonb)
-OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION redeem_invite(bytea, bigint, bytea, jsonb, text, bytea, bytea)
 OWNER TO tetsu_identity_lookup;
 ALTER FUNCTION disable_admin(bigint) OWNER TO tetsu_identity_lookup;
