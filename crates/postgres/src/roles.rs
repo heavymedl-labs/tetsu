@@ -160,7 +160,7 @@ pub(crate) async fn require_role(client: &Client, role: &str) -> Result<(), Erro
         Ok(())
     } else {
         Err(format!(
-            "role {role} must exist before migrating; create it as docs/operations/demo-environment.md shows"
+            "role {role} must exist before migrating; create it as docs/operations/production.md shows"
         )
         .into())
     }
@@ -248,7 +248,7 @@ mod tests {
             .to_string();
         assert_eq!(
             error,
-            "role t_no_such_role must exist before migrating; create it as docs/operations/demo-environment.md shows"
+            "role t_no_such_role must exist before migrating; create it as docs/operations/production.md shows"
         );
     }
 

@@ -371,7 +371,7 @@ creates then. Expect under $20 if the resources are deleted afterward.
 
 ## First deploy, 2026-11-09
 
-The free setup went live on 2026-11-09 ([demo environment](../operations/demo-environment.md)). Findings so far:
+The free setup went live on 2026-11-09 ([demo environment](../operations/production.md)). Findings so far:
 
 - **Render runs the image behind Cloudflare** (`server: cloudflare`). A 70 KB header was dropped at the edge before
   any response. A 20 KB header or path, and a malformed header line, which the edge cleaned up, reached `tetsu`

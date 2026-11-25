@@ -28,10 +28,10 @@ names no business that uses Tetsu. Its root page names fictional customers only 
 | `tetsu admin end-sessions <id \| --all>` | Ends one admin's sessions, or every admin's |
 | `tetsu staff invite <business> <name> <email> --role owner` | Invites someone to the business at that slug as its owner, making them a staff member if the email is new, prints their invite link, good once and for seven days, replacing any open one there, and emails it to them ([ADR-0089](../../docs/adr/0089-staff-join-and-login.md)). Only to a terminal |
 
-The deploy workflow runs `check`, `reset`, `replay`, and `rename` against the demo ([runbook](../../docs/operations/demo-environment.md)).
+The deploy workflow runs `check`, `reset`, `replay`, and `rename` in production ([runbook](../../docs/operations/production.md)).
 
 `tetsu --env <name> <command>` runs any command with the settings in `.env.<name>` in place of `.env`, such as
-`cargo tetsu --env demo admin create "Ada Lovelace" ada@example.com` against the demo. The file must exist, and the environment
+`cargo tetsu --env production admin create "Ada Lovelace" ada@example.com` against production. The file must exist, and the environment
 still wins over it ([ADR-0073](../../docs/adr/0073-settings-files-per-environment.md)), except that the mail
 settings come all from one or all from the other ([ADR-0078](../../docs/adr/0078-mail-settings-from-one-place.md)).
 
@@ -123,23 +123,23 @@ Stop the server when you are done.
 | `DATABASE_TLS` | `migrate`, `seed`, `serve` | `require` (the default) or `disable`, for local tests only ([ADR-0013](../../docs/adr/0013-postgres-tls.md)) |
 | `DATABASE_CA_FILE` | `migrate`, `seed`, `serve` | Optional: a PEM file of certificate authorities, such as a provider's own, trusted instead of the public ones. Refused with `DATABASE_TLS=disable` |
 | `TETSU_DEMO` | `serve` | `true` or `false`, with no default: whether every page says its business is a demo and asks not to be indexed, and whether the root page shows its fictional customers ([ADR-0018](../../docs/adr/0018-demo-businesses-as-data.md), [ADR-0037](../../docs/adr/0037-fictional-customers-on-tetsus-page.md)) |
-| `TETSU_SERVES` | `serve` | What this service serves, with no default: one or more of `site`, `admin`, and `staff`, separated by commas. Each realm on the demo is a service of its own, on its own host; this machine serves all three ([ADR-0040](../../docs/adr/0040-identity-and-sign-in.md), [#169](https://github.com/heavymedl-labs/tetsu/issues/169)). A host without the site sends `/` to its realm's home |
+| `TETSU_SERVES` | `serve` | What this service serves, with no default: one or more of `site`, `admin`, and `staff`, separated by commas. Each realm in production is a service of its own, on its own host; this machine serves all three ([ADR-0092](../../docs/adr/0092-a-service-per-realm-before-domains.md)). A host without the site sends `/` to its realm's home |
 | `TETSU_ADMIN_ORIGIN` | `serve` with `admin`, `admin create`, `admin invite` | The admins' origin, such as `https://admin.example.com`: their passkeys belong to its host, only it may send their pages a state-changing request, and their invite links point to it. `https`, or `http` for this machine alone, with no path. From `.env` only when `DATABASE_URL` is too |
 | `TETSU_STAFF_ORIGIN` | `serve` with `staff`, `staff invite` | The staff's origin, such as `https://app.example.com`, as `TETSU_ADMIN_ORIGIN` is the admins' |
 | `TETSU_LOG_FORMAT` | `serve` | `json` or `text`. Unset, logs are text a person reads when they reach a terminal, and JSON anywhere else ([ADR-0071](../../docs/adr/0071-readable-logs-in-a-terminal.md)) |
-| `TETSU_TRUSTED_PROXIES` | `serve` | How many proxies stand in front, each adding an `X-Forwarded-For` entry, from 0 to 10 with no default: `0` locally, `3` on Render. Rate limits key on the entry the first of them added ([ADR-0072](../../docs/adr/0072-rate-limits-by-network-address.md)) |
+| `TETSU_TRUSTED_PROXIES` | `serve` | How many proxies stand in front, each adding an `X-Forwarded-For` entry, from 0 to 10 with no default: `0` locally, and in production as many as its host puts in front, recorded in the [runbook](../../docs/operations/production.md). Rate limits key on the entry the first of them added ([ADR-0072](../../docs/adr/0072-rate-limits-by-network-address.md)) |
 | `TETSU_SMTP_HOST` | `serve`, `admin create`, `admin invite` | Optional: the SMTP server mail goes through, over implicit TLS ([ADR-0074](../../docs/adr/0074-operator-email-in-development.md)). Without it, every message is kept for the mailbox page, except an invite, which is never kept. From `.env` only when `DATABASE_URL` is too, as are the settings below, and all of them from one place: some exported and some from a file are refused |
 | `TETSU_SMTP_PORT` | as above | The server's implicit-TLS port, `465` by default |
 | `TETSU_SMTP_USERNAME`, `TETSU_SMTP_PASSWORD` | as above | The server's login, required with a host. The password is a secret, never logged |
 | `TETSU_SMTP_CA_FILE` | as above | Optional: a PEM certificate authority the server is also trusted by, besides the public ones, such as the local Mailpit's, which `scripts/mailpit.py` sets in `.env.mailpit` while it runs |
 | `TETSU_MAIL_FROM` | as above | The address mail comes from, required with a host, on the provider's domain |
 | `TETSU_MAIL_ALLOW` | as above | Optional: the addresses, separated by commas, that get real email. Every other message is kept for the mailbox page, except an invite |
-| `PORT` | `serve` | The port a host such as Render sets, listened on at every interface. Without it, `serve` listens on `127.0.0.1:8080` |
+| `PORT` | `serve` | The port a host sets, listened on at every interface. Without it, `serve` listens on `127.0.0.1:8080` |
 | `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`, or `OTEL_EXPORTER_OTLP_ENDPOINT` with `/v1/logs` added | `serve` | Optional: where logs are exported over OTLP ([ADR-0049](../../docs/adr/0049-log-export.md)). HTTPS, or HTTP to this machine. Without it, nothing is exported |
 | `OTEL_EXPORTER_OTLP_LOGS_HEADERS` or `OTEL_EXPORTER_OTLP_HEADERS` | `serve` | Optional: percent-encoded `name=value` pairs sent with each export, such as the backend's key |
 | `OTEL_EXPORTER_OTLP_LOGS_COMPRESSION` or `OTEL_EXPORTER_OTLP_COMPRESSION` | `serve` | `none` (the default) or `gzip` |
 | `OTEL_SERVICE_NAME` | `serve` | The service name the backend sees, `tetsu` by default. `OTEL_RESOURCE_ATTRIBUTES` cannot replace it |
-| `OTEL_RESOURCE_ATTRIBUTES` | `serve` | Optional: percent-encoded `name=value` pairs describing this process, such as `deployment.environment.name=demo` |
+| `OTEL_RESOURCE_ATTRIBUTES` | `serve` | Optional: percent-encoded `name=value` pairs describing this process, such as `deployment.environment.name=production` |
 
 Any of these can also live in a local `.env` ([Run locally](#run-locally)). The logs-only export names win over the shared ones, as in every OpenTelemetry exporter. A bad export setting is
 a warning, and `serve` runs without export. The exporter itself also reads OpenTelemetry's tuning names, such as

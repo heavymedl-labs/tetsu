@@ -1,7 +1,7 @@
-# Demo environment
+# Production
 
-The one environment of the free phase ([ADR-0012](../adr/0012-first-hosting-and-deploys.md)): fictional tenants
-only, at <https://tetsu-demo.onrender.com>. Set up by hand on 2026-11-09; check it with `render services` and
+The one environment of the free phase ([ADR-0012](../adr/0012-first-hosting-and-deploys.md)), holding fictional tenants
+only for now ([ADR-0018](../adr/0018-demo-businesses-as-data.md)), at <https://tetsu-demo.onrender.com>. Set up by hand on 2026-11-09; check it with `render services` and
 `neonctl projects get square-tree-12604600`. Its secrets are listed in [secrets.md](secrets.md).
 
 ## Deploying
@@ -18,10 +18,17 @@ Every deploy that migrates then runs hosted test 8, `tetsu check`, as `tetsu_own
 every catalog rule, `tetsu_app` included, and that each module's role sees no row with no tenant set. A problem
 fails the deploy before Render serves the new image, and the log names it.
 
-Once Render serves the image and the deploy is recorded, `scripts/smoke_check.py` fetches the home page and a missing
-page, waiting out the free instance's wake, and checks each status and security header. A failure names the page and
-what was wrong: roll back to the previous commit, then fix forward. Run it against `tetsu serve` locally the same way,
-with the local address.
+Once every service runs the image and the deploy is recorded, `scripts/smoke_check.py` checks each realm's host: its
+own page, a missing page, and every other realm's login, which must be missing there, waiting out the free instance's
+wake, with each status and security header, and where a realm's root sends visitors. A failure names the host's page
+and what was wrong: roll back to the previous commit, then fix forward. To run it locally, serve one realm with
+`TETSU_SERVES` and pass the same `--serves`, since this machine serves every realm by default.
+
+The deploy sends the image to the site's service, then the admins', then the staff's, after checking each is named.
+If one fails, the log names it and the services before it, which run the new image while the rest run the old, and no
+deploy is recorded: run the deploy again once the failure is fixed, which sends the same image to all three. A
+rollback to a commit from before each realm had its own service ([ADR-0092](../adr/0092-a-service-per-realm-before-domains.md))
+is refused, since its image serves admins on the site's host.
 
 A rollback cannot cross a migration that takes rights away. Code from before
 [#106](https://github.com/heavymedl-labs/tetsu/issues/106) reads Tenancy's tables as `tetsu_app` directly, which
@@ -30,7 +37,7 @@ the old instance in the minute between the Migrate step and Render's switch to t
 
 Every deploy that migrates then seeds the demo businesses from the private `tetsu-demos` repository, with the image
 it deploys, as `tetsu_app` ([ADR-0062](../adr/0062-seeding-from-the-deploy.md)). Seeding skips businesses that exist,
-so a deploy that resets the demo leaves it complete. To add a business, add its file to `tetsu-demos` and run a
+so a deploy that resets a module leaves them complete. To add a business, add its file to `tetsu-demos` and run a
 deploy.
 
 ## Neon
@@ -103,20 +110,50 @@ Connection strings drop Neon's `sslmode`, which `tetsu` refuses since TLS is alw
 
 ## Render
 
-Web service `tetsu-demo` (`srv-dbp542rbc2fs73962k4g`) in Ohio, on the free instance, from the private image
-`ghcr.io/heavymedl-labs/tetsu` by digest, pulled with the `ghcr-tetsu` registry credential. Auto-deploy is off.
+Three web services, one for each realm's host ([ADR-0092](../adr/0092-a-service-per-realm-before-domains.md)), each
+in Ohio, on the free instance, from the private image `ghcr.io/heavymedl-labs/tetsu` by digest, pulled with the
+`ghcr-tetsu` registry credential, with auto-deploy off. `deploy.yml` names no host: it reads each realm's service and
+origin from variables of the GitHub environment `production`, set to let only `main` deploy, and `scripts/host.py`
+holds every call to Render, with its token from that environment's `HOST_TOKEN` secret, so moving hosts changes that
+script and these values. A deploy checks every one of them is set, and that each realm's service is its own, before
+it resets or migrates anything.
+
+| Service | Serves | Service variable | Origin variable |
+| --- | --- | --- | --- |
+| `tetsu-demo` (`srv-dbp542rbc2fs73962k4g`) | the site | `SITE_SERVICE` | `SITE_ORIGIN`, `https://tetsu-demo.onrender.com` |
+| `tetsu-demo-admin` | admins, at `/admin` | `ADMIN_SERVICE` | `ADMIN_ORIGIN`, `https://tetsu-demo-admin.onrender.com` |
+| `tetsu-demo-app` | staff, at `/app` | `STAFF_SERVICE` | `STAFF_ORIGIN`, `https://tetsu-demo-app.onrender.com` |
+
+Moving from one service to three, done once:
+
+1. Wait for [#111](https://github.com/heavymedl-labs/tetsu/issues/111)'s sub-slice 2d to close the staff gaps its
+   comments list, and for [#168](https://github.com/heavymedl-labs/tetsu/issues/168): the first deploy puts staff's
+   pages live on their host.
+2. Create the two new services from `tetsu-demo`'s settings, each with its `TETSU_SERVES` and origin below and
+   without the copied `TETSU_ORIGIN`, and set `TETSU_SERVES=site` on `tetsu-demo`.
+3. Create the GitHub environment `production`, with a deployment branch rule that allows only `main`, and set the
+   six variables above and the `HOST_TOKEN` secret on it.
+4. Deploy with `reset=identity,audit,mail`, since migrations Identity had applied there changed in place and two
+   were removed, as #111 records, then enroll your admin passkey again on the admin host.
+5. Remove `TETSU_ORIGIN` from `tetsu-demo`, which the image before this one read, and the repository's old
+   `RENDER_API_KEY` secret and `RENDER_SERVICE_ID` variable, which nothing reads now, and remove their row from
+   [secrets.md](secrets.md).
+6. Rename your local `.env.demo` to `.env.production`, and replace its `TETSU_ORIGIN` with the two lines
+   [Admins in production](#admins-in-production) gives.
 
 - **Command:** `/usr/local/bin/tetsu serve`. Render's command replaces the image's entrypoint too, so `serve`
   alone exits with status 128.
-- **Environment:** `TETSU_DEMO=true`, `TETSU_ORIGIN=https://tetsu-demo.onrender.com`, which the admin
-  pages' passkeys belong to, `TETSU_TRUSTED_PROXIES=3`, the proxies measured in front of the service
-  ([ADR-0072](../adr/0072-rate-limits-by-network-address.md)), and `DATABASE_URL`, and the export settings under
-  [Logs and alerts](#logs-and-alerts). Render sets `PORT`.
-- **Health check:** `/`.
-- **Free instance:** sleeps after 15 minutes without traffic. Waking takes about 12 seconds, Neon's included, and
-  once in 50 tries took 8 minutes ([test 9](../research/hosting.md#first-deploy-2026-11-09)).
-
-The GitHub repository variable `RENDER_SERVICE_ID` names the service for `deploy.yml`.
+- **Environment, on each:** `TETSU_DEMO=true`, `TETSU_TRUSTED_PROXIES=3`, the proxies measured in front of the
+  service ([ADR-0072](../adr/0072-rate-limits-by-network-address.md)), `DATABASE_URL`, and the export settings
+  under [Logs and alerts](#logs-and-alerts). Render sets `PORT`.
+- **Environment, by service:** `TETSU_SERVES` names what it serves: `site`, `admin`, or `staff`. The admin
+  service sets `TETSU_ADMIN_ORIGIN` to its own origin, which its passkeys belong to, and the staff service
+  `TETSU_STAFF_ORIGIN` to its own.
+- **Health check:** `/`, which the site answers with its home page and each realm's host with a redirect to its
+  realm's home. Render's treatment of a redirect as healthy is not yet confirmed; the first deploy shows it.
+- **Free instances:** each sleeps after 15 minutes without traffic, and nothing keeps one awake, so the three
+  share the workspace's 750 free hours only while used. Waking takes about 12 seconds, Neon's included, and once
+  in 50 tries took 8 minutes ([test 9](../research/hosting.md#first-deploy-2026-11-09)).
 
 ## Logs and alerts
 
@@ -169,10 +206,10 @@ access → Service accounts**, add it a token, and register the server yourself,
 
 The leading space keeps the command out of shell history.
 
-## Resetting the demo database
+## Resetting the database
 
 Before the first real business, a change to a module's first migrations may be folded into those files rather than
-added as new ones, as for [ADR-0060](../adr/0060-database-hardening.md). The runner then refuses the demo's database,
+added as new ones, as for [ADR-0060](../adr/0060-database-hardening.md). The runner then refuses production's database,
 since its record holds the old text, so the changed modules start over. Deploy with their schemas named:
 
 ```bash
@@ -181,7 +218,7 @@ gh workflow run deploy -f reset=tenancy,audit
 
 The Reset step checks the server against the floor, then drops the named schemas, records of applied files
 included, and migrates; the deploy's own migrate then finds nothing new, and it checks and seeds as usual. It drops
-nothing if any name is not a module's schema. The demo
+nothing if any name is not a module's schema. Production
 serves errors from the drop until the deploy finishes.
 
 ## When `serve` refuses to start
@@ -221,7 +258,7 @@ Consumers skip what they already applied, so a replay repeats nothing.
 
 The dispatcher removes rows past their use each hour ([ADR-0080](../adr/0080-event-rows-past-their-use.md)), and
 logs how many when it removes any. Its first cleanup after ADR-0080 shipped removes every stopped event over 30
-days old at once, and works through a backlog of old inbox IDs twenty thousand an hour. The demo holds no real
+days old at once, and works through a backlog of old inbox IDs twenty thousand an hour. Production holds no real
 business's data, so nothing that matters is lost; a database that did would replay or keep its stopped events
 first. An older build that runs again, through `rollback_to` or the minute two instances overlap in a deploy, does
 not mark an event kept when a consumer that must never lose it went unreached, so replay any event it stops within
@@ -231,32 +268,33 @@ from the inboxes until its cause, such as an outbox that lost its delivery polic
 ## Hosted chores
 
 A chore runs instead of a deploy, in the deploy workflow's chore job, the only workflow that may read secrets
-(ADR-0027). It runs from the image live on the demo, as `tetsu_app`, whose URL it reads from the Render
-service through `RENDER_API_KEY` and masks in the log. It runs only from `main`, never alongside a deploy, and
+(ADR-0027). It runs from the image live in production, as `tetsu_app`, whose URL it reads from the site's service
+through `scripts/host.py` and masks in the log. It runs only from `main`, never alongside a deploy, and
 refuses inputs that are not the shape the chore takes.
 
-## Admins on the demo
+## Admins in production
 
-An admin is made from your own terminal, since an invite link prints only to one, with the demo's settings in
-`.env.demo` at the repository's root ([ADR-0073](../adr/0073-settings-files-per-environment.md)). Git ignores it.
-Make it once, readable only by you (`chmod 600 .env.demo`), with these lines:
+An admin is made from your own terminal, since an invite link prints only to one, with production's settings in
+`.env.production` at the repository's root ([ADR-0073](../adr/0073-settings-files-per-environment.md)). Git ignores it.
+Make it once, readable only by you (`chmod 600 .env.production`), with these lines:
 
 ```text
 DATABASE_URL=<the Render service's DATABASE_URL, which is tetsu_app's>
-TETSU_ORIGIN=https://tetsu-demo.onrender.com
+TETSU_ADMIN_ORIGIN=https://tetsu-demo-admin.onrender.com
+TETSU_STAFF_ORIGIN=https://tetsu-demo-app.onrender.com
 ```
 
-The demo sends no email until Tetsu has a domain ([ADR-0079](../adr/0079-no-mail-provider-before-a-domain.md),
+Production sends no email until Tetsu has a domain ([ADR-0079](../adr/0079-no-mail-provider-before-a-domain.md),
 [#151](https://github.com/heavymedl-labs/tetsu/issues/151)): notices are kept for the mailbox page, and invites,
 which are never kept, are only printed. Mail settings, when they come, go in this file and Render's environment
 alike, all of them in each ([ADR-0078](../adr/0078-mail-settings-from-one-place.md)).
 
-Then, from the commit the demo runs:
+Then, from the commit production runs:
 
 ```bash
-cargo tetsu --env demo admin create "Your Name" you@example.com   # prints the invite link, and emails it
-cargo tetsu --env demo admin list
-cargo tetsu --env demo admin email 1 you@example.com   # gives an admin made before addresses one
+cargo tetsu --env production admin create "Your Name" you@example.com   # prints the invite link, and emails it
+cargo tetsu --env production admin list
+cargo tetsu --env production admin email 1 you@example.com   # gives an admin made before addresses one
 ```
 
 Open the link to join with a passkey; it logs you in and opens your Profile. Every other `admin` command works the same way.

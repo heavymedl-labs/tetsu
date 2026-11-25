@@ -20,10 +20,10 @@ GOOD = {
 
 
 class Site:
-    """A local server answering `/` with 200 and anything else with 404, with these headers, after first
-    answering 503 `waking` times, as a host does while its instance starts."""
+    """A local server answering `/` with 200, or each of `pages` with its status, and anything else with 404,
+    with these headers, after first answering 503 `waking` times, as a host does while its instance starts."""
 
-    def __init__(self, headers=GOOD, waking=0, root_status=200):
+    def __init__(self, headers=GOOD, waking=0, root_status=200, pages=None, location=None):
         site = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -33,15 +33,18 @@ class Site:
                     self.send_response(503)
                     self.end_headers()
                     return
-                self.send_response(site.root_status if self.path == "/" else 404)
+                self.send_response(site.pages.get(self.path, 404))
                 for name, value in site.headers.items():
                     self.send_header(name, value)
+                if self.path == "/" and site.location:
+                    self.send_header("Location", site.location)
                 self.end_headers()
 
             def log_message(self, *_):
                 pass
 
-        self.headers, self.waking, self.root_status = headers, waking, root_status
+        self.headers, self.waking, self.location = headers, waking, location
+        self.pages = {"/": root_status} if pages is None else pages
         self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
@@ -106,13 +109,36 @@ class SmokeCheckTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("error: /: no answer after waiting 0 seconds", result.stderr)
 
+    def test_each_host_is_checked_for_its_own_realms_pages(self):
+        admin = self.site(pages={"/": 303, "/admin/login": 200}, location="/admin")
+        result = smoke(admin.url, "--serves", "admin")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result = smoke(admin.url, "--serves", "staff")
+        self.assertEqual(result.returncode, 1)
+        for problem in ["/app/login: status 404, expected 200", "/admin/login: status 200, expected 404"]:
+            self.assertIn(f"error: {problem}", result.stderr)
+
+    def test_a_realms_root_must_send_visitors_to_its_home(self):
+        elsewhere = self.site(pages={"/": 303, "/app/login": 200}, location="/admin")
+        result = smoke(elsewhere.url, "--serves", "staff")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("error: /: sends visitors to '/admin', expected '/app'", result.stderr)
+
+    def test_the_site_serves_no_realms_pages(self):
+        site = self.site(pages={"/": 200, "/admin/login": 200})
+        result = smoke(site.url)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("error: /admin/login: status 200, expected 404", result.stderr)
+
     def test_bad_arguments_print_the_usage(self):
         for args in [
             [],
-            ["tetsu-demo.onrender.com"],
+            ["tetsu.example.com"],
             ["https://x", "--wait"],
             ["https://x", "--wait", "soon"],
             ["https://x", "--retries", "3"],
+            ["https://x", "--serves", "ops"],
+            ["https://x", "--serves"],
         ]:
             result = run(["python3", SCRIPT, *args], ROOT)
             self.assertEqual(result.returncode, 2, args)

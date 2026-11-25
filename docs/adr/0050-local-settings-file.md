@@ -25,7 +25,7 @@ a local run. Commands should run as written, with their settings already in plac
 - **A line that is not a setting stops the command,** naming the file and line number but never its text, since a
   value may be a password.
 - **Production secrets stay out of it.** A command run against a host's database, such as seeding the demo, still
-  takes the address at a prompt ([demo-environment.md](../operations/demo-environment.md)).
+  takes the address at a prompt ([production.md](../operations/production.md)).
 - **The reader is ours, about 30 lines in `settings.rs`,** next to the code that already reads every variable
   through one function.
 

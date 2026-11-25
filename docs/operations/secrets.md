@@ -8,17 +8,18 @@ or when a workflow sets a `GITHUB_TOKEN` permission its row does not list.
 
 ## Secrets
 
-The demo environment's setup is in [demo-environment.md](demo-environment.md). Each value went straight from the
+Production's setup is in [production.md](production.md). Each value went straight from the
 tool that made it into its store, never shown.
 
 | Secret | Store | Scope | Use | Last rotated |
 | --- | --- | --- | --- | --- |
 | `GITHUB_TOKEN` | GitHub, issued per workflow run | That run, with the permissions below | Each workflow's own API calls | automatic |
-| `MIGRATION_DATABASE_URL` | GitHub Actions, repository secret | Role `tetsu_owner` on Neon project `tetsu-demo`, direct endpoint, which owns Tetsu's schemas and creates its roles; set from a password no one kept ([runbook](demo-environment.md#moving-onto-tetsus-own-roles)) | `deploy.yml`'s Reset, Migrate, and Check isolation steps | 2026-11-12 |
-| `RENDER_API_KEY` | GitHub Actions, repository secret | The maintainer's Render account; Render offers no narrower key | `deploy.yml`'s Deploy and Seed steps, and its chore job, which read the service's `DATABASE_URL` through it and mask it | 2026-11-09 |
+| `MIGRATION_DATABASE_URL` | GitHub Actions, repository secret | Role `tetsu_owner` on Neon project `tetsu-demo`, direct endpoint, which owns Tetsu's schemas and creates its roles; set from a password no one kept ([runbook](production.md#moving-onto-tetsus-own-roles)) | `deploy.yml`'s Reset, Migrate, and Check isolation steps | 2026-11-12 |
+| `HOST_TOKEN` | GitHub Actions, secret of the `production` environment, set at step 3 of the move to three services with `RENDER_API_KEY`'s value | The host's API token, the maintainer's Render account today; Render offers no narrower key | `scripts/host.py`, from `deploy.yml`'s Deploy and Seed steps and its chore job, which deploy the services and read the site's `DATABASE_URL`, masked | 2026-11-09 |
+| `RENDER_API_KEY` | GitHub Actions, repository secret | The same Render token, read by `deploy.yml` until the move to three services; removed at its step 5 ([runbook](production.md#render)) | Nothing once `HOST_TOKEN` is set | 2026-11-09 |
 | `DEMOS_READ_TOKEN` | GitHub Actions, repository secret | A fine-grained GitHub token that reaches only `heavymedl-labs/tetsu-demos`, with read access to its contents (ADR-0062), owned by the organization, expiring 2027-11-16 | `deploy.yml`'s Fetch the demo businesses step | 2026-11-15 |
-| `DATABASE_URL` | Render, environment of service `tetsu-demo` | Role `tetsu_app`, which acts only as module roles, one transaction at a time | `tetsu serve` | 2026-11-09 |
-| `OTEL_EXPORTER_OTLP_HEADERS` | Render, environment of service `tetsu-demo` | Grafana Cloud token `render-tetsu-demo` on access policy `tetsu-demo-logs`: only `logs:write` on stack `regalchicken947`; it never expires, so it rotates yearly ([runbook](demo-environment.md#logs-and-alerts)) | `tetsu serve`'s log export | 2026-11-13 |
+| `DATABASE_URL` | Render, environment of each realm's service | Role `tetsu_app`, which acts only as module roles, one transaction at a time | `tetsu serve` | 2026-11-09 |
+| `OTEL_EXPORTER_OTLP_HEADERS` | Render, environment of each realm's service | Grafana Cloud token `render-tetsu-demo` on access policy `tetsu-demo-logs`: only `logs:write` on stack `regalchicken947`; it never expires, so it rotates yearly ([runbook](production.md#logs-and-alerts)) | `tetsu serve`'s log export | 2026-11-13 |
 | `ghcr-tetsu` | Render, registry credential | A GitHub classic token with only `read:packages`, expiring 2027-11-09 | Render pulling the private image | 2026-11-09 |
 | Grafana service account token | Claude Code's local MCP settings on the maintainer's machine | Service account `claude-mcp` on stack `regalchicken947`, **Viewer** role, used by `mcp-grafana --disable-write` ([ADR-0052](../adr/0052-grafana-from-agent-sessions.md)) | Sessions reading logs and alert state | 2026-11-13 |
 | Render CLI token | `~/.render/cli.yaml` on the maintainer's machine, mode 600 | The maintainer's Render account, refreshed by `render login` | Setting up and inspecting the service | 2026-11-09 |
@@ -41,6 +42,6 @@ here that has passed.
 | Workflow | `GITHUB_TOKEN` permissions |
 | --- | --- |
 | `ci.yml` | `permissions: {}` for the workflow, so each job asks for its own: the checks job `contents: read`, and `actions: read` to find the commit the last successful run checked; the image job the same, so a run whose base is its own commit stops at once in both (ADR-0064); and the publish job, which runs only GitHub's own actions after every check passes, `packages: write` alone, to publish the image a manual run on main checked |
-| `deploy.yml` | `contents: read`, `actions: read` to find the CI run that checked the commit and download its digest, `packages: write` to pull the image and prune old ones, and `deployments: write` to record each deploy. Its chore job has `contents: read`, `deployments: read` to find the image live on the demo, and `packages: read` to pull it. Render's service ID is a repository variable, not a secret |
+| `deploy.yml` | `contents: read`, `actions: read` to find the CI run that checked the commit and download its digest, `packages: write` to pull the image and prune old ones, and `deployments: write` to record each deploy. Its chore job has `contents: read`, `deployments: read` to find the image live in production, and `packages: read` to pull it. Each realm's service and origin are variables of the `production` environment, not secrets |
 | `renewals.yml` | `contents: read`, and `issues: write` to open a reminder for each renewal due within 30 days |
 | `benchmarks.yml` | `contents: read`; its image job adds `packages: write` to push the benchmark image, and its run job `packages: read` to pull it |

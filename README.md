@@ -50,7 +50,7 @@ To test its security, and to report what you find privately, see [SECURITY.md](S
 ## Runs on
 
 Free tiers for now, each behind a setting or a port so it can be swapped
-([runbook](docs/operations/demo-environment.md)).
+([runbook](docs/operations/production.md)).
 
 | What | Provider | Status |
 | --- | --- | --- |

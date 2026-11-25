@@ -69,7 +69,7 @@ Only tenancy's and audit's migrations have run anywhere, on the demo's fictional
 ## Consequences
 
 - The changes fold into each module's first migrations, which hold only demo data, and the demo's database is reset
-  from its seed once ([demo environment](../operations/demo-environment.md#resetting-the-demo-database)). Squawk
+  from its seed once ([production](../operations/production.md#resetting-the-database)). Squawk
   refuses them as new migrations: each added check blocks writes while it scans, and the locations key drops a
   constraint. Once a real business stores data, changes like these take new migrations in expand and contract steps.
 - Audit's retention, and with it whether `records` is partitioned by time, which its unique `event_id` key blocks, is

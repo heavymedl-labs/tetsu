@@ -39,7 +39,7 @@ one failing to close.
 - A session joining began cannot add a passkey or do anything else that needs a fresh login, so the operator's
   page tells them to log out and log in with their passkey first.
 - The chained login and its fallbacks leave the passkey island, and with them its hardest cases.
-- Changing the first identity migration is folded in as the [runbook](../operations/demo-environment.md) allows
+- Changing the first identity migration is folded in as the [runbook](../operations/production.md) allows
   before the first real business, so the demo deploys with its identity schema reset, and local databases run
   `tetsu reset identity`.
 

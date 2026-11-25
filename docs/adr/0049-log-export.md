@@ -54,7 +54,7 @@ and rewording a message breaks no rule.
 | `start_failed` | `tetsu serve` failing to start, logged and flushed before it exits | 1 line in 5 minutes |
 
 The table is the rules' one home, in a neutral form. Each backend's rendering, such as LogQL for Grafana, and its
-email contact point are recorded in [demo-environment.md](../operations/demo-environment.md). Moving backends means
+email contact point are recorded in [production.md](../operations/production.md). Moving backends means
 writing the three rules and the contact point again from this table.
 
 ## Alternatives considered

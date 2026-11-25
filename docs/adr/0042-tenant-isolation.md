@@ -179,7 +179,7 @@ the application's own filters as a second layer.
 
 - The demo database moves onto these roles in #106. Today `tetsu_migrate` belongs to `neon_superuser` and owns
   everything, and `tetsu_app` holds table rights through default privileges
-  ([demo environment](../operations/demo-environment.md)). A new owner role made in SQL takes ownership, those
+  ([demo environment](../operations/production.md)). A new owner role made in SQL takes ownership, those
   grants and default privileges are revoked, and the demo environment page is updated.
 - Tenancy's tables gain their class: `tenants` and `addresses` are global, and `locations` is tenant-owned and gets
   forced RLS and both policies. Tenancy moves to the Tier 1 bar in

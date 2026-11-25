@@ -33,7 +33,7 @@ service spends none, and the demo sleeps unless visited, so a service for each r
   web services once they are spent; a service spun down by idleness spends none
   ([Render: deploy for free](https://render.com/docs/free)). Services awake all month would need 720 hours each, but
   the demo sleeps after 15 minutes without traffic, and nothing keeps it awake
-  ([demo environment](../../operations/demo-environment.md)).
+  ([demo environment](../../operations/production.md)).
 - A passkey made on `tetsu-demo.onrender.com` can use only that host as its RP ID, since `onrender.com` is a public
   suffix, so demo passkeys are disposable whatever the layout ([passkey domains](../passkey-domains.md)).
 
