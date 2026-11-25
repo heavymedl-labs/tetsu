@@ -1989,6 +1989,38 @@ mod tests {
         );
     }
 
+    /// A staff invite's answer of the wrong type, in any column, is a storage failure, never a guess.
+    #[tokio::test]
+    async fn a_staff_invite_answer_of_the_wrong_type_is_a_storage_failure() {
+        let (pool, _database) = support::migrated().await;
+        let client = pool.get().await.expect("a connection");
+        let good = ["'issued'::text", "7::bigint", "true", "false"];
+        let columns = ["outcome", "invited", "created", "renamed"];
+        for (at, wrong) in ["1", "7::integer", "1", "1"].into_iter().enumerate() {
+            let mut values = good;
+            values[at] = wrong;
+            let select = values
+                .iter()
+                .zip(columns)
+                .map(|(value, column)| format!("{value} AS {column}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let rows = client
+                .query(&format!("SELECT {select}"), &[])
+                .await
+                .expect("answers");
+            let why = staff_issuance(&rows, BusinessId::new(3), Role::Owner, &support::actor())
+                .map(drop)
+                .unwrap_err()
+                .to_string();
+            assert_eq!(
+                why.split(':').nth(1).map(str::trim),
+                Some(format!("error deserializing column {at}").as_str()),
+                "{why}"
+            );
+        }
+    }
+
     /// A create says what it found and records it, in this one build, which llvm-cov scores on its own: an
     /// admin added, a name another holds, or a name taken by one it cannot yet see.
     #[test]

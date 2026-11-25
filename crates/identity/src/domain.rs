@@ -1064,6 +1064,15 @@ impl std::error::Error for Error {}
 mod tests {
     use super::*;
 
+    /// A role reads back from the name it writes, and no other name is a role yet, in any case.
+    #[test]
+    fn a_role_is_read_only_by_its_own_name() {
+        assert_eq!(Role::parse(Role::Owner.as_str()), Some(Role::Owner));
+        for other in ["Owner", "manager", "front_desk", "instructor", ""] {
+            assert_eq!(Role::parse(other), None, "{other:?}");
+        }
+    }
+
     /// Printing a session leaves out the hash of its token, which finds it.
     #[test]
     fn a_printed_session_hides_its_hash() {

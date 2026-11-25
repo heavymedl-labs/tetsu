@@ -14,14 +14,18 @@ use crate::join_tests::{
 use crate::ports::LoginStore;
 use passkey::types::Passkey;
 
-use crate::{AccountId, Accounts, Answer, Identity, Realm, SessionToken};
+use crate::{AccountId, Accounts, Answer, Error, Identity, Realm, SessionToken};
 
 /// The business Ada is invited to.
 const BUSINESS: i64 = 3;
 
 /// Staff's use cases over a fresh migrated database, with Ada Park invited to the business as its owner, and her
 /// link.
-async fn invited() -> (Accounts<impl LoginStore>, TestDatabase, String) {
+async fn invited() -> (
+    Accounts<impl crate::ports::StaffStore>,
+    TestDatabase,
+    String,
+) {
     let database = migrated_database(&[&Identity])
         .await
         .expect("a migrated test database");
@@ -338,4 +342,87 @@ async fn an_issued_invite_joins_its_staff_member_and_a_replaced_one_does_not() {
     let role =
         "SELECT count(*) FROM identity.staff_roles WHERE tenant_id = 3 AND role_name = 'owner'";
     assert_eq!(number(&database, role).await, 1);
+}
+
+/// Inviting needs a secure random source and storage: without either it fails, saying which, and invites no one.
+#[tokio::test]
+async fn an_invite_without_randomness_or_storage_invites_no_one() {
+    let database = migrated_database(&[&Identity])
+        .await
+        .expect("a migrated test database");
+    let invite = |staff: Accounts<PostgresStaff>| async move {
+        staff
+            .invite_staff(
+                crate::BusinessId::new(BUSINESS),
+                &crate::PersonName::parse("Ada Park").expect("a name"),
+                &tetsu_kernel::Address::parse("ada@example.com").expect("an address"),
+                crate::Role::Owner,
+                &actor(),
+            )
+            .await
+            .map(drop)
+            .map_err(|error| error.to_string())
+    };
+    let failing = Accounts::with_fill(PostgresStaff::new(app_pool(&database)), |_| {
+        Err(getrandom::Error::UNSUPPORTED)
+    });
+    assert_eq!(
+        invite(failing).await,
+        Err(format!(
+            "temporarily unavailable: no secure random source: {}",
+            getrandom::Error::UNSUPPORTED
+        ))
+    );
+    as_db_admin(
+        &database,
+        "REVOKE EXECUTE ON FUNCTION identity.staff_issue_invite(bytea, text, text, text) FROM tetsu_identity",
+    )
+    .await;
+    assert_eq!(
+        invite(Accounts::new(PostgresStaff::new(app_pool(&database)))).await,
+        Err("storage failed: permission denied for function staff_issue_invite".to_string())
+    );
+    assert_eq!(
+        number(&database, "SELECT count(*) FROM identity.staff").await,
+        0
+    );
+}
+
+/// A staff member who holds a role at the business, or is disabled, is refused by name, in this one build, so its
+/// copy of the use case covers every path.
+#[tokio::test]
+async fn an_invite_to_a_member_or_a_disabled_staff_member_is_refused() {
+    let (staff, database, _) = invited().await;
+    let (name, email, by) = (
+        crate::PersonName::parse("Ada Park").expect("a name"),
+        tetsu_kernel::Address::parse("ada@example.com").expect("an address"),
+        actor(),
+    );
+    let invite = || {
+        staff.invite_staff(
+            crate::BusinessId::new(BUSINESS),
+            &name,
+            &email,
+            crate::Role::Owner,
+            &by,
+        )
+    };
+    as_db_admin(
+        &database,
+        "INSERT INTO identity.staff_roles (tenant_id, staff_id, role_name) SELECT 3, id, 'owner' FROM identity.staff",
+    )
+    .await;
+    assert_eq!(
+        invite().await.map(drop),
+        Err(Error::Invalid(
+            "the staff member at ada@example.com holds a role at this business already".to_string()
+        ))
+    );
+    as_db_admin(&database, "UPDATE identity.staff SET disabled_at = now()").await;
+    assert_eq!(
+        invite().await.map(drop),
+        Err(Error::Invalid(
+            "the staff member at ada@example.com is disabled".to_string()
+        ))
+    );
 }
