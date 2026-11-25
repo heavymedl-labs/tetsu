@@ -109,6 +109,20 @@ impl TenantTransaction<'_> {
         self.recorded();
         insert(self, self.schema(), Outbox::Tenant, event).await
     }
+
+    /// Records an event in this module's global outbox from this tenant's transaction, for one the tenant must not
+    /// see, such as an operator's change that names another tenant's facts. It is delivered only if the transaction
+    /// commits.
+    ///
+    /// # Errors
+    /// Fails if the payload is not JSON or the insert fails.
+    pub async fn record_global(
+        &self,
+        event: &NewEvent<'_>,
+    ) -> Result<String, tokio_postgres::Error> {
+        self.recorded();
+        insert(self, self.schema(), Outbox::Global, event).await
+    }
 }
 
 impl ModuleTransaction<'_> {

@@ -436,6 +436,31 @@ async fn an_event_for_no_business_goes_through_the_global_inbox() {
     );
 }
 
+/// An event a business's transaction records for no business, such as an operator's change to a global row, goes to
+/// the global outbox, never the business's, and only if the transaction commits.
+#[tokio::test]
+async fn a_business_transaction_records_a_global_event_only_if_it_commits() {
+    let World { pool, database, .. } = world().await;
+    for commit in [false, true] {
+        let mut client = pool.get().await.expect("a connection");
+        let transaction = TenantTransaction::begin(&mut client, "people", 1)
+            .await
+            .expect("begins");
+        transaction.record_global(&JOINED).await.expect("records");
+        if commit {
+            transaction.commit().await.expect("commits");
+        }
+    }
+    assert_eq!(
+        read::<i64>(
+            &database,
+            "SELECT (SELECT count(*) FROM people.outbox_global) * 10 + (SELECT count(*) FROM people.outbox)"
+        )
+        .await,
+        10
+    );
+}
+
 #[tokio::test]
 async fn events_nobody_wants_are_settled_at_once() {
     let World {
