@@ -95,7 +95,7 @@ number, and add a row below. Never renumber.
 | [0088](0088-admins-apart-from-staff.md) | Admins apart from staff, one login flow in code | Storing accounts for a realm, or sharing login code across realms | Accepted |
 | [0089](0089-staff-join-and-login.md) | Staff join and log in | Building staff sign-in, invites, or staff tables | Accepted |
 | [0090](0090-a-session-table-per-realm.md) | A session table per realm | Storing a realm's sessions | Accepted |
-| [0091](0091-realm-sql-rendered-from-one-source.md) | Realm SQL rendered from one source | Writing SQL a realm shares with another | Proposed |
+| [0091](0091-realm-sql-rendered-from-one-source.md) | Realm SQL rendered from one source | Writing SQL a realm shares with another | Accepted |
 | [0068](0068-no-demo-note.md) | No demo note | Changing what marks a demo page | Proposed |
 
 ## Open decisions

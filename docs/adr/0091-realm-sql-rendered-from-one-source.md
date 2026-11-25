@@ -1,6 +1,6 @@
 # 0091. Realm SQL rendered from one source
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-24
 
 ## Context
@@ -29,8 +29,9 @@ Jinja do, which SQLFluff lints after rendering.
   source to drift.
 - **A test fails if a rendered function still names anything of the admin realm's,** so a missed swap never points a
   realm's function at another realm's tables, and the catalog checks see every rendered function as they see the rest.
-- **What differs by realm is written out, not rendered:** staff invites, owned by each business (ADR-0089), joining
-  and the role it adds, and admins' cap of two passkeys (ADR-0057).
+- **What differs by realm is written out, not rendered:** staff invites, owned by each business (ADR-0089), and
+  joining and the role it adds. Each realm's passkey cap is a small function, as its session limits are: two for
+  admins (ADR-0057) and ten for staff, and a realm it does not know may add none.
 - **A store asks only for its own realm:** the port's methods take no realm from the caller, since each store names
   its realm (`LoginStore::REALM`).
 
