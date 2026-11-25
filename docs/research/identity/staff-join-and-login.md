@@ -193,6 +193,47 @@ explicit action may.
   functions; then the role is added. Any failure undoes all of it.
 - **The same routes as admins:** `/app/join`, its token in the fragment, after ADR-0084.
 
+## Issuing an invite: replacing one, and what its email says
+
+A third pass, on 2026-11-25, asked what `tetsu staff invite` must do beyond creating the invite: what a second
+invite to the same person does, and what the email may carry.
+
+**Takeaway:**
+
+Leaders have no resend that revives an old link: a new invite replaces the pending one, and the old link stops
+working. The email names the business, which the business chose, so that name is the one piece of text an attacker
+can steer, and leaders' worst invite incidents came from it.
+
+**Cited Findings:**
+
+- GitHub lets owners edit or cancel a pending invite until it is accepted, and lists no resend; its community's
+  answer is to cancel and invite again
+  ([GitHub Docs](https://docs.github.com/en/organizations/managing-membership-in-your-organization/canceling-or-editing-an-invitation-to-join-your-organization);
+  [GitHub Community](https://github.community/t/how-do-i-resend-a-pending-invitation/2203)).
+- Shopify has no resend for staff invites; removing the pending invite and adding the email again sends a new link
+  and ends the old one, by its community's account
+  ([Shopify Community](https://community.shopify.com/t/how-can-i-resend-staff-account-invites-on-my-platform/28530)).
+- Clerk's invites are pending, accepted, or revoked, each made with an email and a role, and revocable
+  ([Clerk: invitations](https://clerk.com/docs/guides/organizations/add-members/invitations.md)).
+- Attackers named OpenAI organizations with links and phone numbers, so its own invite emails carried them, and
+  passed the receiving servers' checks ([BleepingComputer](https://bleepingcomputer.com/news/security/cybersecurity-firms-targeted-by-fraudulent-openai-organization-invites)).
+  OWASP calls user text placed in an application's mail content spoofing, a risk even when it is escaped
+  ([OWASP: content spoofing](https://owasp.org/www-community/attacks/Content_Spoofing)), and Tolgee shipped an
+  organization name unescaped into its invite email
+  ([GHSA-gx3w-rwh5-w5cg](https://github.com/tolgee/tolgee-platform/security/advisories/GHSA-gx3w-rwh5-w5cg)).
+
+## Recommendations for issuing
+
+- **A new invite replaces the old,** as `staff_invites`' one row per person and business already makes it, and ends
+  any join begun from the old link. There is no resend.
+- **The email names the business and the role as escaped text, never inside a link.** Escaping stops markup, not a
+  URL a mail reader turns into a link, so the name is trusted only while the operator names businesses; before owners
+  name their own, business names must refuse URLs.
+- **An existing email keeps its staff member's name,** since only the person changes it (ADR-0040), and the command
+  says so when the name given differs.
+- **Someone who already holds a role at the business is issued nothing,** since changing a role is sub-slice 4's.
+- **A disabled staff member is issued nothing,** as for admins.
+
 ## Gaps
 
 - The pages were read through search summaries, not opened; Shopify's `/store/<handle>` path comes from a third-party
