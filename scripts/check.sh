@@ -70,8 +70,15 @@ if ! right_node && [[ -s "$nvm_script" ]]; then
   nvm use "$wanted" >/dev/null
   set -eu
 fi
+# mise, as Omarchy ships it, installs the release .nvmrc names once, and its folder goes first.
+if ! right_node && command -v mise >/dev/null; then
+  mise install --quiet "node@$wanted" >/dev/null 2>&1 &&
+    mise_node="$(mise where "node@$wanted" 2>/dev/null)" &&
+    PATH="$mise_node/bin:$PATH"
+fi
 if ! right_node; then
   echo "error: Node $wanted is required. Install it, for example: nvm install $wanted" >&2
+  echo "or, with mise: mise install node@$wanted" >&2
   exit 1
 fi
 # npm is checked like cargo-deny, against the version package.json names (ADR-0034).

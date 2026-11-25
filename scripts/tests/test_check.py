@@ -35,6 +35,8 @@ class CheckScript(unittest.TestCase):
         write(self.root / ".nvmrc", "26\n")
         self.bin = self.root / "bin"
         self.stub("node", "echo v26.1.0")
+        # No mise unless a test gives one, so the machine's own never answers.
+        self.stub("mise", "exit 1")
         for tool in ("npx", "cargo", "cargo-llvm-cov", "cargo-mutants"):
             self.stub(tool, f'echo "{tool} $*" >> "{self.log}"')
         write(self.root / "package.json", '{\n  "packageManager": "npm@11.20.0"\n}\n')
@@ -628,6 +630,27 @@ class CheckScript(unittest.TestCase):
         write(nvm / "nvm.sh", "nvm() { export NVM_SWITCHED=1; }\n")
         result = self.check(nvm_dir=nvm)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_switches_node_through_mise(self):
+        self.stub("node", "echo v10.15.3")
+        installed = self.root / "mise-node"
+        write(installed / "bin" / "node", "#!/bin/sh\necho v26.1.0\n", EXECUTABLE)
+        # mise installs the release .nvmrc names, then says where it is.
+        self.stub(
+            "mise",
+            f'echo "mise $*" >> "{self.log}"\n'
+            'case "$*" in "install --quiet node@26") exit 0;; '
+            f'"where node@26") echo "{installed}";; *) exit 1;; esac',
+        )
+        result = self.check()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("mise install --quiet node@26", self.log.read_text())
+
+    def test_a_mise_that_cannot_install_node_leaves_the_error(self):
+        self.stub("node", "echo v10.15.3")
+        result = self.check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("mise install node@26", result.stderr)
 
     def test_wrong_node_version_fails_with_a_fix(self):
         self.stub("node", "echo v10.15.3")
