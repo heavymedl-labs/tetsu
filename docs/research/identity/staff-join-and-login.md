@@ -1,7 +1,8 @@
 # How staff join and log in
 
 Researched 2026-11-24 for [#111](https://github.com/heavymedl-labs/tetsu/issues/111)'s sub-slice 2, staff join and
-log in, after the maintainer asked that each slice be checked against industry leaders before it is built. The
+log in, after the maintainer asked that each slice be checked against industry leaders before it is built. A second
+pass the same day asked how invites and memberships, owned by each business, are read before a business is known. The
 identity model is settled elsewhere and not repeated here: one global staff identity with a membership and role in
 each business ([commerce, payments, and booking realms](commerce-booking-realms.md);
 [multi-tenant identity patterns](multitenant-identity-patterns.md)), sessions owned by the person with checks per
@@ -99,6 +100,34 @@ flag on one account-creating command, and show its secret once, in the terminal.
 - Discourse creates an admin with `rake admin:create`, which asks for the email, and offers to grant admin to an
   account that already exists ([Discourse Meta](https://meta.discourse.org/t/create-an-admin-account-from-the-console/17274)).
 
+## Invites and memberships belong to the business, with two narrow ways across
+
+**Takeaway:**
+
+Products built on row security keep invites and memberships as the business's own rows, and open exactly two paths
+across businesses: a function that finds one invite by its token, and a person's own memberships, keyed on who is
+logged in. Tetsu's [ADR-0042](../../adr/0042-tenant-isolation.md) already allows both in words: lookups before a
+business is known go through "one narrow `SECURITY DEFINER` function each", and "which businesses can I work at" is
+named as one. Its catalog check does not yet allow them: a tenant-owned table may hold only the two tenant policies
+for its module's role, so a lookup role, whose functions run with row security forced, finds nothing there.
+
+**Cited Findings:**
+
+- Basejump, a multi-tenant starter for Supabase, keeps `basejump.invitations` under its account (`account_id`), with
+  row security on, owners alone able to read, make, and delete them, and invites lasting 24 hours from creation
+  ([Basejump invitations migration](https://raw.githubusercontent.com/usebasejump/basejump/main/supabase/migrations/20240414162100_basejump-invitations.sql)).
+- Its `lookup_invitation` and `accept_invitation` are `SECURITY DEFINER` with a fixed `search_path`, each taking one
+  token; accepting inserts the membership, deletes a one-time invite, and answers "already a member" from the
+  membership's key (same source).
+- Its memberships, `basejump.account_user`, have row security, with a policy that lets a person read their own rows,
+  `user_id = auth.uid()`, across every account, and no policy that lets anyone insert them; only definer functions do
+  ([Basejump accounts migration](https://raw.githubusercontent.com/usebasejump/basejump/main/supabase/migrations/20240414161947_basejump-accounts.sql)).
+- AWS's walkthrough puts row security on its tenant-to-user table too, rather than leaving the mapping open
+  ([AWS Database Blog](https://aws.amazon.com/blogs/database/multi-tenant-data-isolation-with-postgresql-row-level-security)).
+- Nile's `users.tenant_users` keeps memberships tenant-aware beside a global `users.users`, and Tetsu's earlier
+  research recommended a definer function keyed on the logged-in account for a person's list of businesses
+  ([global tables](../tenant-isolation/roles-global-tables-neon.md#accounts-that-span-tenants-global-users-with-per-tenant-memberships)).
+
 ## Recommendations for sub-slice 2
 
 - **Routes, after ADR-0084:** `/app/login`, `/app/join`, `/app/settings/profile`, and `/app/settings/security` for
@@ -115,6 +144,11 @@ flag on one account-creating command, and show its secret once, in the terminal.
   open their email within the hour admins' links last. ADR-0040 asks for short-lived links (`v5.0.0-6.4.1`) without
   a number. Seven days, single use, and cancellable matches GitHub and Shopify, and keeps a stolen link's window
   bounded; an hour, as for admins, keeps the window smallest but makes owners resend often.
+- **Invites and roles stay tenant-owned, as ADR-0089 has them.** The catalog check gains what ADR-0042's words
+  already allow: a tenant-owned table may also hold read-only policies for its own module's lookup role, whose
+  functions each take one input, so the invite lookup finds one invite by its link's hash, and a later function finds
+  one person's businesses. Writes stay with the module role in the business's own transaction: joining reads the
+  invite, then adds the role and spends the invite where `app.tenant_id` names its business.
 - **Sessions:** a staff session belongs to the person, as ADR-0048 has it, and switching business issues a new token
   (ADR-0040); with one business per person in this slice, there is nothing to switch yet.
 
