@@ -11,6 +11,7 @@ mod events;
 mod failure;
 mod isolation;
 mod migrate;
+mod render;
 mod roles;
 mod scope;
 #[doc(hidden)]
@@ -32,6 +33,7 @@ pub use migrate::{
     Behind, MIGRATION_LOCK, MIN_SERVER_VERSION, behind_code, migrate, migrate_with_wait,
     require_supported_server,
 };
+pub use render::{leftovers, render};
 pub use roles::{APP_ROLE, DELIVERY_ROLE, MAX_SCHEMA, lookup_role, module_role};
 pub use scope::{
     DeliveryTransaction, LOCK_TIMEOUT, ModuleTransaction, STATEMENT_TIMEOUT, TenantTransaction,
