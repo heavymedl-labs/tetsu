@@ -1,8 +1,8 @@
-{#- An admin's pages in the settings shell any realm fills (web/templates/settings.html): their Personal pages
-    (#156), and the Platform group only admins have (ADR-0084), with the admin and Log out at the sidebar's foot;
-    the narrow bar's initials menu (#148); and the session island, so the page warns before the session ends. The
-    account area is the admins' home (ADR-0086), so the sidebar has no "Back to app". A page's struct is a `Shell`'s,
-    as every logged-in admin page's is. -#}
+{#- A realm's account pages in the settings shell any realm fills (web/templates/settings.html): their Personal pages
+    (#156) at the realm's own paths, and for admins the Platform group only they have (ADR-0084), with the person, their
+    role, and Log out at the sidebar's foot; the narrow bar's initials menu (#148); and the session island, so the page
+    warns before the session ends. The account area is the admins' home (ADR-0086), so the sidebar has no "Back to
+    app". A page's struct is a `Shell`'s, as every logged-in account page's is. -#}
 {% extends "../../../web/templates/settings.html" %}
 {% import "../../../web/templates/components.html" as shared %}
 {% block head %}<script type="module" src="{{ script }}"></script><script
@@ -15,13 +15,13 @@
 {#- The sidebar, for the page or for the narrow menu, each copy naming its groups with ids of its own. -#}
 {% macro sidebar(personal, platform, here, name, initials, form) %}
   {% call shared::settings_group(personal, "Personal") %}
-    {%- call shared::settings_link("/admin/settings/profile", "person", "Profile", here) %}{% endcall %}
-    {%- call shared::settings_link("/admin/settings/security", "shield", "Security", here) %}{% endcall %}
+    {%- call shared::settings_link(profile, "person", "Profile", here) %}{% endcall %}
+    {%- call shared::settings_link(security, "shield", "Security", here) %}{% endcall %}
   {% endcall %}
-  {% call shared::settings_group(platform, "Platform") %}
-    {%- call shared::settings_link("/admin/mailbox", "inbox", "Mailbox", here) %}{% endcall %}
-  {% endcall %}
-  {% call shared::settings_account(name, initials, "Admin", "/admin/logout", form) %}{% endcall %}
+  {% if admin %}{% call shared::settings_group(platform, "Platform") %}
+      {%- call shared::settings_link("/admin/mailbox", "inbox", "Mailbox", here) %}{% endcall %}
+    {% endcall %}{% endif %}
+  {% call shared::settings_account(name, initials, role, logout, form) %}{% endcall %}
 {% endmacro %}
 {% block nav %}{% call sidebar("tetsu-personal", "tetsu-platform", here, name, initials, form) %}{% endcall %}{%
   endblock
@@ -29,7 +29,7 @@
 {% block menu %}{% call sidebar("tetsu-personal-menu", "tetsu-platform-menu", here, name, initials, form) %}{%
     endcall
   %}{% endblock %}
-{% block bar_end %}{%
-    call shared::account_menu(name, initials, "Admin", "/admin/settings/profile", "/admin/logout", form, here)
-  %}{% endcall %}{% endblock %}
+{% block bar_end %}{% call shared::account_menu(name, initials, role, profile, logout, form, here) %}{% endcall %}{%
+  endblock
+%}
 {% block after %}{% include "session.html" %}{% endblock %}

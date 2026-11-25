@@ -232,16 +232,26 @@ fn port_fits(scheme: &str, port: &str) -> bool {
         .is_ok_and(|number| number != 0 && number != default && number.to_string() == port)
 }
 
-/// The longest return path a login keeps; an admin page's address is far shorter.
+/// The longest return path a login keeps; a realm's page's address is far shorter.
 const LONGEST_RETURN: usize = 120;
 
-/// Where a login may send the browser next, if `raw` is one of the admin pages: `/admin`, or a path under it
-/// written only in ASCII letters, digits, `-`, `_`, and `.`, with no empty, `.`, or `..` segment. So it can name no
-/// other site, scheme, or realm, and needs no decoding, which leaves nothing for a browser to read differently
-/// (OWASP, "Unvalidated Redirects and Forwards").
+/// Whether `base` is a realm's base path: a slash and lowercase letters, such as `/admin`, so no path under it can
+/// begin another site's address.
+pub(crate) fn realm_base(base: &str) -> bool {
+    base.strip_prefix('/')
+        .is_some_and(|name| !name.is_empty() && name.bytes().all(|byte| byte.is_ascii_lowercase()))
+}
+
+/// Where a login may send the browser next, if `raw` is one of the pages of the realm at `base`, such as `/admin`:
+/// the base, or a path under it written only in ASCII letters, digits, `-`, `_`, and `.`, with no empty, `.`, or `..`
+/// segment. So it can name no other site, scheme, or realm, and needs no decoding, which leaves nothing for a browser
+/// to read differently (OWASP, "Unvalidated Redirects and Forwards"). A base that is no realm's returns nowhere.
 #[must_use]
-pub fn return_path(raw: &str) -> Option<&str> {
-    let rest = raw.strip_prefix("/admin")?;
+pub fn return_path<'a>(base: &str, raw: &'a str) -> Option<&'a str> {
+    if !realm_base(base) {
+        return None;
+    }
+    let rest = raw.strip_prefix(base)?;
     let plain = |segment: &str| {
         !matches!(segment, "" | "." | "..")
             && segment
@@ -269,7 +279,34 @@ mod tests {
             "/admin/a-b/c_d/e.f",
             "/admin/2026",
         ] {
-            assert_eq!(return_path(path), Some(path), "{path}");
+            assert_eq!(return_path("/admin", path), Some(path), "{path}");
+        }
+    }
+
+    /// A base that is no realm's, such as `/` or none, returns nowhere, so no base can open a way to another site.
+    #[test]
+    fn a_return_path_needs_a_realms_base() {
+        for (base, path) in [
+            ("/", "//evil.example"),
+            ("", "/anything"),
+            ("/Admin", "/Admin/a"),
+            ("/a/b", "/a/b/c"),
+            ("/ad-min", "/ad-min/a"),
+        ] {
+            assert_eq!(return_path(base, path), None, "{base} {path}");
+        }
+        assert_eq!([realm_base("/admin"), realm_base("/app")], [true, true]);
+    }
+
+    /// Each realm returns only to its own pages.
+    #[test]
+    fn a_return_path_stays_in_its_realm() {
+        assert_eq!(
+            return_path("/app", "/app/settings/profile"),
+            Some("/app/settings/profile")
+        );
+        for path in ["/admin/passkeys", "/apple", "/app/../admin"] {
+            assert_eq!(return_path("/app", path), None, "{path}");
         }
     }
 
@@ -297,7 +334,7 @@ mod tests {
             "admin/a",
             long.as_str(),
         ] {
-            assert_eq!(return_path(path), None, "{path}");
+            assert_eq!(return_path("/admin", path), None, "{path}");
         }
     }
 
@@ -306,7 +343,7 @@ mod tests {
         fn a_return_path_is_either_refused_or_a_plain_admin_page(
             raw in prop_oneof!["\\PC{0,40}", "/admin(/[a-z.%]{0,3}){0,4}"],
         ) {
-            if let Some(path) = return_path(&raw) {
+            if let Some(path) = return_path("/admin", &raw) {
                 prop_assert!(path == "/admin" || path.starts_with("/admin/"));
                 // With a slash after it, an empty, `.`, or `..` segment shows as one of these anywhere in it.
                 let ended = format!("{path}/");

@@ -248,6 +248,9 @@ async fn the_login_page_says_how_long_a_session_may_sit_idle() {
     assert!(page.body.contains(told), "{}", page.body);
     let page = get(address, "/admin/login", "").await;
     assert!(!page.body.contains("without activity"), "{}", page.body);
+    // The one line: where someone with no passkey in the realm turns.
+    let hint = "No passkey? Ask an admin for an invite.";
+    assert!(page.body.contains(hint), "{}", page.body);
 }
 
 /// A browser with no session cookie at all has no time left to read.

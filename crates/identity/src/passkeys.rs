@@ -9,15 +9,19 @@ use webauthn_rs::prelude::{
 };
 
 use crate::browser::Origins;
-use crate::domain::{Error, HeldPasskey, NewPasskey};
+use crate::domain::{Error, HeldPasskey, NewPasskey, Realm};
 
 /// How long a browser should hold a passkey prompt open. The page's island closes it then too, since a device that
 /// finds no passkey says nothing and browsers treat this only as a hint; it never stops a request already sent.
 const PROMPT_LIMIT: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// What an account picker shows before an admin's name. Authenticators may keep only the first 64 bytes of a
+/// What an account picker shows before a realm's account's name. Authenticators may keep only the first 64 bytes of a
 /// name (`WebAuthn` L3 §6.4.1), so the label comes first, where a cut never reaches it.
-const LABEL: &str = "Tetsu admin · ";
+const fn label(realm: Realm) -> &'static str {
+    match realm {
+        Realm::Admin => "Tetsu admin · ",
+    }
+}
 
 /// The relying party a realm's passkeys belong to: its origin's scheme, host, and port, which `webauthn-rs` compares
 /// (a path or query a client adds is not), and that origin's host as the relying party ID. A response from any
@@ -50,11 +54,12 @@ impl RelyingParty {
     /// Starts registering a passkey for a user handle and name: the options for the browser, and the state to keep
     /// until it answers. The passkey must verify the user, and must be discoverable, so logging in needs no name.
     /// Every realm shares one passkey domain until Tetsu has domains (ADR-0061), so the name a device's account
-    /// picker shows says the passkey is an admin's. The credentials the admin already `held` are listed for the
+    /// picker shows says which realm's account the passkey is, with `realm`'s label. The credentials the admin already `held` are listed for the
     /// device to refuse, so it makes no second passkey where it has one. It fails only for a stored admin with no
     /// name, a fault of storage, never the browser's.
     pub(crate) fn begin_registration(
         &self,
+        realm: Realm,
         user_handle: [u8; 16],
         name: &str,
         held: &[HeldPasskey],
@@ -68,7 +73,7 @@ impl RelyingParty {
             .webauthn
             .start_passkey_registration(
                 Uuid::from_bytes(user_handle),
-                &account_name(name),
+                &account_name(label(realm), name),
                 name,
                 exclude,
             )
@@ -265,8 +270,8 @@ fn not_started(error: impl std::fmt::Display) -> Error {
 /// The name an account picker shows for an admin's passkey: the label, then their name, cut to the 64 bytes an
 /// authenticator may keep. A name that does not fit is cut after its last whole word that does, so the cut splits no
 /// accent from its letter; a single word too long for that is cut at a character's end.
-fn account_name(name: &str) -> String {
-    let fits = name.floor_char_boundary(64 - LABEL.len());
+fn account_name(label: &str, name: &str) -> String {
+    let fits = name.floor_char_boundary(64 - label.len());
     // Admin names are trimmed, so a space is never first, and cutting at one keeps at least a word. A cut just
     // before a space already ends a word.
     let end = if fits == name.len() || name[fits..].starts_with(' ') {
@@ -274,12 +279,15 @@ fn account_name(name: &str) -> String {
     } else {
         name[..fits].rfind(' ').unwrap_or(fits)
     };
-    format!("{LABEL}{}", &name[..end])
+    format!("{label}{}", &name[..end])
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The admins' label, which these tests cut names against.
+    const LABEL: &str = label(Realm::Admin);
 
     /// Bytes are written as `WebAuthn`'s JSON writes them: RFC 4648's URL-safe alphabet, without padding.
     #[test]
@@ -300,23 +308,26 @@ mod tests {
     /// bytes.
     #[test]
     fn an_account_name_keeps_its_label_within_64_bytes() {
-        assert_eq!(account_name("Kurt Medley"), "Tetsu admin · Kurt Medley");
+        assert_eq!(
+            account_name(LABEL, "Kurt Medley"),
+            "Tetsu admin · Kurt Medley"
+        );
         let words = "Maximiliana Alexandrovna Worthington-Fairweatherstone";
         assert_eq!(
-            account_name(words),
+            account_name(LABEL, words),
             "Tetsu admin · Maximiliana Alexandrovna"
         );
         // A name whose cut falls just before a space keeps the word that ends there.
         let at_a_word = format!("Ann {}", "a".repeat(45));
         assert_eq!(
-            account_name(&format!("{at_a_word} Lee")),
+            account_name(LABEL, &format!("{at_a_word} Lee")),
             format!("{LABEL}{at_a_word}")
         );
         let exactly = "a".repeat(49);
-        assert_eq!(account_name(&exactly), format!("{LABEL}{exactly}"));
+        assert_eq!(account_name(LABEL, &exactly), format!("{LABEL}{exactly}"));
         // The label is 15 bytes, leaving 49: sixteen three-byte characters fill 48, and a seventeenth would not fit.
-        let long = account_name(&"あ".repeat(100));
+        let long = account_name(LABEL, &"あ".repeat(100));
         assert_eq!((long.len(), long.starts_with(LABEL)), (63, true));
-        assert_eq!(account_name(&"a".repeat(100)).len(), 64);
+        assert_eq!(account_name(LABEL, &"a".repeat(100)).len(), 64);
     }
 }

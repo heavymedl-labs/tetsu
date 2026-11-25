@@ -12,6 +12,6 @@
     {% call shared::settings_row("Email", "Where invites and security notices go.") %}{% if let Some(email) = email %}<p
           class="text-mini text-ink"
         >{{ email }}</p>{% else %}<p class="text-mini text-muted">No email address</p>{% endif %}{% endcall %}
-    {% call shared::settings_row("Role", "") %}<p class="text-mini text-ink">Admin</p>{% endcall %}
+    {% call shared::settings_row("Role", "") %}<p class="text-mini text-ink">{{ role }}</p>{% endcall %}
   </div>
 {% endblock %}

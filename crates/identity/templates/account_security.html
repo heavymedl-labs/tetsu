@@ -29,7 +29,7 @@
               </div>
             </div>
             {%- if !shown.presented && fresh %}
-              <form method="post" action="/admin/sessions/end">
+              <form method="post" action="{{ base }}/sessions/end">
                 <input type="hidden" name="form" value="{{ form }}">
                 <input type="hidden" name="session" value="{{ shown.id }}">
                 <button type="submit" class="{% call shared::quiet_button_style(false) %}{% endcall %}">Log out<span
@@ -44,7 +44,7 @@
       {%- if sessions.len() > 1 && fresh %}
         {% call shared::settings_row("Log out of all other sessions", "") %}<form
             method="post"
-            action="/admin/sessions/end"
+            action="{{ base }}/sessions/end"
           >
             <input type="hidden" name="form" value="{{ form }}"><button
               type="submit"
@@ -78,7 +78,7 @@
         </ul>
       </tetsu-passkeys>
       {%- if can_add && fresh %}
-        {% call ui::passkey_row(form) %}Add a passkey{% endcall %}
+        {% call ui::passkey_row(base, form) %}Add a passkey{% endcall %}
       {%- else if can_add %}
         {%
           call shared::settings_row(

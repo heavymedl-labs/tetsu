@@ -180,7 +180,8 @@ impl<S: LoginStore> Accounts<S> {
             .await
             .map_err(|error| refusing(error, not_joining))?
             .ok_or_else(not_joining)?;
-        let (options, state) = party.begin_registration(invitee.user_handle, &invitee.name, &[])?;
+        let (options, state) =
+            party.begin_registration(S::REALM, invitee.user_handle, &invitee.name, &[])?;
         let token = CeremonyToken::generate(self.fill)?;
         let begun = self
             .store
@@ -434,7 +435,7 @@ impl<S: LoginStore> Accounts<S> {
             .ok_or_else(not_adding)?;
         let (token, (options, state)) = CeremonyToken::generate(self.fill).and_then(|token| {
             party
-                .begin_registration(adder.user_handle, &adder.name, &adder.passkeys)
+                .begin_registration(S::REALM, adder.user_handle, &adder.name, &adder.passkeys)
                 .map(|begun| (token, begun))
         })?;
         let begun = self

@@ -6,7 +6,7 @@
     heading, never on a button a keystroke meant for the page could press, and the island ignores a dismissal in
     its first second. -#}
 {% import "../../../web/templates/components.html" as shared %}
-<tetsu-session base="/admin" form-token="{{ form }}">
+<tetsu-session base="{{ base }}" form-token="{{ form }}">
   <dialog
     aria-labelledby="tetsu-session-title"
     aria-describedby="tetsu-session-text"
@@ -15,7 +15,7 @@
     <h2 id="tetsu-session-title" tabindex="-1" autofocus class="text-base font-medium outline-none"><span data-idle
       >Still there?</span><span data-absolute hidden>Your session is ending</span></h2>
     <p id="tetsu-session-text" class="mt-2 text-mini text-pretty text-muted"><span data-idle
-      >You'll be logged out in</span><span data-absolute hidden>Sessions last 8 hours. Yours ends in</span> <span
+      >You'll be logged out in</span><span data-absolute hidden>Sessions last {{ absolute }}. Yours ends in</span> <span
         data-left
       >2 minutes</span>.</p>
     <button
@@ -24,7 +24,7 @@
       data-stay
       class="mt-6 {% call shared::button_style(false, false, true) %}{% endcall %}"
     >Stay logged in</button>
-    <form method="post" action="/admin/logout" class="mt-3">
+    <form method="post" action="{{ base }}/logout" class="mt-3">
       <input type="hidden" name="form" value="{{ form }}">
       <button type="submit" class="{% call shared::button_style(true, false, true) %}{% endcall %}"><span data-idle
         >Log out</span><span data-absolute hidden>Log in again</span></button>
