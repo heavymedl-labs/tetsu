@@ -115,6 +115,10 @@ the application's own filters as a second layer.
   with the module role in a tenant transaction, and a table that inherits another sits in its parent's schema.
   Staff invites, found by their link before their business is known, are another such lookup
   ([ADR-0089](0089-staff-join-and-login.md)).)
+  (Clarified 2026-11-25, with the maintainer's approval: a lookup function may run inside its business's tenant
+  transaction when the writes it guards must commit with it, as joining a business by an invite does, so the check
+  and the writes stand or fall together. It still reads across businesses only through its declared policies, and
+  the writes stay with the module role under row security.)
   Customer accounts belong to one business, so they are ordinary tenant-owned rows.
 
 ### Addresses and hosts
