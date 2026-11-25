@@ -235,6 +235,45 @@ async fn a_business_writes_only_its_own_staff_rows() {
     }
 }
 
+/// Each realm's session limits are written once in SQL, and agree with Rust's: admins' with `Realm::limits`, and
+/// staff's with ADR-0048's 12 hours and 1 hour until the staff store names its realm; a realm with none has none
+/// (#142).
+#[tokio::test]
+async fn each_realms_session_limits_are_written_once_and_agree() {
+    let database = ready().await;
+    let client = connect(&database).await.expect("connects");
+    let admin = Realm::Admin.limits();
+    let wanted = [
+        (
+            "admin",
+            Some((admin.absolute.as_secs(), admin.idle.as_secs())),
+        ),
+        ("staff", Some((12 * 3600, 3600))),
+        ("customer", None),
+    ];
+    for (realm, limits) in wanted {
+        let row = client
+            .query_one(
+                "SELECT extract(epoch FROM identity.absolute_limit($1))::bigint AS absolute,
+                        extract(epoch FROM identity.idle_limit($1))::bigint AS idle",
+                &[&realm],
+            )
+            .await
+            .expect("reads");
+        let found: (Option<i64>, Option<i64>) = (
+            row.try_get("absolute").expect("absolute"),
+            row.try_get("idle").expect("idle"),
+        );
+        let wanted = limits.map(|(absolute, idle)| {
+            (
+                i64::try_from(absolute).expect("fits"),
+                i64::try_from(idle).expect("fits"),
+            )
+        });
+        assert_eq!(found.0.zip(found.1), wanted, "{realm}");
+    }
+}
+
 /// A session starts now by Postgres's clock, lasts eight hours at most, and records each request on it.
 #[tokio::test]
 async fn a_started_session_is_found_by_its_token_and_records_each_request() {

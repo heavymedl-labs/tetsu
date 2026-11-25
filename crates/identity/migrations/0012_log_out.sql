@@ -19,7 +19,7 @@ AS $$
     WITH clock AS (
         SELECT
             clock_timestamp() AS at,
-            CASE wanted_realm WHEN 'admin' THEN interval '15 minutes' END
+            identity.idle_limit(wanted_realm)
                 AS idle
     )
 

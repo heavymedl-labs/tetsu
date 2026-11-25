@@ -189,6 +189,32 @@ TO tetsu_identity_lookup;
 -- timeout; a start reads the clock after its wait, so it is never dated
 -- before what held it up.
 
+-- How long a realm's sessions last (ADR-0048): at most absolute_limit after
+-- they start, and idle_limit after their last request. The one place each is
+-- written in SQL; Realm::limits says the same in Rust, and tests check that
+-- the two agree (#142). A realm with none has no live session.
+CREATE FUNCTION absolute_limit(wanted_realm text)
+RETURNS interval
+LANGUAGE sql IMMUTABLE
+SET search_path = pg_catalog, pg_temp
+AS $$
+    SELECT CASE wanted_realm
+        WHEN 'admin' THEN interval '8 hours'
+        WHEN 'staff' THEN interval '12 hours'
+    END
+$$;
+
+CREATE FUNCTION idle_limit(wanted_realm text)
+RETURNS interval
+LANGUAGE sql IMMUTABLE
+SET search_path = pg_catalog, pg_temp
+AS $$
+    SELECT CASE wanted_realm
+        WHEN 'admin' THEN interval '15 minutes'
+        WHEN 'staff' THEN interval '1 hour'
+    END
+$$;
+
 -- Starts a session now, only for an enabled admin, and removes the
 -- admin's spent sessions in the realm, so they do not pile up. Only a login
 -- and a redemption call it, each holding an enabled admin's row, so one
@@ -206,12 +232,8 @@ SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
     at timestamptz;
-    absolute interval := CASE wanted_realm
-        WHEN 'admin' THEN interval '8 hours'
-    END;
-    idle interval := CASE wanted_realm
-        WHEN 'admin' THEN interval '15 minutes'
-    END;
+    absolute interval := identity.absolute_limit(wanted_realm);
+    idle interval := identity.idle_limit(wanted_realm);
 BEGIN
     PERFORM
     FROM identity.admins AS o
@@ -264,9 +286,7 @@ SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
     at timestamptz := clock_timestamp();
-    idle interval := CASE wanted_realm
-        WHEN 'admin' THEN interval '15 minutes'
-    END;
+    idle interval := identity.idle_limit(wanted_realm);
 BEGIN
     RETURN QUERY
     UPDATE identity.admin_sessions AS s
@@ -308,7 +328,7 @@ AS $$
     WITH clock AS (
         SELECT
             clock_timestamp() AS at,
-            CASE wanted_realm WHEN 'admin' THEN interval '15 minutes' END
+            identity.idle_limit(wanted_realm)
                 AS idle
     ),
 
@@ -760,7 +780,7 @@ AS $$
         s.token_hash = wanted_session
         AND s.realm = 'admin'
         AND statement_timestamp() < s.ends_at
-        AND statement_timestamp() < s.last_seen_at + interval '15 minutes'
+        AND statement_timestamp() < s.last_seen_at + identity.idle_limit(s.realm)
         AND o.disabled_at IS NULL
     ORDER BY p.credential_id
 $$;
@@ -836,7 +856,7 @@ BEGIN
             AND s.admin_id = wanted_admin
             AND s.realm = 'admin'
             AND at < s.ends_at
-            AND at < s.last_seen_at + interval '15 minutes'
+            AND at < s.last_seen_at + identity.idle_limit(s.realm)
             AND s.proven_at > at - interval '10 minutes'
             AND (
                 SELECT count(*) FROM identity.passkeys AS p
@@ -927,7 +947,7 @@ BEGIN
         AND s.admin_id = wanted_admin
         AND s.realm = 'admin'
         AND at < s.ends_at
-        AND at < s.last_seen_at + interval '15 minutes';
+        AND at < s.last_seen_at + identity.idle_limit(s.realm);
     IF NOT FOUND THEN
         added := 'logged_out';
         RETURN NEXT;
@@ -974,9 +994,7 @@ BEGIN
                     AND s.token_hash <> wanted_session
                 RETURNING
                     at < s.ends_at
-                    AND at < s.last_seen_at + CASE s.realm
-                        WHEN 'admin' THEN interval '15 minutes'
-                    END AS live
+                    AND at < s.last_seen_at + identity.idle_limit(s.realm) AS live
             )
 
             SELECT count(*) FILTER (WHERE gone.live) INTO sessions_ended
@@ -1100,9 +1118,7 @@ AS $$
         WHERE s.admin_id = wanted_admin
         RETURNING
             at < s.ends_at
-            AND at < s.last_seen_at + CASE s.realm
-                WHEN 'admin' THEN interval '15 minutes'
-            END AS live
+            AND at < s.last_seen_at + identity.idle_limit(s.realm) AS live
     )
 
     SELECT count(*) FILTER (WHERE gone.live) FROM gone
@@ -1253,9 +1269,7 @@ BEGIN
             AND (wanted_admin IS NULL OR s.admin_id = wanted_admin)
         RETURNING
             at < s.ends_at
-            AND at < s.last_seen_at + CASE s.realm
-                WHEN 'admin' THEN interval '15 minutes'
-            END AS live
+            AND at < s.last_seen_at + identity.idle_limit(s.realm) AS live
     )
 
     SELECT count(*) FILTER (WHERE gone.live) INTO ended FROM gone;
@@ -1272,6 +1286,10 @@ $$;
 -- passkeys and join, and log in, with its own through a new link. Database
 -- access stays the trust boundary (ADR-0061).
 REVOKE EXECUTE ON ALL ROUTINES IN SCHEMA identity FROM public;
+-- The session limits run as whoever calls them, which is a lookup function's
+-- owner.
+GRANT EXECUTE ON FUNCTION absolute_limit(text), idle_limit(text)
+TO tetsu_identity_lookup;
 GRANT EXECUTE ON FUNCTION use_session(bytea, text), end_session(bytea, text),
 issue_invite(bytea, bigint), list_admins(), invitee(bytea),
 begin_join(bytea, bigint, bytea, jsonb), take_ceremony(bytea, text),

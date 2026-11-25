@@ -55,10 +55,10 @@ AS $$
         mine.token_hash = wanted_session
         AND mine.realm = 'admin'
         AND statement_timestamp() < mine.ends_at
-        AND statement_timestamp() < mine.last_seen_at + interval '15 minutes'
+        AND statement_timestamp() < mine.last_seen_at + identity.idle_limit(mine.realm)
         AND o.disabled_at IS NULL
         AND statement_timestamp() < s.ends_at
-        AND statement_timestamp() < s.last_seen_at + interval '15 minutes'
+        AND statement_timestamp() < s.last_seen_at + identity.idle_limit(s.realm)
     ORDER BY s.token_hash = wanted_session DESC, s.last_seen_at DESC, s.id
 $$;
 
@@ -111,7 +111,7 @@ BEGIN
         s.token_hash = wanted_session
         AND s.realm = 'admin'
         AND at < s.ends_at
-        AND at < s.last_seen_at + interval '15 minutes';
+        AND at < s.last_seen_at + identity.idle_limit(s.realm);
     IF asking IS NULL THEN
         reason := 'ended';
         RETURN;
@@ -128,7 +128,7 @@ BEGIN
             AND s.token_hash <> wanted_session
             AND (wanted_id IS NULL OR s.id = wanted_id)
         RETURNING
-            at < s.ends_at AND at < s.last_seen_at + interval '15 minutes'
+            at < s.ends_at AND at < s.last_seen_at + identity.idle_limit(s.realm)
                 AS live
     )
 
