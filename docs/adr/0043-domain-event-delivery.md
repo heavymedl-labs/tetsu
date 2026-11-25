@@ -30,7 +30,9 @@ event once. No broker is added.
 - **A module has two outboxes.** `outbox` is tenant-owned under ADR-0042, keyed `(tenant_id, id)` with a UUIDv7
   `id`, for events that belong to one business. `outbox_global` is a global table for events with no business, such
   as an operator's login or a staff member's before they choose a business. A row holds the event's type and
-  version, when it occurred, and a JSON payload.
+  version, when it occurred, and a JSON payload. (Clarified 2026-11-25, with the maintainer's approval: an event
+  that names facts its business must not see goes to `outbox_global` from the business's transaction, as an
+  operator's staff invite does ([ADR-0089](0089-staff-join-and-login.md)).)
 - **An event names a fact in the past tense,** such as `identity.logged_in` or `booking.cancelled_late`. Its type
   carries a version, and a change to a payload's meaning adds a new version rather than altering the old one.
 - **Payloads carry IDs and facts, not personal details,** such as an account's ID rather than its email. Consumers

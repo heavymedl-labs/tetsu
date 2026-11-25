@@ -39,6 +39,10 @@ and accept, and make a first owner with one command that names the role.
 - **The first owner comes from a command:** `tetsu staff invite <business> <name> <email> --role owner`, which
   resolves the business's address in the composition root, prints the link only to a terminal, and emails it, as
   `tetsu admin create` does. Only `owner` is offered until sub-slice 4 adds the other roles and their checks.
+  (Clarified 2026-11-25, with the maintainer's approval: the command acts for Tetsu, so its event goes to Identity's
+  `outbox_global`, naming the business, though the invite is the business's row. The event says whether the person
+  was staff already, or disabled, which may come from another business, so the business's own record must not
+  hold it. Owners' invites in sub-slice 4 add an event to the business's record without those facts.)
 
 ## Alternatives considered
 
