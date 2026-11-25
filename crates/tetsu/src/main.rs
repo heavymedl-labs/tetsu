@@ -10,9 +10,11 @@ mod chores;
     expect(dead_code, reason = "only build.rs and the tests call it")
 )]
 mod manifest;
+mod operator;
 mod seed;
 mod serve;
 mod settings;
+mod staff;
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -29,7 +31,8 @@ const MODULES: &[&dyn Module] = &[&Tenancy, &Identity, &Audit, &Mail];
 const USAGE: &str = "usage: tetsu [--env <name>] [setup | migrate | seed [--check] <file or folder> | serve | check | reset <schema>... \
                      | replay <schema> <event id> | rename <address> <new slug> \
                      | admin <create <name> <email> | invite <id> | list | disable <id> | enable <id> \
-                     | remove-passkeys <id> | end-sessions <id | --all>>]";
+                     | remove-passkeys <id> | end-sessions <id | --all>> \
+                     | staff invite <business> <name> <email> --role owner]";
 
 #[derive(Debug, PartialEq, Eq)]
 enum Command {
@@ -40,6 +43,7 @@ enum Command {
     Serve,
     Chore(chores::Chore),
     Admin(admin::Admin),
+    Staff(staff::Staff),
 }
 
 fn parse(args: &[String]) -> Result<Command, String> {
@@ -56,6 +60,7 @@ fn parse(args: &[String]) -> Result<Command, String> {
         ),
         "seed" => parse_seed(rest),
         "admin" => admin::parse(rest).map(Command::Admin),
+        "staff" => staff::parse(rest).map(Command::Staff),
         other => chores::parse(other, rest).map_or_else(
             || Err(format!("unknown command {command:?}")),
             |chore| chore.map(Command::Chore),
@@ -125,6 +130,7 @@ async fn run(command: Command, source: &settings::Source) -> Result<(), String> 
         Command::Serve => run_serve(source).await,
         Command::Chore(chore) => run_chore(chore, source).await,
         Command::Admin(command) => run_admin(command, source).await,
+        Command::Staff(command) => run_staff(command, source).await,
     }
 }
 
@@ -132,6 +138,12 @@ async fn run(command: Command, source: &settings::Source) -> Result<(), String> 
 async fn run_admin(command: admin::Admin, source: &settings::Source) -> Result<(), String> {
     let terminal = std::io::IsTerminal::is_terminal(&std::io::stdout());
     say_all(&admin::run(command, || local(source), terminal).await?)
+}
+
+/// Runs a staff command with the local settings, telling it whether its output reaches a terminal.
+async fn run_staff(command: staff::Staff, source: &settings::Source) -> Result<(), String> {
+    let terminal = std::io::IsTerminal::is_terminal(&std::io::stdout());
+    say_all(&staff::run(command, || local(source), terminal).await?)
 }
 
 /// Runs a hosted chore with the local settings, and prints what it reports.

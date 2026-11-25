@@ -13,7 +13,7 @@ use crate::http_tests::{
 use crate::join_tests::app_pool;
 use crate::join_tests::{ORIGIN, actor, as_db_admin, with_link};
 use crate::ports::LoginStore;
-use crate::{Actor, AdminName, Ending, Realm, SessionId};
+use crate::{Actor, Ending, PersonName, Realm, SessionId};
 
 const FIREFOX: &str = "Mozilla/5.0 (X11; Linux x86_64) Firefox/140.0";
 /// The admin's Security page, which lists their sessions (#156).
@@ -224,7 +224,7 @@ async fn a_session_joining_began_ends_no_other() {
 /// cookies.
 async fn kurt_and_ada() -> (SocketAddr, TestDatabase, Vec<String>) {
     let (admins, database, _, kurt_link) = with_link().await;
-    let name = AdminName::parse("Ada Lovelace").expect("a name");
+    let name = PersonName::parse("Ada Lovelace").expect("a name");
     let ada = admins.create(&name, None, &actor()).await.expect("creates");
     let ada_link = admins.invite(ada, &actor()).await.expect("issues");
     let address = serve(admins, sample_mailbox()).await;

@@ -1,0 +1,11 @@
+Hello,
+
+You're invited to work at {{ business }} on Tetsu, as {{ role }}. Open this
+link on the device that holds your Tetsu passkey, or that will hold a new one:
+
+{{ link }}
+
+The link works once, for seven days. If you weren't expecting it, ignore this
+email; nothing happens unless the link is opened.
+
+Tetsu

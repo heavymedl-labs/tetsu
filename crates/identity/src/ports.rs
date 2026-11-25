@@ -1,10 +1,10 @@
 //! The driven port Identity calls out through.
 
 use crate::domain::{
-    Account, AccountId, Actor, Addition, AdminName, AdminSummary, Disabling, Ending, Error,
-    FailedCheck, Invitee, Issue, ListedSession, Login, NewPasskey, RateLimit, Realm, Redemption,
-    Refusal, Removal, Session, SessionId, SessionStart, Signer, TakenAddition, TakenCeremony,
-    TimeLeft,
+    Account, AccountId, Actor, Addition, AdminSummary, BusinessId, Disabling, Ending, Error,
+    FailedCheck, Invitee, Issue, ListedSession, Login, NewPasskey, PersonName, RateLimit, Realm,
+    Redemption, Refusal, Removal, Role, Session, SessionId, SessionStart, Signer, StaffIssue,
+    TakenAddition, TakenCeremony, TimeLeft,
 };
 use std::future::Future;
 use std::time::Duration;
@@ -14,6 +14,11 @@ use tetsu_kernel::{Address, Requester};
 pub trait AdminStore: LoginStore + AdminDirectory {}
 
 impl<T: LoginStore + AdminDirectory> AdminStore for T {}
+
+/// The staff realm's store: its login flow and its directory.
+pub trait StaffStore: LoginStore + StaffDirectory {}
+
+impl<T: LoginStore + StaffDirectory> StaffStore for T {}
 
 /// Where a realm's accounts log in: sessions, invites, ceremonies, passkeys, and limits (ADR-0088). A session is reached
 /// only by its token's hash and realm, one at a time (ADR-0048), and the store keeps each realm's limits beside its own
@@ -216,7 +221,7 @@ pub trait AdminDirectory {
     /// audit event naming `actor`, with its outcome, in the same transaction.
     fn insert_admin(
         &self,
-        name: &AdminName,
+        name: &PersonName,
         email: Option<&Address>,
         actor: &Actor,
     ) -> impl Future<Output = Result<AccountId, Error>> + Send;
@@ -288,4 +293,23 @@ pub trait AdminDirectory {
 
     /// Every admin, oldest first.
     fn list_admins(&self) -> impl Future<Output = Result<Vec<AdminSummary>, Error>> + Send;
+}
+
+/// Managing the staff realm's accounts, which only the staff command does so far (ADR-0089). Each change records an
+/// audit event naming its actor, with its outcome, in the business's transaction but Tetsu's record, since whether
+/// the person was staff already, or disabled, may be from another business.
+pub trait StaffDirectory {
+    /// Invites the staff member `email` names to `business` with `role`, under an invite link's hash, good once and
+    /// for seven days, making them, named `name` and with no passkey, if no staff member has that email. A new invite
+    /// replaces any open one of theirs at the business. A disabled staff member, or one who holds a role there
+    /// already, is issued none.
+    fn issue_staff_invite(
+        &self,
+        business: BusinessId,
+        hash: &[u8; 32],
+        name: &PersonName,
+        email: &Address,
+        role: Role,
+        actor: &Actor,
+    ) -> impl Future<Output = Result<StaffIssue, Error>> + Send;
 }

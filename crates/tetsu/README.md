@@ -26,6 +26,7 @@ names no business that uses Tetsu. Its root page names fictional customers only 
 | `tetsu admin enable <id>` | Enables a disabled admin again; their sessions stay ended |
 | `tetsu admin remove-passkeys <id>` | Removes an admin's passkeys, as when their only one is lost, and ends their sessions, so they can be invited to join again |
 | `tetsu admin end-sessions <id \| --all>` | Ends one admin's sessions, or every admin's |
+| `tetsu staff invite <business> <name> <email> --role owner` | Invites someone to the business at that slug as its owner, making them a staff member if the email is new, prints their invite link, good once and for seven days, replacing any open one there, and emails it to them ([ADR-0089](../../docs/adr/0089-staff-join-and-login.md)). Only to a terminal |
 
 The deploy workflow runs `check`, `reset`, `replay`, and `rename` against the demo ([runbook](../../docs/operations/demo-environment.md)).
 

@@ -12,12 +12,12 @@ use tokio_postgres::Row;
 use tokio_postgres::types::{FromSql, ToSql};
 
 use crate::domain::{
-    Account, AccountId, Actor, Addition, AdminName, AdminSummary, CeremonyKind, Disabling, Ending,
-    Error, FailedCheck, HeldPasskey, Invitee, Issue, ListedSession, Login, NewPasskey, RateLimit,
-    Realm, Redemption, Refusal, Removal, Session, SessionId, SessionStart, Signer, TakenAddition,
-    TakenCeremony, TimeLeft,
+    Account, AccountId, Actor, Addition, AdminSummary, BusinessId, CeremonyKind, Disabling, Ending,
+    Error, FailedCheck, HeldPasskey, Invitee, Issue, ListedSession, Login, NewPasskey, PersonName,
+    RateLimit, Realm, Redemption, Refusal, Removal, Role, Session, SessionId, SessionStart, Signer,
+    StaffIssue, TakenAddition, TakenCeremony, TimeLeft,
 };
-use crate::ports::{AdminDirectory, AdminStore, LoginStore};
+use crate::ports::{AdminDirectory, AdminStore, LoginStore, StaffDirectory, StaffStore};
 use crate::use_cases::Accounts;
 
 /// The login flow every realm shares, written once as the admin realm's (ADR-0091).
@@ -126,6 +126,10 @@ pub static MIGRATIONS: LazyLock<Vec<Migration>> = LazyLock::new(|| {
             version: 16,
             sql: include_str!("../../migrations/0016_staff_join.sql"),
         },
+        Migration {
+            version: 17,
+            sql: include_str!("../../migrations/0017_staff_invite.sql"),
+        },
     ]
 });
 /// Identity's schema, which names the role its transactions act as (ADR-0042).
@@ -138,6 +142,7 @@ const USE_SESSION: &str = include_str!("../../sql/use_session.sql");
 const SESSION_LEFT: &str = include_str!("../../sql/session_left.sql");
 const LOG_OUT: &str = include_str!("../../sql/log_out.sql");
 const ISSUE_INVITE: &str = include_str!("../../sql/issue_invite.sql");
+const STAFF_ISSUE_INVITE: &str = include_str!("../../sql/staff_issue_invite.sql");
 const DISABLE_ADMIN: &str = include_str!("../../sql/disable_admin.sql");
 const END_ADMIN_SESSIONS: &str = include_str!("../../sql/end_admin_sessions.sql");
 const END_REALM_SESSIONS: &str = include_str!("../../sql/end_realm_sessions.sql");
@@ -237,7 +242,7 @@ pub fn postgres_store(pool: Pool) -> Accounts<impl AdminStore> {
 /// # }
 /// ```
 #[must_use]
-pub fn postgres_staff_store(pool: Pool) -> Accounts<impl LoginStore> {
+pub fn postgres_staff_store(pool: Pool) -> Accounts<impl StaffStore> {
     Accounts::new(PostgresStaff::new(pool))
 }
 
@@ -385,7 +390,7 @@ impl<R: Sync> PostgresLogin<R> {
         parameters: &[&(dyn ToSql + Sync)],
         event: impl Fn(Option<bool>) -> (&'static str, String) + Sync,
     ) -> Result<Option<bool>, Error> {
-        self.decided(None, statement, parameters, |rows| {
+        self.decided(Place::Module, statement, parameters, |rows| {
             let answer = answered(rows, "done")?;
             Ok((answer, Some(event(answer))))
         })
@@ -400,7 +405,7 @@ impl<R: Sync> PostgresLogin<R> {
         parameters: &[&(dyn ToSql + Sync)],
         event: impl Fn(Option<u64>) -> (&'static str, String) + Sync,
     ) -> Result<Option<u64>, Error> {
-        self.decided(None, statement, parameters, |rows| {
+        self.decided(Place::Module, statement, parameters, |rows| {
             let count = counted(rows, "ended")?;
             Ok((count, Some(event(count))))
         })
@@ -408,17 +413,17 @@ impl<R: Sync> PostgresLogin<R> {
     }
 
     /// Runs a statement whose answer `read` makes of the rows it returned, with the event it records, in the same
-    /// transaction, and returns the answer: none for an account or passkey that does not exist. It runs in
-    /// `business`'s own transaction when one is named.
+    /// transaction, and returns the answer: none for an account or passkey that does not exist. It runs where
+    /// `place` says.
     async fn decided<T: Copy + Send + Sync>(
         &self,
-        business: Option<i64>,
+        place: Place,
         statement: &str,
         parameters: &[&(dyn ToSql + Sync)],
         read: impl Fn(&[Row]) -> Decided<T> + Sync,
     ) -> Result<Option<T>, Error> {
         let answer = OnceLock::new();
-        self.query_recording_in(business, statement, parameters, &|rows| {
+        self.query_recording_in(place, statement, parameters, &|rows| {
             let (decided, recorded) = read(rows)?;
             let _ = answer.set(decided);
             Ok(recorded)
@@ -436,55 +441,79 @@ impl<R: Sync> PostgresLogin<R> {
         parameters: &[&(dyn ToSql + Sync)],
         event: MakesEvent<'_>,
     ) -> Result<Vec<Row>, Error> {
-        self.query_recording_in(None, statement, parameters, event)
+        self.query_recording_in(Place::Module, statement, parameters, event)
             .await
     }
 
-    /// [`Self::query_recording`], in `business`'s own transaction when one is named.
+    /// [`Self::query_recording`], where `place` says.
     async fn query_recording_in(
         &self,
-        business: Option<i64>,
+        place: Place,
         statement: &str,
         parameters: &[&(dyn ToSql + Sync)],
         event: MakesEvent<'_>,
     ) -> Result<Vec<Row>, Error> {
-        on_pool(&self.pool, business, statement, parameters, event).await
+        on_pool(&self.pool, place, statement, parameters, event).await
     }
 }
 
-/// Where a statement runs: as the module, or in one business's own transaction.
+/// Where a statement runs, and whose record its event goes to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Place {
+    /// As the module, recorded for Tetsu.
+    Module,
+    /// In a business's own transaction, recorded for it.
+    Business(i64),
+    /// In a business's own transaction, recorded for Tetsu, as an operator's change is, whose event may name what a
+    /// business must not see, such as whether a person is staff elsewhere.
+    ForTetsu(i64),
+}
+
+impl Place {
+    /// In `business`'s own transaction and record when one is named, and as the module otherwise.
+    fn of(business: Option<i64>) -> Self {
+        business.map_or(Self::Module, Self::Business)
+    }
+}
+
+/// A transaction as the module, or in one business's own transaction, and whether its event is the business's.
 enum Scope<'a> {
     Module(ModuleTransaction<'a>),
-    Business(TenantTransaction<'a>),
+    Business(TenantTransaction<'a>, bool),
 }
 
 impl<'a> Scope<'a> {
-    /// Begins a transaction as the module, or in `business`'s own transaction when one is named.
+    /// Begins a transaction where `place` says.
     async fn begin(
         client: &'a mut tetsu_postgres::Object,
-        business: Option<i64>,
+        place: Place,
     ) -> Result<Self, tokio_postgres::Error> {
-        match business {
-            None => ModuleTransaction::begin(client, SCHEMA)
-                .await
-                .map(Self::Module),
-            Some(tenant) => TenantTransaction::begin(client, SCHEMA, tenant)
-                .await
-                .map(Self::Business),
-        }
+        let (tenant, its_own) = match place {
+            Place::Module => {
+                return ModuleTransaction::begin(client, SCHEMA)
+                    .await
+                    .map(Self::Module);
+            }
+            Place::Business(tenant) => (tenant, true),
+            Place::ForTetsu(tenant) => (tenant, false),
+        };
+        TenantTransaction::begin(client, SCHEMA, tenant)
+            .await
+            .map(|transaction| Self::Business(transaction, its_own))
     }
 
     async fn record(&self, event: &NewEvent<'_>) -> Result<String, tokio_postgres::Error> {
         match self {
             Self::Module(transaction) => transaction.record(event).await,
-            Self::Business(transaction) => transaction.record(event).await,
+            Self::Business(transaction, true) => transaction.record(event).await,
+            Self::Business(transaction, false) => transaction.record_global(event).await,
         }
     }
 
     async fn commit(self) -> Result<(), tokio_postgres::Error> {
         match self {
             Self::Module(transaction) => transaction.commit().await,
-            Self::Business(transaction) => transaction.commit().await,
+            Self::Business(transaction, _) => transaction.commit().await,
         }
     }
 }
@@ -495,21 +524,19 @@ impl<'a> std::ops::Deref for Scope<'a> {
     fn deref(&self) -> &Self::Target {
         match self {
             Self::Module(transaction) => transaction,
-            Self::Business(transaction) => transaction,
+            Self::Business(transaction, _) => transaction,
         }
     }
 }
 
 async fn run(
     client: &mut tetsu_postgres::Object,
-    business: Option<i64>,
+    place: Place,
     statement: &str,
     parameters: &[&(dyn ToSql + Sync)],
     event: MakesEvent<'_>,
 ) -> Result<Vec<Row>, Error> {
-    let transaction = Scope::begin(client, business)
-        .await
-        .map_err(|e| sorted(&e))?;
+    let transaction = Scope::begin(client, place).await.map_err(|e| sorted(&e))?;
     let prepared = transaction
         .prepare_cached(statement)
         .await
@@ -535,13 +562,13 @@ async fn run(
 /// database says they are stale, so the next request prepares them afresh.
 async fn on_pool(
     pool: &Pool,
-    business: Option<i64>,
+    place: Place,
     statement: &str,
     parameters: &[&(dyn ToSql + Sync)],
     event: MakesEvent<'_>,
 ) -> Result<Vec<Row>, Error> {
     let mut client = pool.get().await.map_err(pool_failed)?;
-    let result = run(&mut client, business, statement, parameters, event).await;
+    let result = run(&mut client, place, statement, parameters, event).await;
     if let Err(Error::Unavailable(why)) = &result {
         tetsu_postgres::clear_if_stale(pool, why);
     }
@@ -559,9 +586,11 @@ async fn business_of(
     let Some(query) = query else {
         return Ok(None);
     };
-    on_pool(pool, None, query, &[&link.as_slice()], &|_| Ok(None))
-        .await
-        .and_then(|rows| rows.first().map(|row| column(row, "tenant_id")).transpose())
+    on_pool(pool, Place::Module, query, &[&link.as_slice()], &|_| {
+        Ok(None)
+    })
+    .await
+    .and_then(|rows| rows.first().map(|row| column(row, "tenant_id")).transpose())
 }
 
 /// How a statement failed. Identity's own functions raise three codes of their own, and each is a fault of the code
@@ -627,7 +656,7 @@ impl<R: PostgresRealm> LoginStore for PostgresLogin<R> {
     async fn delete_session(&self, hash: &[u8; 32], actor: &Actor) -> Result<bool, Error> {
         let parameters: [&(dyn ToSql + Sync); 2] = [&hash.as_slice(), &Self::REALM.as_str()];
         let ended = self
-            .decided(None, R::queries().log_out, &parameters, |rows| {
+            .decided(Place::Module, R::queries().log_out, &parameters, |rows| {
                 logged_out(rows, Self::REALM, actor)
             })
             .await?;
@@ -684,9 +713,12 @@ impl<R: PostgresRealm> LoginStore for PostgresLogin<R> {
             &device,
         ];
         let business = business_of(&self.pool, R::queries().business, &ceremony.link_hash).await?;
-        self.decided(business, R::queries().redeem, &parameters, |rows| {
-            redemption(rows, R::REALM, id, &passkey.credential_id, actor)
-        })
+        self.decided(
+            Place::of(business),
+            R::queries().redeem,
+            &parameters,
+            |rows| redemption(rows, R::REALM, id, &passkey.credential_id, actor),
+        )
         .await
     }
 
@@ -719,7 +751,7 @@ impl<R: PostgresRealm> LoginStore for PostgresLogin<R> {
             (RateLimit::RefusalFlood, "identity.refusals_suppressed"),
         ] {
             let admitted = self
-                .decided(None, ADMIT, &[&limit.as_str(), &network], |rows| {
+                .decided(Place::Module, ADMIT, &[&limit.as_str(), &network], |rows| {
                     admitted_to_record(rows, kind, actor, &payload)
                 })
                 .await?;
@@ -797,7 +829,7 @@ impl<R: PostgresRealm> LoginStore for PostgresLogin<R> {
             &replacing,
             &device,
         ];
-        self.decided(None, R::queries().login, &parameters, |rows| {
+        self.decided(Place::Module, R::queries().login, &parameters, |rows| {
             logging_in(rows, R::REALM, signer, passkey, actor)
         })
         .await
@@ -836,9 +868,12 @@ impl<R: PostgresRealm> LoginStore for PostgresLogin<R> {
         let only = only.map(SessionId::as_str);
         let parameters: [&(dyn ToSql + Sync); 2] = [&session.as_slice(), &only];
         let ending = self
-            .decided(None, R::queries().end_other_sessions, &parameters, |rows| {
-                ending(rows, R::REALM, only, actor)
-            })
+            .decided(
+                Place::Module,
+                R::queries().end_other_sessions,
+                &parameters,
+                |rows| ending(rows, R::REALM, only, actor),
+            )
             .await?;
         Ok(ending.unwrap_or(Ending::NoSession))
     }
@@ -885,9 +920,12 @@ impl<R: PostgresRealm> LoginStore for PostgresLogin<R> {
             &passkey.passkey,
             &transports,
         ];
-        self.decided(None, R::queries().add_passkey, &parameters, |rows| {
-            adding(rows, R::REALM, addition.admin.get(), passkey, actor)
-        })
+        self.decided(
+            Place::Module,
+            R::queries().add_passkey,
+            &parameters,
+            |rows| adding(rows, R::REALM, addition.admin.get(), passkey, actor),
+        )
         .await
     }
 }
@@ -895,13 +933,13 @@ impl<R: PostgresRealm> LoginStore for PostgresLogin<R> {
 impl AdminDirectory for PostgresAdmins {
     async fn insert_admin(
         &self,
-        name: &AdminName,
+        name: &PersonName,
         email: Option<&Address>,
         actor: &Actor,
     ) -> Result<AccountId, Error> {
         let parameters: [&(dyn ToSql + Sync); 2] = [&name.as_str(), &email.map(Address::as_str)];
         created(
-            self.decided(None, INSERT_ADMIN, &parameters, |rows| {
+            self.decided(Place::Module, INSERT_ADMIN, &parameters, |rows| {
                 creation(rows, actor)
             })
             .await?,
@@ -943,7 +981,7 @@ impl AdminDirectory for PostgresAdmins {
     ) -> Result<Option<Issue>, Error> {
         let id = admin.get();
         let parameters: [&(dyn ToSql + Sync); 2] = [&hash.as_slice(), &id];
-        self.decided(None, ISSUE_INVITE, &parameters, |rows| {
+        self.decided(Place::Module, ISSUE_INVITE, &parameters, |rows| {
             issuance(rows, id, actor)
         })
         .await
@@ -955,7 +993,7 @@ impl AdminDirectory for PostgresAdmins {
         actor: &Actor,
     ) -> Result<Option<Removal>, Error> {
         let id = admin.get();
-        self.decided(None, REMOVE_PASSKEYS, &[&id], |rows| {
+        self.decided(Place::Module, REMOVE_PASSKEYS, &[&id], |rows| {
             removing(rows, id, actor)
         })
         .await
@@ -967,7 +1005,7 @@ impl AdminDirectory for PostgresAdmins {
         actor: &Actor,
     ) -> Result<Option<Disabling>, Error> {
         let id = admin.get();
-        self.decided(None, DISABLE_ADMIN, &[&id], |rows| {
+        self.decided(Place::Module, DISABLE_ADMIN, &[&id], |rows| {
             let found = rows.first().map(disabling_from).transpose()?.flatten();
             let payload = found.map_or_else(
                 || json!({"admin_id": id}),
@@ -1040,6 +1078,75 @@ impl AdminDirectory for PostgresAdmins {
             .map(summary_from)
             .collect()
     }
+}
+
+impl StaffDirectory for PostgresStaff {
+    async fn issue_staff_invite(
+        &self,
+        business: BusinessId,
+        hash: &[u8; 32],
+        name: &PersonName,
+        email: &Address,
+        role: Role,
+        actor: &Actor,
+    ) -> Result<StaffIssue, Error> {
+        let parameters: [&(dyn ToSql + Sync); 4] = [
+            &hash.as_slice(),
+            &name.as_str(),
+            &email.as_str(),
+            &role.as_str(),
+        ];
+        // The operator invites for Tetsu, and the event says whether the person was staff already, or disabled, which
+        // may be from another business, so it goes to Tetsu's record, not the business's.
+        self.decided(
+            Place::ForTetsu(business.get()),
+            STAFF_ISSUE_INVITE,
+            &parameters,
+            |rows| staff_issuance(rows, business, role, actor),
+        )
+        .await?
+        .ok_or_else(answered_nothing)
+    }
+}
+
+/// Reads what issuing a staff invite came to, and makes the event it records in Tetsu's record: changed when an
+/// invite was issued, and refused otherwise, with the reason. It names the business, the staff member, the role, and
+/// whether the staff member was made by it, never a name, an address, or the link.
+fn staff_issuance(
+    rows: &[Row],
+    business: BusinessId,
+    role: Role,
+    actor: &Actor,
+) -> Decided<StaffIssue> {
+    let row = rows.first().ok_or_else(answered_nothing)?;
+    let outcome: String = column(row, "outcome")?;
+    let staff: i64 = column(row, "invited")?;
+    let created: bool = column(row, "created")?;
+    let issue = match outcome.as_str() {
+        "issued" => StaffIssue::Issued {
+            staff: AccountId::new(staff),
+            created,
+            renamed: column(row, "renamed")?,
+        },
+        "disabled" => StaffIssue::Disabled,
+        "member" => StaffIssue::Member,
+        _ => {
+            return Err(Error::Storage(format!(
+                "issuing a staff invite answered {outcome:?}"
+            )));
+        }
+    };
+    let reason = (outcome != "issued").then_some(outcome.as_str());
+    let payload = json!({
+        "business_id": business.get(),
+        "staff_id": staff,
+        "role": role.as_str(),
+        "created": created,
+    });
+    Ok((
+        Some(issue),
+        Some(reasoned("identity.staff_invited", actor, reason, payload)),
+    ))
 }
 
 /// An audit event: its type, and a payload of IDs, counts, and facts, never names or tokens, with who ran the
@@ -1837,6 +1944,51 @@ mod tests {
         );
     }
 
+    /// Issuing a staff invite reads each answer the database writes, records it, and takes any other answer, or none,
+    /// as a storage failure.
+    #[tokio::test]
+    async fn issuing_a_staff_invite_reads_every_answer() {
+        let (pool, _database) = support::migrated().await;
+        let client = pool.get().await.expect("a connection");
+        let mut seen = Vec::new();
+        for outcome in ["issued", "disabled", "member", "maybe"] {
+            let sql = format!(
+                "SELECT '{outcome}'::text AS outcome, 7::bigint AS invited, true AS created, false AS renamed"
+            );
+            let rows = client.query(&sql, &[]).await.expect("answers");
+            seen.push(
+                staff_issuance(&rows, BusinessId::new(3), Role::Owner, &support::actor()).map(
+                    |(issue, event)| {
+                        let payload: Value =
+                            serde_json::from_str(&event.expect("an event").1).expect("JSON");
+                        (issue, payload["outcome"].clone(), payload["reason"].clone())
+                    },
+                ),
+            );
+        }
+        let issued = StaffIssue::Issued {
+            staff: AccountId::new(7),
+            created: true,
+            renamed: false,
+        };
+        let refused = |issue, reason| Ok((Some(issue), json!("refused"), json!(reason)));
+        assert_eq!(
+            seen,
+            [
+                Ok((Some(issued), json!("changed"), json!(null))),
+                refused(StaffIssue::Disabled, "disabled"),
+                refused(StaffIssue::Member, "member"),
+                Err(Error::Storage(
+                    "issuing a staff invite answered \"maybe\"".to_string()
+                )),
+            ]
+        );
+        assert_eq!(
+            staff_issuance(&[], BusinessId::new(3), Role::Owner, &support::actor()),
+            Err(answered_nothing())
+        );
+    }
+
     /// A create says what it found and records it, in this one build, which llvm-cov scores on its own: an
     /// admin added, a name another holds, or a name taken by one it cannot yet see.
     #[test]
@@ -1908,7 +2060,7 @@ mod tests {
         let admins = Accounts::new(PostgresAdmins::new(pool));
         let failed = admins
             .create(
-                &AdminName::parse("Kurt Medley").expect("a name"),
+                &PersonName::parse("Kurt Medley").expect("a name"),
                 None,
                 &support::actor(),
             )
@@ -1935,7 +2087,7 @@ mod tests {
         let admins = Accounts::new(PostgresAdmins::new(pool));
         let kurt = admins
             .create(
-                &AdminName::parse("Kurt Medley").expect("a name"),
+                &PersonName::parse("Kurt Medley").expect("a name"),
                 None,
                 &support::actor(),
             )
@@ -1959,7 +2111,7 @@ mod tests {
         let admins = Accounts::new(PostgresAdmins::new(pool));
         let lee = admins
             .create(
-                &AdminName::parse("Lee Park").expect("a name"),
+                &PersonName::parse("Lee Park").expect("a name"),
                 None,
                 &support::actor(),
             )
@@ -2008,7 +2160,7 @@ mod tests {
         });
         let kurt = failing
             .create(
-                &AdminName::parse("Kurt Medley").expect("a name"),
+                &PersonName::parse("Kurt Medley").expect("a name"),
                 None,
                 &support::actor(),
             )

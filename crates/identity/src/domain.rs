@@ -86,11 +86,11 @@ impl AccountId {
     }
 }
 
-/// What an admin is called in Tetsu's own tools and the audit record.
+/// What a person, an admin or a staff member, is called in Tetsu's own tools and pages.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AdminName(String);
+pub struct PersonName(String);
 
-impl AdminName {
+impl PersonName {
     /// A name of 1 to 100 characters, trimmed of whitespace at its ends, with no control, invisible,
     /// direction-changing, or blank-looking characters, which could hide or reorder what the name shows, and no
     /// two spaces together, which the admin command's list puts between columns.
@@ -285,8 +285,8 @@ macro_rules! secret_token {
 // The doc text is a literal, not attributes the macro repeats, which lizard reads as one long function.
 secret_token!(
     InviteToken,
-    "What an invite link carries, good once and for an hour. The admin command prints it only to the \
-     terminal that ran it (ADR-0040)."
+    "What an invite link carries, good once: for an hour for an admin, and seven days for staff. The command that \
+     issues it prints it only to its own terminal (ADR-0040)."
 );
 
 secret_token!(
@@ -883,6 +883,75 @@ impl Issue {
     }
 }
 
+/// A business, by the ID the composition root resolves from its address; Identity keeps its staff's roles and
+/// invites under it (ADR-0042).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BusinessId(i64);
+
+impl BusinessId {
+    #[must_use]
+    pub const fn new(id: i64) -> Self {
+        Self(id)
+    }
+
+    #[must_use]
+    pub const fn get(self) -> i64 {
+        self.0
+    }
+}
+
+/// What a staff member may do at a business (ADR-0048). Only owners exist until sub-slice 4 adds the other roles
+/// and their checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+    Owner,
+}
+
+impl Role {
+    /// The role by the name the staff command and Identity's database write.
+    #[must_use]
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "owner" => Some(Self::Owner),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Owner => "owner",
+        }
+    }
+}
+
+/// What issuing a staff invite came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StaffIssue {
+    /// Issued to this staff member, made now if `created`; `renamed` when they keep a stored name other than the one
+    /// given, which only they change (ADR-0040).
+    Issued {
+        staff: AccountId,
+        created: bool,
+        renamed: bool,
+    },
+    /// The staff member is disabled, and is invited nowhere.
+    Disabled,
+    /// The staff member holds a role at the business already.
+    Member,
+}
+
+/// A staff invite issued: its link's token, and who it invites.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StaffInvite {
+    pub token: InviteToken,
+    pub staff: AccountId,
+    /// The staff member was made by this invite.
+    pub created: bool,
+    /// They keep a stored name other than the one given.
+    pub renamed: bool,
+}
+
 /// Fills bytes from a secure random source.
 pub(crate) type Fill = fn(&mut [u8]) -> Result<(), getrandom::Error>;
 
@@ -1181,7 +1250,7 @@ mod tests {
             "a\u{3000}b",
             "a\u{00A0}b",
         ] {
-            assert!(AdminName::parse(hidden).is_err(), "{hidden:?}");
+            assert!(PersonName::parse(hidden).is_err(), "{hidden:?}");
             assert!(
                 Actor::parse(&format!("{hidden}@host")).is_err(),
                 "{hidden:?}"
@@ -1196,10 +1265,10 @@ mod tests {
             "\u{FE10}",
             "\u{FFFD}",
         ] {
-            assert!(AdminName::parse(shown).is_ok(), "{shown:?}");
+            assert!(PersonName::parse(shown).is_ok(), "{shown:?}");
         }
         // Two spaces together would read as a gap between the list's columns.
-        assert!(AdminName::parse("Kurt  disabled").is_err());
+        assert!(PersonName::parse("Kurt  disabled").is_err());
     }
 
     /// An actor made from a login names `unknown` for any part that is missing or cannot be shown safely, so it
@@ -1306,19 +1375,19 @@ mod tests {
     #[test]
     fn a_name_is_trimmed_and_bounded() {
         assert_eq!(
-            AdminName::parse("  Kurt Medley ").map(|name| name.as_str().to_string()),
+            PersonName::parse("  Kurt Medley ").map(|name| name.as_str().to_string()),
             Ok("Kurt Medley".to_string())
         );
-        assert!(AdminName::parse(&"é".repeat(100)).is_ok());
+        assert!(PersonName::parse(&"é".repeat(100)).is_ok());
         let length = Err(Error::Invalid("a name has 1 to 100 characters".to_string()));
         let control = Err(Error::Invalid(
             "a name has no control, invisible, or direction-changing characters, and single plain spaces".to_string(),
         ));
-        assert_eq!(AdminName::parse(""), length);
-        assert_eq!(AdminName::parse("   "), length);
-        assert_eq!(AdminName::parse(&"a".repeat(101)), length);
-        assert_eq!(AdminName::parse("Kurt\nMedley"), control);
-        assert_eq!(AdminName::parse("Kurt\u{7}"), control);
+        assert_eq!(PersonName::parse(""), length);
+        assert_eq!(PersonName::parse("   "), length);
+        assert_eq!(PersonName::parse(&"a".repeat(101)), length);
+        assert_eq!(PersonName::parse("Kurt\nMedley"), control);
+        assert_eq!(PersonName::parse("Kurt\u{7}"), control);
     }
 
     #[test]

@@ -41,15 +41,15 @@ pub use adapters::http::{PATHS, Web, router};
 pub use adapters::postgres::{postgres_staff_store, postgres_store};
 pub use browser::{Change, CheckedSession, ForChange, Logout, Origins};
 pub use domain::{
-    Account, AccountId, Actor, Addition, AdminName, AdminSummary, Answer, Ceremony, CeremonyKind,
+    Account, AccountId, Actor, Addition, AdminSummary, Answer, BusinessId, Ceremony, CeremonyKind,
     CeremonyToken, Device, Disabling, Ending, Error, FailedCheck, HeldPasskey, InviteToken,
-    Invitee, Issue, Limits, ListedSession, Login, NewPasskey, RateLimit, Realm, Redemption,
-    Refusal, Removal, Session, SessionId, SessionStart, SessionToken, Signer, TakenAddition,
-    TakenCeremony, TimeLeft,
+    Invitee, Issue, Limits, ListedSession, Login, NewPasskey, PersonName, RateLimit, Realm,
+    Redemption, Refusal, Removal, Role, Session, SessionId, SessionStart, SessionToken, Signer,
+    StaffInvite, StaffIssue, TakenAddition, TakenCeremony, TimeLeft,
 };
-pub use mail::invite_message;
+pub use mail::{invite_message, staff_invite_message};
 pub use passkeys::RelyingParty;
-pub use ports::{AdminDirectory, AdminStore, LoginStore};
+pub use ports::{AdminDirectory, AdminStore, LoginStore, StaffDirectory, StaffStore};
 pub use use_cases::Accounts;
 
 /// Registers Identity with the kernel.

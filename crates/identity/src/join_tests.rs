@@ -20,7 +20,7 @@ use sha2::{Digest, Sha256};
 use crate::adapters::postgres::PostgresAdmins;
 use crate::domain::{NewPasskey, Redemption, SessionStart, SessionToken, TakenCeremony};
 use crate::ports::LoginStore;
-use crate::{AccountId, Accounts, Actor, AdminName, Answer, Error, Identity, RelyingParty};
+use crate::{AccountId, Accounts, Actor, Answer, Error, Identity, PersonName, RelyingParty};
 
 pub(crate) const ORIGIN: &str = "https://admin.example.com";
 
@@ -164,7 +164,7 @@ pub(crate) async fn with_link() -> (Accounts<PostgresAdmins>, TestDatabase, Acco
     let admins = Accounts::new(PostgresAdmins::new(app_pool(&database)));
     let kurt = admins
         .create(
-            &AdminName::parse("Kurt Medley").expect("a name"),
+            &PersonName::parse("Kurt Medley").expect("a name"),
             None,
             &actor(),
         )
@@ -395,7 +395,7 @@ async fn a_registration_finishes_only_its_own_ceremony() {
     let party = party();
     let lee = admins
         .create(
-            &AdminName::parse("Lee Park").expect("a name"),
+            &PersonName::parse("Lee Park").expect("a name"),
             None,
             &actor(),
         )
@@ -709,7 +709,7 @@ async fn redeeming() -> (
     let (admins, database, kurt, _) = with_link().await;
     let lee = admins
         .create(
-            &AdminName::parse("Lee Park").expect("a name"),
+            &PersonName::parse("Lee Park").expect("a name"),
             None,
             &actor(),
         )

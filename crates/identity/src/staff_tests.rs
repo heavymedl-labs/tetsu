@@ -305,3 +305,37 @@ async fn every_staff_statement_runs_on_staff_tables() {
         3
     );
 }
+
+/// A link `invite_staff` issues joins the person it names, and the link it replaced joins no one.
+#[tokio::test]
+async fn an_issued_invite_joins_its_staff_member_and_a_replaced_one_does_not() {
+    let database = migrated_database(&[&Identity])
+        .await
+        .expect("a migrated test database");
+    let staff = crate::postgres_staff_store(app_pool(&database));
+    let issue = || async {
+        staff
+            .invite_staff(
+                crate::BusinessId::new(BUSINESS),
+                &crate::PersonName::parse("Ada Park").expect("a name"),
+                &tetsu_kernel::Address::parse("ada@example.com").expect("an address"),
+                crate::Role::Owner,
+                &actor(),
+            )
+            .await
+            .expect("issues")
+    };
+    let old = issue().await;
+    let new = issue().await;
+    assert!(
+        staff
+            .begin_join(&party(), &old.token.to_text())
+            .await
+            .is_err()
+    );
+    let (ada, _) = join(&staff, &new.token.to_text()).await;
+    assert_eq!(ada, new.staff);
+    let role =
+        "SELECT count(*) FROM identity.staff_roles WHERE tenant_id = 3 AND role_name = 'owner'";
+    assert_eq!(number(&database, role).await, 1);
+}

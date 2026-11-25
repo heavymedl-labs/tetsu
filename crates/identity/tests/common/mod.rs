@@ -1,7 +1,7 @@
 //! What Identity's integration tests share: a migrated database, Identity's use cases over it, and one admin.
 
 use tetsu_identity::{
-    AccountId, Accounts, Actor, AdminName, AdminStore, Identity, SessionToken, postgres_store,
+    AccountId, Accounts, Actor, AdminStore, Identity, PersonName, SessionToken, postgres_store,
 };
 use tetsu_postgres::connect;
 use tetsu_postgres::pool;
@@ -12,8 +12,8 @@ pub fn actor() -> Actor {
     Actor::parse("kurt@workstation").expect("an actor")
 }
 
-pub fn name(name: &str) -> AdminName {
-    AdminName::parse(name).expect("a name")
+pub fn name(name: &str) -> PersonName {
+    PersonName::parse(name).expect("a name")
 }
 
 /// A fresh, migrated database.

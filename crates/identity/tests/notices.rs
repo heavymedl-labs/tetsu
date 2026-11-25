@@ -9,7 +9,7 @@ use tetsu_postgres::connect;
 mod support {
     use std::sync::{Arc, Mutex};
 
-    use tetsu_identity::{Actor, AdminName, Identity, notices, postgres_store};
+    use tetsu_identity::{Actor, Identity, PersonName, notices, postgres_store};
     use tetsu_kernel::{Address, Delivery, MailError, Mailer, Message};
     use tetsu_postgres::test_support::{TestDatabase, migrated_database};
     use tetsu_postgres::{Dispatcher, ModuleTransaction, NewEvent, Pool, pool};
@@ -49,7 +49,7 @@ mod support {
         let actor = Actor::parse("kurt@workstation").expect("an actor");
         let ada = Address::parse("ada@example.com").expect("an address");
         for (name, email) in [("Ada Lovelace", Some(&ada)), ("Lee Park", None)] {
-            let name = AdminName::parse(name).expect("a name");
+            let name = PersonName::parse(name).expect("a name");
             admins.create(&name, email, &actor).await.expect("created");
         }
         let recorder = Arc::new(Recorder {

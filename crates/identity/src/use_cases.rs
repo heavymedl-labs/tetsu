@@ -2,13 +2,14 @@
 
 use crate::browser::{Change, CheckedSession, ForChange, Logout, Origins};
 use crate::domain::{
-    Account, AccountId, Actor, Addition, AdminName, AdminSummary, Answer, Ceremony, CeremonyKind,
+    Account, AccountId, Actor, Addition, AdminSummary, Answer, BusinessId, Ceremony, CeremonyKind,
     CeremonyToken, Device, Disabling, Ending, Error, FailedCheck, Fill, InviteToken, Issue,
-    ListedSession, Login, NewPasskey, RateLimit, Realm, Redemption, Refusal, Removal, Session,
-    SessionId, SessionStart, SessionToken, Signer, TimeLeft,
+    ListedSession, Login, NewPasskey, PersonName, RateLimit, Realm, Redemption, Refusal, Removal,
+    Role, Session, SessionId, SessionStart, SessionToken, Signer, StaffInvite, StaffIssue,
+    TimeLeft,
 };
 use crate::passkeys::RelyingParty;
-use crate::ports::{AdminDirectory, LoginStore};
+use crate::ports::{AdminDirectory, LoginStore, StaffDirectory};
 use tetsu_kernel::{Address, Requester};
 
 /// A realm's use cases over its store, in the realm the store names (ADR-0088). It offers nothing that reaches the
@@ -44,7 +45,7 @@ impl<S: AdminDirectory> Accounts<S> {
     /// Fails if storage fails.
     pub async fn create(
         &self,
-        name: &AdminName,
+        name: &PersonName,
         email: Option<&Address>,
         actor: &Actor,
     ) -> Result<AccountId, Error> {
@@ -159,6 +160,50 @@ impl<S: AdminDirectory> Accounts<S> {
     /// Fails if storage fails.
     pub async fn list(&self) -> Result<Vec<AdminSummary>, Error> {
         self.store.list_admins().await
+    }
+}
+
+impl<S: StaffDirectory> Accounts<S> {
+    /// Invites the staff member `email` names to a business with a role, by a link good once and for seven days,
+    /// making them with no passkey if no staff member has that email, and replacing any open invite of theirs there
+    /// (ADR-0089). Records whether one was issued, never the token. The command prints the link only to its own
+    /// terminal and emails it only to `email`.
+    ///
+    /// # Errors
+    /// Fails with [`Error::Invalid`] for a staff member who is disabled or holds a role at the business already,
+    /// each named as such, if no secure random source can be read, or if storage fails.
+    pub async fn invite_staff(
+        &self,
+        business: BusinessId,
+        name: &PersonName,
+        email: &Address,
+        role: Role,
+        actor: &Actor,
+    ) -> Result<StaffInvite, Error> {
+        let token = InviteToken::generate(self.fill)?;
+        let issue = self
+            .store
+            .issue_staff_invite(business, &token.hash(), name, email, role, actor)
+            .await?;
+        let to = email.as_str();
+        match issue {
+            StaffIssue::Issued {
+                staff,
+                created,
+                renamed,
+            } => Ok(StaffInvite {
+                token,
+                staff,
+                created,
+                renamed,
+            }),
+            StaffIssue::Disabled => Err(Error::Invalid(format!(
+                "the staff member at {to} is disabled"
+            ))),
+            StaffIssue::Member => Err(Error::Invalid(format!(
+                "the staff member at {to} holds a role at this business already"
+            ))),
+        }
     }
 }
 

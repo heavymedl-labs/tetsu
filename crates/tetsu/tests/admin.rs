@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use tetsu_identity::{AdminName, Identity};
+use tetsu_identity::{Identity, PersonName};
 use tetsu_postgres::test_support::{Scratch, TestDatabase, migrated_database};
 use tetsu_postgres::{Settings, pool};
 
@@ -48,7 +48,7 @@ mod support {
             .expect("a migrated test database");
         tetsu_identity::postgres_store(pool(&database.as_app()).expect("a pool"))
             .create(
-                &AdminName::parse("Kurt Medley").expect("a name"),
+                &PersonName::parse("Kurt Medley").expect("a name"),
                 None,
                 &tetsu_identity::Actor::parse("kurt@workstation").expect("an actor"),
             )

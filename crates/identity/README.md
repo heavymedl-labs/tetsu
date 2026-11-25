@@ -8,10 +8,12 @@ So far, `Accounts`, a realm's use cases over its store, creates, lists, disables
 invite links, begins and finishes joining with their first passkey, logs them in with it, adds their second, removes
 their passkeys, and starts, finds, and ends their sessions. The login flow runs over any realm's `LoginStore`, and
 managing accounts over the admin realm's `AdminDirectory` alone, so each realm keeps its own tables
-([ADR-0088](../../docs/adr/0088-admins-apart-from-staff.md)). `postgres_store(pool)` returns the admins' over Postgres.
+([ADR-0088](../../docs/adr/0088-admins-apart-from-staff.md)). `postgres_store(pool)` returns the admins' over Postgres,
+and `postgres_staff_store(pool)` staff's, whose `StaffDirectory` invites a staff member to a business by email, making
+them if new, in that business's own transaction ([ADR-0089](../../docs/adr/0089-staff-join-and-login.md)).
 
 An admin may hold an email address ([ADR-0074](../../docs/adr/0074-operator-email-in-development.md)).
-`invite_message` renders their invite from templates, never kept for the mailbox, and `notices(mailer)` is an outbox
+`invite_message` renders their invite from templates, and `staff_invite_message` a staff member's, naming the business as escaped text, never kept for the mailbox, and `notices(mailer)` is an outbox
 consumer of Identity's own events that emails an admin when a login, an added passkey, or a join goes through, keyed on the event, with no link in it
 (`v5.0.0-6.3.5`, `v5.0.0-6.3.7`). A notice that cannot go just now is retried; one the mail server refuses is
 dropped. `/admin/mailbox` shows a logged-in admin the email kept rather than sent, newest first, as text, through
@@ -86,8 +88,9 @@ the kernel's `Mailbox` port, which Mail implements; a message's HTML is never sh
 `tetsu admin` ([ADR-0040](../../docs/adr/0040-identity-and-sign-in.md),
 [ADR-0059](../../docs/adr/0059-session-controls-and-request-checks.md)) works through these use cases:
 
-- **An invite link** carries 256 random bits, stored only as their hash, good once and for an hour, by one
-  reading of the clock. Each admin has one open link at most; a new one replaces the last. An admin who
+- **An invite link** carries 256 random bits, stored only as their hash, good once and for an hour for an admin
+  or seven days for staff, by one reading of the clock. Each admin has one open link at most, and each staff member
+  one at each business; a new one replaces the last. An admin who
   holds a passkey is issued none, since another passkey is added only after logging in (`v5.0.0-6.4.1`). The
   command prints
   it only to a terminal, a guard against it landing in a log by accident; the trust boundary is access to the
