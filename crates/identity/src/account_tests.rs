@@ -211,10 +211,6 @@ async fn an_account_page_that_cannot_be_read_is_unavailable() {
             "REVOKE EXECUTE ON FUNCTION identity.account(bytea) FROM tetsu_identity",
         ),
         (
-            PROFILE,
-            "REVOKE SELECT (email) ON identity.admins FROM tetsu_identity",
-        ),
-        (
             SECURITY,
             "REVOKE EXECUTE ON FUNCTION identity.use_session(bytea, text) FROM tetsu_identity",
         ),

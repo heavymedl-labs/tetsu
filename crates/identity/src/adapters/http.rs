@@ -20,7 +20,7 @@ use crate::domain::{
     ListedSession, RateLimit, Realm, Session, SessionId, SessionToken, TimeLeft,
 };
 use crate::passkeys::{RelyingParty, base64url};
-use crate::ports::{AdminStore, LoginStore};
+use crate::ports::LoginStore;
 use crate::use_cases::Accounts;
 use tetsu_kernel::{Mailbox, Requester, Scheme};
 
@@ -106,9 +106,17 @@ const fn role(realm: Realm) -> &'static str {
     }
 }
 
+/// The pages only a realm's Platform group has: the mailbox for admins, and none for staff (ADR-0084).
+const fn platform_pages(realm: Realm) -> &'static [&'static str] {
+    match realm {
+        Realm::Admin => &[MAILBOX],
+        Realm::Staff => &[],
+    }
+}
+
 /// Whether a realm's sidebar has the Platform group, which only admins have (ADR-0084).
 const fn platform(realm: Realm) -> bool {
-    matches!(realm, Realm::Admin)
+    !platform_pages(realm).is_empty()
 }
 
 /// Where someone with no passkey in a realm turns, as its login page says.
@@ -139,8 +147,9 @@ const fn at<S: LoginStore>() -> &'static Paths {
     paths(S::REALM)
 }
 
-/// Every path Identity serves, which the composition root checks each start with a name no tenant may hold.
-pub const PATHS: [&str; 16] = [
+/// Every path Identity serves, in every realm, which the composition root checks each start with a name no tenant may
+/// hold.
+pub const PATHS: [&str; 31] = [
     ADMIN.home,
     ADMIN.profile,
     ADMIN.security,
@@ -157,6 +166,21 @@ pub const PATHS: [&str; 16] = [
     ADMIN.session,
     MAILBOX,
     ADMIN.elsewhere,
+    STAFF.home,
+    STAFF.profile,
+    STAFF.security,
+    STAFF.login,
+    STAFF.login_begin,
+    STAFF.login_finish,
+    STAFF.join,
+    STAFF.join_begin,
+    STAFF.join_finish,
+    STAFF.add_begin,
+    STAFF.add_finish,
+    STAFF.logout,
+    STAFF.end_sessions,
+    STAFF.session,
+    STAFF.elsewhere,
 ];
 
 /// The admin pages' policy: the site's, with Tetsu's own script, its calls back to this origin, and forms
@@ -406,9 +430,9 @@ type Shared<S> = State<Arc<Served<S>>>;
 /// Identity's routes. They set no fallback, which is the site's alone (#90).
 pub fn router<S>(admins: Accounts<S>, web: Web) -> Router
 where
-    S: AdminStore + Send + Sync + 'static,
+    S: LoginStore + Send + Sync + 'static,
 {
-    Router::new()
+    let routes = Router::new()
         .route(at::<S>().home, get(home::<S>))
         .route(at::<S>().profile, get(profile::<S>))
         .route(at::<S>().security, get(security::<S>))
@@ -435,13 +459,15 @@ where
             at::<S>().session,
             get(time_left::<S>).merge(logged_in_route::<S>(LoggedIn::Stay)),
         )
-        .route(MAILBOX, get(mailbox::<S>))
-        .route(at::<S>().elsewhere, get(elsewhere::<S>))
+        .route(at::<S>().elsewhere, get(elsewhere::<S>));
+    platform_pages(S::REALM)
+        .iter()
+        .fold(routes, |routes, path| routes.route(path, get(mailbox::<S>)))
         .layer(DefaultBodyLimit::max(LARGEST_BODY))
         .with_state(Arc::new(Served { admins, web }))
 }
 
-fn before_route<S: AdminStore + Send + Sync + 'static>(
+fn before_route<S: LoginStore + Send + Sync + 'static>(
     step: Before,
 ) -> MethodRouter<Arc<Served<S>>> {
     post(
@@ -452,7 +478,7 @@ fn before_route<S: AdminStore + Send + Sync + 'static>(
     )
 }
 
-fn logged_in_route<S: AdminStore + Send + Sync + 'static>(
+fn logged_in_route<S: LoginStore + Send + Sync + 'static>(
     step: LoggedIn,
 ) -> MethodRouter<Arc<Served<S>>> {
     post(
@@ -465,7 +491,7 @@ fn logged_in_route<S: AdminStore + Send + Sync + 'static>(
 
 /// The login page. An admin already logged in is sent on, to the checked page it would return to or their own,
 /// since logging in again would only replace their session.
-async fn login_page<S: AdminStore>(
+async fn login_page<S: LoginStore>(
     State(served): Shared<S>,
     headers: HeaderMap,
     uri: Uri,
@@ -517,7 +543,7 @@ async fn join_page<S: LoginStore>(State(served): Shared<S>, headers: HeaderMap) 
 
 /// The admins' realm itself (ADR-0084): it sends a logged-in admin to their Profile, as the account area is their
 /// home (ADR-0086), and anyone else to log in.
-async fn home<S: AdminStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
+async fn home<S: LoginStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
     match served.admins.session(cookies(&headers)).await {
         Ok(Some(_)) => see_other(at::<S>().profile),
         Ok(None) => see_other(at::<S>().login),
@@ -527,25 +553,22 @@ async fn home<S: AdminStore>(State(served): Shared<S>, headers: HeaderMap) -> Re
 
 /// The admin's Profile (#156): their name, email address, and role. Anyone without a live session is sent to
 /// log in, returning here after.
-async fn profile<S: AdminStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
+async fn profile<S: LoginStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
     let web = &served.web;
     let (account, form) = match viewer(&served, &headers).await {
         Ok(Some(viewer)) => viewer,
         Ok(None) => return see_other(&return_to(at::<S>(), at::<S>().profile)),
         Err(error) => return unavailable_page(web, "could not show an admin's profile", &error),
     };
-    match served.admins.email(account.admin).await {
-        Ok(email) => page(&ProfilePage {
-            email: email.map(|email| email.as_str().to_string()),
-            shell: Shell::of::<S>(web, &headers, account.name, form, at::<S>().profile),
-        }),
-        Err(error) => unavailable_page(web, "could not show an admin's profile", &error),
-    }
+    page(&ProfilePage {
+        email: account.email.map(|email| email.as_str().to_string()),
+        shell: Shell::of::<S>(web, &headers, account.name, form, at::<S>().profile),
+    })
 }
 
 /// The admin's Security (#156): their sessions and passkeys. Anyone without a live session is sent to log in,
 /// returning here after.
-async fn security<S: AdminStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
+async fn security<S: LoginStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
     match shown(&served, &headers).await {
         Ok(Some(page)) => page,
         Ok(None) => see_other(&return_to(at::<S>(), at::<S>().security)),
@@ -554,7 +577,7 @@ async fn security<S: AdminStore>(State(served): Shared<S>, headers: HeaderMap) -
 }
 
 /// The admins' mailbox. Anyone without a live session is sent to log in, returning here after.
-async fn mailbox<S: AdminStore>(
+async fn mailbox<S: LoginStore>(
     State(served): Shared<S>,
     headers: HeaderMap,
     uri: Uri,
@@ -587,7 +610,7 @@ async fn mailbox<S: AdminStore>(
 
 /// The account of the live session a page's request comes with, and a form token for the page to carry; none for a
 /// request with no live session, or whose admin was disabled since it was checked.
-async fn viewer<S: AdminStore>(
+async fn viewer<S: LoginStore>(
     served: &Served<S>,
     headers: &HeaderMap,
 ) -> Result<Option<(Account, String)>, Error> {
@@ -627,7 +650,7 @@ fn ago(at: SystemTime, now: SystemTime) -> String {
 /// A path under `/admin` that Identity does not serve. Anyone without a live session is sent to log in, returning here
 /// after, as at `/admin`, so the admin pages cannot be mapped from outside; an admin gets the site's not-found
 /// page, as any wrong address does.
-async fn elsewhere<S: AdminStore>(
+async fn elsewhere<S: LoginStore>(
     State(served): Shared<S>,
     headers: HeaderMap,
     uri: Uri,
@@ -650,7 +673,7 @@ async fn elsewhere<S: AdminStore>(
 
 /// The live session a page's request comes with, which the request renews, and a form token for the page to carry;
 /// none for a request with no live session.
-async fn viewing<S: AdminStore>(
+async fn viewing<S: LoginStore>(
     served: &Served<S>,
     headers: &HeaderMap,
 ) -> Result<Option<(Session, String)>, Error> {
@@ -667,7 +690,7 @@ async fn viewing<S: AdminStore>(
     token.form_token().map(|form| Some((session, form)))
 }
 
-async fn shown<S: AdminStore>(
+async fn shown<S: LoginStore>(
     served: &Served<S>,
     headers: &HeaderMap,
 ) -> Result<Option<Response>, Error> {
@@ -688,7 +711,7 @@ async fn shown<S: AdminStore>(
                 .map(|passkey| base64url(&passkey.credential))
                 .collect::<Vec<_>>()
                 .join(" "),
-            can_add: account.passkeys.len() < 2,
+            can_add: account.passkeys.len() < S::REALM.passkey_cap(),
             fresh: fresh(session.proven_at(), now),
             passkeys: account.passkeys.iter().map(described).collect(),
             sessions: sessions
@@ -702,7 +725,7 @@ async fn shown<S: AdminStore>(
 
 /// How long the browser's session has left, read without renewing it, for the session island's clock: only the
 /// person's own requests renew a session (NIST SP 800-63B-4).
-async fn time_left<S: AdminStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
+async fn time_left<S: LoginStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
     let left = served.admins.time_left(cookies(&headers)).await;
     answered(&served.web, left.map(left_json))
 }
@@ -794,7 +817,7 @@ impl LoggedIn {
 
 /// Runs a step before login, once the request is admitted and its network has room under the step's rate limit,
 /// and counts a login that fails against its network.
-async fn before<S: AdminStore>(
+async fn before<S: LoginStore>(
     served: Arc<Served<S>>,
     from: Requester,
     headers: HeaderMap,
@@ -817,7 +840,7 @@ async fn before<S: AdminStore>(
 }
 
 /// Begins or finishes logging in or joining.
-async fn stepped<S: AdminStore>(
+async fn stepped<S: LoginStore>(
     served: &Served<S>,
     headers: &HeaderMap,
     sent: &Value,
@@ -858,7 +881,7 @@ async fn stepped<S: AdminStore>(
 
 /// Runs a logged-in admin's step, once the request has passed the checks for a change, which renew the session:
 /// begins or finishes adding a passkey, or stays logged in.
-async fn logged_in<S: AdminStore>(
+async fn logged_in<S: LoginStore>(
     served: Arc<Served<S>>,
     from: Requester,
     headers: HeaderMap,
@@ -895,7 +918,7 @@ async fn logged_in<S: AdminStore>(
 /// cookie cleared, whether or not the session was still live, returning after to the checked page the form's address
 /// names, as the session dialog's "Log in again" does. A form posts and shows pages, so a logout refused or failed
 /// gets a page saying so, never a bare status or JSON.
-async fn logout<S: AdminStore>(
+async fn logout<S: LoginStore>(
     State(served): Shared<S>,
     Extension(from): Extension<Requester>,
     headers: HeaderMap,
@@ -958,7 +981,7 @@ fn field<'a>(body: &'a [u8], name: &str) -> Option<&'a str> {
 /// not proven within ten minutes ended none. Its checks are logging out's: a request from elsewhere, without its
 /// session's form token, or naming a session in no form an id takes is refused, and one whose session has ended goes
 /// to log in.
-async fn end_sessions<S: AdminStore>(
+async fn end_sessions<S: LoginStore>(
     State(served): Shared<S>,
     Extension(from): Extension<Requester>,
     headers: HeaderMap,
@@ -998,7 +1021,7 @@ async fn end_sessions<S: AdminStore>(
 
 /// Records a form a check refused (#152), then the page it gets: forbidden, or unavailable if the record could not
 /// be made.
-async fn refused_form<S: AdminStore>(
+async fn refused_form<S: LoginStore>(
     served: &Served<S>,
     from: &Requester,
     headers: &HeaderMap,
@@ -1022,7 +1045,7 @@ fn refused_page(web: &Web) -> Response {
 
 /// The live session a logged-in request acts for, or the answer it gets instead: forbidden when it comes from
 /// elsewhere or without its session's form token, and unauthorized when its session has ended.
-async fn acting<S: AdminStore>(
+async fn acting<S: LoginStore>(
     served: &Served<S>,
     from: &Requester,
     headers: &HeaderMap,
@@ -1048,7 +1071,7 @@ async fn acting<S: AdminStore>(
 
 /// A request before login, which has no session to check: its JSON, if it comes from one of the realm's
 /// origins and says so in both ways a browser can (ADR-0059), or the answer it gets instead.
-async fn admitted<S: AdminStore>(
+async fn admitted<S: LoginStore>(
     served: &Served<S>,
     from: &Requester,
     headers: &HeaderMap,
@@ -1066,7 +1089,7 @@ async fn admitted<S: AdminStore>(
 
 /// Records a request a check refused (#152), then the answer a script gets: forbidden, or unavailable if the record
 /// could not be made.
-async fn refused_json<S: AdminStore>(
+async fn refused_json<S: LoginStore>(
     served: &Served<S>,
     from: &Requester,
     headers: &HeaderMap,
@@ -1080,7 +1103,7 @@ async fn refused_json<S: AdminStore>(
 }
 
 /// Records a request a check refused, naming the device it came from.
-async fn record_refused<S: AdminStore>(
+async fn record_refused<S: LoginStore>(
     served: &Served<S>,
     from: &Requester,
     headers: &HeaderMap,

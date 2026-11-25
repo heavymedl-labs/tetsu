@@ -4,6 +4,7 @@ SELECT
     a.admin_id AS account_id,
     a.user_handle,
     a.name,
+    a.email,
     a.credential_id,
     a.transports,
     a.backup_eligible,

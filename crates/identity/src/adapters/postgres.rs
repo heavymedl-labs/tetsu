@@ -1517,8 +1517,17 @@ fn account_from(rows: &[Row]) -> Result<Option<Account>, Error> {
         admin: invitee.admin,
         user_handle: invitee.user_handle,
         name: invitee.name,
+        email: email_from(first)?,
         passkeys,
     }))
+}
+
+/// An account's stored email, if it has one, which must be a plain address.
+fn email_from(row: &Row) -> Result<Option<Address>, Error> {
+    column::<Option<String>>(row, "email")?
+        .as_deref()
+        .map(address_from)
+        .transpose()
 }
 
 /// A stored user handle, which must be 16 bytes: `uuid_send` always writes 16, so any other length is a fault of
@@ -1813,7 +1822,7 @@ mod tests {
                 });
         assert_eq!(
             digest,
-            "a0a8051a8191e636b59b2850a50a5561f1c430dd595a174686df87403d5cef2b"
+            "e51b8592d8e94f380af9055d9b03a91f0dfbec15946aa0a55f4c8cd2e4fe0900"
         );
     }
 

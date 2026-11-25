@@ -23,7 +23,7 @@ INSERT (
 UPDATE (last_seen_at, device),
 DELETE ON identity.admin_sessions TO tetsu_identity_lookup;
 -- Locking an account's row needs a right to update it.
-GRANT SELECT (id, name, user_handle, disabled_at), UPDATE (disabled_at)
+GRANT SELECT (id, name, email, user_handle, disabled_at), UPDATE (disabled_at)
 ON identity.admins TO tetsu_identity_lookup;
 GRANT SELECT (credential_id, admin_id, passkey, transports),
 INSERT (credential_id, admin_id, passkey, transports, created_at),
@@ -602,16 +602,17 @@ END
 $$;
 
 -- The account a live admin session names, if the admin is enabled: their
--- user handle and name, and a row for each passkey they hold, with how the
--- browser said it can reach it and whether it is synced, as the admin's
--- page and the browser's list of their passkeys need. An admin who holds
--- none has one row with no passkey. Reading it changes nothing, not even the
--- session's last request.
+-- user handle, name, and email, and a row for each passkey they hold, with
+-- how the browser said it can reach it and whether it is synced, as the
+-- admin's page and the browser's list of their passkeys need. An admin who
+-- holds none has one row with no passkey. Reading it changes nothing, not even
+-- the session's last request.
 CREATE FUNCTION identity.account(wanted_session bytea)
 RETURNS TABLE (
     admin_id bigint,
     user_handle bytea,
     name text,
+    email text,
     credential_id bytea,
     transports text,
     backup_eligible boolean,
@@ -624,6 +625,7 @@ AS $$
         o.id,
         uuid_send(o.user_handle),
         o.name,
+        o.email,
         p.credential_id,
         p.transports,
         (p.passkey #>> '{cred,backup_eligible}')::boolean,
@@ -763,6 +765,7 @@ RETURNS TABLE (
     admin_id bigint,
     user_handle bytea,
     name text,
+    email text,
     credential_id bytea,
     transports text,
     backup_eligible boolean,

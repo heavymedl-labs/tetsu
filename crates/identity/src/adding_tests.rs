@@ -210,7 +210,7 @@ async fn an_unreadable_passkey_row_is_a_storage_failure() {
     ] {
         let (admins, database, _, session) = logged_in().await;
         let returns = format!(
-            "TABLE (admin_id bigint, user_handle bytea, name text, credential_id {}, transports {}, \
+            "TABLE (admin_id bigint, user_handle bytea, name text, email text, credential_id {}, transports {}, \
              backup_eligible boolean, backup_state boolean)",
             if credential.ends_with("text") {
                 "text"
@@ -220,12 +220,13 @@ async fn an_unreadable_passkey_row_is_a_storage_failure() {
             if transports == "1" { "integer" } else { "text" },
         );
         let body = format!(
-            "SELECT 1::bigint, uuid_send(gen_random_uuid()), 'Kurt', {credential}, {transports}, {eligible}, true"
+            "SELECT 1::bigint, uuid_send(gen_random_uuid()), 'Kurt', null::text, {credential}, {transports}, \
+             {eligible}, true"
         );
         replace(&database, "account(bytea)", &returns, &body).await;
         said.push(failure(admins.account(session.session()).await.map(drop)));
     }
-    for (said, column) in said.iter().zip(3..) {
+    for (said, column) in said.iter().zip(4..) {
         assert!(
             said.starts_with(&format!(
                 "storage failed: error deserializing column {column}: "
@@ -233,6 +234,34 @@ async fn an_unreadable_passkey_row_is_a_storage_failure() {
             "{said}"
         );
     }
+}
+
+/// A stored email that is not a plain address, or not text at all, is a storage failure, never shown.
+#[tokio::test]
+async fn an_unreadable_email_is_a_storage_failure() {
+    let mut said = Vec::new();
+    for (kind, email) in [("text", "'not an address'"), ("integer", "1")] {
+        let (admins, database, _, session) = logged_in().await;
+        let returns = format!(
+            "TABLE (admin_id bigint, user_handle bytea, name text, email {kind}, credential_id bytea, \
+             transports text, backup_eligible boolean, backup_state boolean)"
+        );
+        let body = format!(
+            "SELECT 1::bigint, uuid_send(gen_random_uuid()), 'Kurt', {email}, null::bytea, null::text, \
+             null::boolean, null::boolean"
+        );
+        replace(&database, "account(bytea)", &returns, &body).await;
+        said.push(failure(admins.account(session.session()).await.map(drop)));
+    }
+    assert_eq!(
+        said[0],
+        "storage failed: a stored email address is not plain"
+    );
+    assert!(
+        said[1].starts_with("storage failed: error deserializing column 3: "),
+        "{}",
+        said[1]
+    );
 }
 
 /// Reading an account fails as storage when the database refuses its lookup.
@@ -635,23 +664,23 @@ async fn failures_of_the_server_are_told_apart() {
 const UNREADABLE: [(&str, &str, &str); 14] = [
     (
         "adder(bytea)",
-        "TABLE (admin_id text, user_handle bytea, name text, credential_id bytea, transports text, backup_eligible boolean, backup_state boolean)",
-        "SELECT '1', uuid_send(gen_random_uuid()), 'Kurt', null::bytea, null::text, null::boolean, null::boolean",
+        "TABLE (admin_id text, user_handle bytea, name text, email text, credential_id bytea, transports text, backup_eligible boolean, backup_state boolean)",
+        "SELECT '1', uuid_send(gen_random_uuid()), 'Kurt', null::text, null::bytea, null::text, null::boolean, null::boolean",
     ),
     (
         "adder(bytea)",
-        "TABLE (admin_id bigint, user_handle bytea, name text, credential_id bytea, transports text, backup_eligible boolean, backup_state boolean)",
-        "SELECT 1::bigint, '\\x00'::bytea, 'Kurt', null::bytea, null::text, null::boolean, null::boolean",
+        "TABLE (admin_id bigint, user_handle bytea, name text, email text, credential_id bytea, transports text, backup_eligible boolean, backup_state boolean)",
+        "SELECT 1::bigint, '\\x00'::bytea, 'Kurt', null::text, null::bytea, null::text, null::boolean, null::boolean",
     ),
     (
         "adder(bytea)",
-        "TABLE (admin_id bigint, user_handle bytea, name integer, credential_id bytea, transports text, backup_eligible boolean, backup_state boolean)",
-        "SELECT 1::bigint, uuid_send(gen_random_uuid()), 1, null::bytea, null::text, null::boolean, null::boolean",
+        "TABLE (admin_id bigint, user_handle bytea, name integer, email text, credential_id bytea, transports text, backup_eligible boolean, backup_state boolean)",
+        "SELECT 1::bigint, uuid_send(gen_random_uuid()), 1, null::text, null::bytea, null::text, null::boolean, null::boolean",
     ),
     (
         "adder(bytea)",
-        "TABLE (admin_id bigint, user_handle bytea, name text, credential_id bytea, transports text, backup_eligible boolean, backup_state boolean)",
-        "SELECT 1::bigint, uuid_send(gen_random_uuid()), 'Kurt', '\\x01'::bytea, ''::text, true, null::boolean",
+        "TABLE (admin_id bigint, user_handle bytea, name text, email text, credential_id bytea, transports text, backup_eligible boolean, backup_state boolean)",
+        "SELECT 1::bigint, uuid_send(gen_random_uuid()), 'Kurt', null::text, '\\x01'::bytea, ''::text, true, null::boolean",
     ),
     (
         "take_addition(bytea, bytea)",

@@ -12,7 +12,6 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::adapters::http::{PATHS, Web, router};
-use crate::adapters::postgres::PostgresAdmins;
 use crate::join_tests::{ORIGIN, as_db_admin, authenticate, party, register_keeping, with_link};
 use crate::{Accounts, Origins};
 
@@ -94,8 +93,8 @@ async fn serving_with(mailbox: Arc<dyn Mailbox>) -> (SocketAddr, TestDatabase, S
     (serve(admins, mailbox).await, database, link)
 }
 
-pub(crate) async fn serve(
-    admins: Accounts<PostgresAdmins>,
+pub(crate) async fn serve<S: crate::ports::LoginStore + Send + Sync + 'static>(
+    admins: Accounts<S>,
     mailbox: Arc<dyn Mailbox>,
 ) -> SocketAddr {
     let web = Web {
@@ -349,14 +348,15 @@ pub(crate) async fn text(database: &TestDatabase, sql: &str) -> String {
         .expect("text")
 }
 
-/// Every path Identity serves begins at `/admin`, which the composition root reserves.
+/// Every path Identity serves begins at a realm's base, `/admin` or `/app`, each of which the composition root
+/// reserves.
 #[test]
 fn every_path_is_under_ops() {
-    assert!(
-        PATHS
+    assert!(PATHS.iter().all(|path| {
+        ["/admin", "/app"]
             .iter()
-            .all(|path| *path == "/admin" || path.starts_with("/admin/"))
-    );
+            .any(|base| path == base || path.starts_with(&format!("{base}/")))
+    }));
 }
 
 /// Adds a passkey through the pages' endpoints, as the script would, and returns how finishing answered.

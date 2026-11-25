@@ -80,9 +80,9 @@ async fn pages_without_a_session_show_no_menu() {
 #[tokio::test]
 async fn a_page_without_an_account_goes_to_log_in() {
     let (address, database, cookie, _) = logged_in().await;
-    let returns = "TABLE (admin_id bigint, user_handle bytea, name text, credential_id bytea, transports text, \
-                   backup_eligible boolean, backup_state boolean)";
-    let none = "SELECT 1::bigint, ''::bytea, ''::text, ''::bytea, ''::text, true, true WHERE false";
+    let returns = "TABLE (admin_id bigint, user_handle bytea, name text, email text, credential_id bytea, \
+                   transports text, backup_eligible boolean, backup_state boolean)";
+    let none = "SELECT 1::bigint, ''::bytea, ''::text, ''::text, ''::bytea, ''::text, true, true WHERE false";
     replace(&database, "account(bytea)", returns, none).await;
     for (path, to) in [
         ("/admin/mailbox", "/admin/login?next=/admin/mailbox"),

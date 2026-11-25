@@ -32,7 +32,7 @@ pub struct RelyingParty {
 }
 
 impl RelyingParty {
-    /// The relying party for an origin such as `https://tetsu-demo.onrender.com`, written as browsers send it, with
+    /// The relying party for an origin such as `https://admin.example.com`, written as browsers send it, with
     /// [`Origins`]'s rules: `https`, or `http` for this machine alone, a host of plain labels, and no path. The host
     /// must be a domain, since passkeys cannot belong to an address.
     ///
@@ -54,9 +54,10 @@ impl RelyingParty {
 
     /// Starts registering a passkey for a user handle and name: the options for the browser, and the state to keep
     /// until it answers. The passkey must verify the user, and must be discoverable, so logging in needs no name.
-    /// Every realm shares one passkey domain until Tetsu has domains (ADR-0061), so the name a device's account
-    /// picker shows says which realm's account the passkey is, with `realm`'s label. The credentials the admin already `held` are listed for the
-    /// device to refuse, so it makes no second passkey where it has one. It fails only for a stored admin with no
+    /// The name a device's account picker shows says which realm's account the passkey is, with `realm`'s label,
+    /// since one device may hold several realms', which share a host wherever their origins do, as on this machine;
+    /// production gives each realm a host of its own (ADR-0092).
+    /// The credentials the admin already `held` are listed for the device to refuse, so it makes no second passkey where it has one. It fails only for a stored admin with no
     /// name, a fault of storage, never the browser's.
     pub(crate) fn begin_registration(
         &self,

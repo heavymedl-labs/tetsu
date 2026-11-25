@@ -146,7 +146,7 @@ pub enum Logout {
     Refused(FailedCheck),
 }
 
-/// The origins a realm's pages are served from, such as `https://tetsu-demo-admin.onrender.com`. A state-changing
+/// The origins a realm's pages are served from, such as `https://admin.example.com`. A state-changing
 /// request is accepted only from one of them, so another site's form or script can never act for a logged-in
 /// person (ADR-0048, `v5.0.0-3.5.1`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -497,7 +497,7 @@ mod tests {
     fn origins_are_https_or_this_machine_and_nothing_else() {
         assert!(
             Origins::parse(&[
-                "https://tetsu-demo-admin.onrender.com",
+                "https://admin.tetsu.example",
                 "https://admin.example.com:8443",
                 "https://ops2.example.com",
                 "http://localhost:8080",
@@ -506,10 +506,10 @@ mod tests {
             .is_ok()
         );
         let refused = [
-            "tetsu-demo-admin.onrender.com",
-            "http://tetsu-demo-admin.onrender.com",
-            "https://tetsu-demo-admin.onrender.com/",
-            "https://Tetsu-Demo-Admin.onrender.com",
+            "admin.tetsu.example",
+            "http://admin.tetsu.example",
+            "https://admin.tetsu.example/",
+            "https://Admin.Tetsu.example",
             "https://admin.example.com:99999",
             "https://admin.example.com:+8443",
             "https://admin.example.com:08443",

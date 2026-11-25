@@ -40,6 +40,16 @@ impl Realm {
         }
     }
 
+    /// The most passkeys an account in this realm may hold, as `identity.passkey_cap` enforces: two for an admin,
+    /// whose keys are hardware, and ten for staff, who may keep one on each device they use.
+    #[must_use]
+    pub const fn passkey_cap(self) -> usize {
+        match self {
+            Self::Admin => 2,
+            Self::Staff => 10,
+        }
+    }
+
     /// How long a session lasts in this realm, within NIST SP 800-63B-4's Level 2 ceiling (ADR-0048).
     #[must_use]
     pub fn limits(self) -> Limits {
@@ -450,6 +460,8 @@ pub struct Account {
     pub admin: AccountId,
     pub user_handle: [u8; 16],
     pub name: String,
+    /// Where their invites and notices go, if they have an address (ADR-0074); every staff member has one.
+    pub email: Option<tetsu_kernel::Address>,
     pub passkeys: Vec<HeldPasskey>,
 }
 

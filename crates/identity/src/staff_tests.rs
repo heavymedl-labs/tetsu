@@ -156,6 +156,10 @@ async fn a_staff_member_joins_by_their_link_and_logs_in() {
         .expect("reads")
         .expect("an account");
     assert_eq!((account.admin, account.name.as_str()), (ada, "Ada Park"));
+    assert_eq!(
+        account.email,
+        tetsu_kernel::Address::parse("ada@example.com")
+    );
     let logins = events(&database, "outbox_global", "identity.logged_in").await;
     assert_eq!(
         (logins.len(), &logins[0]["staff_id"], &logins[0]["admin_id"]),
@@ -406,4 +410,52 @@ async fn an_invite_to_a_member_or_a_disabled_staff_member_is_refused() {
             "the staff member at ada@example.com is disabled".to_string()
         ))
     );
+}
+
+/// Each realm's passkey cap, as its pages show it, is the one its database enforces.
+#[tokio::test]
+async fn each_realms_passkey_cap_is_the_databases() {
+    let database = migrated_database(&[&Identity])
+        .await
+        .expect("a migrated test database");
+    for realm in [Realm::Admin, Realm::Staff] {
+        let enforced = number(
+            &database,
+            &format!("SELECT identity.passkey_cap('{}')", realm.as_str()),
+        )
+        .await;
+        assert_eq!(
+            i64::try_from(realm.passkey_cap()).expect("a small cap"),
+            enforced,
+            "{realm:?}"
+        );
+    }
+}
+
+/// Staff's router serves staff's pages at `/app`, and none of the admins', not even the mailbox.
+#[tokio::test]
+async fn staffs_router_serves_staff_pages_alone() {
+    let (staff, _database, _) = invited().await;
+    let address = crate::http_tests::serve(staff, crate::http_tests::sample_mailbox()).await;
+    let login = crate::http_tests::get(address, "/app/login", "").await;
+    assert_eq!(login.status, 200);
+    assert!(
+        login
+            .body
+            .contains("Ask the business&#39;s owner for an invite."),
+        "{}",
+        login.body
+    );
+    let profile = crate::http_tests::get(address, "/app/settings/profile", "").await;
+    assert_eq!(
+        (profile.status, profile.header("location")),
+        (303, Some("/app/login"))
+    );
+    for admins in ["/admin/login", "/admin/mailbox", "/admin"] {
+        assert_eq!(
+            crate::http_tests::get(address, admins, "").await.status,
+            404,
+            "{admins}"
+        );
+    }
 }
