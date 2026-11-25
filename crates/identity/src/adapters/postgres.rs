@@ -320,7 +320,9 @@ impl LoginStore for PostgresAdmins {
         let rows = self
             .query(USE_SESSION, &[&hash.as_slice(), &realm.as_str()])
             .await?;
-        rows.first().map(|row| session_from(row, hash)).transpose()
+        rows.first()
+            .map(|row| session_from(row, hash, Self::REALM))
+            .transpose()
     }
 
     async fn session_left(&self, hash: &[u8; 32], realm: Realm) -> Result<Option<TimeLeft>, Error> {
@@ -1250,12 +1252,19 @@ fn logged_out(rows: &[Row], realm: Realm, actor: &Actor) -> Decided<bool> {
     Ok((Some(true), Some(recorded)))
 }
 
-/// A stored realm Identity does not know is an error, never a session in some default realm.
-fn session_from(row: &Row, hash: &[u8; 32]) -> Result<Session, Error> {
+/// A stored realm Identity does not know is an error, never a session in some default realm, and so is a session of
+/// any realm but the store's own, which its lookups never return.
+fn session_from(row: &Row, hash: &[u8; 32], own: Realm) -> Result<Session, Error> {
     let realm: String = column(row, "realm")?;
     let Some(known) = Realm::parse(&realm) else {
         return Err(Error::Storage(format!("unknown realm {realm:?}")));
     };
+    if known != own {
+        return Err(Error::Storage(format!(
+            "a {realm} session from the {} store",
+            own.as_str()
+        )));
+    }
     Ok(Session {
         hash: *hash,
         realm: known,

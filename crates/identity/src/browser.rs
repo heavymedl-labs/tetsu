@@ -12,6 +12,7 @@ impl Realm {
     pub fn cookie_name(self) -> &'static str {
         match self {
             Self::Admin => "__Host-tetsu-admin",
+            Self::Staff => "__Host-tetsu-staff",
         }
     }
 
@@ -414,6 +415,16 @@ mod tests {
             None
         );
         assert_eq!(Realm::Admin.token_in([]), None);
+    }
+
+    /// Each realm has a cookie of its own, so one realm's session never reads as another's.
+    #[test]
+    fn each_realm_has_its_own_cookie() {
+        assert_eq!(
+            [Realm::Admin.cookie_name(), Realm::Staff.cookie_name()],
+            ["__Host-tetsu-admin", "__Host-tetsu-staff"]
+        );
+        assert_eq!(Realm::Staff.token_in(["__Host-tetsu-admin=a"]), None);
     }
 
     #[test]

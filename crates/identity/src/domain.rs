@@ -14,10 +14,11 @@ const HEX: &[u8; 16] = b"0123456789abcdef";
 const FORM_TOKEN: &[u8] = b"tetsu form token\0";
 
 /// Which kind of person logs in. Each realm has its own host, passkeys, cookie, and session limits (ADR-0040,
-/// ADR-0048); admins come first, in slice 5.
+/// ADR-0048): admins, who work for Tetsu, and staff, who work for businesses (ADR-0089).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Realm {
     Admin,
+    Staff,
 }
 
 impl Realm {
@@ -25,6 +26,7 @@ impl Realm {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Admin => "admin",
+            Self::Staff => "staff",
         }
     }
 
@@ -33,6 +35,7 @@ impl Realm {
     pub fn parse(name: &str) -> Option<Self> {
         match name {
             "admin" => Some(Self::Admin),
+            "staff" => Some(Self::Staff),
             _ => None,
         }
     }
@@ -44,6 +47,10 @@ impl Realm {
             Self::Admin => Limits {
                 absolute: Duration::from_hours(8),
                 idle: Duration::from_mins(15),
+            },
+            Self::Staff => Limits {
+                absolute: Duration::from_hours(12),
+                idle: Duration::from_hours(1),
             },
         }
     }
@@ -1272,10 +1279,28 @@ mod tests {
     }
 
     #[test]
+    fn staff_get_twelve_hours_and_one_idle_hour() {
+        assert_eq!(
+            Realm::Staff.limits(),
+            Limits {
+                absolute: 12 * HOUR,
+                idle: HOUR
+            }
+        );
+    }
+
+    #[test]
     fn a_realm_reads_back_its_own_name_and_no_other() {
-        assert_eq!(Realm::parse(Realm::Admin.as_str()), Some(Realm::Admin));
-        assert_eq!(Realm::parse("Admin"), None);
-        assert_eq!(Realm::parse("staff"), None);
+        for realm in [Realm::Admin, Realm::Staff] {
+            assert_eq!(Realm::parse(realm.as_str()), Some(realm));
+        }
+        assert_eq!(
+            [Realm::Admin.as_str(), Realm::Staff.as_str()],
+            ["admin", "staff"]
+        );
+        for other in ["Admin", "Staff", "customer", ""] {
+            assert_eq!(Realm::parse(other), None, "{other}");
+        }
     }
 
     #[test]

@@ -20,6 +20,7 @@ const PROMPT_LIMIT: std::time::Duration = std::time::Duration::from_secs(60);
 const fn label(realm: Realm) -> &'static str {
     match realm {
         Realm::Admin => "Tetsu admin · ",
+        Realm::Staff => "Tetsu staff · ",
     }
 }
 
@@ -306,6 +307,15 @@ mod tests {
 
     /// The label always survives, and a long name is cut after a whole word, or at a character's end, within 64
     /// bytes.
+    /// Each realm labels its passkeys, so a device's account picker says whose each one is.
+    #[test]
+    fn each_realm_labels_its_passkeys() {
+        assert_eq!(
+            [label(Realm::Admin), label(Realm::Staff)],
+            ["Tetsu admin · ", "Tetsu staff · "]
+        );
+    }
+
     #[test]
     fn an_account_name_keeps_its_label_within_64_bytes() {
         assert_eq!(

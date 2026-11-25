@@ -235,20 +235,22 @@ async fn a_business_writes_only_its_own_staff_rows() {
     }
 }
 
-/// Each realm's session limits are written once in SQL, and agree with Rust's: admins' with `Realm::limits`, and
-/// staff's with ADR-0048's 12 hours and 1 hour until the staff store names its realm; a realm with none has none
-/// (#142).
+/// Each realm's session limits are written once in SQL, and agree with Rust's `Realm::limits`; a realm with none has
+/// none (#142).
 #[tokio::test]
 async fn each_realms_session_limits_are_written_once_and_agree() {
     let database = ready().await;
     let client = connect(&database).await.expect("connects");
-    let admin = Realm::Admin.limits();
+    let (admin, staff) = (Realm::Admin.limits(), Realm::Staff.limits());
     let wanted = [
         (
             "admin",
             Some((admin.absolute.as_secs(), admin.idle.as_secs())),
         ),
-        ("staff", Some((12 * 3600, 3600))),
+        (
+            "staff",
+            Some((staff.absolute.as_secs(), staff.idle.as_secs())),
+        ),
         ("customer", None),
     ];
     for (realm, limits) in wanted {
@@ -587,23 +589,30 @@ async fn another_realms_session_is_neither_used_nor_ended() {
     );
 }
 
-/// A realm Identity does not know, should a lookup return one, is an error, never a session in some default realm.
+/// A realm Identity does not know, or another realm's session, should a lookup return one, is an error, never a
+/// session in some default realm or in the wrong one.
 #[tokio::test]
-async fn an_unknown_realm_is_an_error() {
-    let (database, admins) = migrated().await;
-    as_db_admin(
-        &database,
-        &replaced_use_session(
-            "realm text, admin_id bigint, started_at timestamptz, proven_at timestamptz, last_seen_at timestamptz, \
-             ends_at timestamptz",
-            "'staff', 1::bigint, now(), now(), now(), now()",
-        ),
-    )
-    .await;
-    assert_eq!(
-        admins.session([cookie(&"ab".repeat(32)).as_str()]).await,
-        Err(Error::Storage("unknown realm \"staff\"".to_string()))
-    );
+async fn an_unknown_or_another_realm_is_an_error() {
+    for (realm, refused) in [
+        ("customer", "unknown realm \"customer\""),
+        ("staff", "a staff session from the admin store"),
+    ] {
+        let (database, admins) = migrated().await;
+        as_db_admin(
+            &database,
+            &replaced_use_session(
+                "realm text, admin_id bigint, started_at timestamptz, proven_at timestamptz, last_seen_at timestamptz, \
+                 ends_at timestamptz",
+                &format!("'{realm}', 1::bigint, now(), now(), now(), now()"),
+            ),
+        )
+        .await;
+        assert_eq!(
+            admins.session([cookie(&"ab".repeat(32)).as_str()]).await,
+            Err(Error::Storage(refused.to_string())),
+            "{realm}"
+        );
+    }
 }
 
 /// Each stored column of the wrong type is an error rather than a session, whichever column it is.

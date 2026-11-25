@@ -68,6 +68,25 @@ const ADMIN: Paths = Paths {
     elsewhere: "/admin/{*rest}",
 };
 
+/// The staff realm (ADR-0084, ADR-0089), whose pages are the person's own, apart from any business's.
+const STAFF: Paths = Paths {
+    home: "/app",
+    profile: "/app/settings/profile",
+    security: "/app/settings/security",
+    login: "/app/login",
+    login_begin: "/app/login/begin",
+    login_finish: "/app/login/finish",
+    join: "/app/join",
+    join_begin: "/app/join/begin",
+    join_finish: "/app/join/finish",
+    add_begin: "/app/passkeys/begin",
+    add_finish: "/app/passkeys/finish",
+    logout: "/app/logout",
+    end_sessions: "/app/sessions/end",
+    session: "/app/session",
+    elsewhere: "/app/{*rest}",
+};
+
 /// The admins' mailbox: email kept rather than sent (ADR-0074), a page only admins have.
 const MAILBOX: &str = "/admin/mailbox";
 
@@ -75,6 +94,7 @@ const MAILBOX: &str = "/admin/mailbox";
 const fn paths(realm: Realm) -> &'static Paths {
     match realm {
         Realm::Admin => &ADMIN,
+        Realm::Staff => &STAFF,
     }
 }
 
@@ -82,13 +102,20 @@ const fn paths(realm: Realm) -> &'static Paths {
 const fn role(realm: Realm) -> &'static str {
     match realm {
         Realm::Admin => "Admin",
+        Realm::Staff => "Staff",
     }
+}
+
+/// Whether a realm's sidebar has the Platform group, which only admins have (ADR-0084).
+const fn platform(realm: Realm) -> bool {
+    matches!(realm, Realm::Admin)
 }
 
 /// Where someone with no passkey in a realm turns, as its login page says.
 const fn invite_hint(realm: Realm) -> &'static str {
     match realm {
         Realm::Admin => "Ask an admin for an invite.",
+        Realm::Staff => "Ask the business's owner for an invite.",
     }
 }
 
@@ -273,7 +300,7 @@ impl Shell {
             security: at.security,
             logout: at.logout,
             role: role(S::REALM),
-            admin: matches!(S::REALM, Realm::Admin),
+            admin: platform(S::REALM),
             absolute: spoken(S::REALM.limits().absolute),
             demo: web.demo,
             stylesheet: web.stylesheet,
@@ -1270,10 +1297,27 @@ fn browser(realm: Realm, headers: &HeaderMap, account: Option<crate::AccountId>)
 mod tests {
     use super::*;
 
+    /// Each realm's pages name its people, say where to turn without a passkey, and show the Platform group to admins
+    /// alone.
+    #[test]
+    fn each_realm_has_its_own_words() {
+        assert_eq!(
+            [Realm::Admin, Realm::Staff].map(|realm| (
+                role(realm),
+                invite_hint(realm),
+                platform(realm)
+            )),
+            [
+                ("Admin", "Ask an admin for an invite.", true),
+                ("Staff", "Ask the business's owner for an invite.", false),
+            ]
+        );
+    }
+
     /// Every realm's base path is one `return_path` accepts, so a login can return to its pages.
     #[test]
     fn every_realms_base_is_a_realm_base() {
-        let realms = [Realm::Admin];
+        let realms = [Realm::Admin, Realm::Staff];
         assert!(
             realms
                 .iter()
