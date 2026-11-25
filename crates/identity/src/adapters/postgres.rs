@@ -465,7 +465,7 @@ enum Place {
     /// In a business's own transaction, recorded for it.
     Business(i64),
     /// In a business's own transaction, recorded for Tetsu, as an operator's change is, whose event may name what a
-    /// business must not see, such as whether a person is staff elsewhere.
+    /// business must not see, such as whether a person was staff already.
     ForTetsu(i64),
 }
 
@@ -476,44 +476,43 @@ impl Place {
     }
 }
 
-/// A transaction as the module, or in one business's own transaction, and whether its event is the business's.
+/// A transaction begun where a [`Place`] says, which records its event where that place says too.
 enum Scope<'a> {
     Module(ModuleTransaction<'a>),
-    Business(TenantTransaction<'a>, bool),
+    Business(TenantTransaction<'a>),
+    ForTetsu(TenantTransaction<'a>),
 }
 
 impl<'a> Scope<'a> {
-    /// Begins a transaction where `place` says.
     async fn begin(
         client: &'a mut tetsu_postgres::Object,
         place: Place,
     ) -> Result<Self, tokio_postgres::Error> {
-        let (tenant, its_own) = match place {
-            Place::Module => {
-                return ModuleTransaction::begin(client, SCHEMA)
-                    .await
-                    .map(Self::Module);
-            }
-            Place::Business(tenant) => (tenant, true),
-            Place::ForTetsu(tenant) => (tenant, false),
-        };
-        TenantTransaction::begin(client, SCHEMA, tenant)
-            .await
-            .map(|transaction| Self::Business(transaction, its_own))
+        match place {
+            Place::Module => ModuleTransaction::begin(client, SCHEMA)
+                .await
+                .map(Self::Module),
+            Place::Business(tenant) => TenantTransaction::begin(client, SCHEMA, tenant)
+                .await
+                .map(Self::Business),
+            Place::ForTetsu(tenant) => TenantTransaction::begin(client, SCHEMA, tenant)
+                .await
+                .map(Self::ForTetsu),
+        }
     }
 
     async fn record(&self, event: &NewEvent<'_>) -> Result<String, tokio_postgres::Error> {
         match self {
             Self::Module(transaction) => transaction.record(event).await,
-            Self::Business(transaction, true) => transaction.record(event).await,
-            Self::Business(transaction, false) => transaction.record_global(event).await,
+            Self::Business(transaction) => transaction.record(event).await,
+            Self::ForTetsu(transaction) => transaction.record_global(event).await,
         }
     }
 
     async fn commit(self) -> Result<(), tokio_postgres::Error> {
         match self {
             Self::Module(transaction) => transaction.commit().await,
-            Self::Business(transaction, _) => transaction.commit().await,
+            Self::Business(transaction) | Self::ForTetsu(transaction) => transaction.commit().await,
         }
     }
 }
@@ -524,7 +523,7 @@ impl<'a> std::ops::Deref for Scope<'a> {
     fn deref(&self) -> &Self::Target {
         match self {
             Self::Module(transaction) => transaction,
-            Self::Business(transaction, _) => transaction,
+            Self::Business(transaction) | Self::ForTetsu(transaction) => transaction,
         }
     }
 }
