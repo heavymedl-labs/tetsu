@@ -137,6 +137,27 @@ realm and a check that one is set.
   [Session Management Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html)
   was read through a search summary.
 
+## Shared logic, a store per type
+
+**Takeaway:**
+
+Added 2026-11-24, before writing the staff store. Frameworks that serve several kinds of account from separate tables
+share the logic in code and give each kind its own table, routes, and helpers: Rails's Devise lets an application
+define as many models as it needs, each with its own routes, such as `new_admin_session_path` beside
+`new_user_session_path`, all built from the same modules. In the database, guidance on dynamic SQL in `SECURITY
+DEFINER` functions is to write static SQL when the table is known when the code is written. So Tetsu shares its login
+flow in Rust, writes each realm's SQL statically against its own tables, and shares in SQL only what is the same for
+every realm, such as each realm's session limits.
+
+**Cited Findings:**
+
+- [Devise README](https://github.com/plataformatec/devise/blob/dbea9347013d15243fe459a323cee1c229b2257b/README.md):
+  any number of models, each configured with Devise's modules, and its own routes and helpers.
+- Guidance on dynamic SQL, read through search summaries: pass values with `EXECUTE ... USING`, quote identifiers with
+  `format('%I')`, and "if you know the table and column at development time, write static SQL instead"
+  ([Red Gate: securing PostgreSQL](https://www.red-gate.com/simple-talk/featured/securing-postgresql-against-injection-misconfiguration-and-privilege-escalation/);
+  [Cybertec: abusing SECURITY DEFINER functions](https://cybertec-postgresql.com/en/?p=8278)).
+
 ## How each shape fits Tetsu
 
 | | One account table, realm in each key | Exclusive arc | Separate tables per realm |
