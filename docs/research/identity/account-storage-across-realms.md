@@ -158,6 +158,31 @@ every realm, such as each realm's session limits.
   ([Red Gate: securing PostgreSQL](https://www.red-gate.com/simple-talk/featured/securing-postgresql-against-injection-misconfiguration-and-privilege-escalation/);
   [Cybertec: abusing SECURITY DEFINER functions](https://cybertec-postgresql.com/en/?p=8278)).
 
+## One source for each realm's functions
+
+**Takeaway:**
+
+Added 2026-11-24, when a probe showed that porting the admins' functions to staff, even with every table and column
+renamed, fails the duplicate check. Two established ways write similar SQL once. Postgres projects generate objects
+in the database with `EXECUTE format(...)`, as pg_partman builds each partition's tables and functions, but the
+generated bodies are strings no linter reads. Migration tools instead render a template before it runs: Flyway
+replaces `${placeholder}`s in a migration per environment, and dbt renders Jinja macros, which SQLFluff's Jinja
+templater renders before it lints, so the source stays linted. For Tetsu, the second fits: each shared function is
+written once, as real, linted SQL for one realm, and the migration runner renders it for the other realm by a
+declared list of names to replace, so no copy exists to drift, and the catalog checks see every function.
+
+**Cited Findings:**
+
+- [PostgreSQL wiki: dynamic DDL](https://wiki.postgresql.org/wiki/Dynamic_DDL) runs generated statements with
+  `EXECUTE`, built with `format()`; pg_partman builds its templates this way, for example `CREATE TABLE IF NOT EXISTS
+  %I.%I (LIKE %I.%I)` ([pg_partman source](https://sources.debian.org/src/pg-partman/5.3.1-2/sql/functions/create_partition_id.sql)).
+- [Flyway: placeholders](https://documentation.red-gate.com/fd/placeholders-configuration-224003082.html): a migration
+  holds `${name}`, replaced before it runs, so one script serves several environments.
+- [SQLFluff: Jinja templater](https://docs.sqlfluff.com/en/3.1.1/configuration/templating/jinja.html): macros are
+  expanded "before parsing takes place", and the rendered SQL is what is linted;
+  [dbt: Jinja and macros](https://docs.getdbt.com/docs/build/jinja-macros) builds SQL from templates the same way.
+- All read through search summaries.
+
 ## How each shape fits Tetsu
 
 | | One account table, realm in each key | Exclusive arc | Separate tables per realm |
