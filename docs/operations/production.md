@@ -135,7 +135,7 @@ Moving from one service to three, done once:
    comments list, and for [#168](https://github.com/heavymedl-labs/tetsu/issues/168): the first deploy puts staff's
    pages live on their host.
 2. In Render's dashboard, check each service above holds the settings below, copied from `tetsu-demo`, and delete
-   its copied `TETSU_ORIGIN`.
+   its copied `TETSU_ORIGIN`. Done 2026-11-26.
 3. Set the `HOST_TOKEN` secret on the `production` environment: `gh secret set HOST_TOKEN --env production`, with
    the value of the Render API key `RENDER_API_KEY` holds.
 4. Deploy with `reset=identity,audit,mail`, since migrations Identity had applied there changed in place and two
@@ -179,7 +179,7 @@ runs to 2026-11-27; with no card on file it then stays on the free plan. Export 
   printf 'Authorization=Basic%%20%s\n' "$(printf '1922014:%s' "$GC_TOKEN" | base64 -w0)"; unset GC_TOKEN
   ```
 
-- `OTEL_RESOURCE_ATTRIBUTES`: `deployment.environment.name=demo`.
+- `OTEL_RESOURCE_ATTRIBUTES`: `deployment.environment.name=production`.
 
 **Render applies a changed setting only with a deploy,** not on save or restart, so run the Deploy workflow after
 changing one. A bad value logs `logs are not exported` as a warning on Render, and the site serves without export.
