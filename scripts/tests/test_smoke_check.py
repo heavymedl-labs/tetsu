@@ -33,9 +33,13 @@ class Site:
                     self.send_response(503)
                     self.end_headers()
                     return
-                self.send_response(site.pages.get(self.path, 404))
+                # A page given as a pair also names the referrer policy it sends, as a realm's own pages do.
+                status, referrer = (site.pages.get(self.path, 404), None)
+                if isinstance(status, tuple):
+                    status, referrer = status
+                self.send_response(status)
                 for name, value in site.headers.items():
-                    self.send_header(name, value)
+                    self.send_header(name, referrer if referrer and name == "Referrer-Policy" else value)
                 if self.path == "/" and site.location:
                     self.send_header("Location", site.location)
                 self.end_headers()
@@ -110,13 +114,22 @@ class SmokeCheckTest(unittest.TestCase):
         self.assertIn("error: /: no answer after waiting 0 seconds", result.stderr)
 
     def test_each_host_is_checked_for_its_own_realms_pages(self):
-        admin = self.site(pages={"/": 303, "/admin/login": 200}, location="/admin")
+        admin = self.site(pages={"/": 303, "/admin/login": (200, "same-origin")}, location="/admin")
         result = smoke(admin.url, "--serves", "admin")
         self.assertEqual(result.returncode, 0, result.stderr)
         result = smoke(admin.url, "--serves", "staff")
         self.assertEqual(result.returncode, 1)
         for problem in ["/app/login: status 404, expected 200", "/admin/login: status 200, expected 404"]:
             self.assertIn(f"error: {problem}", result.stderr)
+
+    def test_only_a_realms_own_page_sends_a_referrer_to_tetsu(self):
+        # A realm's login alone sends `same-origin`, so a posted form carries its real origin (ADR-0059).
+        site = self.site(headers=dict(GOOD, **{"Referrer-Policy": "same-origin"}))
+        self.assertIn("error: /: referrer-policy is 'same-origin'", smoke(site.url).stderr)
+        admin = self.site(pages={"/": 303, "/admin/login": 200}, location="/admin")
+        result = smoke(admin.url, "--serves", "admin")
+        self.assertIn("error: /admin/login: referrer-policy is 'no-referrer'", result.stderr)
+        self.assertNotIn("error: /: referrer-policy", result.stderr)
 
     def test_a_realms_root_must_send_visitors_to_its_home(self):
         elsewhere = self.site(pages={"/": 303, "/app/login": 200}, location="/admin")

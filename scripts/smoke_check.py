@@ -23,13 +23,15 @@ PAGES = {
 }
 # Where a realm's host sends a visitor from its root.
 HOMES = {"admin": "/admin", "staff": "/app"}
+# A realm's own pages send a referrer to Tetsu alone, so a posted form carries its real origin (ADR-0059);
+# every other answer, the site's and a realm host's root and missing pages, sends none.
+REALM_PAGES = {"admin": "/admin/login", "staff": "/app/login"}
 # What ADR-0029 and ASVS 3.4 ask every response to carry. The content security policy grows as pages need
 # more, so only the directives that must never loosen are checked.
 NEVER_LOOSENED = ("default-src 'none'", "object-src 'none'", "frame-ancestors 'none'")
 HEADERS = {
     "strict-transport-security": lambda value: value.startswith("max-age=31536000"),
     "x-content-type-options": lambda value: value == "nosniff",
-    "referrer-policy": lambda value: value == "no-referrer",
     "x-frame-options": lambda value: value == "DENY",
     "content-security-policy": lambda value: all(directive in value for directive in NEVER_LOOSENED),
 }
@@ -56,13 +58,15 @@ def fetch(url):
         connection.close()
 
 
-def problems(path, expected, answer, home=None):
-    """What is wrong with one page's answer, and where it sends a visitor when it should send them `home`."""
+def problems(path, expected, answer, home=None, referrer="no-referrer"):
+    """What is wrong with one page's answer, where it sends a visitor when it should send them `home`, and the
+    referrer policy it should send."""
     status, headers = answer
     found = [] if status == expected else [f"{path}: status {status}, expected {expected}"]
     if home is not None and path == "/" and headers.get("location") != home:
         found.append(f"{path}: sends visitors to {headers.get('location')!r}, expected {home!r}")
-    for name, holds in HEADERS.items():
+    rules = dict(HEADERS, **{"referrer-policy": lambda value: value == referrer})
+    for name, holds in rules.items():
         value = headers.get(name)
         if value is None:
             found.append(f"{path}: no {name} header")
@@ -72,18 +76,23 @@ def problems(path, expected, answer, home=None):
 
 
 def check(pages, wait, interval, clock=time.monotonic, sleep=time.sleep):
-    """Every problem across `pages`, each a base URL, path, expected status, and the home a root sends a
-    visitor to, once the host answers, or a single one if it never wakes."""
+    """Every problem across `pages`, each a base URL, path, expected status, the home a root sends a visitor
+    to, and its referrer policy, once the host answers, or a single one if it never wakes."""
     deadline = clock() + wait
     found = []
-    for base, path, expected, home in pages:
+    for base, path, expected, home, referrer in pages:
         while (answer := fetch(base + path)) is None or answer[0] in WAKING:
             if clock() >= deadline:
                 shown = "no answer" if answer is None else f"status {answer[0]}"
                 return [f"{path}: {shown} after waiting {wait} seconds for the site to wake"]
             sleep(interval)
-        found += problems(path, expected, answer, home)
+        found += problems(path, expected, answer, home, referrer)
     return found
+
+
+def referrer_of(serves, path):
+    """The referrer policy a page on a host serving `serves` sends."""
+    return "same-origin" if REALM_PAGES.get(serves) == path else "no-referrer"
 
 
 def main(args):
@@ -103,7 +112,10 @@ def main(args):
         return 2
     settings.update(pairs)
     serves = settings["--serves"]
-    pages = [(base.rstrip("/"), path, expected, HOMES.get(serves)) for path, expected in PAGES[serves]]
+    pages = [
+        (base.rstrip("/"), path, expected, HOMES.get(serves), referrer_of(serves, path))
+        for path, expected in PAGES[serves]
+    ]
     found = check(pages, int(settings["--wait"]), int(settings["--interval"]))
     for problem in found:
         print(f"error: {problem}", file=sys.stderr)
