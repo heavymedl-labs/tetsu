@@ -1,14 +1,24 @@
 //! The driven port Identity calls out through.
 
 use crate::domain::{
-    Acceptance, Account, AccountId, Actor, Addition, AdminSummary, Disabling, Ending, Error,
-    FailedCheck, Invitation, Invitee, Issue, ListedSession, Login, NewPasskey, NewStaffInvite,
-    PersonName, RateLimit, Realm, Redemption, Refusal, Removal, Session, SessionId, SessionStart,
-    Signer, StaffIssue, TakenAddition, TakenCeremony, TimeLeft,
+    Acceptance, Account, AccountId, Actor, Addition, AdminSummary, BusinessId, Disabling, Ending,
+    Error, FailedCheck, Invitation, Invitee, Issue, ListedSession, Login, NewPasskey,
+    NewStaffInvite, PersonName, RateLimit, Realm, Redemption, Refusal, Removal, Session, SessionId,
+    SessionStart, Signer, StaffIssue, TakenAddition, TakenCeremony, TimeLeft,
 };
 use std::future::Future;
+use std::pin::Pin;
 use std::time::Duration;
 use tetsu_kernel::{Address, Requester};
+
+/// A business's name as [`BusinessNames`] reads it, boxed so a page can hold any as `dyn BusinessNames`.
+pub type Naming<'a> = Pin<Box<dyn Future<Output = Result<Option<String>, Error>> + Send + 'a>>;
+
+/// Where Identity reads a business's name, which Tenancy keeps, for a page that knows the business only by id, such
+/// as a staff invite's. The composition root fills it; none for an id no business has.
+pub trait BusinessNames: Send + Sync {
+    fn name(&self, business: BusinessId) -> Naming<'_>;
+}
 
 /// The admin realm's store: its login flow and its directory.
 pub trait AdminStore: LoginStore + AdminDirectory {}

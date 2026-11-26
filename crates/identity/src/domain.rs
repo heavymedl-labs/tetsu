@@ -444,6 +444,14 @@ pub struct Answer<'a> {
     pub response: &'a str,
 }
 
+/// A login's answer and the staff invite link it accepts once logged in (ADR-0089). It derives no `Debug`, as the
+/// link is a secret.
+#[derive(Clone, Copy)]
+pub struct Accepting<'a> {
+    pub answer: Answer<'a>,
+    pub link: &'a str,
+}
+
 impl std::fmt::Debug for Answer<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Answer")

@@ -1,12 +1,14 @@
 // The passkey islands (ADR-0031): light-DOM Web Components that add behavior to markup the server renders.
 //
-// - <tetsu-passkey base="/admin" action="login|join|add" form-token="…" next="…"> wraps a button and a status line,
-//   and runs one passkey ceremony in the realm at `base` when the button is pressed. Its state is an attribute, data-state, of ready, waiting, done, or
-//   failed, for styles to read (ADR-0032).
+// - <tetsu-passkey base="/admin" action="login|join|add" form-token="…" next="…" invitation="…"> wraps a button and a
+//   status line, and runs one passkey ceremony in the realm at `base` when the button is pressed. Its state is an
+//   attribute, data-state, of ready, waiting, done, or failed, for styles to read (ADR-0032). A staff join names in
+//   `invitation` the element it fills with what the invite gives, once read, and logs in to accept instead for
+//   someone who has a passkey.
 // - <tetsu-passkeys user="…" credentials="…"> wraps the list of an admin's passkeys, and tells their devices every
 //   passkey Tetsu holds, so a device can hide one Tetsu removed.
 
-import { Refused } from "../shared/http";
+import { call, Refused } from "../shared/http";
 import { loggedOut, realmBase } from "../shared/login";
 import { type Action, ceremony } from "./ceremony";
 
@@ -24,6 +26,7 @@ const ACTIONS: readonly Action[] = ["login", "join", "add"];
  * logs the admin in too (ADR-0069). */
 const DONE: Record<Action, string> = {
   login: "Logged in.",
+  accept: "Logged in. Invite accepted.",
   join: "Passkey created. Logging you in.",
   add: "Passkey added.",
 };
@@ -115,10 +118,62 @@ export function ready(host: HTMLElement, browser: Browser): void {
     host.dataset.state = "failed";
     return;
   }
-  const presses = new Presses({ host, parts, browser, device }, sent);
-  parts.button.addEventListener("click", () => presses.press());
-  parts.button.disabled = false;
-  host.dataset.state = "ready";
+  const start = (): void => {
+    const presses = new Presses({ host, parts, browser, device }, sent);
+    parts.button.addEventListener("click", () => presses.press());
+    parts.button.disabled = false;
+    host.dataset.state = "ready";
+  };
+  const shows = host.getAttribute("invitation");
+  if (parts.action !== "join" || shows === null) {
+    start();
+    return;
+  }
+  readInvite(host, parts, sent, host.ownerDocument.getElementById(shows), start);
+}
+
+/** Reads a staff invite into `shows`, then calls `start`. The link has left the address bar, so a
+ * read that may work later is offered again from the button; an invite the server refused has ended, and no press
+ * can change that. */
+function readInvite(
+  host: HTMLElement,
+  parts: Parts,
+  sent: Record<string, string>,
+  shows: Element | null,
+  start: () => void,
+): void {
+  // Waiting, so an island connected again while it reads is not readied twice.
+  host.dataset.state = "waiting";
+  parts.button.disabled = true;
+  invited(parts, sent, shows).then(start, (error: unknown) => {
+    parts.status.textContent = said(error);
+    host.dataset.state = "failed";
+    if (!(error instanceof Refused && error.status === 400)) {
+      parts.button.disabled = false;
+      parts.button.addEventListener("click", () => readInvite(host, parts, sent, shows, start), {
+        once: true,
+      });
+    }
+  });
+}
+
+/** Reads what a staff invite gives, sending its link as `sent` holds it, and says it in `shows`, before what the
+ * page already says there of how long it lasts. An invite whose person has a passkey turns the island to logging in
+ * to accept it, in one press (ADR-0089). */
+async function invited(parts: Parts, sent: Record<string, string>, shows: Element | null): Promise<void> {
+  const invitation = await call(`${parts.base}/join/invitation`, undefined, sent);
+  const business = typeof invitation.business === "string" ? invitation.business : "the business";
+  const offer = `${business} as ${String(invitation.role)}`;
+  const joined = invitation.joined === true;
+  if (joined) {
+    parts.action = "accept";
+    parts.label.textContent = "Log in to accept";
+  }
+  if (shows !== null) {
+    shows.textContent = joined
+      ? `You're invited to join ${offer}. Log in with your passkey to accept.`
+      : `Join ${offer}. ${shows.textContent}`;
+  }
 }
 
 /** What a readied island works with. */

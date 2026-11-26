@@ -326,6 +326,9 @@ fn served(
 ) -> Result<(axum::Router, Option<&'static str>), String> {
     let serves = settings::serves(|name| local.var(name))?;
     let mut modules = axum::Router::new();
+    let names = Businesses(tetsu_tenancy::postgres_store(pool.clone()));
+    let businesses: std::sync::Arc<dyn tetsu_identity::BusinessNames> = std::sync::Arc::new(names);
+    let pages = |origin| realm_pages(local, demo, office, &businesses, origin);
     if serves.site {
         let tenants = tetsu_tenancy::postgres_store(pool.clone());
         modules = modules.merge(tetsu_tenancy::router(
@@ -336,14 +339,18 @@ fn served(
         ));
     }
     if serves.admin {
-        let pages = realm_pages(local, demo, office, settings::ADMIN_ORIGIN)?;
         let admins = tetsu_identity::postgres_store(pool.clone());
-        modules = modules.merge(tetsu_identity::router(admins, pages));
+        modules = modules.merge(tetsu_identity::router(
+            admins,
+            pages(settings::ADMIN_ORIGIN)?,
+        ));
     }
     if serves.staff {
-        let pages = realm_pages(local, demo, office, settings::STAFF_ORIGIN)?;
         let staff = tetsu_identity::postgres_staff_store(pool);
-        modules = modules.merge(tetsu_identity::router(staff, pages));
+        modules = modules.merge(tetsu_identity::staff_router(
+            staff,
+            pages(settings::STAFF_ORIGIN)?,
+        ));
     }
     let home = match serves {
         settings::Serves { site: true, .. } => None,
@@ -431,6 +438,7 @@ fn realm_pages(
     local: &settings::Local,
     demo: bool,
     office: &std::sync::Arc<tetsu_mail::PostOffice>,
+    businesses: &std::sync::Arc<dyn tetsu_identity::BusinessNames>,
     name: &str,
 ) -> Result<tetsu_identity::Web, String> {
     local.beside("DATABASE_URL", &[name])?;
@@ -445,8 +453,21 @@ fn realm_pages(
         scheme_script: assets::SCHEME_SCRIPT,
         menu_script: assets::MENU_SCRIPT,
         mailbox: office.clone(),
+        businesses: businesses.clone(),
         report,
     })
+}
+
+/// Businesses' names, read from Tenancy for Identity's staff invite page (#111).
+struct Businesses<S>(tetsu_tenancy::Tenants<S>);
+
+impl<S: tetsu_tenancy::TenantStore + Send + Sync> tetsu_identity::BusinessNames for Businesses<S> {
+    fn name(&self, business: tetsu_identity::BusinessId) -> tetsu_identity::Naming<'_> {
+        Box::pin(async move {
+            let named = self.0.name(business.get()).await;
+            named.map_err(|error| tetsu_identity::Error::Storage(error.to_string()))
+        })
+    }
 }
 
 /// Logs what a module reports, as an error on the request it happened in.

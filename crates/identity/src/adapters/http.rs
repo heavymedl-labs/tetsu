@@ -16,12 +16,12 @@ use serde_json::{Value, json};
 
 use crate::browser::{Change, ForChange, Logout, Origins, return_path};
 use crate::domain::{
-    Account, Actor, Answer, Ceremony, Device, Ending, Error, FailedCheck, HeldPasskey,
+    Acceptance, Account, Actor, Answer, Ceremony, Device, Ending, Error, FailedCheck, HeldPasskey,
     ListedSession, RateLimit, Realm, Session, SessionId, SessionToken, TimeLeft,
 };
 use crate::passkeys::{RelyingParty, base64url};
-use crate::ports::LoginStore;
-use crate::use_cases::Accounts;
+use crate::ports::{BusinessNames, LoginStore, StaffStore};
+use crate::use_cases::{Accounts, invite_ended, joining_refused};
 use tetsu_kernel::{Mailbox, Requester, Scheme};
 
 /// A realm's pages and endpoints, all below its base path (ADR-0084), so its pages, redirects, and recorded routes
@@ -90,6 +90,12 @@ const STAFF: Paths = Paths {
 /// The admins' mailbox: email kept rather than sent (ADR-0074), a page only admins have.
 const MAILBOX: &str = "/admin/mailbox";
 
+/// What a staff invite's link gives, which the join page reads before anyone acts on it (#111).
+const STAFF_INVITATION: &str = "/app/join/invitation";
+/// Logging in to accept a staff invite, in one step, for someone who has a passkey (ADR-0089).
+const STAFF_ACCEPT_BEGIN: &str = "/app/join/accept/begin";
+const STAFF_ACCEPT_FINISH: &str = "/app/join/accept/finish";
+
 /// A realm's paths.
 const fn paths(realm: Realm) -> &'static Paths {
     match realm {
@@ -149,7 +155,7 @@ const fn at<S: LoginStore>() -> &'static Paths {
 
 /// Every path Identity serves, in every realm, which the composition root checks each start with a name no tenant may
 /// hold.
-pub const PATHS: [&str; 31] = [
+pub const PATHS: [&str; 34] = [
     ADMIN.home,
     ADMIN.profile,
     ADMIN.security,
@@ -181,6 +187,9 @@ pub const PATHS: [&str; 31] = [
     STAFF.end_sessions,
     STAFF.session,
     STAFF.elsewhere,
+    STAFF_INVITATION,
+    STAFF_ACCEPT_BEGIN,
+    STAFF_ACCEPT_FINISH,
 ];
 
 /// The admin pages' policy: the site's, with Tetsu's own script, its calls back to this origin, and forms
@@ -219,6 +228,8 @@ pub struct Web {
     pub menu_script: &'static str,
     /// The messages Mail kept rather than sent, which the mailbox page shows (ADR-0074).
     pub mailbox: Arc<dyn Mailbox>,
+    /// Businesses' names, which a staff invite's page shows.
+    pub businesses: Arc<dyn BusinessNames>,
     pub report: fn(&str),
 }
 
@@ -254,6 +265,11 @@ struct JoinPage {
     scheme_script: &'static str,
     /// The radio the color scheme control checks, from the visitor's cookie (ADR-0070).
     scheme: &'static str,
+    /// The element a staff join's island fills with what the invite gives, or none for admins, whose invites name no
+    /// business (#111).
+    invitation: &'static str,
+    /// How long the realm's invites last, as the page says: an admin's an hour, and staff's seven days (#111).
+    lasts: &'static str,
 }
 
 #[derive(Template)]
@@ -427,11 +443,41 @@ struct Served<S> {
 
 type Shared<S> = State<Arc<Served<S>>>;
 
-/// Identity's routes. They set no fallback, which is the site's alone (#90).
+/// Identity's routes for a realm. They set no fallback, which is the site's alone (#90).
 pub fn router<S>(admins: Accounts<S>, web: Web) -> Router
 where
     S: LoginStore + Send + Sync + 'static,
 {
+    serve_routes(realm_routes::<S>(), Served { admins, web })
+}
+
+/// Staff's routes: the realm's, and reading and logging in to accept an invite, which only staff have (#111).
+pub fn staff_router<S>(staff: Accounts<S>, web: Web) -> Router
+where
+    S: StaffStore + Send + Sync + 'static,
+{
+    let routes = realm_routes::<S>()
+        .route(STAFF_INVITATION, accepting_route::<S>(AcceptStep::Read))
+        .route(STAFF_ACCEPT_BEGIN, accepting_route::<S>(AcceptStep::Begin))
+        .route(
+            STAFF_ACCEPT_FINISH,
+            accepting_route::<S>(AcceptStep::Finish),
+        );
+    serve_routes(routes, Served { admins: staff, web })
+}
+
+/// Routes, each with the body limit, over what they serve.
+fn serve_routes<S: Send + Sync + 'static>(
+    routes: Router<Arc<Served<S>>>,
+    served: Served<S>,
+) -> Router {
+    routes
+        .layer(DefaultBodyLimit::max(LARGEST_BODY))
+        .with_state(Arc::new(served))
+}
+
+/// Every realm's routes.
+fn realm_routes<S: LoginStore + Send + Sync + 'static>() -> Router<Arc<Served<S>>> {
     let routes = Router::new()
         .route(at::<S>().home, get(home::<S>))
         .route(at::<S>().profile, get(profile::<S>))
@@ -463,18 +509,33 @@ where
     platform_pages(S::REALM)
         .iter()
         .fold(routes, |routes, path| routes.route(path, get(mailbox::<S>)))
-        .layer(DefaultBodyLimit::max(LARGEST_BODY))
-        .with_state(Arc::new(Served { admins, web }))
 }
 
 fn before_route<S: LoginStore + Send + Sync + 'static>(
     step: Before,
 ) -> MethodRouter<Arc<Served<S>>> {
+    step_route(step, before::<S>)
+}
+
+fn accepting_route<S: StaffStore + Send + Sync + 'static>(
+    step: AcceptStep,
+) -> MethodRouter<Arc<Served<S>>> {
+    step_route(step, accepting::<S>)
+}
+
+/// A step's route: a post, handed its request and the step.
+fn step_route<S, T, F, Fut>(step: T, run: F) -> MethodRouter<Arc<Served<S>>>
+where
+    S: Send + Sync + 'static,
+    T: Copy + Send + Sync + 'static,
+    F: Fn(Arc<Served<S>>, Requester, HeaderMap, Bytes, T) -> Fut + Clone + Send + Sync + 'static,
+    Fut: Future<Output = Result<Response, Refused>> + Send + 'static,
+{
     post(
         move |State(served): Shared<S>,
               Extension(from): Extension<Requester>,
               headers: HeaderMap,
-              body: Bytes| { before(served, from, headers, body, step) },
+              body: Bytes| { run(served, from, headers, body, step) },
     )
 }
 
@@ -538,7 +599,26 @@ async fn join_page<S: LoginStore>(State(served): Shared<S>, headers: HeaderMap) 
         script: web.script,
         scheme_script: web.scheme_script,
         scheme: scheme_of(&headers).as_str(),
+        invitation: invitation_of(S::REALM),
+        lasts: invite_lasts(S::REALM),
     })
+}
+
+/// How long a realm's invites last, as its join page says.
+const fn invite_lasts(realm: Realm) -> &'static str {
+    match realm {
+        Realm::Admin => "within the hour",
+        Realm::Staff => "within seven days",
+    }
+}
+
+/// The element a realm's join page names for its island to fill with what an invite gives: only staff's invites
+/// name a business.
+const fn invitation_of(realm: Realm) -> &'static str {
+    match realm {
+        Realm::Admin => "",
+        Realm::Staff => "invitation",
+    }
 }
 
 /// The admins' realm itself (ADR-0084): it sends a logged-in admin to their Profile, as the account area is their
@@ -824,19 +904,159 @@ async fn before<S: LoginStore>(
     body: Bytes,
     step: Before,
 ) -> Result<Response, Refused> {
-    let sent = admitted(&served, &from, &headers, &body, step.path(at::<S>())).await?;
-    let admins = &served.admins;
-    let result = match admins.admit(step.limit(), &from).await {
-        Ok(()) => stepped(&served, &headers, &sent, step).await,
+    let asked = Asked {
+        served: &served,
+        from: &from,
+        headers: &headers,
+    };
+    let at = (step.path(at::<S>()), step.limit());
+    held_to(asked, &body, at, async |sent| {
+        stepped(&served, &headers, sent, step).await
+    })
+    .await
+}
+
+/// A request to a step taken before logging in: what serves it, its network, and its headers.
+#[derive(Clone, Copy)]
+struct Asked<'a, S> {
+    served: &'a Served<S>,
+    from: &'a Requester,
+    headers: &'a HeaderMap,
+}
+
+/// Runs a step taken before logging in, at its path and held to its limit, once its request passes the origin check
+/// and the limit admits it. A refused login counts against the network's failures (ADR-0072).
+async fn held_to<S: LoginStore>(
+    asked: Asked<'_, S>,
+    body: &Bytes,
+    at: (&'static str, RateLimit),
+    run: impl AsyncFnOnce(&Value) -> Result<Response, Error>,
+) -> Result<Response, Refused> {
+    let (path, limit) = at;
+    let sent = admitted(asked.served, asked.from, asked.headers, body, path).await?;
+    let admins = &asked.served.admins;
+    let result = match admins.admit(limit, asked.from).await {
+        Ok(()) => run(&sent).await,
         Err(refused) => Err(refused),
     };
     let result = match result {
-        Err(Error::Invalid(why)) if step.limit() == RateLimit::LoginFailure => {
-            admins.failed(&from).await.and(Err(Error::Invalid(why)))
-        }
+        Err(Error::Invalid(why)) if limit == RateLimit::LoginFailure => admins
+            .failed(asked.from)
+            .await
+            .and(Err(Error::Invalid(why))),
         other => other,
     };
-    Ok(answered(&served.web, result))
+    Ok(answered(&asked.served.web, result))
+}
+
+/// Staff's steps for an invite to someone who has a passkey: reading what it gives, then logging in to accept it.
+#[derive(Clone, Copy)]
+enum AcceptStep {
+    Read,
+    Begin,
+    Finish,
+}
+
+impl AcceptStep {
+    /// Each step's path, and the limit it is held to (ADR-0072). Reading an invite is held as starting a login is,
+    /// both reading only, so a page reloaded or a join that reads first spends none of a network's join room.
+    const fn at(self) -> (&'static str, RateLimit) {
+        match self {
+            Self::Read => (STAFF_INVITATION, RateLimit::LoginBegin),
+            Self::Begin => (STAFF_ACCEPT_BEGIN, RateLimit::LoginBegin),
+            Self::Finish => (STAFF_ACCEPT_FINISH, RateLimit::LoginFailure),
+        }
+    }
+}
+
+async fn accepting<S: StaffStore>(
+    served: Arc<Served<S>>,
+    from: Requester,
+    headers: HeaderMap,
+    body: Bytes,
+    step: AcceptStep,
+) -> Result<Response, Refused> {
+    let asked = Asked {
+        served: &served,
+        from: &from,
+        headers: &headers,
+    };
+    held_to(asked, &body, step.at(), async |sent| {
+        accepted(&served, &headers, sent, step).await
+    })
+    .await
+}
+
+/// Reads what an invite gives, with its business by name, or begins or finishes logging in to accept it.
+async fn accepted<S: StaffStore>(
+    served: &Served<S>,
+    headers: &HeaderMap,
+    sent: &Value,
+    step: AcceptStep,
+) -> Result<Response, Error> {
+    let (web, staff) = (&served.web, &served.admins);
+    let link = sent["link"].as_str().unwrap_or_default();
+    match step {
+        AcceptStep::Read => {
+            let invitation = staff
+                .invitation(link)
+                .await?
+                .ok_or_else(|| joining_refused(Realm::Staff))?;
+            let business = web.businesses.name(invitation.business).await?;
+            let read = json!({
+                "business": business,
+                "role": invitation.role.as_str(),
+                "joined": invitation.joined,
+            });
+            Ok(json_out(StatusCode::OK, &read))
+        }
+        AcceptStep::Begin => staff
+            .begin_login(&web.party)
+            .await
+            .map(|begun| begun_json(&begun)),
+        AcceptStep::Finish => {
+            let (ceremony, response) = answer_in(sent);
+            let answer = Answer {
+                ceremony,
+                response: &response,
+            };
+            let actor = browser(S::REALM, headers, None);
+            let (token, accepted) = staff
+                .log_in_to_accept(
+                    &web.party,
+                    crate::domain::Accepting { answer, link },
+                    &cookies(headers),
+                    &actor,
+                )
+                .await?;
+            Ok(accepted_at(&token, accepted))
+        }
+    }
+}
+
+/// What logging in to accept answers: the Profile once the role is held, and otherwise why not. The person is logged
+/// in either way, so the session's cookie is set either way.
+fn accepted_at(token: &SessionToken, accepted: Acceptance) -> Response {
+    let why = match accepted {
+        Acceptance::Accepted | Acceptance::Member => {
+            return logged_in_at(Realm::Staff, token, STAFF.profile);
+        }
+        Acceptance::Expired => invite_ended(Realm::Staff),
+        Acceptance::Other => {
+            "this invite is for another account. Log in with the passkey of the account it was \
+                              sent to"
+                .to_string()
+        }
+        Acceptance::LoggedOut | Acceptance::Disabled | Acceptance::Stale => {
+            "this invite couldn't be accepted. Try again".to_string()
+        }
+    };
+    let cookie = Realm::Staff.session_cookie(token);
+    (
+        [(header::SET_COOKIE, cookie)],
+        refusal(StatusCode::BAD_REQUEST, &why),
+    )
+        .into_response()
 }
 
 /// Begins or finishes logging in or joining.
@@ -1319,6 +1539,49 @@ fn browser(realm: Realm, headers: &HeaderMap, account: Option<crate::AccountId>)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Logging in to accept sets the session's cookie whatever the invite came to, and says why it was not accepted
+    /// when it was not.
+    #[tokio::test]
+    async fn logging_in_to_accept_answers_each_outcome() {
+        let token = SessionToken::generate(getrandom::fill).expect("a token");
+        let mut seen = Vec::new();
+        for accepted in [
+            Acceptance::Accepted,
+            Acceptance::Member,
+            Acceptance::Expired,
+            Acceptance::Other,
+            Acceptance::LoggedOut,
+            Acceptance::Disabled,
+            Acceptance::Stale,
+        ] {
+            let response = accepted_at(&token, accepted);
+            let status = response.status().as_u16();
+            let cookie = response.headers().get(header::SET_COOKIE).is_some();
+            let body = axum::body::to_bytes(response.into_body(), LARGEST_BODY)
+                .await
+                .expect("a body");
+            let body: Value = serde_json::from_slice(&body).expect("JSON");
+            seen.push((status, cookie, body));
+        }
+        let profile = (200, true, json!({"next": "/app/settings/profile"}));
+        let refused = |why: &str| (400, true, json!({ "error": why }));
+        let again = refused("this invite couldn't be accepted. Try again");
+        assert_eq!(
+            seen,
+            [
+                profile.clone(),
+                profile,
+                refused("this invite has ended. Log in, or ask the business's owner for a new one"),
+                refused(
+                    "this invite is for another account. Log in with the passkey of the account it was sent to"
+                ),
+                again.clone(),
+                again.clone(),
+                again,
+            ]
+        );
+    }
 
     /// Each realm's pages name its people, say where to turn without a passkey, and show the Platform group to admins
     /// alone.

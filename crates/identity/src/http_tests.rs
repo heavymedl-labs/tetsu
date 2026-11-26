@@ -97,7 +97,19 @@ pub(crate) async fn serve<S: crate::ports::LoginStore + Send + Sync + 'static>(
     admins: Accounts<S>,
     mailbox: Arc<dyn Mailbox>,
 ) -> SocketAddr {
-    let web = Web {
+    listening(router(admins, web(mailbox))).await
+}
+
+/// Serves staff's routes, the invite's own among them, on a port of their own.
+pub(crate) async fn serve_staff<S: crate::ports::StaffStore + Send + Sync + 'static>(
+    staff: Accounts<S>,
+) -> SocketAddr {
+    listening(crate::staff_router(staff, web(sample_mailbox()))).await
+}
+
+/// The pages' settings every test serves, with `mailbox` as the one Mail keeps.
+fn web(mailbox: Arc<dyn Mailbox>) -> Web {
+    Web {
         party: party(),
         origins: Origins::parse(&[ORIGIN]).expect("origins"),
         demo: true,
@@ -107,11 +119,33 @@ pub(crate) async fn serve<S: crate::ports::LoginStore + Send + Sync + 'static>(
         scheme_script: "/assets/scheme-test.js",
         menu_script: MENU_SCRIPT,
         mailbox,
+        businesses: Arc::new(Businesses),
         report,
-    };
+    }
+}
+
+/// Businesses as tests name them: Fern Studio is business 4, business 3's name cannot be read, as when Tenancy's
+/// store is down, and no other has one.
+struct Businesses;
+
+impl crate::BusinessNames for Businesses {
+    fn name(&self, business: crate::BusinessId) -> crate::Naming<'_> {
+        let named = match business.get() {
+            3 => Err(crate::Error::Unavailable(
+                "tenancy's store is down".to_string(),
+            )),
+            4 => Ok(Some("Fern Studio".to_string())),
+            _ => Ok(None),
+        };
+        Box::pin(std::future::ready(named))
+    }
+}
+
+/// Serves an app on a port of its own, noting each request's network.
+async fn listening(app: axum::Router) -> SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("binds");
     let address = listener.local_addr().expect("an address");
-    let app = router(admins, web).layer(axum::middleware::from_fn(requester));
+    let app = app.layer(axum::middleware::from_fn(requester));
     tokio::spawn(async move { axum::serve(listener, app).await });
     address
 }
@@ -621,18 +655,10 @@ async fn a_passkey_on_one_device_is_listed_as_one() {
     assert!(page.body.contains("Passkey on one device"), "{}", page.body);
 }
 
-/// A request before login is read only if it comes from the site, as both its origin and, when sent, its
-/// `Sec-Fetch-Site` say, and only as a JSON object; each endpoint refuses alike.
-#[tokio::test]
-async fn requests_before_login_come_from_the_site_as_json() {
-    let (address, _database, _) = serving().await;
+/// Each of `paths` refuses a request from another site, or from no site it can read, as not from the site.
+pub(crate) async fn refuses_other_sites(address: SocketAddr, paths: &[&str]) {
     let json = ("Content-Type", "application/json");
-    for path in [
-        "/admin/login/begin",
-        "/admin/login/finish",
-        "/admin/join/begin",
-        "/admin/join/finish",
-    ] {
+    for path in paths {
         for headers in [
             vec![
                 ("Origin", "https://evil.example"),
@@ -656,6 +682,20 @@ async fn requests_before_login_come_from_the_site_as_json() {
             );
         }
     }
+}
+
+/// A request before login is read only if it comes from the site, as both its origin and, when sent, its
+/// `Sec-Fetch-Site` say, and only as a JSON object; each endpoint refuses alike.
+#[tokio::test]
+async fn requests_before_login_come_from_the_site_as_json() {
+    let (address, _database, _) = serving().await;
+    let paths = [
+        "/admin/login/begin",
+        "/admin/login/finish",
+        "/admin/join/begin",
+        "/admin/join/finish",
+    ];
+    refuses_other_sites(address, &paths).await;
     let begin = |kind: &'static str, body: &'static str| {
         let headers = [("Origin", ORIGIN), ("Content-Type", kind)];
         async move { send(address, "POST", "/admin/login/begin", &headers, body).await }

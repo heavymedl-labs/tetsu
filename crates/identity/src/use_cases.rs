@@ -2,14 +2,14 @@
 
 use crate::browser::{Change, CheckedSession, ForChange, Logout, Origins};
 use crate::domain::{
-    Acceptance, Account, AccountId, Actor, Addition, AdminSummary, Answer, Ceremony, CeremonyKind,
-    CeremonyToken, Device, Disabling, Ending, Error, FailedCheck, Fill, Invitation, InviteToken,
-    Issue, ListedSession, Login, NewPasskey, NewStaffInvite, PersonName, RateLimit, Realm,
-    Redemption, Refusal, Removal, Session, SessionId, SessionStart, SessionToken, Signer,
+    Acceptance, Accepting, Account, AccountId, Actor, Addition, AdminSummary, Answer, Ceremony,
+    CeremonyKind, CeremonyToken, Device, Disabling, Ending, Error, FailedCheck, Fill, Invitation,
+    InviteToken, Issue, ListedSession, Login, NewPasskey, NewStaffInvite, PersonName, RateLimit,
+    Realm, Redemption, Refusal, Removal, Session, SessionId, SessionStart, SessionToken, Signer,
     StaffInvite, StaffIssue, TimeLeft,
 };
 use crate::passkeys::RelyingParty;
-use crate::ports::{AdminDirectory, LoginStore, StaffDirectory};
+use crate::ports::{AdminDirectory, LoginStore, StaffDirectory, StaffStore};
 use tetsu_kernel::{Address, Requester};
 
 /// A realm's use cases over its store, in the realm the store names (ADR-0088). It offers nothing that reaches the
@@ -160,6 +160,32 @@ impl<S: AdminDirectory> Accounts<S> {
     /// Fails if storage fails.
     pub async fn list(&self) -> Result<Vec<AdminSummary>, Error> {
         self.store.list_admins().await
+    }
+}
+
+impl<S: StaffStore> Accounts<S> {
+    /// Logs in with `accepting`'s answer and accepts the invite whose link it holds, in one step, as the join
+    /// page does for someone who has a passkey: the login's
+    /// fresh session accepts it (ADR-0089). The login stands whatever the invite came to, so an invite for someone
+    /// else, or one that ended, leaves the person logged in and the invite as it was.
+    ///
+    /// # Errors
+    /// Fails as [`Self::finish_login`] does, or if storage fails.
+    pub async fn log_in_to_accept(
+        &self,
+        party: &RelyingParty,
+        accepting: Accepting<'_>,
+        cookies: &[&str],
+        actor: &Actor,
+    ) -> Result<(SessionToken, Acceptance), Error> {
+        let token = self
+            .finish_login(party, accepting.answer, cookies, actor)
+            .await?;
+        // A session that is not live the moment it began is a login that did not hold.
+        let live = self.live(&token).await;
+        let session = live.and_then(|session| session.ok_or_else(not_logging_in))?;
+        let accepted = self.accept_invite(&session, accepting.link, actor).await?;
+        Ok((token, accepted))
     }
 }
 
@@ -686,14 +712,17 @@ fn not_joining<S: LoginStore>() -> Error {
 }
 
 /// [`not_joining`] for a realm, apart from any store, so each realm's wording is tested in one build.
-fn joining_refused(realm: Realm) -> Error {
+pub(crate) fn joining_refused(realm: Realm) -> Error {
+    Error::Invalid(invite_ended(realm))
+}
+
+/// What a page says of an invite that has ended, naming who issues a new one in a realm.
+pub(crate) fn invite_ended(realm: Realm) -> String {
     let issuer = match realm {
         Realm::Admin => "an admin",
         Realm::Staff => "the business's owner",
     };
-    Error::Invalid(format!(
-        "this invite has ended. Log in, or ask {issuer} for a new one"
-    ))
+    format!("this invite has ended. Log in, or ask {issuer} for a new one")
 }
 
 /// One answer for every way a login can fail, so a browser learns nothing about which passkeys or admins

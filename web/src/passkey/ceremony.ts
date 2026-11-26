@@ -1,10 +1,10 @@
-// One passkey ceremony with Tetsu's server: begin, ask the device, finish. Logging in, joining, and adding a
-// passkey differ only in their endpoints and in which call they make on the device.
+// One passkey ceremony with Tetsu's server: begin, ask the device, finish. Logging in, logging in to accept a staff
+// invite, joining, and adding a passkey differ only in their endpoints and in which call they make on the device.
 
 import { call } from "../shared/http";
 import { assertion, type CreationJSON, creation, type RequestJSON, registration, request } from "./convert";
 
-export type Action = "login" | "join" | "add";
+export type Action = "login" | "accept" | "join" | "add";
 
 /** What a ceremony is asked to do: its action, in the realm at `base`, sending `sent` with both halves. */
 export interface Asked {
@@ -16,6 +16,7 @@ export interface Asked {
 /** Where each action's requests go, below its realm's base path. */
 const ENDPOINTS: Record<Action, string> = {
   login: "/login",
+  accept: "/join/accept",
   join: "/join",
   add: "/passkeys",
 };
@@ -32,7 +33,7 @@ export async function ceremony(
 ): Promise<string> {
   const endpoint = `${base}${ENDPOINTS[action]}`;
   const begun = await call(`${endpoint}/begin`, signal, sent);
-  const signing = action === "login";
+  const signing = action === "login" || action === "accept";
   const credential = signing
     ? await device.get(request(begun.options as RequestJSON, signal))
     : await device.create(creation(begun.options as CreationJSON, signal));

@@ -1147,13 +1147,12 @@ impl StaffDirectory for PostgresStaff {
         staff: AccountId,
         actor: &Actor,
     ) -> Result<Acceptance, Error> {
-        let Some(business) = business_of(&self.pool, Some(STAFF_BUSINESS), link).await? else {
-            return Ok(Acceptance::Expired);
-        };
+        // A link with no open invite names no business, so it is refused, and recorded, as the module (ADR-0089).
+        let business = business_of(&self.pool, Some(STAFF_BUSINESS), link).await?;
         let id = staff.get();
         let parameters: [&(dyn ToSql + Sync); 2] = [&link.as_slice(), &session.as_slice()];
         self.decided(
-            Place::Business(business),
+            Place::of(business),
             STAFF_ACCEPT_INVITE,
             &parameters,
             |rows| acceptance(rows, id, actor),
@@ -2091,16 +2090,7 @@ mod tests {
         let (pool, _database) = support::migrated().await;
         let client = pool.get().await.expect("a connection");
         let mut seen = Vec::new();
-        for outcome in [
-            "accepted",
-            "member",
-            "logged_out",
-            "disabled",
-            "stale",
-            "expired",
-            "other",
-            "maybe",
-        ] {
+        for outcome in "accepted member logged_out disabled stale expired other maybe".split(' ') {
             let rows = client
                 .query(&format!("SELECT '{outcome}'::text AS outcome"), &[])
                 .await
@@ -2157,6 +2147,42 @@ mod tests {
                 "an invite gives the role \"janitor\"".to_string()
             ))
         );
+        let good = ["3::bigint", "'owner'::text", "false"];
+        let columns = ["tenant_id", "role_name", "joined"];
+        for at in 0..columns.len() {
+            let mut values = good;
+            values[at] = "1::integer";
+            let rows = selected(&client, &values, &columns).await;
+            let why = invitation_from(&rows[0]).unwrap_err().to_string();
+            assert_eq!(why.split(':').next(), Some("storage failed"), "{why}");
+        }
+        let rows = client
+            .query("SELECT 1 AS outcome", &[])
+            .await
+            .expect("answers");
+        let why = acceptance(&rows, 7, &support::actor())
+            .map(drop)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(why.split(':').next(), Some("storage failed"), "{why}");
+    }
+
+    /// The one row that selecting these values as these columns answers.
+    async fn selected(
+        client: &deadpool_postgres::Object,
+        values: &[&str],
+        columns: &[&str],
+    ) -> Vec<Row> {
+        let select = values
+            .iter()
+            .zip(columns)
+            .map(|(value, column)| format!("{value} AS {column}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        client
+            .query(&format!("SELECT {select}"), &[])
+            .await
+            .expect("answers")
     }
 
     /// A staff invite's answer of the wrong type, in any column, is a storage failure, never a guess.
@@ -2169,16 +2195,7 @@ mod tests {
         for (at, wrong) in ["1", "7::integer", "1", "1"].into_iter().enumerate() {
             let mut values = good;
             values[at] = wrong;
-            let select = values
-                .iter()
-                .zip(columns)
-                .map(|(value, column)| format!("{value} AS {column}"))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let rows = client
-                .query(&format!("SELECT {select}"), &[])
-                .await
-                .expect("answers");
+            let rows = selected(&client, &values, &columns).await;
             let why = staff_issuance(&rows, BusinessId::new(3), Role::Owner, &support::actor())
                 .map(drop)
                 .unwrap_err()

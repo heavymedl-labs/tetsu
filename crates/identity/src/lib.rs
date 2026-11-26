@@ -37,20 +37,22 @@ mod sessions_tests;
 mod staff_tests;
 
 pub use adapters::events::notices;
-pub use adapters::http::{PATHS, Web, router};
+pub use adapters::http::{PATHS, Web, router, staff_router};
 pub use adapters::postgres::{postgres_staff_store, postgres_store};
 pub use browser::{Change, CheckedSession, ForChange, Logout, Origins};
 pub use domain::{
-    Acceptance, Account, AccountId, Actor, Addition, AdminSummary, Answer, BusinessId, Ceremony,
-    CeremonyKind, CeremonyToken, Device, Disabling, Ending, Error, FailedCheck, HeldPasskey,
-    Invitation, InviteToken, Invitee, Issue, Limits, ListedSession, Login, NewPasskey,
+    Acceptance, Accepting, Account, AccountId, Actor, Addition, AdminSummary, Answer, BusinessId,
+    Ceremony, CeremonyKind, CeremonyToken, Device, Disabling, Ending, Error, FailedCheck,
+    HeldPasskey, Invitation, InviteToken, Invitee, Issue, Limits, ListedSession, Login, NewPasskey,
     NewStaffInvite, PersonName, RateLimit, Realm, Redemption, Refusal, Removal, Role, Session,
     SessionId, SessionStart, SessionToken, Signer, StaffInvite, StaffIssue, TakenAddition,
     TakenCeremony, TimeLeft,
 };
 pub use mail::{invite_message, staff_invite_message};
 pub use passkeys::RelyingParty;
-pub use ports::{AdminDirectory, AdminStore, LoginStore, StaffDirectory, StaffStore};
+pub use ports::{
+    AdminDirectory, AdminStore, BusinessNames, LoginStore, Naming, StaffDirectory, StaffStore,
+};
 pub use use_cases::Accounts;
 
 /// Registers Identity with the kernel.

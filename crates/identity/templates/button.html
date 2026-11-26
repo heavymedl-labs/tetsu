@@ -1,14 +1,16 @@
 {#- The passkey island around the one passkey action a page offers. `<tetsu-passkey>` enables its button once it can
     run the action, and keeps its state in `data-state`, which styles read through the group: while it waits, three
     slots of the brand's grid book in beside the label; what it came to, failed or done, takes its color and
-    settles in. A login's `next` is the checked page it returns to, and `base` is the realm's path its island works below. -#}
+    settles in. A login's `next` is the checked page it returns to, and `base` is the realm's path its island works below.
+    A staff join's `invitation` names the element the island fills with what the invite gives, once it has read it. -#}
 {% import "../../../web/templates/components.html" as shared %}
-{% macro passkey(base, action, form = "", secondary = false, next = "") %}
+{% macro passkey(base, action, form = "", secondary = false, next = "", invitation = "") %}
   <tetsu-passkey
     base="{{ base }}"
     action="{{ action }}"
     {% if !form.is_empty() %}form-token="{{ form }}"{% endif %}
     {% if !next.is_empty() %}next="{{ next }}"{% endif %}
+    {% if !invitation.is_empty() %}invitation="{{ invitation }}"{% endif %}
     class="group/passkey mt-8 block"
   >
     <button

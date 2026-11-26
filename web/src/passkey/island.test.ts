@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Refused } from "../shared/http";
+import { call, Refused } from "../shared/http";
 import { type Asked, ceremony } from "./ceremony";
 import { type Browser, define, ready, said, signal } from "./island";
 
@@ -9,6 +9,13 @@ vi.mock("./ceremony", async (original) => ({
   ceremony: vi.fn(),
 }));
 const run = vi.mocked(ceremony);
+
+// Reading a staff invite is the island's one call of its own; here it only answers.
+vi.mock("../shared/http", async (original) => ({
+  ...(await original<typeof import("../shared/http")>()),
+  call: vi.fn(),
+}));
+const read = vi.mocked(call);
 
 const device = {} as CredentialsContainer;
 
@@ -139,6 +146,132 @@ describe("a passkey island that joins", () => {
       "Go",
     ]);
     expect(page.location.assign).toHaveBeenCalledWith("/admin");
+  });
+});
+
+/** A staff join page's island, which names the element it fills with what the invite gives, and that element,
+ * unless `shown` is false. */
+function staffJoin(shown = true): { host: HTMLElement; shows: Element | null } {
+  const document = window.document.implementation.createHTMLDocument("test");
+  const shows = shown ? '<p id="invitation">Create a passkey to log in.</p>' : "";
+  document.body.innerHTML = `${shows}<tetsu-passkey base="/app" action="join" invitation="invitation"><button type="button" disabled><span data-label>Create a passkey</span></button><p role="status"></p></tetsu-passkey>`;
+  return {
+    host: document.querySelector("tetsu-passkey") as HTMLElement,
+    shows: document.getElementById("invitation"),
+  };
+}
+
+/** Readies a staff join's island, with the invite read as `invitation`, and waits until it is ready or failed. */
+async function readied(host: HTMLElement, invitation: Promise<Record<string, unknown>>): Promise<Browser> {
+  read.mockReturnValueOnce(invitation);
+  const page = browser();
+  ready(host, page);
+  expect([button(host).disabled, host.dataset.state]).toEqual([true, "waiting"]);
+  await vi.waitFor(() => expect(host.dataset.state).not.toBe("waiting"));
+  return page;
+}
+
+describe("a passkey island that joins a business", () => {
+  beforeEach(() => {
+    read.mockReset();
+  });
+
+  it("reads what the invite gives before offering anything, and asks someone new to create a passkey", async () => {
+    const { host, shows } = staffJoin();
+    await readied(host, Promise.resolve({ business: "Fern Studio", role: "owner", joined: false }));
+    expect(read).toHaveBeenCalledWith("/app/join/invitation", undefined, { link: "L1" });
+    expect(shows?.textContent).toBe("Join Fern Studio as owner. Create a passkey to log in.");
+    expect([
+      button(host).disabled,
+      host.dataset.state,
+      host.querySelector("[data-label]")?.textContent,
+    ]).toEqual([false, "ready", "Create a passkey"]);
+    answering("/app/settings/profile");
+    await press(host);
+    expect(run).toHaveBeenCalledWith(...ran({ action: "join", base: "/app", sent: { link: "L1" } }));
+  });
+
+  it("asks someone with a passkey to log in to accept, in one press, sending the link", async () => {
+    const { host, shows } = staffJoin();
+    const page = await readied(host, Promise.resolve({ business: null, role: "owner", joined: true }));
+    expect(shows?.textContent).toBe(
+      "You're invited to join the business as owner. Log in with your passkey to accept.",
+    );
+    expect(host.querySelector("[data-label]")?.textContent).toBe("Log in to accept");
+    answering("/app/settings/profile");
+    await press(host);
+    expect(run).toHaveBeenCalledWith(...ran({ action: "accept", base: "/app", sent: { link: "L1" } }));
+    expect([status(host), host.dataset.state]).toEqual(["Logged in. Invite accepted.", "done"]);
+    expect(page.location.assign).toHaveBeenCalledWith("/app/settings/profile");
+  });
+});
+
+describe("a passkey island that joins a business, at the edges", () => {
+  beforeEach(() => {
+    read.mockReset();
+  });
+
+  it("still reads the invite when the page has nowhere to say it", async () => {
+    const { host } = staffJoin(false);
+    await readied(host, Promise.resolve({ business: "Fern Studio", role: "owner", joined: true }));
+    expect([host.dataset.state, host.querySelector("[data-label]")?.textContent]).toEqual([
+      "ready",
+      "Log in to accept",
+    ]);
+  });
+
+  it("says an invite that ended cannot be used, and keeps the button off", async () => {
+    const { host } = staffJoin();
+    await readied(host, Promise.reject(new Refused("this invite has ended")));
+    expect([button(host).disabled, status(host), host.dataset.state]).toEqual([
+      true,
+      "This invite has ended.",
+      "failed",
+    ]);
+  });
+
+  it("offers to read again an invite whose read failed for now, and then goes on", async () => {
+    for (const failure of [new Refused("try again in a minute", 503), new TypeError("Failed to fetch")]) {
+      read.mockReset();
+      run.mockReset();
+      const { host } = staffJoin();
+      await readied(host, Promise.reject(failure));
+      expect([button(host).disabled, host.dataset.state]).toEqual([false, "failed"]);
+      read.mockReturnValueOnce(Promise.resolve({ business: "Fern Studio", role: "owner", joined: true }));
+      button(host).click();
+      await vi.waitFor(() => expect(host.dataset.state).toBe("ready"));
+      expect(read).toHaveBeenCalledTimes(2);
+      expect(run).not.toHaveBeenCalled();
+      expect(host.querySelector("[data-label]")?.textContent).toBe("Log in to accept");
+      // Read once it works, the button only logs in to accept from then on.
+      answering("/app/settings/profile");
+      await press(host);
+      expect(read).toHaveBeenCalledTimes(2);
+      expect(run).toHaveBeenCalledTimes(1);
+    }
+  });
+});
+
+describe("a passkey island that joins a business, read again", () => {
+  beforeEach(() => {
+    read.mockReset();
+  });
+
+  it("reads no invite for any action but a join", () => {
+    const host = island('action="login" invitation="invitation"');
+    ready(host, browser());
+    expect(read).not.toHaveBeenCalled();
+    expect(host.dataset.state).toBe("ready");
+  });
+
+  it("is readied once, even when connected again while it reads", async () => {
+    const { host } = staffJoin();
+    read.mockReturnValueOnce(Promise.resolve({ business: "Fern Studio", role: "owner", joined: false }));
+    const page = browser();
+    ready(host, page);
+    ready(host, page);
+    await vi.waitFor(() => expect(host.dataset.state).toBe("ready"));
+    expect(read).toHaveBeenCalledTimes(1);
   });
 });
 

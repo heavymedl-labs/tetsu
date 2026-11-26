@@ -85,6 +85,20 @@ describe("ceremony", () => {
   });
 });
 
+describe("ceremony, accepting an invite", () => {
+  it("logs in at the accept endpoints, sending the invite's link with both halves", async () => {
+    const fetch = serve([200, { ceremony: "c3", options: fixture.request }], [200, { next: "/app" }]);
+    const phone = device(signed);
+    const asked = { action: "accept", base: "/app", sent: { link: "L" } } as const;
+    expect(await ceremony(asked, phone, live(), vi.fn())).toBe("/app");
+    expect(phone.create).not.toHaveBeenCalled();
+    const calls = sent(fetch);
+    expect(calls[0]).toEqual(["/app/join/accept/begin", { link: "L" }]);
+    expect(calls[1]?.[0]).toBe("/app/join/accept/finish");
+    expect(calls[1]?.[1]).toMatchObject({ link: "L", ceremony: "c3", response: { id: "AQ" } });
+  });
+});
+
 describe("ceremony, creating a passkey", () => {
   it("joins and adds by creating a passkey at the realm's endpoints, sending what the page gave with both halves", async () => {
     for (const [action, base, endpoint, extra] of [

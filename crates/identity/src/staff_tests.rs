@@ -525,13 +525,256 @@ async fn a_staff_member_accepts_an_invite_to_another_business() {
     assert_eq!(again, Ok(crate::Acceptance::Expired));
     let not_a_link = staff.accept_invite(&session, "not a link", &by).await;
     assert_eq!(not_a_link, Ok(crate::Acceptance::Expired));
-    let accepted = events(&database, "outbox", "identity.invite_accepted").await;
+    // The business records its acceptance; a link with no open invite names no business, so Tetsu's own record
+    // keeps those refusals, as it keeps joining's. Text that is no link at all never reaches storage.
+    let mut accepted = events(&database, "outbox", "identity.invite_accepted").await;
+    accepted.extend(events(&database, "outbox_global", "identity.invite_accepted").await);
+    let said: Vec<_> = accepted
+        .iter()
+        .map(|event| (&event["outcome"], &event["reason"], &event["staff_id"]))
+        .collect();
+    let ada = json!(session.admin().get());
+    let expired = (&json!("refused"), &json!("expired"), &ada);
+    assert_eq!(said, [(&json!("changed"), &json!(null), &ada), expired]);
+}
+
+/// The link of an invite to business 4, as its owner, for the person with this name and address.
+async fn issued(
+    staff: &Accounts<impl crate::ports::StaffStore>,
+    name: &str,
+    email: &str,
+) -> String {
+    let invite = crate::NewStaffInvite {
+        business: crate::BusinessId::new(4),
+        name: crate::PersonName::parse(name).expect("a name"),
+        email: tetsu_kernel::Address::parse(email).expect("an address"),
+        role: crate::Role::Owner,
+    };
+    let issue = staff.invite_staff(&invite, &actor()).await.expect("issues");
+    issue.token.to_text()
+}
+
+/// Logging in to accept, as the join page does for someone with a passkey: the login gives a fresh session, and the
+/// invite is accepted by it in the same step. Accepting an invite meant for someone else leaves it open.
+#[tokio::test]
+async fn logging_in_accepts_an_invite_in_the_same_step() {
+    let (staff, database, link) = invited().await;
+    let (_, kept) = join(&staff, &link).await;
+    let by = actor();
+    let hers = issued(&staff, "Ada Park", "ada@example.com").await;
+    let his = issued(&staff, "Bo Lin", "bo@example.com").await;
+    let party = party();
+    for (link, expected) in [
+        (his.clone(), crate::Acceptance::Other),
+        (hers, crate::Acceptance::Accepted),
+    ] {
+        let ceremony = staff.begin_login(&party).await.expect("begins");
+        let response = authenticate(&ceremony.options, ORIGIN, kept.clone(), true).await;
+        let answer = Answer {
+            ceremony: &ceremony.token.to_text(),
+            response: &response,
+        };
+        let (token, accepted) = staff
+            .log_in_to_accept(
+                &party,
+                crate::Accepting {
+                    answer,
+                    link: &link,
+                },
+                &[],
+                &by,
+            )
+            .await
+            .expect("logs in");
+        assert_eq!(accepted, expected);
+        let session = staff
+            .session([cookie(&token).as_str()])
+            .await
+            .expect("reads");
+        assert!(session.is_some(), "logged in either way");
+    }
+    let open = staff.invitation(&his).await.expect("reads");
+    assert!(open.is_some(), "left open");
     assert_eq!(
-        (
-            accepted.len(),
-            &accepted[0]["outcome"],
-            &accepted[0]["staff_id"]
-        ),
-        (1, &json!("changed"), &json!(session.admin().get()))
+        number(
+            &database,
+            "SELECT count(*) FROM identity.staff_roles WHERE tenant_id = 4"
+        )
+        .await,
+        1
     );
+}
+
+/// Logs in through staff's accept endpoints, as the join page's script does for someone with a passkey, sending the
+/// link with both halves, and returns how finishing answered.
+async fn accept_by_page(
+    address: std::net::SocketAddr,
+    kept: Passkey,
+    link: &str,
+) -> crate::http_tests::Reply {
+    let post = crate::http_tests::post;
+    let begun = post(
+        address,
+        "/app/join/accept/begin",
+        "",
+        &json!({ "link": link }),
+    )
+    .await
+    .json();
+    let response = authenticate(&begun["options"].to_string(), ORIGIN, kept, true).await;
+    let response: Value = serde_json::from_str(&response).expect("JSON");
+    let finish = json!({"link": link, "ceremony": begun["ceremony"], "response": response});
+    post(address, "/app/join/accept/finish", "", &finish).await
+}
+
+/// Through staff's pages: an invite's link reads as the business, by name, and role it gives, then whether its
+/// person has joined; someone who has logs in to accept in one step, and lands on their Profile, logged in.
+#[tokio::test]
+async fn a_staff_member_joins_then_logs_in_to_accept_through_the_pages() {
+    let (staff, _database, link) = invited().await;
+    let (_, kept) = join(&staff, &link).await;
+    let second = issued(&staff, "Ada Park", "ada@example.com").await;
+    let address = crate::http_tests::serve_staff(staff).await;
+    let read = |link: String| async move {
+        crate::http_tests::post(
+            address,
+            "/app/join/invitation",
+            "",
+            &json!({ "link": link }),
+        )
+        .await
+    };
+    let invitation = read(second.clone()).await;
+    assert_eq!(
+        (invitation.status, invitation.json()),
+        (
+            200,
+            json!({"business": "Fern Studio", "role": "owner", "joined": true})
+        )
+    );
+    let accepted = accept_by_page(address, kept.clone(), &second).await;
+    assert_eq!(
+        (accepted.status, accepted.json()),
+        (200, json!({"next": "/app/settings/profile"}))
+    );
+    assert!(
+        accepted
+            .header("set-cookie")
+            .is_some_and(|set| set.starts_with("__Host-tetsu-staff="))
+    );
+    let again = accept_by_page(address, kept, &second).await;
+    assert_eq!(again.status, 400);
+    assert_eq!(
+        again.json()["error"],
+        json!("this invite has ended. Log in, or ask the business's owner for a new one")
+    );
+    assert!(
+        again.header("set-cookie").is_some(),
+        "logged in all the same"
+    );
+    for gone in [link, second, "not a link".to_string()] {
+        assert_eq!(read(gone).await.status, 400);
+    }
+}
+
+/// Staff's join page says their invites last seven days, and names the element its island fills with what the
+/// invite gives; the admins' says theirs last an hour, and names none.
+#[tokio::test]
+async fn staffs_join_page_names_where_the_invite_is_said() {
+    let (staff, _database, _) = invited().await;
+    let address = crate::http_tests::serve_staff(staff).await;
+    let page = crate::http_tests::get(address, "/app/join", "").await;
+    assert_eq!(page.status, 200);
+    assert!(page.body.contains(r#"id="invitation""#), "{}", page.body);
+    assert!(
+        page.body
+            .contains("This invite works once, within seven days."),
+        "{}",
+        page.body
+    );
+    assert!(
+        page.body.contains(r#"invitation="invitation""#),
+        "{}",
+        page.body
+    );
+    let (admins, _admins_database, _) = crate::http_tests::serving().await;
+    let page = crate::http_tests::get(admins, "/admin/join", "").await;
+    assert!(
+        page.body
+            .contains("This invite works once, within the hour.")
+    );
+    assert!(!page.body.contains("invitation="), "{}", page.body);
+}
+
+/// An invite whose business's name cannot be read is unavailable, and a login to accept that does not work is
+/// refused, and counted as a failed login. Reading is held as a login's start is.
+#[tokio::test]
+async fn reading_or_logging_in_to_accept_can_fail() {
+    let (staff, database, link) = invited().await;
+    let address = crate::http_tests::serve_staff(staff).await;
+    let post = crate::http_tests::post;
+    let read = post(
+        address,
+        "/app/join/invitation",
+        "",
+        &json!({ "link": link }),
+    )
+    .await;
+    assert_eq!(read.status, 503);
+    let finish = json!({"link": link, "ceremony": "not one", "response": {}});
+    let refused = post(address, "/app/join/accept/finish", "", &finish).await;
+    assert_eq!(refused.status, 400);
+    let failures = "SELECT count(*) FROM identity.limits WHERE kind = 'staff_login_failure'";
+    assert_eq!(number(&database, failures).await, 1);
+    // Reading spent a login's start, never a join's room.
+    let joins = "SELECT count(*) FROM identity.limits WHERE kind = 'staff_join'";
+    assert_eq!(number(&database, joins).await, 0);
+    let begun = "SELECT count(*) FROM identity.limits WHERE kind = 'staff_login_begin'";
+    assert_eq!(number(&database, begun).await, 1);
+}
+
+/// Storage that fails while an invite is read, while a fresh login's session is found, or while the invite is
+/// accepted leaves logging in to accept unavailable.
+#[tokio::test]
+async fn logging_in_to_accept_is_unavailable_when_storage_fails() {
+    for broken in [
+        "REVOKE EXECUTE ON FUNCTION identity.staff_invitee(bytea) FROM tetsu_identity",
+        "REVOKE EXECUTE ON FUNCTION identity.staff_use_session(bytea, text) FROM tetsu_identity",
+        "REVOKE EXECUTE ON FUNCTION identity.staff_accept_invite(bytea, bytea) FROM tetsu_identity",
+    ] {
+        let (staff, database, link) = invited().await;
+        let (_, kept) = join(&staff, &link).await;
+        let second = issued(&staff, "Ada Park", "ada@example.com").await;
+        let address = crate::http_tests::serve_staff(staff).await;
+        as_db_admin(&database, broken).await;
+        let accepted = accept_by_page(address, kept, &second).await;
+        assert_eq!(accepted.status, 503, "{broken}");
+        let read = crate::http_tests::post;
+        let read = read(
+            address,
+            "/app/join/invitation",
+            "",
+            &json!({ "link": second }),
+        )
+        .await;
+        let expected = if broken.contains("staff_invitee") {
+            503
+        } else {
+            200
+        };
+        assert_eq!(read.status, expected, "{broken}");
+    }
+}
+
+/// Reading an invite and logging in to accept it come only from staff's own site, as every step before login does.
+#[tokio::test]
+async fn reading_and_accepting_an_invite_come_from_the_site() {
+    let (staff, _database, _) = invited().await;
+    let address = crate::http_tests::serve_staff(staff).await;
+    let paths = [
+        "/app/join/invitation",
+        "/app/join/accept/begin",
+        "/app/join/accept/finish",
+    ];
+    crate::http_tests::refuses_other_sites(address, &paths).await;
 }
