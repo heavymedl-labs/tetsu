@@ -596,6 +596,17 @@ async fn business_of(
     .and_then(|rows| rows.first().map(|row| column(row, "tenant_id")).transpose())
 }
 
+/// The stored kind of a realm's limit: staff's logins and joins have rooms of their own, so one realm's traffic
+/// never spends another's, while recording refusals is bounded for a network across realms (ADR-0081).
+fn limit_kind(realm: Realm, limit: RateLimit) -> String {
+    match (realm, limit) {
+        (Realm::Staff, RateLimit::LoginBegin | RateLimit::LoginFailure | RateLimit::Join) => {
+            format!("staff_{}", limit.as_str())
+        }
+        _ => limit.as_str().to_string(),
+    }
+}
+
 /// How a statement failed. Identity's own functions raise three codes of their own, and each is a fault of the code
 /// that called them, so storage: TD001, a session started for an admin not enabled, which only a login that
 /// holds an enabled admin's row ever starts; TD002, an isolation level other than read committed; and TD003, a
@@ -727,7 +738,10 @@ impl<R: PostgresRealm> LoginStore for PostgresLogin<R> {
 
     async fn admit(&self, limit: RateLimit, from: &Requester) -> Result<Option<Duration>, Error> {
         let rows = self
-            .query(ADMIT, &[&limit.as_str(), &from.as_bytes().as_slice()])
+            .query(
+                ADMIT,
+                &[&limit_kind(R::REALM, limit), &from.as_bytes().as_slice()],
+            )
             .await?;
         rows.first()
             .map(|row| column::<Option<i64>>(row, "wait"))
@@ -766,7 +780,7 @@ impl<R: PostgresRealm> LoginStore for PostgresLogin<R> {
     }
 
     async fn fail(&self, from: &Requester) -> Result<(), Error> {
-        let failure = RateLimit::LoginFailure.as_str();
+        let failure = limit_kind(R::REALM, RateLimit::LoginFailure);
         self.query(FAIL, &[&failure, &from.as_bytes().as_slice()])
             .await
             .map(drop)

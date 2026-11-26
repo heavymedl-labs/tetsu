@@ -14,13 +14,15 @@ SET statement_timeout = '30s';
 ALTER TABLE limits DROP CONSTRAINT limits_kind_check;
 ALTER TABLE limits ADD CONSTRAINT limits_kind_check CHECK (
     kind IN (
-        'login_begin', 'login_failure', 'join', 'refusal', 'refusal_flood'
+        'login_begin', 'login_failure', 'join', 'refusal', 'refusal_flood',
+        'staff_login_begin', 'staff_login_failure', 'staff_join'
     )
 ) NOT VALID;
 
 -- Each limit's numbers: the refusals each network may have recorded, ten in
 -- fifteen minutes, and the one record a window that later ones are not, then
--- 0004's own.
+-- 0004's own. Staff's logins and joins have the same numbers, each in a room
+-- of its own, so one realm's traffic never spends another's (#111).
 CREATE OR REPLACE FUNCTION limit_rule(
     wanted_kind text,
     OUT span interval,
@@ -43,5 +45,8 @@ AS $$
 
     SELECT rules.span, rules.room, rules.first_wait, rules.longest
     FROM rules
-    WHERE rules.kind = wanted_kind
+    WHERE
+        rules.kind = wanted_kind
+        OR 'staff_' || rules.kind = wanted_kind
+        AND rules.kind IN ('login_begin', 'login_failure', 'join')
 $$;

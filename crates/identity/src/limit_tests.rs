@@ -244,3 +244,39 @@ async fn a_network_has_ten_refusals_recorded_in_fifteen_minutes() {
     later(&database, 810).await;
     assert_eq!(wait(&admins, RateLimit::RefusalFlood, &from).await, None);
 }
+
+/// Each realm's logins have their own room on a network, so staff using up theirs leave admins' alone, and the
+/// reverse; failures are counted apart too.
+#[tokio::test]
+async fn staff_and_admins_have_their_own_room_on_a_network() {
+    let (admins, database) = limited().await;
+    let staff = Accounts::new(crate::adapters::postgres::PostgresStaff::new(
+        crate::join_tests::app_pool(&database),
+    ));
+    let one = network("192.0.2.1");
+    for _ in 0..30 {
+        assert!(staff.admit(RateLimit::LoginBegin, &one).await.is_ok());
+    }
+    assert!(matches!(
+        staff.admit(RateLimit::LoginBegin, &one).await,
+        Err(Error::Limited(_))
+    ));
+    assert_eq!(wait(&admins, RateLimit::LoginBegin, &one).await, None);
+    staff.failed(&one).await.expect("counted");
+    assert_eq!(
+        number(
+            &database,
+            "SELECT count(*) FROM identity.limits WHERE kind = 'staff_login_failure'"
+        )
+        .await,
+        1
+    );
+    assert_eq!(
+        number(
+            &database,
+            "SELECT count(*) FROM identity.limits WHERE kind = 'login_failure'"
+        )
+        .await,
+        0
+    );
+}
