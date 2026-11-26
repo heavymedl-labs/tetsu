@@ -1,7 +1,7 @@
-//! Identity's notices (ADR-0074): an outbox consumer of its own events that emails an admin when they log in, add
-//! a passkey, or join, naming when and from which device, so a login they did not make is one they hear about
+//! Identity's notices (ADR-0074): an outbox consumer of its own events that emails an admin or a staff member when
+//! they log in, add a passkey, or join, naming when and from which device, so a login they did not make is one they hear about
 //! (`v5.0.0-6.3.5`, `v5.0.0-6.3.7`). It applies
-//! each event in the transaction the dispatcher opens as Identity's role, which reads the admin's address.
+//! each event in the transaction the dispatcher opens as Identity's role, which reads the account's address.
 //!
 //! Identity's inbox records each event a consumer of Identity's applied, by the event alone, so this is the one
 //! consumer Identity runs; a second would find these events already applied.
@@ -12,11 +12,13 @@ use serde_json::Value;
 use tetsu_kernel::{Delivery, MailError, Mailer};
 use tetsu_postgres::{Applied, Consumer, Event, Transaction};
 
+use crate::domain::Realm;
 use crate::mail::{Happened, Notice, notice_message};
 
 const NOTICE: &str = include_str!("../../sql/notice.sql");
+const STAFF_NOTICE: &str = include_str!("../../sql/staff_notice.sql");
 
-/// Emails admins through `mailer` when they log in or add a passkey.
+/// Emails admins and staff through `mailer` when they log in or add a passkey.
 #[must_use]
 pub fn notices<M: Mailer + 'static>(mailer: Arc<M>) -> Arc<dyn Consumer> {
     Arc::new(Notices { mailer })
@@ -44,16 +46,20 @@ impl<M: Mailer + 'static> Consumer for Notices<M> {
     fn apply<'a>(&'a self, transaction: &'a Transaction<'a>, event: &'a Event) -> Applied<'a> {
         Box::pin(async move {
             let told = changed(&event.payload).zip(Notice::of(&event.kind));
-            let Some(((admin, device), notice)) = told else {
+            let Some(((realm, account, device), notice)) = told else {
                 return Ok(());
             };
+            let query = match realm {
+                Realm::Admin => NOTICE,
+                Realm::Staff => STAFF_NOTICE,
+            };
             let Some(row) = transaction
-                .query_opt(NOTICE, &[&admin, &event.occurred_at])
+                .query_opt(query, &[&account, &event.occurred_at])
                 .await?
             else {
                 return Ok(());
             };
-            // An address that cannot be read is a fault to try again; an admin with none has no one to tell.
+            // An address that cannot be read is a fault to try again; an account with none has no one to tell.
             let Some(email) = row.try_get::<_, Option<String>>("email")? else {
                 return Ok(());
             };
@@ -63,10 +69,12 @@ impl<M: Mailer + 'static> Consumer for Notices<M> {
                 at: &at,
                 device: &device,
             };
+            let realm = realm.as_str();
             let Some(message) = notice_message(notice, &email, &happened, &event.id) else {
                 tracing::warn!(
-                    admin,
-                    "identity: an admin's address is not plain, so they get no notices"
+                    account,
+                    realm,
+                    "identity: an account's address is not plain, so it gets no notices"
                 );
                 return Ok(());
             };
@@ -75,10 +83,10 @@ impl<M: Mailer + 'static> Consumer for Notices<M> {
     }
 }
 
-/// The admin an event's payload names, with the device that acted, if what it records went through: a refused
-/// login or addition is no one's to be told of. The actor reads `admin-<id>@<device>`, and a device the request
-/// did not name reads as unknown.
-fn changed(payload: &str) -> Option<(i64, String)> {
+/// The account an event's payload names, an admin's or else a staff member's, with its realm and the device that
+/// acted, if what it records went through: a refused login or addition is no one's to be told of. The actor reads
+/// `<realm>-<id>@<device>`, and a device the request did not name reads as unknown.
+fn changed(payload: &str) -> Option<(Realm, i64, String)> {
     let payload: Value = serde_json::from_str(payload).ok()?;
     let device = payload["actor"]
         .as_str()
@@ -86,10 +94,14 @@ fn changed(payload: &str) -> Option<(i64, String)> {
         .map(|(_, device)| device)
         .filter(|device| *device != "unknown")
         .unwrap_or("an unknown device");
+    let account = payload["admin_id"]
+        .as_i64()
+        .map(|id| (Realm::Admin, id))
+        .or_else(|| payload["staff_id"].as_i64().map(|id| (Realm::Staff, id)));
     (payload["outcome"] == "changed")
-        .then(|| payload["admin_id"].as_i64())
+        .then_some(account)
         .flatten()
-        .map(|admin| (admin, device.to_string()))
+        .map(|(realm, id)| (realm, id, device.to_string()))
 }
 
 /// A notice that could not go just now is tried again; one the mail server refused for good, or one sent or kept,
@@ -106,12 +118,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_change_names_the_staff_member_to_tell_when_it_is_theirs() {
+        assert_eq!(
+            changed(r#"{"outcome": "changed", "staff_id": 9, "actor": "staff-9@Safari on iOS"}"#),
+            Some((Realm::Staff, 9, "Safari on iOS".to_string()))
+        );
+        assert_eq!(
+            changed(r#"{"outcome": "changed", "staff_id": 9, "admin_id": 7}"#),
+            Some((Realm::Admin, 7, "an unknown device".to_string()))
+        );
+        assert_eq!(changed(r#"{"outcome": "changed", "staff_id": "9"}"#), None);
+    }
+
+    #[test]
     fn only_a_change_names_an_admin_to_tell() {
-        let unknown = || Some((7, "an unknown device".to_string()));
+        let unknown = || Some((Realm::Admin, 7, "an unknown device".to_string()));
         for (payload, told) in [
             (
                 r#"{"outcome": "changed", "admin_id": 7, "actor": "admin-7@Firefox on Linux"}"#,
-                Some((7, "Firefox on Linux".to_string())),
+                Some((Realm::Admin, 7, "Firefox on Linux".to_string())),
             ),
             (
                 r#"{"outcome": "changed", "admin_id": 7, "actor": "admin-7@unknown"}"#,

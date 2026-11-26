@@ -14,7 +14,7 @@ them if new, in that business's own transaction ([ADR-0089](../../docs/adr/0089-
 
 An admin may hold an email address ([ADR-0074](../../docs/adr/0074-operator-email-in-development.md)).
 `invite_message` renders their invite from templates, and `staff_invite_message` a staff member's, naming the business as escaped text, never kept for the mailbox, and `notices(mailer)` is an outbox
-consumer of Identity's own events that emails an admin when a login, an added passkey, or a join goes through, keyed on the event, with no link in it
+consumer of Identity's own events that emails an admin or a staff member when a login, an added passkey, or a join goes through, keyed on the event, with no link in it
 (`v5.0.0-6.3.5`, `v5.0.0-6.3.7`). A notice that cannot go just now is retried; one the mail server refuses is
 dropped. `/admin/mailbox` shows a logged-in admin the email kept rather than sent, newest first, as text, through
 the kernel's `Mailbox` port, which Mail implements; a message's HTML is never shown.

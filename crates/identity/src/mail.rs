@@ -87,7 +87,7 @@ pub fn staff_invite_message(
     )
 }
 
-/// What a notice tells an admin of, by the event that records it (ADR-0074).
+/// What a notice tells an account's owner of, by the event that records it (ADR-0074).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Notice {
     Login,

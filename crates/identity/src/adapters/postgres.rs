@@ -130,6 +130,10 @@ pub static MIGRATIONS: LazyLock<Vec<Migration>> = LazyLock::new(|| {
             version: 17,
             sql: include_str!("../../migrations/0017_staff_invite.sql"),
         },
+        Migration {
+            version: 18,
+            sql: include_str!("../../migrations/0018_staff_notice.sql"),
+        },
     ]
 });
 /// Identity's schema, which names the role its transactions act as (ADR-0042).

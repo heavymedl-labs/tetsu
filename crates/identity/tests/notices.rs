@@ -136,6 +136,51 @@ async fn a_login_a_passkey_and_a_join_are_each_told_once() {
     assert!(told.text().contains(" UTC, from Firefox on Linux."));
 }
 
+/// A staff member's login or new passkey is told to them, at their own address, as an admin's is.
+#[tokio::test]
+async fn a_staff_members_login_and_passkey_are_told_to_them() {
+    let (database, pool, dispatcher, recorder) = ready().await;
+    connect(&database)
+        .await
+        .unwrap()
+        .batch_execute(
+            "INSERT INTO identity.staff (name, email) VALUES ('Bo Lim', 'bo@example.com')",
+        )
+        .await
+        .unwrap();
+    let staff: i64 = connect(&database)
+        .await
+        .unwrap()
+        .query_one("SELECT id FROM identity.staff", &[])
+        .await
+        .unwrap()
+        .try_get(0)
+        .unwrap();
+    record(
+        &pool,
+        "identity.logged_in",
+        &format!(r#"{{"staff_id": {staff}, "outcome": "changed", "actor": "staff-{staff}@Safari on iOS"}}"#),
+    )
+    .await;
+    record(
+        &pool,
+        "identity.passkey_added",
+        &format!(r#"{{"staff_id": {staff}, "outcome": "changed"}}"#),
+    )
+    .await;
+    dispatcher.deliver_due().await.unwrap();
+    let sent = recorder.sent();
+    assert_eq!(sent.len(), 2, "{sent:?}");
+    assert!(
+        sent.iter()
+            .all(|message| message.to().as_str() == "bo@example.com")
+    );
+    assert!(
+        sent.iter()
+            .any(|message| message.text().contains(" UTC, from Safari on iOS."))
+    );
+}
+
 #[tokio::test]
 async fn a_refused_login_or_an_admin_without_an_address_is_told_nothing() {
     let (database, pool, dispatcher, recorder) = ready().await;
