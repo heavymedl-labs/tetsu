@@ -22,10 +22,11 @@ business is a tenant, isolated in the database itself, and industries add only w
 
 - **Tenancy:** each business's address and page, kept apart by row-level security
 - **Audit:** a record of security events that is never lost
-- **Identity:** admins, who join with a passkey from a one-time invite link and log in with it at `/admin`, with
-  server-side sessions whose tokens are stored only as hashes
+- **Identity:** admins at `/admin` and staff at `/app`, each realm on a host of its own, who join with a passkey
+  from a one-time invite link and log in with it; staff accept an invite to another business by logging in. Sessions
+  are server-side, and their tokens are stored only as hashes
 - **Domain events:** delivered once through an outbox, retried, and logged when they stop
-- **Mail:** admins' invites and notices, sent by SMTP to listed addresses and otherwise kept for a mailbox page
+- **Mail:** admins' and staff's invites and notices, sent by SMTP to listed addresses and otherwise kept for a mailbox page
 - **Operations:** JSON logs with alert fields, exported to any OTLP backend
 
 Next: login ([#20](https://github.com/heavymedl-labs/tetsu/issues/20)), then bookings and payments.
@@ -54,7 +55,7 @@ Free tiers for now, each behind a setting or a port so it can be swapped
 
 | What | Provider | Status |
 | --- | --- | --- |
-| App | [Render](https://render.com) ([ADR-0012](docs/adr/0012-first-hosting-and-deploys.md)) | Live |
+| App | [Render](https://render.com), a service per realm ([ADR-0012](docs/adr/0012-first-hosting-and-deploys.md), [ADR-0092](docs/adr/0092-a-service-per-realm-before-domains.md)) | Live |
 | Database | [Neon](https://neon.com), Postgres 18 ([ADR-0012](docs/adr/0012-first-hosting-and-deploys.md)) | Live |
 | Code, CI, images | [GitHub](https://github.com/heavymedl-labs/tetsu) ([ADR-0023](docs/adr/0023-ci-on-demand.md), [ADR-0033](docs/adr/0033-deploys-on-demand.md)) | Live |
 | Logs and alerts | [Grafana Cloud](https://grafana.com/products/cloud/) ([ADR-0049](docs/adr/0049-log-export.md)) | Live |
