@@ -1438,7 +1438,7 @@ fn see_other(path: &str) -> Response {
 /// or Profile, where a login goes anyway.
 fn return_to(at: &Paths, path: &str) -> String {
     back_to(at, path)
-        .filter(|path| *path != at.home && *path != at.profile)
+        .filter(|path| *path != at.profile)
         .map_or_else(
             || at.login.to_string(),
             |path| format!("{}?next={path}", at.login),

@@ -802,6 +802,13 @@ async fn an_admin_host_serves_the_admins_pages_at_its_root() {
     );
     let tenant = get(&server, "/sample-gym");
     assert!(!tenant.contains("Sample Gym"), "{tenant}");
+    // A login returns only to a plain page of its own host, never home, which Profile follows anyway.
+    let long = format!("/login?next=/{}", "a".repeat(200));
+    for asked in ["/login?next=/", long.as_str()] {
+        let page = get(&server, asked);
+        assert!(page.starts_with("HTTP/1.1 200"), "{asked}: {page}");
+        assert!(!page.contains("next=\"/"), "{asked}: {page}");
+    }
     stop(&mut server);
 }
 
