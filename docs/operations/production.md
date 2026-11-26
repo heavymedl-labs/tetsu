@@ -149,7 +149,7 @@ Moving from one service to three, done once:
 Before the first deploy of realm pages at their hosts' roots
 ([ADR-0094](../adr/0094-realm-paths-at-the-root-of-their-hosts.md)), add `TETSU_STAFF_ORIGIN`, set to
 `STAFF_ORIGIN`'s value, to `tetsu-site` in Render's dashboard: the site refuses to start without it. The deploy's page
-check then confirms the site's `/login` leads to staff login there. Not yet done.
+check then confirms the site's `/login` leads to staff login there. Done 2026-11-26.
 
 - **Command:** `/usr/local/bin/tetsu serve`. Render's command replaces the image's entrypoint too, so `serve`
   alone exits with status 128.
