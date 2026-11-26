@@ -96,6 +96,7 @@ number, and add a row below. Never renumber.
 | [0089](0089-staff-join-and-login.md) | Staff join and log in | Building staff sign-in, invites, or staff tables | Accepted |
 | [0090](0090-a-session-table-per-realm.md) | A session table per realm | Storing a realm's sessions | Accepted |
 | [0091](0091-realm-sql-rendered-from-one-source.md) | Realm SQL rendered from one source | Writing SQL a realm shares with another | Accepted |
+| [0092](0092-a-service-per-realm-before-domains.md) | A service per realm before domains | Deploying, adding a realm, or setting a realm's host | Proposed |
 | [0068](0068-no-demo-note.md) | No demo note | Changing what marks a demo page | Proposed |
 
 ## Open decisions

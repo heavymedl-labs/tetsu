@@ -5,7 +5,8 @@
 - Date: 2026-11-11
 - Session controls, the checks on state-changing requests, and the pre-session record are amended by
   [ADR-0059](0059-session-controls-and-request-checks.md)
-- Realms share one demo service until Tetsu has domains, by [ADR-0061](0061-one-service-until-domains.md)
+- Realms share one demo service until Tetsu has domains, by [ADR-0061](0061-one-service-until-domains.md);
+  [ADR-0092](0092-a-service-per-realm-before-domains.md), proposed, gives each realm its own service and host instead
 
 ## Context
 
