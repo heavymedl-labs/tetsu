@@ -607,6 +607,23 @@ async fn each_page_offers_one_passkey_island() {
 }
 
 /// A passkey on one device is listed as one, not as synced.
+/// The admins' router serves none of the requests only staff have, reading and accepting an invite: they are
+/// answered as any address the admins' host does not serve, never as staff's (#111, ADR-0094).
+#[tokio::test]
+async fn the_admins_router_serves_no_staff_request() {
+    let (address, _database, cookie, _) = logged_in().await;
+    for path in [
+        "/join/invitation",
+        "/join/accept/begin",
+        "/join/accept/finish",
+    ] {
+        let sent = post(address, path, &cookie, &json!({ "link": "L" })).await;
+        assert_eq!(sent.status, 405, "{path}: {}", sent.body);
+        let read = get(address, path, &cookie).await;
+        assert_eq!(read.status, 404, "{path}: {}", read.body);
+    }
+}
+
 /// A path on the admins' host that Identity does not serve sends anyone logged out to log in, so no one can map the
 /// admin pages without a session, and shows a logged-in admin the site's not-found page.
 #[tokio::test]

@@ -508,6 +508,22 @@ fn names_no_path(line: &serde_json::Value) {
     assert!(line["timestamp"].is_string(), "{text}");
 }
 
+/// A request's line names the realm of the host it came to: the admins' or staff's on their own hosts, as the site's
+/// name the customers' (ADR-0048, ADR-0094).
+#[tokio::test]
+async fn each_realms_host_labels_its_requests_with_its_realm() {
+    let database = fresh_database().await.expect("a test database");
+    ready(&database);
+    for realm in ["admin", "staff"] {
+        let (server, _) = start_with(&database, &[("TETSU_SERVES", realm)]);
+        get(&server, "/login");
+        let lines = logged(server);
+        let requests = served(&lines);
+        assert_eq!(requests.len(), 1, "{lines:?}");
+        assert_eq!(requests[0]["span"]["realm"], realm, "{:?}", requests[0]);
+    }
+}
+
 /// Each request logs one JSON line with its request ID, realm, route, and tenant, and never its path or query,
 /// which could carry a token or an email (ADR-0045).
 #[tokio::test]
