@@ -1,7 +1,7 @@
 //! Fresh databases for tests. `TEST_DATABASE_URL` points at a Postgres the tests may create databases on.
 //!
 //! Every database is dropped when its test is done with it, including when the test fails or panics. One
-//! left by a run that was killed is swept by a later run (#43). A database with modules migrated is copied from a
+//! left by a run that was killed is swept by a later run (#43), as is a runner role it made (#168). A database with modules migrated is copied from a
 //! template migrated once, which the final sweep drops. Temporary files work the same way: a [`Scratch`]
 //! is removed when dropped, and `scripts/clean.py` sweeps one a killed run left (#124).
 
@@ -213,6 +213,22 @@ async fn sweep(older_than: Duration, wait: Option<Duration>) -> Result<(), Error
     if !take_sweep_lock(&admin, wait).await? {
         return Ok(());
     }
+    let mut left = sweep_databases(&admin, older_than).await?;
+    left.extend(sweep_runner_roles(&admin).await?);
+    // Closing the connection releases the lock. A sweep that waited is the last one, so nothing may be left.
+    match (wait, left.is_empty()) {
+        (Some(_), false) => {
+            Err(format!("test databases or roles were left: {}", left.join(", ")).into())
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Drops each test database a sweep reaches, and returns those that would not drop.
+async fn sweep_databases(
+    admin: &tokio_postgres::Client,
+    older_than: Duration,
+) -> Result<Vec<String>, Error> {
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
     let rows = admin.query("SELECT datname FROM pg_database", &[]).await?;
     // Every name is checked in Rust, since only a test database's name parses as a creation time. A name that
@@ -227,11 +243,43 @@ async fn sweep(older_than: Duration, wait: Option<Duration>) -> Result<(), Error
             left.push(name);
         }
     }
-    // Closing the connection releases the lock. A sweep that waited is the last one, so nothing may be left.
-    match (wait, left.is_empty()) {
-        (Some(_), false) => Err(format!("test databases were left: {}", left.join(", ")).into()),
-        _ => Ok(()),
+    Ok(left)
+}
+
+/// Drops each runner role a test made, `t_runner_<process>` or `t_runner_app_<process>`, whose process has ended, so
+/// a run that crashed leaves no role holding ADMIN on the module roles (#168). Returns those that would not drop,
+/// such as one still holding rights in a database a later sweep drops.
+async fn sweep_runner_roles(admin: &tokio_postgres::Client) -> Result<Vec<String>, Error> {
+    let rows = admin
+        .query(
+            r"SELECT rolname::text AS name FROM pg_catalog.pg_roles WHERE rolname LIKE 't\_runner\_%'",
+            &[],
+        )
+        .await?;
+    let mut left = Vec::new();
+    for row in &rows {
+        let name: String = row.try_get("name")?;
+        if !ended(&name) {
+            continue;
+        }
+        if let Err(error) = admin
+            .batch_execute(&format!("DROP ROLE IF EXISTS {}", quoted(&name)))
+            .await
+        {
+            eprintln!("warning: test role {name} was not dropped: {error}");
+            left.push(name);
+        }
     }
+    Ok(left)
+}
+
+/// Whether a runner role's name ends in the ID of a process that is no longer running. Any other name is never
+/// ended, so it is kept.
+fn ended(role: &str) -> bool {
+    role.strip_prefix("t_runner_app_")
+        .or_else(|| role.strip_prefix("t_runner_"))
+        .and_then(|process| process.parse::<u32>().ok())
+        .is_some_and(|process| !std::path::Path::new(&format!("/proc/{process}")).exists())
 }
 
 /// Whether this connection now holds the sweep lock.
@@ -422,6 +470,55 @@ impl Drop for Scratch {
 
 #[cfg(test)]
 mod tests {
+    /// A runner role whose process has ended is dropped, and one whose process runs is kept; one that holds rights
+    /// in a database is reported as left. No process has an ID above Linux's largest, 4,194,304.
+    #[tokio::test]
+    async fn runner_roles_of_ended_runs_are_dropped() {
+        let database = fresh_database().await.unwrap();
+        let admin = connect(&database).await.unwrap();
+        // Held throughout, so no sweep in a test running alongside reaches these roles, or reports one as left.
+        admin
+            .query_one("SELECT pg_advisory_lock($1)", &[&SWEEP_LOCK])
+            .await
+            .unwrap();
+        let (gone, held, running) = (
+            "t_runner_4194998",
+            "t_runner_app_4194999",
+            format!("t_runner_app_{}", std::process::id()),
+        );
+        admin
+            .batch_execute(&format!(
+                "CREATE ROLE {gone}; CREATE ROLE {held}; CREATE ROLE {running};
+                 GRANT CONNECT ON DATABASE {} TO {held}",
+                database.name()
+            ))
+            .await
+            .unwrap();
+        let left = sweep_runner_roles(&admin).await;
+        let kept = admin
+            .query(
+                "SELECT rolname::text FROM pg_catalog.pg_roles WHERE rolname = ANY($1)",
+                &[&vec![gone.to_string(), held.to_string(), running.clone()]],
+            )
+            .await
+            .unwrap();
+        admin
+            .batch_execute(&format!(
+                "REVOKE CONNECT ON DATABASE {} FROM {held}; DROP ROLE {held}; DROP ROLE {running};
+                 SELECT pg_advisory_unlock({SWEEP_LOCK})",
+                database.name()
+            ))
+            .await
+            .unwrap();
+        assert_eq!(left.unwrap(), [held]);
+        let mut kept: Vec<String> = kept.iter().map(|row| row.try_get(0).unwrap()).collect();
+        kept.sort();
+        let mut expected = vec![held.to_string(), running];
+        expected.sort();
+        assert_eq!(kept, expected);
+        assert!(!ended("t_runner_x") && !ended("tetsu_identity"));
+    }
+
     #[test]
     fn scratch_files_and_folders_go_when_dropped_even_by_a_panic() {
         let file = Scratch::file("scratch.txt", "x").unwrap();
@@ -558,7 +655,7 @@ mod tests {
         }
         let error = swept.unwrap_err().to_string();
         assert!(
-            error.contains(&format!("test databases were left: {name}")),
+            error.contains(&format!("test databases or roles were left: {name}")),
             "{error}"
         );
     }

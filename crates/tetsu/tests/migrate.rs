@@ -123,6 +123,60 @@ async fn every_module_follows_the_isolation_rules() {
     assert_eq!(problems, Vec::<String>::new());
 }
 
+/// As on the deploy, where `tetsu_owner` migrates with CREATEROLE but is no superuser: every module migrates, twice,
+/// and keeps the isolation rules, as a runner that owns the database and holds ADMIN on the module and delivery
+/// roles, as their creator, without inheriting them. `tetsu_owner` did not create `tetsu_app`, so it holds no ADMIN
+/// on it, and neither does this runner. A statement only a superuser may run, such as revoking on a function
+/// another role owns, fails here as it would at deploy (#168).
+#[tokio::test]
+async fn every_module_migrates_as_a_runner_that_is_no_superuser() {
+    // A migration as the test server's superuser makes the module roles, if no test has yet.
+    let first = fresh_database().await.expect("a test database");
+    assert!(migrate(first.url()).status.success());
+    let admin = tetsu_postgres::connect(&first).await.expect("connects");
+    let schemas = tetsu_postgres::module_schemas(&admin)
+        .await
+        .expect("finds the modules");
+    let mut roles = vec![tetsu_postgres::DELIVERY_ROLE.to_string()];
+    for schema in &schemas {
+        roles.extend([
+            tetsu_postgres::module_role(schema),
+            tetsu_postgres::lookup_role(schema),
+        ]);
+    }
+    let settings = fresh_database().await.expect("a test database");
+    let runner = format!("t_runner_{}", std::process::id());
+    let mut admin = tetsu_postgres::connect(&settings).await.expect("connects");
+    admin
+        .batch_execute(&format!(
+            "CREATE ROLE {runner} LOGIN CREATEROLE;
+             GRANT {} TO {runner} WITH ADMIN TRUE, INHERIT FALSE, SET FALSE;
+             ALTER DATABASE {} OWNER TO {runner}",
+            roles.join(", "),
+            settings.name()
+        ))
+        .await
+        .expect("makes the runner");
+    // Assumes the test server trusts local roles without a password, as CI's and check.sh's do.
+    let as_runner = settings
+        .url()
+        .replacen("postgres@", &format!("{runner}@"), 1);
+    let runs = [migrate(&as_runner), migrate(&as_runner)];
+    let schemas: Vec<&str> = schemas.iter().map(String::as_str).collect();
+    let problems = tetsu_postgres::isolation_violations(&mut admin, &schemas).await;
+    admin
+        .batch_execute(&format!(
+            "REASSIGN OWNED BY {runner} TO postgres; DROP OWNED BY {runner}; DROP ROLE {runner}"
+        ))
+        .await
+        .expect("drops the runner");
+    assert!(as_runner.contains(&format!("//{runner}@")), "{as_runner}");
+    for run in &runs {
+        assert!(run.status.success(), "{run:?}");
+    }
+    assert_eq!(problems.expect("checks"), Vec::<String>::new());
+}
+
 /// A local `.env` where the command runs supplies settings the environment leaves unset, and the environment wins
 /// over it (ADR-0050).
 #[tokio::test]
