@@ -41,11 +41,12 @@ pub use adapters::http::{PATHS, Web, router};
 pub use adapters::postgres::{postgres_staff_store, postgres_store};
 pub use browser::{Change, CheckedSession, ForChange, Logout, Origins};
 pub use domain::{
-    Account, AccountId, Actor, Addition, AdminSummary, Answer, BusinessId, Ceremony, CeremonyKind,
-    CeremonyToken, Device, Disabling, Ending, Error, FailedCheck, HeldPasskey, InviteToken,
-    Invitee, Issue, Limits, ListedSession, Login, NewPasskey, NewStaffInvite, PersonName,
-    RateLimit, Realm, Redemption, Refusal, Removal, Role, Session, SessionId, SessionStart,
-    SessionToken, Signer, StaffInvite, StaffIssue, TakenAddition, TakenCeremony, TimeLeft,
+    Acceptance, Account, AccountId, Actor, Addition, AdminSummary, Answer, BusinessId, Ceremony,
+    CeremonyKind, CeremonyToken, Device, Disabling, Ending, Error, FailedCheck, HeldPasskey,
+    Invitation, InviteToken, Invitee, Issue, Limits, ListedSession, Login, NewPasskey,
+    NewStaffInvite, PersonName, RateLimit, Realm, Redemption, Refusal, Removal, Role, Session,
+    SessionId, SessionStart, SessionToken, Signer, StaffInvite, StaffIssue, TakenAddition,
+    TakenCeremony, TimeLeft,
 };
 pub use mail::{invite_message, staff_invite_message};
 pub use passkeys::RelyingParty;

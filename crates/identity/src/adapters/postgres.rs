@@ -12,10 +12,11 @@ use tokio_postgres::Row;
 use tokio_postgres::types::{FromSql, ToSql};
 
 use crate::domain::{
-    Account, AccountId, Actor, Addition, AdminSummary, BusinessId, CeremonyKind, Disabling, Ending,
-    Error, FailedCheck, HeldPasskey, Invitee, Issue, ListedSession, Login, NewPasskey,
-    NewStaffInvite, PersonName, RateLimit, Realm, Redemption, Refusal, Removal, Role, Session,
-    SessionId, SessionStart, Signer, StaffIssue, TakenAddition, TakenCeremony, TimeLeft,
+    Acceptance, Account, AccountId, Actor, Addition, AdminSummary, BusinessId, CeremonyKind,
+    Disabling, Ending, Error, FailedCheck, HeldPasskey, Invitation, Invitee, Issue, ListedSession,
+    Login, NewPasskey, NewStaffInvite, PersonName, RateLimit, Realm, Redemption, Refusal, Removal,
+    Role, Session, SessionId, SessionStart, Signer, StaffIssue, TakenAddition, TakenCeremony,
+    TimeLeft,
 };
 use crate::ports::{AdminDirectory, AdminStore, LoginStore, StaffDirectory, StaffStore};
 use crate::use_cases::Accounts;
@@ -147,6 +148,9 @@ const SESSION_LEFT: &str = include_str!("../../sql/session_left.sql");
 const LOG_OUT: &str = include_str!("../../sql/log_out.sql");
 const ISSUE_INVITE: &str = include_str!("../../sql/issue_invite.sql");
 const STAFF_ISSUE_INVITE: &str = include_str!("../../sql/staff_issue_invite.sql");
+const STAFF_INVITATION: &str = include_str!("../../sql/staff_invitation.sql");
+const STAFF_ACCEPT_INVITE: &str = include_str!("../../sql/staff_accept_invite.sql");
+const STAFF_BUSINESS: &str = include_str!("../../sql/staff_business.sql");
 const DISABLE_ADMIN: &str = include_str!("../../sql/disable_admin.sql");
 const END_ADMIN_SESSIONS: &str = include_str!("../../sql/end_admin_sessions.sql");
 const END_REALM_SESSIONS: &str = include_str!("../../sql/end_realm_sessions.sql");
@@ -1127,6 +1131,68 @@ impl StaffDirectory for PostgresStaff {
         .await?
         .ok_or_else(answered_nothing)
     }
+
+    async fn invitation(&self, link: &[u8; 32]) -> Result<Option<Invitation>, Error> {
+        self.query(STAFF_INVITATION, &[&link.as_slice()])
+            .await?
+            .first()
+            .map(invitation_from)
+            .transpose()
+    }
+
+    async fn accept_invite(
+        &self,
+        link: &[u8; 32],
+        session: &[u8; 32],
+        staff: AccountId,
+        actor: &Actor,
+    ) -> Result<Acceptance, Error> {
+        let Some(business) = business_of(&self.pool, Some(STAFF_BUSINESS), link).await? else {
+            return Ok(Acceptance::Expired);
+        };
+        let id = staff.get();
+        let parameters: [&(dyn ToSql + Sync); 2] = [&link.as_slice(), &session.as_slice()];
+        self.decided(
+            Place::Business(business),
+            STAFF_ACCEPT_INVITE,
+            &parameters,
+            |rows| acceptance(rows, id, actor),
+        )
+        .await?
+        .ok_or_else(answered_nothing)
+    }
+}
+
+/// An open invite's business, role, and whether its person has joined; a role Identity never writes is a storage
+/// failure.
+fn invitation_from(row: &Row) -> Result<Invitation, Error> {
+    let role: String = column(row, "role_name")?;
+    Ok(Invitation {
+        business: BusinessId::new(column(row, "tenant_id")?),
+        role: Role::parse(&role)
+            .ok_or_else(|| Error::Storage(format!("an invite gives the role {role:?}")))?,
+        joined: column(row, "joined")?,
+    })
+}
+
+/// Reads what accepting an invite came to, and makes the event it records in the business's own record: changed
+/// when the role was added, unchanged for a member already, and refused otherwise, with the reason. It names the
+/// staff member, never the link.
+fn acceptance(rows: &[Row], staff: i64, actor: &Actor) -> Decided<Acceptance> {
+    let row = rows.first().ok_or_else(answered_nothing)?;
+    let outcome: String = column(row, "outcome")?;
+    let accepted = Acceptance::parse(&outcome)
+        .ok_or_else(|| Error::Storage(format!("accepting an invite answered {outcome:?}")))?;
+    let (said, reason) = match accepted {
+        Acceptance::Accepted => ("changed", None),
+        Acceptance::Member => ("unchanged", None),
+        _ => ("refused", Some(outcome.as_str())),
+    };
+    let payload = json!({"staff_id": staff, "reason": reason});
+    Ok((
+        Some(accepted),
+        Some(event("identity.invite_accepted", actor, said, payload)),
+    ))
 }
 
 /// Reads what issuing a staff invite came to, and makes the event it records in Tetsu's record: changed when an
@@ -2015,6 +2081,81 @@ mod tests {
         assert_eq!(
             staff_issuance(&[], BusinessId::new(3), Role::Owner, &support::actor()),
             Err(answered_nothing())
+        );
+    }
+
+    /// Accepting an invite reads each answer the database writes and records it, changed, unchanged, or refused with
+    /// its reason, and takes any other answer, or none, as a storage failure.
+    #[tokio::test]
+    async fn accepting_an_invite_reads_every_answer() {
+        let (pool, _database) = support::migrated().await;
+        let client = pool.get().await.expect("a connection");
+        let mut seen = Vec::new();
+        for outcome in [
+            "accepted",
+            "member",
+            "logged_out",
+            "disabled",
+            "stale",
+            "expired",
+            "other",
+            "maybe",
+        ] {
+            let rows = client
+                .query(&format!("SELECT '{outcome}'::text AS outcome"), &[])
+                .await
+                .expect("answers");
+            seen.push(
+                acceptance(&rows, 7, &support::actor()).map(|(accepted, event)| {
+                    let payload: Value =
+                        serde_json::from_str(&event.expect("an event").1).expect("JSON");
+                    (
+                        accepted,
+                        payload["outcome"].clone(),
+                        payload["reason"].clone(),
+                    )
+                }),
+            );
+        }
+        let refused = |accepted, reason| Ok((Some(accepted), json!("refused"), json!(reason)));
+        assert_eq!(
+            seen,
+            [
+                Ok((Some(Acceptance::Accepted), json!("changed"), json!(null))),
+                Ok((Some(Acceptance::Member), json!("unchanged"), json!(null))),
+                refused(Acceptance::LoggedOut, "logged_out"),
+                refused(Acceptance::Disabled, "disabled"),
+                refused(Acceptance::Stale, "stale"),
+                refused(Acceptance::Expired, "expired"),
+                refused(Acceptance::Other, "other"),
+                Err(Error::Storage(
+                    "accepting an invite answered \"maybe\"".to_string()
+                )),
+            ]
+        );
+        assert_eq!(
+            acceptance(&[], 7, &support::actor()),
+            Err(answered_nothing())
+        );
+    }
+
+    /// An invite that gives a role Identity never writes is a storage failure, never a guess.
+    #[tokio::test]
+    async fn an_invite_with_an_unknown_role_is_a_storage_failure() {
+        let (pool, _database) = support::migrated().await;
+        let client = pool.get().await.expect("a connection");
+        let unknown = client
+            .query(
+                "SELECT 3::bigint AS tenant_id, 'janitor'::text AS role_name, false AS joined",
+                &[],
+            )
+            .await
+            .expect("answers");
+        assert_eq!(
+            invitation_from(&unknown[0]),
+            Err(Error::Storage(
+                "an invite gives the role \"janitor\"".to_string()
+            ))
         );
     }
 

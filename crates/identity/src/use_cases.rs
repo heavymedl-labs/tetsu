@@ -2,11 +2,11 @@
 
 use crate::browser::{Change, CheckedSession, ForChange, Logout, Origins};
 use crate::domain::{
-    Account, AccountId, Actor, Addition, AdminSummary, Answer, Ceremony, CeremonyKind,
-    CeremonyToken, Device, Disabling, Ending, Error, FailedCheck, Fill, InviteToken, Issue,
-    ListedSession, Login, NewPasskey, NewStaffInvite, PersonName, RateLimit, Realm, Redemption,
-    Refusal, Removal, Session, SessionId, SessionStart, SessionToken, Signer, StaffInvite,
-    StaffIssue, TimeLeft,
+    Acceptance, Account, AccountId, Actor, Addition, AdminSummary, Answer, Ceremony, CeremonyKind,
+    CeremonyToken, Device, Disabling, Ending, Error, FailedCheck, Fill, Invitation, InviteToken,
+    Issue, ListedSession, Login, NewPasskey, NewStaffInvite, PersonName, RateLimit, Realm,
+    Redemption, Refusal, Removal, Session, SessionId, SessionStart, SessionToken, Signer,
+    StaffInvite, StaffIssue, TimeLeft,
 };
 use crate::passkeys::RelyingParty;
 use crate::ports::{AdminDirectory, LoginStore, StaffDirectory};
@@ -164,6 +164,39 @@ impl<S: AdminDirectory> Accounts<S> {
 }
 
 impl<S: StaffDirectory> Accounts<S> {
+    /// What an invite link gives, read before anyone acts on it, so its page asks someone new to make a passkey and
+    /// someone with one to log in and accept; none for a link that is not one, or that ended.
+    ///
+    /// # Errors
+    /// Fails if storage fails.
+    pub async fn invitation(&self, link: &str) -> Result<Option<Invitation>, Error> {
+        match InviteToken::parse(link) {
+            Some(token) => self.store.invitation(&token.hash()).await,
+            None => Ok(None),
+        }
+    }
+
+    /// Accepts an invite for the staff member a live session names, adding its role at its business, if that
+    /// session was proven by a passkey within ten minutes (ADR-0089). A link that is not one has ended.
+    ///
+    /// # Errors
+    /// Fails if storage fails.
+    pub async fn accept_invite(
+        &self,
+        session: &Session,
+        link: &str,
+        actor: &Actor,
+    ) -> Result<Acceptance, Error> {
+        match InviteToken::parse(link) {
+            Some(token) => {
+                self.store
+                    .accept_invite(&token.hash(), &session.hash, session.admin, actor)
+                    .await
+            }
+            None => Ok(Acceptance::Expired),
+        }
+    }
+
     /// Invites the staff member an email names to a business with a role, by a link good once and for seven days,
     /// making them with no passkey if no staff member has that email, and replacing any open invite of theirs there
     /// (ADR-0089). Records whether one was issued, never the token. The command prints the link only to its own

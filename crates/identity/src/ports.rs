@@ -1,10 +1,10 @@
 //! The driven port Identity calls out through.
 
 use crate::domain::{
-    Account, AccountId, Actor, Addition, AdminSummary, Disabling, Ending, Error, FailedCheck,
-    Invitee, Issue, ListedSession, Login, NewPasskey, NewStaffInvite, PersonName, RateLimit, Realm,
-    Redemption, Refusal, Removal, Session, SessionId, SessionStart, Signer, StaffIssue,
-    TakenAddition, TakenCeremony, TimeLeft,
+    Acceptance, Account, AccountId, Actor, Addition, AdminSummary, Disabling, Ending, Error,
+    FailedCheck, Invitation, Invitee, Issue, ListedSession, Login, NewPasskey, NewStaffInvite,
+    PersonName, RateLimit, Realm, Redemption, Refusal, Removal, Session, SessionId, SessionStart,
+    Signer, StaffIssue, TakenAddition, TakenCeremony, TimeLeft,
 };
 use std::future::Future;
 use std::time::Duration;
@@ -308,4 +308,22 @@ pub trait StaffDirectory {
         hash: &[u8; 32],
         actor: &Actor,
     ) -> impl Future<Output = Result<StaffIssue, Error>> + Send;
+
+    /// What an open invite link gives, read before anyone acts on it, or none for a link that ended, was replaced,
+    /// or names someone disabled.
+    fn invitation(
+        &self,
+        link: &[u8; 32],
+    ) -> impl Future<Output = Result<Option<Invitation>, Error>> + Send;
+
+    /// Accepts an open invite for the staff member `staff`, whose fresh session a token's hash names, adding its role
+    /// at its business and spending it, in that business's transaction, and records what came of it there. An invite
+    /// that names someone else stays open.
+    fn accept_invite(
+        &self,
+        link: &[u8; 32],
+        session: &[u8; 32],
+        staff: AccountId,
+        actor: &Actor,
+    ) -> impl Future<Output = Result<Acceptance, Error>> + Send;
 }

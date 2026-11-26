@@ -14,7 +14,7 @@ use crate::join_tests::{
 use crate::ports::LoginStore;
 use passkey::types::Passkey;
 
-use crate::{AccountId, Accounts, Answer, Error, Identity, Realm, SessionToken};
+use crate::{AccountId, Accounts, Answer, Error, Identity, Realm, Session, SessionToken};
 
 /// The business Ada is invited to.
 const BUSINESS: i64 = 3;
@@ -458,4 +458,80 @@ async fn staffs_router_serves_staff_pages_alone() {
             "{admins}"
         );
     }
+}
+
+/// An invite's link says, before anyone acts on it, which business and role it gives and whether its person has
+/// joined already, so the page asks someone new to make a passkey and someone else to log in and accept.
+#[tokio::test]
+async fn an_invites_link_says_whom_it_asks_to_join_or_accept() {
+    let (staff, _database, link) = invited().await;
+    let invitation = staff.invitation(&link).await.expect("reads").expect("open");
+    assert_eq!(
+        (invitation.business, invitation.role, invitation.joined),
+        (crate::BusinessId::new(BUSINESS), crate::Role::Owner, false)
+    );
+    join(&staff, &link).await;
+    assert_eq!(staff.invitation(&link).await.expect("reads"), None, "spent");
+    assert_eq!(staff.invitation("not a link").await.expect("reads"), None);
+}
+
+/// Ada, joined at the business and freshly logged in, with her session and a second invite, to business 4.
+async fn invited_again() -> (
+    Accounts<impl crate::ports::StaffStore>,
+    TestDatabase,
+    Session,
+    String,
+) {
+    let (staff, database, link) = invited().await;
+    let (_, kept) = join(&staff, &link).await;
+    let token = log_in(&staff, kept).await;
+    let session = staff
+        .session([cookie(&token).as_str()])
+        .await
+        .expect("reads")
+        .expect("a live session");
+    let second = staff
+        .invite_staff(
+            &crate::NewStaffInvite {
+                business: crate::BusinessId::new(4),
+                ..ada()
+            },
+            &actor(),
+        )
+        .await
+        .expect("issues");
+    (staff, database, session, second.token.to_text())
+}
+
+/// Someone with a passkey, invited to a second business, accepts by their fresh session: the role is added there,
+/// the invite is spent, and that business's record says so.
+#[tokio::test]
+async fn a_staff_member_accepts_an_invite_to_another_business() {
+    let (staff, database, session, link) = invited_again().await;
+    let invitation = staff.invitation(&link).await.expect("reads").expect("open");
+    assert!(invitation.joined);
+    let by = actor();
+    let accepted = staff.accept_invite(&session, &link, &by).await;
+    assert_eq!(accepted, Ok(crate::Acceptance::Accepted));
+    assert_eq!(
+        number(
+            &database,
+            "SELECT count(*) FROM identity.staff_roles WHERE tenant_id = 4"
+        )
+        .await,
+        1
+    );
+    let again = staff.accept_invite(&session, &link, &by).await;
+    assert_eq!(again, Ok(crate::Acceptance::Expired));
+    let not_a_link = staff.accept_invite(&session, "not a link", &by).await;
+    assert_eq!(not_a_link, Ok(crate::Acceptance::Expired));
+    let accepted = events(&database, "outbox", "identity.invite_accepted").await;
+    assert_eq!(
+        (
+            accepted.len(),
+            &accepted[0]["outcome"],
+            &accepted[0]["staff_id"]
+        ),
+        (1, &json!("changed"), &json!(session.admin().get()))
+    );
 }

@@ -963,6 +963,50 @@ pub struct NewStaffInvite {
     pub role: Role,
 }
 
+/// An open staff invite, as its link's page shows it before anyone acts on it: the business and role it gives, and
+/// whether its person has a passkey already, so logs in and accepts rather than joins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Invitation {
+    pub business: BusinessId,
+    pub role: Role,
+    pub joined: bool,
+}
+
+/// What accepting a staff invite came to (ADR-0089).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Acceptance {
+    /// The role is added, and the invite spent.
+    Accepted,
+    /// They held a role at the business already; the invite is spent all the same.
+    Member,
+    /// No live staff session.
+    LoggedOut,
+    /// The session's staff member is disabled.
+    Disabled,
+    /// The session was not proven by a passkey within ten minutes, so they log in again first.
+    Stale,
+    /// The link ended, was replaced, or names no open invite.
+    Expired,
+    /// The invite names someone else, and stays open for them.
+    Other,
+}
+
+impl Acceptance {
+    /// The answer as Identity's database writes it, or none for one it never writes.
+    pub(crate) fn parse(text: &str) -> Option<Self> {
+        match text {
+            "accepted" => Some(Self::Accepted),
+            "member" => Some(Self::Member),
+            "logged_out" => Some(Self::LoggedOut),
+            "disabled" => Some(Self::Disabled),
+            "stale" => Some(Self::Stale),
+            "expired" => Some(Self::Expired),
+            "other" => Some(Self::Other),
+            _ => None,
+        }
+    }
+}
+
 /// A staff invite issued: its link's token, and who it invites.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StaffInvite {
