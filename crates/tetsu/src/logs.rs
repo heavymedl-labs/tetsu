@@ -403,7 +403,7 @@ mod tests {
             "tetsu".into(),
             vec![
                 ("service.name".into(), "other".into()),
-                ("deployment.environment.name".into(), "demo".into()),
+                ("deployment.environment.name".into(), "production".into()),
             ],
         );
         let get = |key: &'static str| {
@@ -412,7 +412,10 @@ mod tests {
                 .map(|value| value.to_string())
         };
         assert_eq!(get("service.name"), Some("tetsu".into()));
-        assert_eq!(get("deployment.environment.name"), Some("demo".into()));
+        assert_eq!(
+            get("deployment.environment.name"),
+            Some("production".into())
+        );
     }
 
     /// A 5xx response's line names the server error alert; others carry no alert.

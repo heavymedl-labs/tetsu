@@ -1,5 +1,5 @@
 //! What the hosted chores run against a migrated database: the isolation check after every migrate, and dropping
-//! modules' schemas to start the demo over (#135).
+//! modules' schemas to start them over (#135).
 
 use tetsu_kernel::{Migration, Module, Storage};
 use tetsu_postgres::test_support::{TestDatabase, fresh_database};

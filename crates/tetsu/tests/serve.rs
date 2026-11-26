@@ -60,7 +60,7 @@ mod support {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample.toml")
     }
 
-    /// Starts the server on a free port in a demo environment, and waits until it says it is listening.
+    /// Starts the server on a free port with `TETSU_DEMO` set, and waits until it says it is listening.
     pub fn start(settings: &Settings) -> Server {
         start_marked(settings, "true")
     }

@@ -130,7 +130,7 @@ fn plain_schema(schema: &str) -> bool {
         && !schema.ends_with("_lookup")
 }
 
-/// Schemas whose module role would be another of Tetsu's roles, or the demo's migration role, or one the catalog
+/// Schemas whose module role would be another of Tetsu's roles, or the hosted migration role, or one the catalog
 /// checks read as a lookup role. A schema ending in `_lookup` would be another module's lookup role.
 const RESERVED_SCHEMAS: &[&str] = &["app", "owner", "migrate", "lookup", "delivery"];
 

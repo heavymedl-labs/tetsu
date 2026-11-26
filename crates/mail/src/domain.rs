@@ -3,7 +3,7 @@
 use tetsu_kernel::Address;
 
 /// The addresses that get real email by SMTP (ADR-0044). Every other message is kept for the mailbox page, so the
-/// demo's fictional people, and anyone not named here, never receive anything.
+/// demo businesses' fictional people, and anyone not named here, never receive anything.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Allowlist(Vec<Address>);
 

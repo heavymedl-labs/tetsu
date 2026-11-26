@@ -735,7 +735,7 @@ async fn rights(
     Ok(row.try_get("held")?)
 }
 
-/// The demo's app role gets rights on every table the migration role creates (#93). It keeps them on a module's
+/// The hosted app role gets rights on every table the migration role creates (#93). It keeps them on a module's
 /// own tables but may only read the record of applied files. A later grant, to it, to `PUBLIC`, or passed on from
 /// it, is taken back on the next run.
 #[tokio::test]

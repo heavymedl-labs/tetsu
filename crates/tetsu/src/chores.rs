@@ -1,5 +1,5 @@
 //! The hosted chores, run by workflows rather than by hand against the hosted database (#135): checking isolation
-//! after a migrate, starting the demo over, replaying a stopped event, and moving a tenant off a reserved address.
+//! after a migrate, starting modules over, replaying a stopped event, and moving a tenant off a reserved address.
 //! Each says what it changed, as a line the workflow's log keeps.
 
 use tetsu_kernel::Module;
@@ -69,8 +69,8 @@ pub async fn check(local: &Local) -> Result<Vec<String>, String> {
     ))
 }
 
-/// Drops the named modules' schemas, only where `TETSU_DEMO` is true, since only the demo holds no real business's
-/// data, then migrates, which builds them afresh.
+/// Drops the named modules' schemas, only where `TETSU_DEMO` is true, since only a database of demo businesses holds
+/// no real business's data, then migrates, which builds them afresh.
 pub async fn reset(
     local: &Local,
     schemas: &[String],

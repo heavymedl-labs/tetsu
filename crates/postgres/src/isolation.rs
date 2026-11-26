@@ -150,7 +150,7 @@ pub async fn check_isolation(settings: &Settings) -> Result<Vec<String>, Error> 
 }
 
 /// Drops the named modules' schemas, with everything in them, their records of applied files included, so the
-/// next migrate builds them afresh. Only for a database holding no real business's data, such as the demo's,
+/// next migrate builds them afresh. Only for a database holding no real business's data, as `TETSU_DEMO` marks,
 /// which the caller checks. Every name must be a module's schema here, and the server one Tetsu runs on, so a
 /// release that would refuse it never finds its schemas already gone. All or none are dropped.
 ///

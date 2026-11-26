@@ -101,12 +101,12 @@ jobs:
 
     def test_every_secret_a_workflow_uses_has_a_row(self):
         workflow = "on: push\njobs:\n  a:\n    steps:\n      - env:\n"
-        workflow += "          KEY: ${{ secrets.RENDER_API_KEY }}\n"
+        workflow += "          KEY: ${{ secrets.SAMPLE_TOKEN }}\n"
         result = self.check(secrets_list([("GITHUB_TOKEN", "automatic")]), workflow=workflow)
         self.assertEqual(result.returncode, 1)
-        expected = "ci.yml uses secrets.RENDER_API_KEY, which has no row in the secrets table"
+        expected = "ci.yml uses secrets.SAMPLE_TOKEN, which has no row in the secrets table"
         self.assertIn(expected, result.stderr)
-        listed = secrets_list([("GITHUB_TOKEN", "automatic"), ("RENDER_API_KEY", "2026-11-01")])
+        listed = secrets_list([("GITHUB_TOKEN", "automatic"), ("SAMPLE_TOKEN", "2026-11-01")])
         self.assertEqual(self.check(listed, workflow=workflow).returncode, 0)
 
     def test_a_missing_list_or_table_fails(self):

@@ -203,7 +203,7 @@ const LOGGED_OUT: &str = "you are logged out; log in again";
 const UNAVAILABLE: &str = "logging in is unavailable. Try again in a minute";
 
 /// What the pages need from the composition root: the relying party and the origins state-changing requests
-/// must come from, whether this is the demo, the shared stylesheet's URL, the passkey script's, which every admin
+/// must come from, whether its businesses are demos, the shared stylesheet's URL, the passkey script's, which every admin
 /// page loads, the session script's, which a logged-in admin's pages load too, and the color scheme control's,
 /// and where a failure is reported for the log (#27).
 pub struct Web {

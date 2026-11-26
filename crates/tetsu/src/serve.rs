@@ -68,7 +68,7 @@ const IMMUTABLE: &str = "public, max-age=31536000, immutable";
 /// A fixed address keeps its name when its file changes, so a client keeps it a day.
 const DAILY: &str = "public, max-age=86400";
 
-/// How this service serves: whether it is the demo, how many proxies stand in front (ADR-0072), and, for a host
+/// How this service serves: whether its businesses are demos (`TETSU_DEMO`), how many proxies stand in front (ADR-0072), and, for a host
 /// that serves a realm but not the site, the realm's home its root sends visitors to (#169).
 #[derive(Debug, Clone, Copy)]
 pub struct Site {
@@ -79,8 +79,8 @@ pub struct Site {
 
 /// The whole site: its own routes, then the modules' routers, then `not_found` at any path none of them
 /// answers, which is [`not_found`] outside tests. Modules set no fallback, since axum panics when two merged
-/// routers both have one (#90). In a demo environment every response also asks search engines not to index it
-/// (ADR-0018).
+/// routers both have one (#90). Where `TETSU_DEMO` marks the businesses as demos, every response also asks search
+/// engines not to index it (ADR-0018).
 pub fn app(modules: Router, site: Site, not_found: fn(bool, Scheme) -> Response) -> Router {
     let Site {
         demo,
@@ -520,7 +520,7 @@ mod tests {
         assert!(ask("/nowhere").await.starts_with("HTTP/1.1 404"));
     }
 
-    /// Asks the demo site for a path as a browser that accepts brotli and gzip does, and returns the response's
+    /// Asks the site, marked as holding demo businesses, for a path as a browser that accepts brotli and gzip does, and returns the response's
     /// head and how many bytes its body took to send.
     async fn as_sent(path: &str) -> (String, usize) {
         let address = serving(site(true, None)).await;
