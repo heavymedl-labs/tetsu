@@ -228,9 +228,16 @@ GRANT EXECUTE ON FUNCTION identity.staff_invitee(bytea),
 identity.staff_join(bytea, bigint, bytea, jsonb, text, bytea, bytea),
 identity.staff_accept_invite(bytea, bytea),
 identity.staff_accept(bytea, bytea),
-identity.staff_join_by_link(bytea, bigint, bytea, jsonb, text, bytea, bytea),
 identity.staff_spend_invite(bytea, bigint)
 TO tetsu_identity;
+
+-- Version 15 gave staff_join_by_link to the lookup role, so only that role
+-- may grant it: a runner that is no superuser owns it no longer (#168).
+SET LOCAL ROLE tetsu_identity_lookup;
+GRANT EXECUTE ON FUNCTION identity.staff_join_by_link(
+    bytea, bigint, bytea, jsonb, text, bytea, bytea
+) TO tetsu_identity;
+RESET ROLE;
 
 -- A new owner needs CREATE on the schema at the moment it takes a function,
 -- and no longer after.
