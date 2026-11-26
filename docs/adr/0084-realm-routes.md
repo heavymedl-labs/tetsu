@@ -4,6 +4,8 @@
 - Date: 2026-11-23
 - Supersedes [ADR-0061](0061-one-service-until-domains.md)'s `/ops` as the operators' path
 - Operators' home superseded by [ADR-0086](0086-the-account-area-is-the-admins-home.md): the account area
+- The `/admin` and `/app` prefixes superseded by [ADR-0094](0094-realm-paths-at-the-root-of-their-hosts.md): realm
+  paths at the root of their hosts
 
 ## Context
 

@@ -4,6 +4,8 @@
 - Date: 2026-11-25
 - Supersedes [ADR-0061](0061-one-service-until-domains.md)'s one service for every realm and its shared passkey
   domain; its two database logins stand
+- Realms keeping their paths on their own hosts superseded by
+  [ADR-0094](0094-realm-paths-at-the-root-of-their-hosts.md): realm paths at the root of their hosts
 
 ## Context
 
