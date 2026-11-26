@@ -97,7 +97,7 @@ number, and add a row below. Never renumber.
 | [0090](0090-a-session-table-per-realm.md) | A session table per realm | Storing a realm's sessions | Accepted |
 | [0091](0091-realm-sql-rendered-from-one-source.md) | Realm SQL rendered from one source | Writing SQL a realm shares with another | Accepted |
 | [0092](0092-a-service-per-realm-before-domains.md) | A service per realm before domains | Deploying, adding a realm, or setting a realm's host | Accepted |
-| [0093](0093-log-in-leads-to-staff.md) | "Log in" leads to staff login | Changing the site header's login, or where admins log in | Proposed |
+| [0093](0093-log-in-leads-to-staff.md) | "Log in" leads to staff login | Changing the site header's login, or where admins log in | Accepted |
 | [0068](0068-no-demo-note.md) | No demo note | Changing what marks a demo page | Proposed |
 
 ## Open decisions

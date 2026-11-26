@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-24
-- The remembered admin hint, and `/login`'s routing by it, proposed to be superseded by
+- The remembered admin hint, and `/login`'s routing by it, superseded by
   [ADR-0093](0093-log-in-leads-to-staff.md): "Log in" always leads to staff login
 
 ## Context

@@ -1,6 +1,6 @@
 # 0093. "Log in" leads to staff login
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-26
 - Supersedes [ADR-0087](0087-one-log-in-button.md)'s remembered admin hint, and its routing of `/login` by that hint
 
