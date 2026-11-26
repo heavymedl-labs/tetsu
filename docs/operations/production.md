@@ -1,8 +1,9 @@
 # Production
 
 The one environment of the free phase ([ADR-0012](../adr/0012-first-hosting-and-deploys.md)), holding fictional tenants
-only for now ([ADR-0018](../adr/0018-demo-businesses-as-data.md)), at <https://tetsu-demo.onrender.com>. Set up by hand on 2026-11-09; check it with `render services` and
-`neonctl projects get square-tree-12604600`. Its secrets are listed in [secrets.md](secrets.md).
+only for now ([ADR-0018](../adr/0018-demo-businesses-as-data.md)), at <https://tetsu-site.onrender.com> once the move
+to three services below runs, and <https://tetsu-demo.onrender.com> until then. Set up by hand on 2026-11-09; check it
+with `render services` and `neonctl projects get square-tree-12604600`. Its secrets are listed in [secrets.md](secrets.md).
 
 ## Deploying
 
@@ -120,24 +121,28 @@ it resets or migrates anything.
 
 | Service | Serves | Service variable | Origin variable |
 | --- | --- | --- | --- |
-| `tetsu-demo` (`srv-dbp542rbc2fs73962k4g`) | the site | `SITE_SERVICE` | `SITE_ORIGIN`, `https://tetsu-demo.onrender.com` |
-| `tetsu-demo-admin` | admins, at `/admin` | `ADMIN_SERVICE` | `ADMIN_ORIGIN`, `https://tetsu-demo-admin.onrender.com` |
-| `tetsu-demo-app` | staff, at `/app` | `STAFF_SERVICE` | `STAFF_ORIGIN`, `https://tetsu-demo-app.onrender.com` |
+| `tetsu-site` (`srv-dc3q286c6qcc73biss9g`) | the site | `SITE_SERVICE` | `SITE_ORIGIN`, `https://tetsu-site.onrender.com` |
+| `tetsu-admin` (`srv-dc3q28ui0phs7387arc0`) | admins, at `/admin` | `ADMIN_SERVICE` | `ADMIN_ORIGIN`, `https://tetsu-admin.onrender.com` |
+| `tetsu-staff` (`srv-dc3q29mc6qcc73bit100`) | staff, at `/app` | `STAFF_SERVICE` | `STAFF_ORIGIN`, `https://tetsu-staff.onrender.com` |
+
+Each was made on 2026-11-26 from `tetsu-demo`'s settings (`srv-dbp542rbc2fs73962k4g`), which serves until the move
+below and is then deleted. The `production` environment, its `main`-only branch rule, and its six variables were set
+the same day.
 
 Moving from one service to three, done once:
 
 1. Wait for [#111](https://github.com/heavymedl-labs/tetsu/issues/111)'s sub-slice 2d to close the staff gaps its
    comments list, and for [#168](https://github.com/heavymedl-labs/tetsu/issues/168): the first deploy puts staff's
    pages live on their host.
-2. Create the two new services from `tetsu-demo`'s settings, each with its `TETSU_SERVES` and origin below and
-   without the copied `TETSU_ORIGIN`, and set `TETSU_SERVES=site` on `tetsu-demo`.
-3. Create the GitHub environment `production`, with a deployment branch rule that allows only `main`, and set the
-   six variables above and the `HOST_TOKEN` secret on it.
+2. In Render's dashboard, check each service above holds the settings below, copied from `tetsu-demo`, and delete
+   its copied `TETSU_ORIGIN`.
+3. Set the `HOST_TOKEN` secret on the `production` environment: `gh secret set HOST_TOKEN --env production`, with
+   the value of the Render API key `RENDER_API_KEY` holds.
 4. Deploy with `reset=identity,audit,mail`, since migrations Identity had applied there changed in place and two
    were removed, as #111 records, then enroll your admin passkey again on the admin host.
-5. Remove `TETSU_ORIGIN` from `tetsu-demo`, which the image before this one read, and the repository's old
-   `RENDER_API_KEY` secret and `RENDER_SERVICE_ID` variable, which nothing reads now, and remove their row from
-   [secrets.md](secrets.md).
+5. Delete the `tetsu-demo` service, point the README's demo link at the site's new address, and remove the
+   repository's old `RENDER_API_KEY` secret and `RENDER_SERVICE_ID` variable, which nothing reads now, with their row
+   in [secrets.md](secrets.md).
 6. Rename your local `.env.demo` to `.env.production`, and replace its `TETSU_ORIGIN` with the two lines
    [Admins in production](#admins-in-production) gives.
 
@@ -280,8 +285,8 @@ Make it once, readable only by you (`chmod 600 .env.production`), with these lin
 
 ```text
 DATABASE_URL=<the Render service's DATABASE_URL, which is tetsu_app's>
-TETSU_ADMIN_ORIGIN=https://tetsu-demo-admin.onrender.com
-TETSU_STAFF_ORIGIN=https://tetsu-demo-app.onrender.com
+TETSU_ADMIN_ORIGIN=https://tetsu-admin.onrender.com
+TETSU_STAFF_ORIGIN=https://tetsu-staff.onrender.com
 ```
 
 Production sends no email until Tetsu has a domain ([ADR-0079](../adr/0079-no-mail-provider-before-a-domain.md),
