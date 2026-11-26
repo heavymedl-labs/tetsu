@@ -1,6 +1,6 @@
 # 0092. A service per realm before domains
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-25
 - Supersedes [ADR-0061](0061-one-service-until-domains.md)'s one service for every realm and its shared passkey
   domain; its two database logins stand

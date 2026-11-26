@@ -4,7 +4,7 @@ Researched 2026-11-25 for [#169](https://github.com/heavymedl-labs/tetsu/issues/
 deploy configuration name neither the host provider nor a temporary stage: Render is treated as a viable production
 host, though it serves only demo businesses for now. What is settled is not repeated here: Render as the first host
 ([ADR-0012](../adr/0012-first-hosting-and-deploys.md)), a service per realm
-([ADR-0092](../adr/0092-a-service-per-realm-before-domains.md), proposed), and whether a business is a demo, which
+([ADR-0092](../adr/0092-a-service-per-realm-before-domains.md)), and whether a business is a demo, which
 is data, not infrastructure ([ADR-0018](../adr/0018-demo-businesses-as-data.md)). Sources were read through search
 summaries on 2026-11-25.
 

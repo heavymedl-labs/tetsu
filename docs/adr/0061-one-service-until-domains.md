@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-15
 - Operators' path `/ops` superseded by [ADR-0084](0084-realm-routes.md): `/admin`
-- One service for every realm, and its shared passkey domain, proposed to be superseded by
+- One service for every realm, and its shared passkey domain, superseded by
   [ADR-0092](0092-a-service-per-realm-before-domains.md): a service per realm before domains
 - Amends [ADR-0040](0040-identity-and-sign-in.md) (passkey domains), [ADR-0042](0042-tenant-isolation.md) (one
   service per demo realm, the operator login), and [ADR-0048](0048-sign-in-design.md) (realm services)
