@@ -90,6 +90,38 @@ the invite open, so the page's job is to say which account it is for and how to 
 - Linear made accepting work for someone logged in to another account in 2021; its current behavior was not found
   ([Linear changelog, 2021-09-03](https://linear.app/changelog/2021-09-03-easier-invites-and-webhook-improvements)).
 
+## Logging in to accept carries the invite through the login
+
+A third pass, on 2026-11-26, asked how leaders take someone with an account from an invite link through login to
+accepting, while the invite's token survives the login.
+
+**Takeaway:**
+
+Identity platforms carry the invite's token into the login itself: the link tells the app whether to sign the person
+in or up, and signing in with the token accepts the invite in the same step. The account must be the invited one.
+Where the token reached a login page that did not carry it, existing users were sent to sign up instead, the
+commonest complaint read. Tokens kept out of query strings, or cleared from the address at once, leak least.
+
+**Cited Findings:**
+
+- Clerk's invite link carries its ticket and a status, `sign_in` or `sign_up`; for `sign_in`, the app signs the
+  person in with the ticket, which accepts the invite, and the ticket also verifies their email
+  ([Clerk: accept organization invitations](https://clerk.com/docs/guides/development/custom-flows/organizations/accept-organization-invitations.md)).
+- WorkOS invites suit new and existing users alike: an existing user signs in from the emailed link and becomes a
+  member; its sign-in methods take the invitation token, accepting while signing in, and an app that accepts for a
+  signed-in user first checks the invite is that user's ([WorkOS: invitations](https://workos.com/docs/authkit/invitations)).
+- Auth0's invite link carries the invitation and organization to its login; its community's recurring report is
+  existing users sent to sign up instead of log in, and "user already exists" errors
+  ([Auth0 Community](https://community.auth0.com/t/can-we-redirect-to-u-login-invitation-when-the-existing-user-clicks-on-the-invitation-link/114307);
+  [Auth0 Community](https://community.auth0.com/t/invite-flow-error-user-already-exists-one-connection-one-application-multiple-organisations/94365)).
+- GitHub accepts an emailed invite only for an account holding that verified address, and asks a signed-out invitee
+  to authenticate before joining ([GitHub Docs](https://docs.github.com/en/organizations/managing-membership-in-your-organization/inviting-users-to-join-your-organization);
+  [University of Illinois guide](https://answers.uillinois.edu/102588)).
+- A token in a query string can leak through `Referer` and logs; a fragment avoids the `Referer` but stays in
+  history and in reach of scripts, so a page clears it and spends it once
+  ([OWASP: query strings](https://owasp.org/www-community/vulnerabilities/Information_exposure_through_query_strings_in_url);
+  [thoughtbot](https://thoughtbot.com/blog/is-your-site-leaking-password-reset-links)).
+
 ## Recommendations for sub-slice 2d
 
 - **Each realm on a host of its own before 2d builds staff pages,** as ADR-0040 intends: one image deployed as a free
@@ -97,9 +129,11 @@ the invite open, so the page's job is to say which account it is for and how to 
   The maintainer chose this over sharing a host for now, since shared-host code would be thrown away. A domain
   (#102) later changes the hosts' names, not their layout.
 - **Passkey names keep leading with the realm,** as they do: "Tetsu staff · Name" and "Tetsu admin · Name".
-- **One join page, `/app/join`, for both kinds of invitee.** The link's lookup already says whether the person has a
-  passkey. Someone new registers one. Someone with one is asked to log in, then sees "Accept" with the business and
-  role named, and accepting needs a click, never the link alone.
+- **One join page, `/app/join`, for both kinds of invitee,** after Clerk's and WorkOS's sign-in with the invite. The
+  page reads the token from the fragment, clears it from the address, and asks what the invite gives. Someone new
+  registers a passkey. Someone with one sees the business and role and one button, "Log in to accept", whose passkey
+  login is followed at once by accepting, with the token kept in the page's memory; someone already logged in as the
+  invitee sees "Accept". The person's own press starts either, never the link alone.
 - **Logged in as someone else, the page says so and refuses,** naming the account it is for by name only, and offering
   to log out and open the link again. The invite stays open, as the SQL already keeps it.
 - **One router for both realms,** with the paths sub-slice 1 set out, each served only on its realm's host. The mailbox stays an admin page, and each realm's passkey
