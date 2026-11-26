@@ -137,10 +137,10 @@ Moving from one service to three, done once:
 2. In Render's dashboard, check each service above holds the settings below, copied from `tetsu-demo`, and delete
    its copied `TETSU_ORIGIN`. Done 2026-11-26.
 3. Set the `HOST_TOKEN` secret on the `production` environment: `gh secret set HOST_TOKEN --env production`, with
-   the value of the Render API key `RENDER_API_KEY` holds.
+   a new Render API key. Done 2026-11-26, with key `github-production-deploy`.
 4. Deploy with `reset=identity,audit,mail`, since migrations Identity had applied there changed in place and two
    were removed, as #111 records, then enroll your admin passkey again on the admin host.
-5. Delete the `tetsu-demo` service, point the README's demo link at the site's new address, and remove the
+5. Delete the `tetsu-demo` service, revoke the Render key `RENDER_API_KEY` holds, point the README's demo link at the site's new address, and remove the
    repository's old `RENDER_API_KEY` secret and `RENDER_SERVICE_ID` variable, which nothing reads now, with their row
    in [secrets.md](secrets.md).
 6. Rename your local `.env.demo` to `.env.production`, and replace its `TETSU_ORIGIN` with the two lines
