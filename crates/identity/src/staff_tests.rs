@@ -436,7 +436,9 @@ async fn each_realms_passkey_cap_is_the_databases() {
 /// answers as any address it does not serve.
 #[tokio::test]
 async fn staffs_router_serves_staff_pages_alone() {
-    let (staff, _database, _) = invited().await;
+    let (staff, _database, link) = invited().await;
+    let (_, kept) = join(&staff, &link).await;
+    let session = cookie(&log_in(&staff, kept).await);
     let address = crate::http_tests::serve(staff, crate::http_tests::sample_mailbox()).await;
     let login = crate::http_tests::get(address, "/login", "").await;
     assert_eq!(login.status, 200);
@@ -457,6 +459,12 @@ async fn staffs_router_serves_staff_pages_alone() {
         (mailbox.status, mailbox.header("location")),
         (303, Some("/login?next=/mailbox"))
     );
+    // Logged in, staff see their own pages, and the admins' mailbox is not found, as any address staff do not have.
+    let own = crate::http_tests::get(address, "/settings/profile", &session).await;
+    assert_eq!(own.status, 200, "{}", own.body);
+    let admins = crate::http_tests::get(address, "/mailbox", &session).await;
+    assert_eq!(admins.status, 404, "{}", admins.body);
+    assert!(!admins.body.contains("Mailbox"), "{}", admins.body);
 }
 
 /// An invite's link says, before anyone acts on it, which business and role it gives and whether its person has

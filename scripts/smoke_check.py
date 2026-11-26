@@ -24,9 +24,17 @@ PAGES = {
     "admin": (("/", 303), ("/login", 200), (MISSING, 303)),
     "staff": (("/", 303), ("/login", 200), (MISSING, 303)),
 }
-# Where a page sends a visitor: a realm host's root to its login, and the site's `/login` to the staff login
-# `--login` names, which the site must have, so a wrong staff origin, such as the site's own, fails the check.
-LOCATIONS = {"admin": {"/": "/login"}, "staff": {"/": "/login"}}
+# Where a page sends a visitor: a realm host's root and missing pages to its login, and the site's `/login`
+# to the staff login `--login` names, which the site must have, so a wrong staff origin, such as the site's
+# own, fails the check.
+REALM_LOCATIONS = {"/": "/login", MISSING: f"/login?next={MISSING}"}
+LOCATIONS = {"admin": REALM_LOCATIONS, "staff": REALM_LOCATIONS}
+# What a realm's login says that the other's does not, so a host serving the wrong realm, or two services
+# swapped, fails the check.
+SHOWS = {
+    "admin": {"/login": "Ask an admin for an invite."},
+    "staff": {"/login": "Ask the business&#39;s owner for an invite."},
+}
 # A realm's own pages send a referrer to Tetsu alone, so a posted form carries its real origin (ADR-0059);
 # every other answer, the site's and a realm host's root and missing pages, sends none.
 REALM_PAGES = {"admin": "/login", "staff": "/login"}
@@ -44,8 +52,8 @@ TIMEOUT = 30
 
 
 def fetch(url):
-    """The status and headers of a GET, with any status at all, or None when nothing answered. Only HTTP and
-    HTTPS, which `main` checks, and no redirects, so each page is judged as it answers."""
+    """The status, headers, and body of a GET, with any status at all, or None when nothing answered. Only
+    HTTP and HTTPS, which `main` checks, and no redirects, so each page is judged as it answers."""
     parts = urllib.parse.urlsplit(url)
     secure = parts.scheme == "https"
     connection = (http.client.HTTPSConnection if secure else http.client.HTTPConnection)(
@@ -54,21 +62,26 @@ def fetch(url):
     try:
         connection.request("GET", parts.path or "/", headers={"User-Agent": "tetsu-smoke-check"})
         response = connection.getresponse()
+        body = response.read().decode("utf-8", "replace")
     except (OSError, http.client.HTTPException):
         return None
     else:
-        return response.status, response.headers
+        return response.status, response.headers, body
     finally:
         connection.close()
 
 
-def problems(path, expected, answer, location=None, referrer="no-referrer"):
-    """What is wrong with one page's answer, where it sends a visitor when it should send them to `location`,
-    and the referrer policy it should send."""
-    status, headers = answer
+def problems(path, answer, want):
+    """What is wrong with one page's answer, against what it should give: its `status`, the `location` it
+    sends a visitor to, text it `shows`, and the `referrer` policy it sends."""
+    status, headers, body = answer
+    expected, location, shows = want["status"], want.get("location"), want.get("shows")
     found = [] if status == expected else [f"{path}: status {status}, expected {expected}"]
     if location is not None and headers.get("location") != location:
         found.append(f"{path}: sends visitors to {headers.get('location')!r}, expected {location!r}")
+    if shows is not None and shows not in body:
+        found.append(f"{path}: does not say {shows!r}")
+    referrer = want.get("referrer", "no-referrer")
     rules = dict(HEADERS, **{"referrer-policy": lambda value: value == referrer})
     for name, holds in rules.items():
         value = headers.get(name)
@@ -80,17 +93,17 @@ def problems(path, expected, answer, location=None, referrer="no-referrer"):
 
 
 def check(pages, wait, interval, clock=time.monotonic, sleep=time.sleep):
-    """Every problem across `pages`, each a base URL, path, expected status, where it sends a visitor, and its
-    referrer policy, once the host answers, or a single one if it never wakes."""
+    """Every problem across `pages`, each a base URL, path, and what it should give, as [`problems`] reads
+    it, once the host answers, or a single one if it never wakes."""
     deadline = clock() + wait
     found = []
-    for base, path, expected, location, referrer in pages:
+    for base, path, want in pages:
         while (answer := fetch(base + path)) is None or answer[0] in WAKING:
             if clock() >= deadline:
                 shown = "no answer" if answer is None else f"status {answer[0]}"
                 return [f"{path}: {shown} after waiting {wait} seconds for the site to wake"]
             sleep(interval)
-        found += problems(path, expected, answer, location, referrer)
+        found += problems(path, answer, want)
     return found
 
 
@@ -120,7 +133,16 @@ def main(args):
     serves = settings["--serves"]
     locations = LOCATIONS.get(serves, {"/login": settings["--login"]})
     pages = [
-        (base.rstrip("/"), path, expected, locations.get(path), referrer_of(serves, path))
+        (
+            base.rstrip("/"),
+            path,
+            {
+                "status": expected,
+                "location": locations.get(path),
+                "shows": SHOWS.get(serves, {}).get(path),
+                "referrer": referrer_of(serves, path),
+            },
+        )
         for path, expected in PAGES[serves]
     ]
     found = check(pages, int(settings["--wait"]), int(settings["--interval"]))

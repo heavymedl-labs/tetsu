@@ -25,6 +25,7 @@ async fn a_logged_in_admin_is_sent_on_from_the_login_page() {
         ("/login?next=//evil.example", PROFILE),
         ("/login?next=/login", PROFILE),
         ("/login?next=/join", PROFILE),
+        ("/login?next=/", PROFILE),
     ] {
         let page = get(address, path, &cookie).await;
         assert_eq!(

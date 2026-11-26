@@ -55,8 +55,7 @@ impl RelyingParty {
     /// Starts registering a passkey for a user handle and name: the options for the browser, and the state to keep
     /// until it answers. The passkey must verify the user, and must be discoverable, so logging in needs no name.
     /// The name a device's account picker shows says which realm's account the passkey is, with `realm`'s label,
-    /// since one device may hold several realms', which share a host wherever their origins do, as on this machine;
-    /// production gives each realm a host of its own (ADR-0092).
+    /// since one device may hold several realms' passkeys, each for its realm's own host (ADR-0092, ADR-0094).
     /// The credentials the admin already `held` are listed for the device to refuse, so it makes no second passkey where it has one. It fails only for a stored admin with no
     /// name, a fault of storage, never the browser's.
     pub(crate) fn begin_registration(

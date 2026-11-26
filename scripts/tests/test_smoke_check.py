@@ -10,6 +10,10 @@ from scripts.tests.support import ROOT, run
 SCRIPT = ROOT / "scripts" / "smoke_check.py"
 # The staff login a site's `/login` leads to.
 LOGIN = "https://app.example.com/login"
+# What each realm's login says, as the smoke check reads it.
+ADMIN_HINT = "Ask an admin for an invite."
+STAFF_HINT = "Ask the business&#39;s owner for an invite."
+MISSING = "/Smoke-Check-Missing-Page"
 GOOD = {
     "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
     "X-Content-Type-Options": "nosniff",
@@ -36,16 +40,17 @@ class Site:
                     self.send_response(503)
                     self.end_headers()
                     return
-                # A page given as a pair also names the referrer policy it sends, as a realm's own pages do.
-                status, referrer = (site.pages.get(self.path, 404), None)
-                if isinstance(status, tuple):
-                    status, referrer = status
+                # A page given as a tuple also names the referrer policy it sends, as a realm's own pages do,
+                # and may name its body.
+                page = site.pages.get(self.path, 404)
+                status, referrer, body = (*page, "")[:3] if isinstance(page, tuple) else (page, None, "")
                 self.send_response(status)
                 for name, value in site.headers.items():
                     self.send_header(name, referrer if referrer and name == "Referrer-Policy" else value)
                 if self.path in site.locations:
                     self.send_header("Location", site.locations[self.path])
                 self.end_headers()
+                self.wfile.write(body.encode())
 
             def log_message(self, *_):
                 pass
@@ -119,33 +124,53 @@ class SmokeCheckTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("error: /: no answer after waiting 0 seconds", result.stderr)
 
-    def realm(self, **settings):
+    def realm(self, hint=ADMIN_HINT, **settings):
         """A realm's host as Tetsu serves it: its root and any page it does not hold send a visitor to log in,
-        and its login sends a referrer to Tetsu alone."""
-        pages = {"/": 303, "/login": (200, "same-origin"), "/Smoke-Check-Missing-Page": 303}
-        return self.site(**dict({"pages": pages, "locations": {"/": "/login"}}, **settings))
+        and its login, which says the realm's `hint`, sends a referrer to Tetsu alone."""
+        pages = {"/": 303, "/login": (200, "same-origin", hint), MISSING: 303}
+        locations = {"/": "/login", MISSING: f"/login?next={MISSING}"}
+        return self.site(**dict({"pages": pages, "locations": locations}, **settings))
 
     def test_each_realms_host_serves_its_pages_at_its_root(self):
         admin = self.realm()
-        for serves in ["admin", "staff"]:
-            result = smoke(admin.url, "--serves", serves)
-            self.assertEqual(result.returncode, 0, result.stderr)
+        result = smoke(admin.url, "--serves", "admin")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        staff = self.realm(STAFF_HINT)
+        result = smoke(staff.url, "--serves", "staff")
+        self.assertEqual(result.returncode, 0, result.stderr)
         result = smoke(admin.url)
         self.assertEqual(result.returncode, 1)
         for problem in ["/: status 303, expected 200", "/Smoke-Check-Missing-Page: status 303, expected 404"]:
             self.assertIn(f"error: {problem}", result.stderr)
 
+    def test_a_host_serving_the_other_realm_fails(self):
+        # Two services swapped, or one serving the wrong realm, answer the same addresses; the login tells.
+        admin = self.realm()
+        result = smoke(admin.url, "--serves", "staff")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(f"error: /login: does not say {STAFF_HINT!r}", result.stderr)
+
+    def test_a_realms_missing_page_must_send_visitors_to_log_in_and_back(self):
+        elsewhere = self.realm(locations={"/": "/login", MISSING: "https://evil.example/"})
+        result = smoke(elsewhere.url, "--serves", "admin")
+        self.assertEqual(result.returncode, 1)
+        expected = f"/login?next={MISSING}"
+        self.assertIn(
+            f"error: {MISSING}: sends visitors to 'https://evil.example/', expected {expected!r}",
+            result.stderr,
+        )
+
     def test_only_a_realms_own_page_sends_a_referrer_to_tetsu(self):
         # A realm's login alone sends `same-origin`, so a posted form carries its real origin (ADR-0059).
         site = self.site(headers=dict(GOOD, **{"Referrer-Policy": "same-origin"}))
         self.assertIn("error: /: referrer-policy is 'same-origin'", smoke(site.url).stderr)
-        admin = self.realm(pages={"/": 303, "/login": 200, "/Smoke-Check-Missing-Page": 303})
+        admin = self.realm(pages={"/": 303, "/login": (200, None, ADMIN_HINT), MISSING: 303})
         result = smoke(admin.url, "--serves", "admin")
         self.assertIn("error: /login: referrer-policy is 'no-referrer'", result.stderr)
         self.assertNotIn("error: /: referrer-policy", result.stderr)
 
     def test_a_realms_root_must_send_visitors_to_log_in(self):
-        elsewhere = self.realm(locations={"/": "/admin"})
+        elsewhere = self.realm(STAFF_HINT, locations={"/": "/admin", MISSING: f"/login?next={MISSING}"})
         result = smoke(elsewhere.url, "--serves", "staff")
         self.assertEqual(result.returncode, 1)
         self.assertIn("error: /: sends visitors to '/admin', expected '/login'", result.stderr)

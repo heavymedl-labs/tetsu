@@ -1446,9 +1446,10 @@ fn return_to(at: &Paths, path: &str) -> String {
 }
 
 /// The realm's page a login may return to, once [`return_path`] checks it: never the login or join page itself,
-/// which would send a logged-in person back where they started.
+/// which would send a logged-in person back where they started, nor the home, which would only send them on to
+/// Profile, where a login goes anyway, in one more hop (ADR-0094).
 fn back_to<'a>(at: &Paths, raw: &'a str) -> Option<&'a str> {
-    return_path(raw).filter(|path| *path != at.login && *path != at.join)
+    return_path(raw).filter(|path| ![at.login, at.join, at.home].contains(path))
 }
 
 /// A value the address's query gives `name`, as written. Only values the pages check before use are read, and a

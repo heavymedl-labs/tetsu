@@ -373,8 +373,7 @@ async fn bound(
 /// Staff login on staff's own host, from `TETSU_STAFF_ORIGIN`, which the site's "Log in" and `/login` lead to
 /// (ADR-0093, ADR-0094). It is read once at start and kept for the life of the process.
 fn staff_login(local: &settings::Local) -> Result<&'static str, String> {
-    local.beside("DATABASE_URL", &[settings::STAFF_ORIGIN])?;
-    let origin = settings::origin(|name| local.var(name), settings::STAFF_ORIGIN)?;
+    let origin = operator::link_origin(local, settings::STAFF_ORIGIN)?;
     Ok(format!("{origin}{}", tetsu_identity::LOGIN).leak())
 }
 
