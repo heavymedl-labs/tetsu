@@ -125,8 +125,8 @@ it resets or migrates anything.
 | `tetsu-admin` (`srv-dc3q28ui0phs7387arc0`) | admins, at `/admin` | `ADMIN_SERVICE` | `ADMIN_ORIGIN`, `https://tetsu-admin.onrender.com` |
 | `tetsu-staff` (`srv-dc3q29mc6qcc73bit100`) | staff, at `/app` | `STAFF_SERVICE` | `STAFF_ORIGIN`, `https://tetsu-staff.onrender.com` |
 
-Each was made on 2026-11-26 from `tetsu-demo`'s settings (`srv-dbp542rbc2fs73962k4g`), which serves until the move
-below and is then deleted. The `production` environment, its `main`-only branch rule, and its six variables were set
+Each was made on 2026-11-26 from `tetsu-demo`'s settings (`srv-dbp542rbc2fs73962k4g`), deleted at the move below.
+Its copy left out the start command, which each service had to be given by hand before its first deploy. The `production` environment, its `main`-only branch rule, and its six variables were set
 the same day.
 
 Moving from one service to three, done once:
@@ -139,12 +139,12 @@ Moving from one service to three, done once:
 3. Set the `HOST_TOKEN` secret on the `production` environment: `gh secret set HOST_TOKEN --env production`, with
    a new Render API key. Done 2026-11-26, with key `github-production-deploy`.
 4. Deploy with `reset=identity,audit,mail`, since migrations Identity had applied there changed in place and two
-   were removed, as #111 records, then enroll your admin passkey again on the admin host.
+   were removed, as #111 records, then enroll your admin passkey again on the admin host. Done 2026-11-26.
 5. Delete the `tetsu-demo` service, revoke the Render key `RENDER_API_KEY` holds, point the README's demo link at the site's new address, and remove the
    repository's old `RENDER_API_KEY` secret and `RENDER_SERVICE_ID` variable, which nothing reads now, with their row
-   in [secrets.md](secrets.md).
+   in [secrets.md](secrets.md). Done 2026-11-26, but the key's revoking waits on the maintainer.
 6. Rename your local `.env.demo` to `.env.production`, and replace its `TETSU_ORIGIN` with the two lines
-   [Admins in production](#admins-in-production) gives.
+   [Admins in production](#admins-in-production) gives. Done 2026-11-26.
 
 - **Command:** `/usr/local/bin/tetsu serve`. Render's command replaces the image's entrypoint too, so `serve`
   alone exits with status 128.

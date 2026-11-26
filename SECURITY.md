@@ -30,5 +30,6 @@ together with you. Within a week, the maintainer answers on the report with one 
 ## Test only your own copy
 
 Test Tetsu on your own machine, as [testing with an agent](docs/security/testing-with-an-agent.md) describes. Never
-test the demo at `tetsu-demo.onrender.com` or the services it runs on (Render, Neon, Grafana Cloud,
+test the hosted copy at `tetsu-site.onrender.com`, `tetsu-admin.onrender.com`, or `tetsu-staff.onrender.com`, or
+the services it runs on (Render, Neon, Grafana Cloud,
 GitHub): they are shared and run on free plans, and testing them needs their owners' permission, which no one has.
