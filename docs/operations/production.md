@@ -142,7 +142,7 @@ Moving from one service to three, done once:
    were removed, as #111 records, then enroll your admin passkey again on the admin host. Done 2026-11-26.
 5. Delete the `tetsu-demo` service, revoke the Render key `RENDER_API_KEY` holds, point the README's demo link at the site's new address, and remove the
    repository's old `RENDER_API_KEY` secret and `RENDER_SERVICE_ID` variable, which nothing reads now, with their row
-   in [secrets.md](secrets.md). Done 2026-11-26, but the key's revoking waits on the maintainer.
+   in [secrets.md](secrets.md). Done 2026-11-26.
 6. Rename your local `.env.demo` to `.env.production`, and replace its `TETSU_ORIGIN` with the two lines
    [Admins in production](#admins-in-production) gives. Done 2026-11-26.
 
