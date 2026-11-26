@@ -47,8 +47,9 @@ pub const GRACE: Duration = Duration::from_secs(10);
 /// fonts, so the policy allows nothing else, not even an inline style, and no site may frame them (ADR-0030). A
 /// route that runs Tetsu's own script sets a policy of its own, which [`secure`] keeps, as it keeps a route's own
 /// referrer policy. HSTS lasts a year, the
-/// least ASVS 3.4.1 allows.
-const HEADERS: [(HeaderName, &str); 5] = [
+/// least ASVS 3.4.1 allows. The permissions policy switches off features no page uses, which ASVS 5.0.0 does not
+/// ask for. It lists none of the passkey ones, so those keep their defaults.
+const HEADERS: [(HeaderName, &str); 6] = [
     (
         header::STRICT_TRANSPORT_SECURITY,
         "max-age=31536000; includeSubDomains",
@@ -60,6 +61,10 @@ const HEADERS: [(HeaderName, &str); 5] = [
     ),
     (header::REFERRER_POLICY, "no-referrer"),
     (header::X_FRAME_OPTIONS, "DENY"),
+    (
+        HeaderName::from_static("permissions-policy"),
+        "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+    ),
 ];
 
 /// A hashed file changes name whenever it changes, so it may be kept for a year (ADR-0034).
@@ -390,7 +395,7 @@ mod tests {
     use super::*;
 
     /// The values ADR-0029 and ASVS ask for, written out so a weakened header fails the test.
-    const EXPECTED: [(&str, &str); 5] = [
+    const EXPECTED: [(&str, &str); 6] = [
         (
             "strict-transport-security",
             "max-age=31536000; includeSubDomains",
@@ -402,6 +407,10 @@ mod tests {
         ),
         ("referrer-policy", "no-referrer"),
         ("x-frame-options", "DENY"),
+        (
+            "permissions-policy",
+            "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+        ),
     ];
     const POST: &str =
         "POST / HTTP/1.1\r\nHost: test\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
