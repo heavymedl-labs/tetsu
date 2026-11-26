@@ -10,6 +10,12 @@ This is research, not a decision. Where it disagrees with an ADR, the ADR wins.
 
 [How competitors let customers book and pay](customer-channels.md): booking pages, websites, branded apps, and marketplaces.
 
+## Tennis and racquet clubs
+
+Racquet club booking platforms, scanned as a reference for court and facility booking. Started 2026-11-23 with one player.
+
+- [CourtReserve](tennis-courts/players.md#courtreserve): tennis, pickleball and padel club software priced by court count, with a public API and webhooks.
+
 ## Boutique fitness
 
 Seven studio-software platforms, scanned for our first vertical. The market is consolidating, the loudest complaints are about business model rather than features, and no one pairs an open API with reliable engineering. That leaves room for an independent, engineering-led entrant.
