@@ -17,7 +17,7 @@ use crate::{Actor, Ending, PersonName, Realm, SessionId};
 
 const FIREFOX: &str = "Mozilla/5.0 (X11; Linux x86_64) Firefox/140.0";
 /// The admin's Security page, which lists their sessions (#156).
-const SECURITY: &str = "/admin/settings/security";
+const SECURITY: &str = "/settings/security";
 const LISTED: &str = "Started ";
 const PRESENTED: &str = "This session";
 const STALE: &str = "Log in again to log out other sessions.";
@@ -48,7 +48,7 @@ async fn end(address: SocketAddr, cookie: &str, form: &str, session: Option<&str
         ("Cookie", cookie),
         ("User-Agent", FIREFOX),
     ];
-    send(address, "POST", "/admin/sessions/end", &headers, &body).await
+    send(address, "POST", "/sessions/end", &headers, &body).await
 }
 
 /// Each ending's record, oldest first: its outcome, how many ended, the session that asked, the one it named, its
@@ -284,7 +284,7 @@ async fn an_ending_from_elsewhere_or_unchecked_is_refused() {
     let from_elsewhere = send(
         address,
         "POST",
-        "/admin/sessions/end",
+        "/sessions/end",
         &elsewhere,
         &format!("form={form}"),
     )
@@ -310,7 +310,7 @@ async fn an_ending_from_elsewhere_or_unchecked_is_refused() {
     let ended = end(address, &cookies[1], &form, None).await;
     assert_eq!(
         (ended.status, ended.header("location")),
-        (303, Some("/admin/login"))
+        (303, Some("/login"))
     );
     // None of them reached the ending, so none records one.
     assert_eq!(recorded(&database).await, Vec::<String>::new());
@@ -401,14 +401,7 @@ async fn an_unreadable_list_is_unavailable() {
 async fn a_form_that_is_not_text_is_refused() {
     let (address, database, cookies) = logged_in_from(2).await;
     let headers = [("Origin", ORIGIN), ("Cookie", cookies[1].as_str())];
-    let reply = send_bytes(
-        address,
-        "POST",
-        "/admin/sessions/end",
-        &headers,
-        &[0xff, 0xfe],
-    )
-    .await;
+    let reply = send_bytes(address, "POST", "/sessions/end", &headers, &[0xff, 0xfe]).await;
     assert_eq!(reply.status, 403);
     assert_eq!(held(&database).await, "2");
 }

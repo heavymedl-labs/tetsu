@@ -22,7 +22,7 @@ business is a tenant, isolated in the database itself, and industries add only w
 
 - **Tenancy:** each business's address and page, kept apart by row-level security
 - **Audit:** a record of security events that is never lost
-- **Identity:** admins at `/admin` and staff at `/app`, each realm on a host of its own, who join with a passkey
+- **Identity:** admins and staff, each realm at the root of a host of its own, who join with a passkey
   from a one-time invite link and log in with it; staff accept an invite to another business by logging in. Sessions
   are server-side, and their tokens are stored only as hashes
 - **Domain events:** delivered once through an outbox, retried, and logged when they stop

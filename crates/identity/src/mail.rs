@@ -182,7 +182,7 @@ mod tests {
 
     #[test]
     fn an_invite_carries_its_link_in_both_bodies() {
-        let link = "https://tetsu.example/admin/join#abc&def";
+        let link = "https://tetsu.example/join#abc&def";
         let token = token(&"ab".repeat(32));
         let message =
             invite_message(Address::parse("ada@example.com").unwrap(), link, &token).unwrap();
@@ -192,19 +192,19 @@ mod tests {
         assert!(
             message
                 .text()
-                .contains("\nhttps://tetsu.example/admin/join#abc&def\n"),
+                .contains("\nhttps://tetsu.example/join#abc&def\n"),
         );
         assert!(
             message
                 .html()
-                .contains(r#"<a href="https://tetsu.example/admin/join#abc&#38;def">"#),
+                .contains(r#"<a href="https://tetsu.example/join#abc&#38;def">"#),
         );
         assert!(message.text().contains("works once, for an hour"));
     }
 
     #[test]
     fn a_staff_invite_names_its_business_and_role_as_escaped_text() {
-        let link = "https://tetsu.example/app/join#abc&def";
+        let link = "https://tetsu.example/join#abc&def";
         let token = token(&"ab".repeat(32));
         let business = "Fern & Co <a href=\"https://evil.example\">";
         let message = staff_invite_message(
@@ -227,7 +227,7 @@ mod tests {
         assert!(
             message
                 .text()
-                .contains("\nhttps://tetsu.example/app/join#abc&def\n")
+                .contains("\nhttps://tetsu.example/join#abc&def\n")
         );
         assert!(message.text().contains("works once, for seven days"));
         assert!(
@@ -239,7 +239,7 @@ mod tests {
         assert!(
             message
                 .html()
-                .contains(r#"<a href="https://tetsu.example/app/join#abc&#38;def">"#),
+                .contains(r#"<a href="https://tetsu.example/join#abc&#38;def">"#),
         );
     }
 

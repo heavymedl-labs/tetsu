@@ -37,7 +37,7 @@ mod sessions_tests;
 mod staff_tests;
 
 pub use adapters::events::notices;
-pub use adapters::http::{PATHS, Web, router, staff_router};
+pub use adapters::http::{LOGIN, PATHS, Web, router, staff_router};
 pub use adapters::postgres::{postgres_staff_store, postgres_store};
 pub use browser::{Change, CheckedSession, ForChange, Logout, Origins};
 pub use domain::{

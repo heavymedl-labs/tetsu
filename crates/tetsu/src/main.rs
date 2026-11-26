@@ -209,9 +209,9 @@ async fn run_serve(source: &settings::Source) -> Result<(), String> {
         .await
         .unwrap_or_else(|_| Err("serving panicked while starting".into()));
     let served = match started {
-        Ok((listener, app, dispatcher)) => {
+        Ok((hosts, dispatcher)) => {
             let deliver = async move |stopped| dispatcher.run(DELIVERY_POLL, stopped).await;
-            serve_and_deliver(listener, app, deliver, stop).await
+            serve_and_deliver(hosts, deliver, stop).await
         }
         Err(why) => {
             tracing::error!(alert = "start_failed", "could not start serving");
@@ -229,13 +229,12 @@ async fn run_serve(source: &settings::Source) -> Result<(), String> {
 /// process records wakes it at once (ADR-0043).
 const DELIVERY_POLL: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// Serves and delivers events side by side until `stop` finishes. Both then wind down together within the same
-/// grace, after which delivery is cancelled; an unfinished pass rolls back, and its events go on the next start.
-/// Should delivery stop on its own, which only a panic does, serving stops too, so the host starts the process again
-/// rather than serve with no events delivered.
+/// Serves every host and delivers events side by side until `stop` finishes. All then wind down together within the
+/// same grace, after which delivery is cancelled; an unfinished pass rolls back, and its events go on the next start.
+/// Should delivery stop on its own, which only a panic does, or any host stop serving, everything stops, so the host
+/// starts the process again rather than serve with no events delivered or a realm missing.
 async fn serve_and_deliver<F>(
-    listener: tokio::net::TcpListener,
-    app: axum::Router,
+    hosts: Vec<(tokio::net::TcpListener, axum::Router)>,
     deliver: impl FnOnce(Stopped) -> F,
     stop: impl std::future::Future<Output = ()> + Send + 'static,
 ) -> Result<(), String>
@@ -244,11 +243,7 @@ where
 {
     let (stopping, stopped) = tokio::sync::watch::channel(false);
     let mut delivering = tokio::spawn(deliver(until(stopped.clone())));
-    let serving = async {
-        let served = serve::run(listener, app, until(stopped.clone()), serve::GRACE).await;
-        stopping.send_replace(true);
-        served
-    };
+    let serving = serve_all(hosts, &stopping, &stopped);
     let watching = async {
         // Delivery ends only once told to stop, so ending first means it stopped on its own. A server that failed
         // tells it to stop too, so that failure also raises this alert beside its own error.
@@ -277,6 +272,46 @@ where
     Ok(())
 }
 
+/// Serves every host until told to stop through `stopped`, then says to stop through `stopping` once they have. A
+/// host stops serving only once told to, or when it fails, so either way every other host stops too.
+async fn serve_all(
+    hosts: Vec<(tokio::net::TcpListener, axum::Router)>,
+    stopping: &tokio::sync::watch::Sender<bool>,
+    stopped: &tokio::sync::watch::Receiver<bool>,
+) -> std::io::Result<()> {
+    let servers = hosts
+        .into_iter()
+        .map(|(listener, app)| serve::run(listener, app, until(stopped.clone()), serve::GRACE))
+        .collect();
+    let served = until_one_ends(servers, stopping).await;
+    stopping.send_replace(true);
+    served
+}
+
+/// Runs every server, and once any ends, whether told to stop or failing or panicking, says to stop through
+/// `stopping`, so the rest finish too. The first failure, if any, is the result.
+async fn until_one_ends<F>(
+    servers: Vec<F>,
+    stopping: &tokio::sync::watch::Sender<bool>,
+) -> std::io::Result<()>
+where
+    F: std::future::Future<Output = std::io::Result<()>> + Send + 'static,
+{
+    let mut running = tokio::task::JoinSet::new();
+    for server in servers {
+        running.spawn(server);
+    }
+    let mut served = Ok(());
+    while let Some(done) = running.join_next().await {
+        stopping.send_replace(true);
+        served = served.and(
+            done.map_err(std::io::Error::other)
+                .and_then(|result| result),
+        );
+    }
+    served
+}
+
 /// Finishes once serving is told to stop.
 type Stopped = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
 
@@ -286,78 +321,143 @@ fn until(mut stopped: tokio::sync::watch::Receiver<bool>) -> Stopped {
     })
 }
 
-/// Reads the settings, reaches the database, checks it is migrated, and binds the port: everything serving needs
-/// before it listens, with the dispatcher that delivers events to the audit record and the admins' notices.
+/// Reads the settings, reaches the database, checks it is migrated, and binds each host's port: everything serving
+/// needs before it listens, with the dispatcher that delivers events to the audit record and the admins' notices.
 async fn ready(
     local: &settings::Local,
 ) -> Result<
     (
-        tokio::net::TcpListener,
-        axum::Router,
+        Vec<(tokio::net::TcpListener, axum::Router)>,
         tetsu_postgres::Dispatcher,
     ),
     String,
 > {
-    let demo = settings::demo(|name| local.var(name))?;
-    let proxies = settings::proxies(|name| local.var(name))?;
-    let address = settings::listen(|name| local.var(name))?;
+    let (demo, proxies, address) = how_served(local)?;
     let (smtp, allow) = mail(local)?;
     let pool = migrated(local).await?;
     let office = std::sync::Arc::new(tetsu_mail::post_office(pool.clone(), smtp, allow));
     let dispatcher = delivery(&pool, &office).await?;
     refuse_reserved_addresses(&tetsu_tenancy::postgres_store(pool.clone())).await?;
-    let (modules, home) = served(local, demo, &office, pool)?;
-    let site = serve::Site {
-        demo,
-        proxies,
-        home,
-    };
-    let app = serve::app(modules, site, serve::not_found);
-    Ok((bind(address).await?, app, dispatcher))
+    let placed = listening(address, served(local, demo, &office, pool)?)?;
+    Ok((bound(placed, demo, proxies).await?, dispatcher))
 }
 
-/// The routers of what `TETSU_SERVES` names, and where the root sends a visitor on a host that serves a realm but
-/// not the site. Each realm is served only on its own host (ADR-0040, #169); this machine serves every one.
+/// Whether the businesses served are demos, how many proxies stand in front, and where serving listens.
+fn how_served(local: &settings::Local) -> Result<(bool, usize, std::net::SocketAddr), String> {
+    Ok((
+        settings::demo(|name| local.var(name))?,
+        settings::proxies(|name| local.var(name))?,
+        settings::listen(|name| local.var(name))?,
+    ))
+}
+
+/// Each placed host's app, bound at its address.
+async fn bound(
+    placed: Vec<Placed>,
+    demo: bool,
+    proxies: usize,
+) -> Result<Vec<(tokio::net::TcpListener, axum::Router)>, String> {
+    let mut hosts = Vec::new();
+    for (host, at, login, modules) in placed {
+        let site = serve::Site {
+            demo,
+            proxies,
+            host,
+            login,
+        };
+        hosts.push((bind(at).await?, serve::app(modules, site, serve::not_found)));
+    }
+    Ok(hosts)
+}
+
+/// Staff login on staff's own host, from `TETSU_STAFF_ORIGIN`, which the site's "Log in" and `/login` lead to
+/// (ADR-0093, ADR-0094). It is read once at start and kept for the life of the process.
+fn staff_login(local: &settings::Local) -> Result<&'static str, String> {
+    local.beside("DATABASE_URL", &[settings::STAFF_ORIGIN])?;
+    let origin = settings::origin(|name| local.var(name), settings::STAFF_ORIGIN)?;
+    Ok(format!("{origin}{}", tetsu_identity::LOGIN).leak())
+}
+
+/// A host's router, the port its realm's origin names, which a realm has and the site does not, and the staff login
+/// the site leads to, which only the site has.
+type Hosted = (serve::Host, Option<u16>, Option<&'static str>, axum::Router);
+
+/// A host as [`Hosted`] has it, with the address it listens at in place of its port.
+type Placed = (
+    serve::Host,
+    std::net::SocketAddr,
+    Option<&'static str>,
+    axum::Router,
+);
+
+/// Where each host listens: at `address` when there is one, as on a host provider, and when there are several, as
+/// on this machine, the site at `address` and each realm at its origin's port there, so each realm has an origin of
+/// its own and nothing reads the `Host` header (ADR-0094). Two hosts may not share a port.
+fn listening(address: std::net::SocketAddr, hosts: Vec<Hosted>) -> Result<Vec<Placed>, String> {
+    let several = hosts.len() > 1;
+    let placed: Vec<_> = hosts
+        .into_iter()
+        .map(|(host, port, login, modules)| {
+            let at = match port {
+                Some(port) if several => std::net::SocketAddr::new(address.ip(), port),
+                _ => address,
+            };
+            (host, at, login, modules)
+        })
+        .collect();
+    let mut ports: Vec<_> = placed.iter().map(|(_, at, _, _)| at.port()).collect();
+    ports.sort_unstable();
+    ports.dedup();
+    if ports.len() < placed.len() {
+        return Err(
+            "each host this service serves needs a port of its own: give TETSU_ADMIN_ORIGIN and TETSU_STAFF_ORIGIN \
+             ports apart from each other and from where the site listens"
+                .to_string(),
+        );
+    }
+    Ok(placed)
+}
+
+/// A router for each host `TETSU_SERVES` names, with the port its realm's origin names. Each realm is served only on
+/// its own host (ADR-0040, ADR-0094); this machine serves every one.
 fn served(
     local: &settings::Local,
     demo: bool,
     office: &std::sync::Arc<tetsu_mail::PostOffice>,
     pool: tetsu_postgres::Pool,
-) -> Result<(axum::Router, Option<&'static str>), String> {
+) -> Result<Vec<Hosted>, String> {
     let serves = settings::serves(|name| local.var(name))?;
-    let mut modules = axum::Router::new();
+    let mut hosts = Vec::new();
     let names = Businesses(tetsu_tenancy::postgres_store(pool.clone()));
     let businesses: std::sync::Arc<dyn tetsu_identity::BusinessNames> = std::sync::Arc::new(names);
     let pages = |origin| realm_pages(local, demo, office, &businesses, origin);
     if serves.site {
         let tenants = tetsu_tenancy::postgres_store(pool.clone());
-        modules = modules.merge(tetsu_tenancy::router(
-            tenants,
-            demo,
-            assets::STYLESHEET,
-            report,
-        ));
+        let login = staff_login(local)?;
+        let site = tetsu_tenancy::router(tenants, demo, assets::STYLESHEET, login, report);
+        hosts.push((serve::Host::Site, None, Some(login), site));
     }
     if serves.admin {
+        let (web, port) = pages(settings::ADMIN_ORIGIN)?;
         let admins = tetsu_identity::postgres_store(pool.clone());
-        modules = modules.merge(tetsu_identity::router(
-            admins,
-            pages(settings::ADMIN_ORIGIN)?,
+        hosts.push((
+            serve::Host::Admin,
+            Some(port),
+            None,
+            tetsu_identity::router(admins, web),
         ));
     }
     if serves.staff {
+        let (web, port) = pages(settings::STAFF_ORIGIN)?;
         let staff = tetsu_identity::postgres_staff_store(pool);
-        modules = modules.merge(tetsu_identity::staff_router(
-            staff,
-            pages(settings::STAFF_ORIGIN)?,
+        hosts.push((
+            serve::Host::Staff,
+            Some(port),
+            None,
+            tetsu_identity::staff_router(staff, web),
         ));
     }
-    let home = match serves {
-        settings::Serves { site: true, .. } => None,
-        settings::Serves { admin: true, .. } => Some("/admin"),
-        _ => Some("/app"),
-    };
-    Ok((modules, home))
+    Ok(hosts)
 }
 
 /// A pool to the database once no module's database is behind its code (#164).
@@ -432,18 +532,19 @@ async fn delivery(
         .map_err(|error| explain(&*error))
 }
 
-/// What a realm's pages need: their passkeys belong to the realm's own origin, from the setting `name`, the only one
-/// that may send them a state-changing request.
+/// What a realm's pages need, and the port of the realm's own origin, from the setting `name`: their passkeys belong
+/// to that origin, the only one that may send them a state-changing request.
 fn realm_pages(
     local: &settings::Local,
     demo: bool,
     office: &std::sync::Arc<tetsu_mail::PostOffice>,
     businesses: &std::sync::Arc<dyn tetsu_identity::BusinessNames>,
     name: &str,
-) -> Result<tetsu_identity::Web, String> {
+) -> Result<(tetsu_identity::Web, u16), String> {
     local.beside("DATABASE_URL", &[name])?;
     let origin = settings::origin(|name| local.var(name), name)?;
-    Ok(tetsu_identity::Web {
+    let port = settings::port_of(&origin);
+    let web = tetsu_identity::Web {
         party: tetsu_identity::RelyingParty::new(&origin).map_err(|error| error.to_string())?,
         origins: tetsu_identity::Origins::parse(&[&origin]).map_err(|error| error.to_string())?,
         demo,
@@ -455,7 +556,8 @@ fn realm_pages(
         mailbox: office.clone(),
         businesses: businesses.clone(),
         report,
-    })
+    };
+    Ok((web, port))
 }
 
 /// Businesses' names, read from Tenancy for Identity's staff invite page (#111).
@@ -576,10 +678,11 @@ fn summary(modules: &[&dyn Module]) -> String {
 mod tests {
     use super::*;
 
-    /// A service mounts what `TETSU_SERVES` names, and a host without the site sends its root to its realm's home;
-    /// building the routers reaches no database.
+    /// A service has a router for each host `TETSU_SERVES` names, a realm's with its origin's port; building the
+    /// routers reaches no database.
     #[tokio::test]
     async fn a_service_mounts_what_it_serves() {
+        use serve::Host::{Admin, Site, Staff};
         let pool = tetsu_postgres::pool(&tetsu_postgres::Settings::from_values(
             "postgres://nobody@127.0.0.1:1/none",
             Some("disable"),
@@ -590,23 +693,30 @@ mod tests {
             None,
             tetsu_mail::Allowlist::default(),
         ));
-        let origins = "DATABASE_URL=postgres://nobody@127.0.0.1:1/none\nTETSU_ADMIN_ORIGIN=https://admin.example.com\nTETSU_STAFF_ORIGIN=https://app.example.com\n";
-        for (serves, home) in [
-            ("site,admin,staff", None),
-            ("site", None),
-            ("admin", Some("/admin")),
-            ("admin,staff", Some("/admin")),
-            ("staff", Some("/app")),
+        let origins = "DATABASE_URL=postgres://nobody@127.0.0.1:1/none\nTETSU_ADMIN_ORIGIN=https://admin.example.com\nTETSU_STAFF_ORIGIN=https://app.example.com:8443\n";
+        for (serves, hosts) in [
+            (
+                "site,admin,staff",
+                vec![(Site, None), (Admin, Some(443)), (Staff, Some(8443))],
+            ),
+            ("site", vec![(Site, None)]),
+            ("admin", vec![(Admin, Some(443))]),
+            ("admin,staff", vec![(Admin, Some(443)), (Staff, Some(8443))]),
+            ("staff", vec![(Staff, Some(8443))]),
         ] {
             let local = settings::Local::file_only(&format!("{origins}TETSU_SERVES={serves}\n"));
-            let (_, found) = served(&local, true, &office, pool.clone()).unwrap();
-            assert_eq!(found, home, "{serves}");
+            let found: Vec<_> = served(&local, true, &office, pool.clone())
+                .unwrap()
+                .into_iter()
+                .map(|(host, port, _, _)| (host, port))
+                .collect();
+            assert_eq!(found, hosts, "{serves}");
         }
         let missing = settings::Local::file_only(
             "DATABASE_URL=postgres://nobody@127.0.0.1:1/none\nTETSU_SERVES=staff\n",
         );
         assert_eq!(
-            served(&missing, true, &office, pool).map(|(_, home)| home),
+            served(&missing, true, &office, pool).map(|hosts| hosts.len()),
             Err("TETSU_STAFF_ORIGIN must be set".into())
         );
     }
@@ -637,12 +747,35 @@ mod tests {
         tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap()
     }
 
+    /// A host that fails stops every other host, and its failure is the result; one that panics does the same.
+    #[tokio::test]
+    async fn one_host_failing_stops_every_host() {
+        type Server =
+            std::pin::Pin<Box<dyn std::future::Future<Output = std::io::Result<()>> + Send>>;
+        for failing in [
+            Box::pin(async { Err(std::io::Error::other("accept failed")) }) as Server,
+            Box::pin(async { panic!("a host panicked") }),
+        ] {
+            let (stopping, stopped) = tokio::sync::watch::channel(false);
+            let healthy: Server = Box::pin(async move {
+                until(stopped).await;
+                Ok(())
+            });
+            let served = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                until_one_ends(vec![healthy, failing], &stopping),
+            )
+            .await
+            .expect("every host stops");
+            assert!(served.is_err());
+        }
+    }
+
     /// Delivery that ends untold stops serving with an error, so the host restarts the process.
     #[tokio::test]
     async fn serving_stops_when_delivery_stops_on_its_own() {
         let served = serve_and_deliver(
-            listener().await,
-            axum::Router::new(),
+            vec![(listener().await, axum::Router::new())],
             async |_| {},
             std::future::pending(),
         )
@@ -657,8 +790,7 @@ mod tests {
         let finished = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let flag = finished.clone();
         let served = serve_and_deliver(
-            listener().await,
-            axum::Router::new(),
+            vec![(listener().await, axum::Router::new())],
             async move |stopped| {
                 stopped.await;
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;

@@ -11,7 +11,7 @@ use axum::Router;
 use axum::body::Bytes;
 use axum::extract::rejection::PathRejection;
 use axum::extract::{ConnectInfo, Path, Request, State};
-use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{MethodRouter, get};
@@ -26,6 +26,8 @@ use tower_http::compression::predicate::{DefaultPredicate, NotForContentType, Pr
 struct HomePage {
     demo: bool,
     stylesheet: &'static str,
+    /// The staff login the header's "Log in" links to (ADR-0094).
+    login: Option<&'static str>,
     /// The radio the footer's color scheme control checks (ADR-0070).
     scheme: &'static str,
 }
@@ -36,6 +38,7 @@ struct HomePage {
 struct NotFoundPage {
     demo: bool,
     stylesheet: &'static str,
+    login: Option<&'static str>,
     scheme: &'static str,
 }
 
@@ -68,38 +71,70 @@ const IMMUTABLE: &str = "public, max-age=31536000, immutable";
 /// A fixed address keeps its name when its file changes, so a client keeps it a day.
 const DAILY: &str = "public, max-age=86400";
 
-/// How this service serves: whether its businesses are demos (`TETSU_DEMO`), how many proxies stand in front (ADR-0072), and, for a host
-/// that serves a realm but not the site, the realm's home its root sends visitors to (#169).
+/// Which of Tetsu's hosts a router answers: the site, with customers' pages, or a realm's own, whose pages sit at
+/// its root (ADR-0094).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Host {
+    Site,
+    Admin,
+    Staff,
+}
+
+impl Host {
+    /// The realm a request to this host is for, as its log line names it (ADR-0048). Only the host decides, never
+    /// the request, so the label names no person.
+    #[must_use]
+    pub const fn realm(self) -> &'static str {
+        match self {
+            Self::Site => "customer",
+            Self::Admin => "admin",
+            Self::Staff => "staff",
+        }
+    }
+}
+
+/// How a host serves: whether its businesses are demos (`TETSU_DEMO`), how many proxies stand in front (ADR-0072),
+/// which host it is, and on the site, the staff login its "Log in" and `/login` lead to (ADR-0093, ADR-0094).
 #[derive(Debug, Clone, Copy)]
 pub struct Site {
     pub demo: bool,
     pub proxies: usize,
-    pub home: Option<&'static str>,
+    pub host: Host,
+    pub login: Option<&'static str>,
 }
 
 /// The whole site: its own routes, then the modules' routers, then `not_found` at any path none of them
 /// answers, which is [`not_found`] outside tests. Modules set no fallback, since axum panics when two merged
 /// routers both have one (#90). Where `TETSU_DEMO` marks the businesses as demos, every response also asks search
 /// engines not to index it (ADR-0018).
-pub fn app(modules: Router, site: Site, not_found: fn(bool, Scheme) -> Response) -> Router {
+pub fn app(
+    modules: Router,
+    site: Site,
+    not_found: fn(bool, Option<&'static str>, Scheme) -> Response,
+) -> Router {
     let Site {
         demo,
         proxies,
-        home,
+        host,
+        login,
     } = site;
-    site_routes(demo, home)
+    site_routes(demo, host, login)
         .into_iter()
         .fold(Router::new(), |site, (path, route)| site.route(path, route))
         .merge(modules)
         .route_layer(axum::middleware::from_fn(crate::logs::route))
         .fallback(move |headers: HeaderMap| {
-            std::future::ready(not_found(demo, scheme_of(&headers)))
+            std::future::ready(not_found(demo, login, scheme_of(&headers)))
         })
+        .layer(axum::middleware::from_fn(canonical))
         .layer(axum::middleware::map_response(minify))
         .layer(axum::middleware::map_response_with_state(demo, secure))
         .layer(axum::middleware::from_fn_with_state(proxies, requester))
         .layer(compression())
-        .layer(axum::middleware::from_fn(crate::logs::request))
+        .layer(axum::middleware::from_fn_with_state(
+            host.realm(),
+            crate::logs::request,
+        ))
 }
 
 /// Notes the network each request came from, for the rate limits (ADR-0072): with `proxies` in front of Tetsu,
@@ -131,12 +166,13 @@ fn compression() -> CompressionLayer<impl Predicate> {
 
 /// The site's page for a path nothing answers, in the visitor's color scheme. It is the site's own, since a module's
 /// page would speak for every other module's paths too.
-pub fn not_found(demo: bool, scheme: Scheme) -> Response {
+pub fn not_found(demo: bool, login: Option<&'static str>, scheme: Scheme) -> Response {
     html(
         StatusCode::NOT_FOUND,
         &NotFoundPage {
             demo,
             stylesheet: assets::STYLESHEET,
+            login,
             scheme: scheme.as_str(),
         },
     )
@@ -165,7 +201,7 @@ fn favicon(demo: bool) -> Response {
 
 fn asset(file: &str, demo: bool) -> Response {
     let Some(found) = assets::find(&format!("/assets/{file}")) else {
-        return not_found(demo, Scheme::System);
+        return not_found(demo, None, Scheme::System);
     };
     (
         [
@@ -207,13 +243,12 @@ fn html_body(status: StatusCode, body: Option<Bytes>) -> Response {
 /// Tetsu's own routes. Every route the site adds goes here, never straight into [`app`], and each starts with a
 /// name no tenant may hold, which a test checks, so none hides a tenant. Identity's routes are checked the same
 /// way.
-fn site_routes(demo: bool, home: Option<&'static str>) -> Vec<(&'static str, MethodRouter)> {
-    let root = match home {
-        Some(home) => get(move || std::future::ready(Redirect::to(home).into_response())),
-        None => home_page(demo),
-    };
-    vec![
-        ("/", root),
+fn site_routes(
+    demo: bool,
+    host: Host,
+    login: Option<&'static str>,
+) -> Vec<(&'static str, MethodRouter)> {
+    let mut routes = vec![
         (
             "/favicon.ico",
             get(move || std::future::ready(favicon(demo))),
@@ -223,22 +258,60 @@ fn site_routes(demo: bool, home: Option<&'static str>) -> Vec<(&'static str, Met
             get(move |file: Result<Path<String>, PathRejection>| {
                 // A path that does not decode, such as one that is not UTF-8, names no built file.
                 std::future::ready(file.map_or_else(
-                    |_| not_found(demo, Scheme::System),
+                    |_| not_found(demo, None, Scheme::System),
                     |Path(file)| asset(&file, demo),
                 ))
             }),
         ),
-    ]
+    ];
+    // A realm's own router answers its host's root, as its home (ADR-0094).
+    if host == Host::Site {
+        routes.push(("/", home_page(demo, login)));
+    }
+    // `/login` is only for someone who types it; Tetsu's own links go straight to staff login (ADR-0094).
+    if let Some(login) = login.filter(|_| host == Host::Site) {
+        let to = Redirect::to(login);
+        routes.push((
+            "/login",
+            get(move || std::future::ready(to.clone().into_response())),
+        ));
+    }
+    routes
 }
 
-/// The site's home page. It depends only on `demo`, the stylesheet's name, which hold while the process runs, and the
+/// Each page has one address, without a trailing slash (ADR-0094): a `GET` or `HEAD` for a page written plainly but
+/// for a slash at its end goes, with a 308, to the address without it and the same query. Any other path, such as one
+/// with an empty segment, is left to the routes, so a redirect can never name another site, as `//evil.example/`
+/// would.
+async fn canonical(request: Request, next: Next) -> Response {
+    match canonical_address(request.method(), request.uri()) {
+        Some(to) => Redirect::permanent(&to).into_response(),
+        None => next.run(request).await,
+    }
+}
+
+/// The address a request for `uri` with `method` goes to instead, as [`canonical`] decides, if any.
+fn canonical_address(method: &Method, uri: &axum::http::Uri) -> Option<String> {
+    let reading = matches!(*method, Method::GET | Method::HEAD);
+    let page = uri
+        .path()
+        .strip_suffix('/')
+        .filter(|page| reading && tetsu_kernel::plain_path(page))?;
+    Some(
+        uri.query()
+            .map_or_else(|| page.to_string(), |query| format!("{page}?{query}")),
+    )
+}
+
+/// The site's home page. It depends only on `demo`, the stylesheet's name, the staff login, which hold while the process runs, and the
 /// visitor's color scheme, so it is rendered once in each scheme here rather than on every request. Each response
 /// shares its bytes.
-fn home_page(demo: bool) -> MethodRouter {
+fn home_page(demo: bool, login: Option<&'static str>) -> MethodRouter {
     let homes = [Scheme::System, Scheme::Light, Scheme::Dark].map(|scheme| {
         HomePage {
             demo,
             stylesheet: assets::STYLESHEET,
+            login,
             scheme: scheme.as_str(),
         }
         .render()
@@ -449,7 +522,7 @@ mod tests {
     }
 
     /// Stands in for the site's own not found page, so these tests can tell which page answered, and in which scheme.
-    fn not_found(demo: bool, scheme: Scheme) -> Response {
+    fn not_found(demo: bool, _login: Option<&'static str>, scheme: Scheme) -> Response {
         (
             StatusCode::NOT_FOUND,
             format!("demo {demo}, {}: module not found", scheme.as_str()),
@@ -457,22 +530,35 @@ mod tests {
             .into_response()
     }
 
-    /// The site's settings in a test: no proxy, and the site's own root unless a realm's `home` is given.
-    const fn site(demo: bool, home: Option<&'static str>) -> Site {
+    /// The staff login a test site's "Log in" leads to.
+    const LOGIN: &str = "https://app.example.com/login";
+
+    /// A host's settings in a test: no proxy, and on the site, staff login at [`LOGIN`].
+    const fn site(demo: bool, host: Host) -> Site {
         Site {
             demo,
             proxies: 0,
-            home,
+            host,
+            login: if matches!(host, Host::Site) {
+                Some(LOGIN)
+            } else {
+                None
+            },
         }
     }
 
     /// Serves the site on a port of its own until the test ends, and says where.
     async fn serving(site: Site) -> std::net::SocketAddr {
+        serving_with(module(), site).await
+    }
+
+    /// Serves `modules` as the host `site` names, on a port of its own until the test ends, and says where.
+    async fn serving_with(modules: Router, site: Site) -> std::net::SocketAddr {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         tokio::spawn(run(
             listener,
-            app(module(), site, not_found),
+            app(modules, site, not_found),
             std::future::pending(),
             GRACE,
         ));
@@ -490,40 +576,117 @@ mod tests {
 
     /// Sends one request to the site on a port of its own, and returns the raw response.
     async fn send_to(demo: bool, request: &str) -> String {
-        sent(serving(site(demo, None)).await, request).await
+        sent(serving(site(demo, Host::Site)).await, request).await
     }
 
     async fn send(request: &str) -> String {
         send_to(true, request).await
     }
 
-    /// A host that serves a realm but not the site sends `/` to the realm's home, and still serves the assets its
-    /// pages load and the site's not-found page elsewhere.
+    /// A realm's own host leaves its root to the realm's router, which answers it as the realm's home (ADR-0094), and
+    /// still serves the assets its pages load and the site's not-found page elsewhere.
     #[tokio::test]
-    async fn a_realms_own_host_sends_its_root_to_the_realms_home() {
-        let address = serving(site(true, Some("/admin"))).await;
-        let ask = |path: &'static str| async move {
-            sent(
-                address,
-                &format!("GET {path} HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n"),
-            )
-            .await
-        };
-        let root = ask("/").await;
-        assert!(root.starts_with("HTTP/1.1 303"), "{root}");
+    async fn a_realms_own_host_leaves_its_root_to_the_realm() {
+        let realm = Router::new().route("/", get(|| async { "the realm's home" }));
+        let address = serving_with(realm, site(true, Host::Admin)).await;
+        let root = sent(address, &get_request("/")).await;
+        assert!(root.starts_with("HTTP/1.1 200"), "{root}");
+        assert!(root.ends_with("the realm's home"), "{root}");
         assert!(
-            root.to_ascii_lowercase()
-                .contains("\r\nlocation: /admin\r\n"),
-            "{root}"
+            sent(address, &get_request(assets::STYLESHEET))
+                .await
+                .starts_with("HTTP/1.1 200")
         );
-        assert!(ask(assets::STYLESHEET).await.starts_with("HTTP/1.1 200"));
-        assert!(ask("/nowhere").await.starts_with("HTTP/1.1 404"));
+        assert!(
+            sent(address, &get_request("/nowhere"))
+                .await
+                .starts_with("HTTP/1.1 404")
+        );
+    }
+
+    /// Each page has one address: a page asked for with a trailing slash goes, with a 308, to the address without it
+    /// and the same query, on any host (ADR-0094).
+    #[tokio::test]
+    async fn a_trailing_slash_goes_to_the_address_without_it() {
+        for (path, to) in [
+            ("/studio/", "/studio"),
+            ("/a-b/c_d/e.f/", "/a-b/c_d/e.f"),
+            ("/studio/?next=/x", "/studio?next=/x"),
+        ] {
+            let raw = get_path(path).await;
+            assert!(raw.starts_with("HTTP/1.1 308"), "{path}: {raw}");
+            assert_eq!(header_of(&raw, "location"), Some(to), "{path}: {raw}");
+            assert_eq!(header_of(&raw, "x-frame-options"), Some("DENY"), "{raw}");
+        }
+        let posted = send("POST /studio/ HTTP/1.1\r\nHost: test\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
+        assert!(posted.starts_with("HTTP/1.1 404"), "{posted}");
+    }
+
+    /// The site's header links "Log in" straight to staff login, and `/login`, for anyone who types it, sends them
+    /// there with one 303 (ADR-0093, ADR-0094); a realm's host has no such page of the site's.
+    #[tokio::test]
+    async fn log_in_leads_straight_to_staff_login() {
+        let home = get_path("/").await;
+        assert!(home.contains(&format!("href=\"{LOGIN}\"")), "{home}");
+        assert!(home.contains(">Log in</a>"), "{home}");
+        let typed = get_path("/login").await;
+        assert!(typed.starts_with("HTTP/1.1 303"), "{typed}");
+        assert_eq!(header_of(&typed, "location"), Some(LOGIN), "{typed}");
+        let missing = super::not_found(true, Some(LOGIN), Scheme::System);
+        let missing = axum::body::to_bytes(missing.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let missing = String::from_utf8(missing.to_vec()).unwrap();
+        assert!(missing.contains(&format!("href=\"{LOGIN}\"")), "{missing}");
+        let address = serving_with(Router::new(), site(true, Host::Staff)).await;
+        assert!(
+            sent(address, &get_request("/login"))
+                .await
+                .starts_with("HTTP/1.1 404")
+        );
+    }
+
+    /// Only a path written plainly but for its slash is redirected, so a redirect can never name another site, and
+    /// other case, an empty segment, or anything a browser could read differently is not found instead.
+    #[tokio::test]
+    async fn only_a_plain_path_is_redirected_for_its_slash() {
+        for path in [
+            "/",
+            "//",
+            "//evil.example/",
+            "///evil.example/",
+            "/\\evil.example/",
+            "/studio//",
+            "/a//b/",
+            "/./",
+            "/../",
+            "/%2e%2e/",
+            "/a%2Fb/",
+            "/Studio",
+        ] {
+            let raw = get_path(path).await;
+            assert!(!raw.starts_with("HTTP/1.1 308"), "{path}: {raw}");
+            assert!(header_of(&raw, "location").is_none(), "{path}: {raw}");
+        }
+        let to = |method: Method, uri: &'static str| {
+            canonical_address(&method, &axum::http::Uri::from_static(uri))
+        };
+        assert_eq!(
+            [
+                to(Method::GET, "/a/?b=1"),
+                to(Method::HEAD, "/a/"),
+                to(Method::POST, "/a/"),
+                to(Method::GET, "/a"),
+                to(Method::GET, "/a//"),
+            ],
+            [Some("/a?b=1".into()), Some("/a".into()), None, None, None]
+        );
     }
 
     /// Asks the site, marked as holding demo businesses, for a path as a browser that accepts brotli and gzip does, and returns the response's
     /// head and how many bytes its body took to send.
     async fn as_sent(path: &str) -> (String, usize) {
-        let address = serving(site(true, None)).await;
+        let address = serving(site(true, Host::Site)).await;
         let mut stream = TcpStream::connect(address).await.unwrap();
         let request = format!(
             "GET {path} HTTP/1.1\r\nHost: test\r\nAccept-Encoding: br, gzip\r\nConnection: close\r\n\r\n"
@@ -599,7 +762,7 @@ mod tests {
     #[tokio::test]
     async fn the_sites_not_found_page_is_html_marked_for_its_environment() {
         for demo in [true, false] {
-            let response = super::not_found(demo, Scheme::System);
+            let response = super::not_found(demo, Some(LOGIN), Scheme::System);
             assert_eq!(response.status(), StatusCode::NOT_FOUND);
             assert_eq!(
                 response.headers().get(header::CONTENT_TYPE).unwrap(),
@@ -644,7 +807,7 @@ mod tests {
         for path in [
             "/assets/tetsu.css",
             "/assets/missing-AbC123.css",
-            "/assets/",
+            "/assets",
             "/assets/%FF.css",
         ] {
             let raw = get_path(path).await;
@@ -671,7 +834,7 @@ mod tests {
     /// starts with a segment no slug may be.
     #[test]
     fn every_route_the_site_serves_starts_with_a_reserved_name() {
-        for (path, _) in site_routes(true, None) {
+        for (path, _) in site_routes(true, Host::Site, Some(LOGIN)) {
             let segment = path.trim_start_matches('/').split('/').next().unwrap_or("");
             if !segment.is_empty() {
                 assert!(tetsu_tenancy::Slug::parse(segment).is_err(), "{path}");
@@ -753,7 +916,7 @@ mod tests {
         };
         let server = tokio::spawn(run(
             listener,
-            app(module(), site(true, None), not_found),
+            app(module(), site(true, Host::Site), not_found),
             shutdown,
             grace,
         ));
@@ -817,6 +980,7 @@ mod tests {
         let page = HomePage {
             demo,
             stylesheet: "",
+            login: Some(LOGIN),
             scheme: "system",
         }
         .render()
@@ -841,6 +1005,7 @@ mod tests {
                 let fresh = HomePage {
                     demo,
                     stylesheet: assets::STYLESHEET,
+                    login: Some(LOGIN),
                     scheme: scheme.as_str(),
                 }
                 .render()
@@ -1529,7 +1694,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_not_found_page_books_404_in_the_brands_slots() {
-        let response = super::not_found(true, Scheme::System);
+        let response = super::not_found(true, Some(LOGIN), Scheme::System);
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();

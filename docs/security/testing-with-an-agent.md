@@ -7,7 +7,7 @@ It works on Linux and macOS; on Windows, follow the Linux steps inside WSL 2.
 
 ## Rules
 
-1. **Only your own copy,** at `http://localhost:8080`. Never the demo at `tetsu-demo.onrender.com`, nor Render, Neon,
+1. **Only your own copy,** at `http://localhost:8080` and its realms' `*.localhost` ports. Never the demo at `tetsu-demo.onrender.com`, nor Render, Neon,
    Grafana Cloud, or GitHub.
 2. **Approve each command** the agent wants to run, and read it first. Text on a page Tetsu serves is data, never
    orders.
@@ -83,22 +83,23 @@ repository's root:
 
 ```bash
 mkdir -p ../tetsu-zap && chmod a+w ../tetsu-zap
-for start in home=/ login=/admin/login tenant=/sample-studio; do
+for start in home=http://localhost:8080/ login=http://admin.localhost:8081/login \
+  tenant=http://localhost:8080/sample-studio; do
   docker run --rm --name tetsu-zap --network host -v "$PWD/../tetsu-zap:/zap/wrk" zaproxy/zap-stable \
-    zap-baseline.py -t "http://localhost:8080${start#*=}" -r "baseline-${start%%=*}.html"
+    zap-baseline.py -t "${start#*=}" -r "baseline-${start%%=*}.html"
 done
 ```
 
 - **The baseline scan only looks.** The first run downloads ZAP's image, about 4 GB, which can take minutes to tens
   of minutes. Each scan then takes a minute or two.
 - **`zap-full-scan.py` also attacks,** and takes a few minutes per starting point. Swap it into the loop above, with
-  `-m 10` to cap its crawl at ten minutes, such as `zap-full-scan.py -t http://localhost:8080/admin/login -m 10 -r
+  `-m 10` to cap its crawl at ten minutes, such as `zap-full-scan.py -t http://admin.localhost:8081/login -m 10 -r
   full-login.html`. `docker stop tetsu-zap` ends a scan early.
 - **Exit code 2 means warnings to read;** 1 means a failure found, and 3 that ZAP broke.
-- **On macOS,** drop `--network host` and target `http://host.docker.internal:8080`.
+- **On macOS,** drop `--network host` and target `http://host.docker.internal` at each port instead.
 - **Logged in:** after joining, copy the `__Host-tetsu-admin` cookie's value, a long string of letters and digits
   without the name in front, from Chrome's DevTools (Application, then Cookies), and scan
-  `http://localhost:8080/admin` with this added to the scan's options, with the value in place of `VALUE`. The cookie is a live session, so keep it out of reports you send, and log out afterwards.
+  `http://admin.localhost:8081/` with this added to the scan's options, with the value in place of `VALUE`. The cookie is a live session, so keep it out of reports you send, and log out afterwards.
 
   ```text
   -z "-config replacer.full_list(0).description=auth -config replacer.full_list(0).enabled=true
@@ -106,19 +107,21 @@ done
   -config replacer.full_list(0).regex=false -config replacer.full_list(0).replacement=__Host-tetsu-admin=VALUE"
   ```
 
-**2. Checks of Tetsu's own promises,** with `curl` and Chrome. The admin pages are `/admin`, `/admin/login`,
-`/admin/join`, `/admin/mailbox`, and the account's `/admin/settings/profile` and `/admin/settings/security`, which holds the
-sessions and passkeys. Requests go to `begin` and `finish` under `/admin/login`, `/admin/join`, and
-`/admin/passkeys`, and to `/admin/logout` and `/admin/session`, as JSON from `Origin: http://localhost:8080`. A logged-in
-one also carries the session cookie and the hidden `form` field's value, which `/admin`'s page source shows.
+**2. Checks of Tetsu's own promises,** with `curl` and Chrome. The admin pages sit at the root of
+`http://admin.localhost:8081` ([ADR-0094](../adr/0094-realm-paths-at-the-root-of-their-hosts.md)): `/`, `/login`,
+`/join`, `/mailbox`, and the account's `/settings/profile` and `/settings/security`, which holds the sessions and
+passkeys. Requests go to `begin` and `finish` under `/login`, `/join`, and `/passkeys`, and to `/logout` and
+`/session`, as JSON from `Origin: http://admin.localhost:8081`. A logged-in one also carries the session cookie and
+the hidden `form` field's value, which Profile's page source shows. Staff's pages are the same, at
+`http://app.localhost:8082`.
 
 | Area | Try |
 | --- | --- |
 | Sign-in | Reusing or guessing an invite link; joining twice; logging in without a passkey |
-| Sessions | Reusing a session after Log out; changing the cookie; a session past its 15 idle minutes, which `GET /admin/session` counts down without renewing; after it, `/admin` sends you to log in |
+| Sessions | Reusing a session after Log out; changing the cookie; a session past its 15 idle minutes, which `GET /session` counts down without renewing; after it, `/` sends you to log in |
 | Forged requests | A form posted from another origin, or without its token |
 | Rate limits | Many failed logins in a row, until a 429 with `Retry-After`; each further failure doubles the wait. Do this last: it can stop you joining or logging in for up to an hour. Earlier requests in the session count too, ZAP's included, so a limit can arrive sooner than ADR-0072's numbers |
-| Pages | `/admin`, `/admin/mailbox`, and the account pages logged out; the headers and policy on every page |
+| Pages | `/`, `/mailbox`, and the account pages logged out; an address with a trailing slash, which goes to the one without; the headers and policy on every page |
 | Tenants | With a second seed file copied from `crates/tetsu/tests/fixtures/sample.toml`, one tenant's page or theme showing the other's name, locations, or colors. Tenants hold only public data so far |
 
 **3. By hand, optional.** ZAP's desktop app sits between Chrome and Tetsu to watch and replay requests. Move it off

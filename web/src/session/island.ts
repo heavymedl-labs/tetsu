@@ -1,4 +1,4 @@
-// The session island (ADR-0031): <tetsu-session base="/admin" form-token="…"> wraps the page's session dialog, which
+// The session island (ADR-0031): <tetsu-session base="" form-token="…"> wraps the page's session dialog, which
 // the server renders, for the realm at `base`. It reads how long the session has left without renewing it, opens the dialog two minutes before a limit,
 // renews the session only when the person chooses to stay, keeps every tab of the site in step, and sends a page
 // whose session has ended to log in (docs/research/identity/operator-lifecycles.md).

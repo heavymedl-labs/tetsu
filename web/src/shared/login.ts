@@ -1,9 +1,9 @@
 // A realm's base path, and where a page goes once its session has ended, which the passkey and session islands
 // share.
 
-/** A realm's base path as a page names it: a slash and lowercase letters, such as `/admin` or `/app`. A customer realm's
- * `/<business>/account` (ADR-0084), and a realm on a host of its own, need more, which their slices add. */
-const BASE = /^\/[a-z]+$/;
+/** A realm's base path as a page names it: none, for a realm at the root of its own host (ADR-0094), or a slash and
+ * lowercase letters. A customer realm's `/<business>/account` (ADR-0084) needs more, which its slice adds. */
+const BASE = /^(\/[a-z]+)?$/;
 
 /** A path written plainly, in the alphabet of the server's return path check: what a login may return to, below its
  * realm's base path. The base itself is where a login goes anyway, so it needs no saying. */

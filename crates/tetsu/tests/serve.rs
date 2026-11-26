@@ -31,9 +31,9 @@ mod support {
             .env("DATABASE_URL", settings.url())
             .env("DATABASE_TLS", "disable")
             .env("TETSU_DEMO", "true")
-            .env("TETSU_SERVES", "site,admin,staff")
+            .env("TETSU_SERVES", "site")
             .env("TETSU_ADMIN_ORIGIN", "http://localhost:8080")
-            .env("TETSU_STAFF_ORIGIN", "http://localhost:8080")
+            .env("TETSU_STAFF_ORIGIN", "http://app.localhost:8082")
             .env("TETSU_TRUSTED_PROXIES", "0");
         // A developer's or CI's own OpenTelemetry settings never reach a test server.
         // Export and mail settings in the shell that runs the tests never reach a test server.
@@ -95,11 +95,7 @@ mod support {
         settings: &Settings,
         env: &[(&str, &str)],
     ) -> Result<(Server, Vec<String>), Child> {
-        let port = TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
+        let port = free_port();
         let mut command = tetsu(settings, &["serve"]);
         command
             .env("PORT", port.to_string())
@@ -108,7 +104,7 @@ mod support {
             .stdout(Stdio::piped())
             .spawn()
             .expect("the binary runs");
-        let (stdout, mut before) = until_listening(BufReader::new(child.stdout.take().unwrap()));
+        let (stdout, mut before) = until_listening(BufReader::new(child.stdout.take().unwrap()), 1);
         // A server that could not bind says so, then may log more as it stops, such as a refused export, so the
         // line is looked for anywhere, not only last.
         if before
@@ -133,22 +129,35 @@ mod support {
         ))
     }
 
-    /// The lines the server writes up to and including the one saying it is listening, or a failure after 10
-    /// seconds, so a server that never says it is listening fails the test rather than hanging it.
-    fn until_listening(
+    /// A port free a moment ago, which the kernel may hand to another socket before the server binds it.
+    pub fn free_port() -> u16 {
+        TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port()
+    }
+
+    /// The lines the server writes up to and including the last of `hosts` saying each is listening, or a failure
+    /// after 10 seconds, so a server that never says it is listening fails the test rather than hanging it.
+    pub fn until_listening(
         mut stdout: BufReader<ChildStdout>,
+        hosts: usize,
     ) -> (BufReader<ChildStdout>, Vec<String>) {
         let (send, receive) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let mut lines = Vec::new();
+            let mut listening = 0;
             loop {
                 let mut line = String::new();
                 if stdout.read_line(&mut line).unwrap_or(0) == 0 {
                     break;
                 }
-                let listening = message(&line).is_some_and(|text| text.starts_with("serving on"));
+                if message(&line).is_some_and(|text| text.starts_with("serving on")) {
+                    listening += 1;
+                }
                 lines.push(line);
-                if listening {
+                if listening == hosts {
                     break;
                 }
             }
@@ -319,8 +328,13 @@ mod support {
     );
 
     pub fn get(server: &Server, path: &str) -> String {
-        sent(
-            server,
+        get_at(server.port, path)
+    }
+
+    /// A page from whatever listens at `port` on this machine.
+    pub fn get_at(port: u16, path: &str) -> String {
+        sent_to(
+            port,
             &format!("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"),
         )
     }
@@ -330,7 +344,7 @@ mod support {
         sent(
             server,
             &format!(
-                "POST /admin/login/begin HTTP/1.1\r\nHost: localhost\r\nOrigin: http://localhost:8080\r\n\
+                "POST /login/begin HTTP/1.1\r\nHost: localhost\r\nOrigin: http://localhost:8080\r\n\
                  X-Forwarded-For: {forwarded}\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\
                  Connection: close\r\n\r\n{{}}"
             ),
@@ -338,7 +352,11 @@ mod support {
     }
 
     fn sent(server: &Server, request: &str) -> String {
-        let mut stream = TcpStream::connect(("127.0.0.1", server.port)).unwrap();
+        sent_to(server.port, request)
+    }
+
+    fn sent_to(port: u16, request: &str) -> String {
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
         stream.write_all(request.as_bytes()).unwrap();
         let mut raw = String::new();
         stream.read_to_string(&mut raw).unwrap();
@@ -352,8 +370,8 @@ use std::process::Command;
 #[cfg(unix)]
 use support::{KEY, exported, one_visit_exported};
 use support::{
-    begin_login, get, logged, message, ready, refused, served, start, start_marked, start_with,
-    stop, tetsu,
+    begin_login, free_port, get, get_at, logged, message, ready, refused, served, start,
+    start_marked, start_with, stop, tetsu, until_listening,
 };
 use tetsu_postgres::test_support::fresh_database;
 
@@ -363,8 +381,8 @@ use tetsu_postgres::test_support::fresh_database;
 async fn the_login_page_loads_its_script() {
     let database = fresh_database().await.expect("a test database");
     ready(&database);
-    let server = start(&database);
-    let page = get(&server, "/admin/login");
+    let (server, _) = start_with(&database, &[("TETSU_SERVES", "admin")]);
+    let page = get(&server, "/login");
     assert!(page.starts_with("HTTP/1.1 200"), "{page}");
     assert!(page.contains("script-src 'self'"), "{page}");
     assert!(
@@ -426,6 +444,28 @@ async fn a_visitor_sees_a_tenants_page_and_tetsus_page() {
     assert!(
         theme_head.contains("x-content-type-options: nosniff"),
         "{theme}"
+    );
+}
+
+/// The site's "Log in" goes straight to staff login on the staff's origin, and `/login` sends a typed visit there
+/// (ADR-0093, ADR-0094).
+#[tokio::test]
+async fn log_in_on_the_site_leads_to_staff_login() {
+    let database = fresh_database().await.expect("a test database");
+    ready(&database);
+    let server = start(&database);
+    let home = get(&server, "/");
+    assert!(
+        home.contains("href=\"http://app.localhost:8082/login\""),
+        "{home}"
+    );
+    let typed = get(&server, "/login");
+    assert!(typed.starts_with("HTTP/1.1 303"), "{typed}");
+    assert!(
+        typed
+            .to_ascii_lowercase()
+            .contains("\r\nlocation: http://app.localhost:8082/login\r\n"),
+        "{typed}"
     );
 }
 
@@ -634,7 +674,10 @@ async fn it_refuses_to_start_while_a_tenant_holds_a_reserved_address() {
 async fn a_flood_of_logins_from_one_network_is_refused_and_no_other() {
     let database = fresh_database().await.expect("a test database");
     ready(&database);
-    let (server, _) = start_with(&database, &[("TETSU_TRUSTED_PROXIES", "1")]);
+    let (server, _) = start_with(
+        &database,
+        &[("TETSU_TRUSTED_PROXIES", "1"), ("TETSU_SERVES", "admin")],
+    );
     for n in 0..30 {
         let begun = begin_login(&server, &format!("203.0.113.{n}, 192.0.2.1"));
         assert!(begun.starts_with("HTTP/1.1 200"), "{n}: {begun}");
@@ -674,6 +717,7 @@ async fn it_refuses_to_start_without_its_origin() {
     let database = fresh_database().await.expect("a test database");
     ready(&database);
     let output = tetsu(&database, &["serve"])
+        .env("TETSU_SERVES", "admin")
         .env_remove("TETSU_ADMIN_ORIGIN")
         .output()
         .expect("the binary runs");
@@ -698,31 +742,42 @@ async fn it_refuses_to_start_without_saying_what_it_serves() {
     assert!(stderr.contains("TETSU_SERVES must list"), "{stderr}");
 }
 
-/// A service on the staff's own host serves their pages, sends its root to them, and serves no admin page
-/// (ADR-0040, #169).
+/// A service on the staff's own host serves their pages at its root, sends its root to log in, and answers an
+/// address it does not serve as its realm's (ADR-0040, ADR-0094).
 #[tokio::test]
-async fn a_staff_host_serves_the_staffs_pages_alone() {
+async fn a_staff_host_serves_the_staffs_pages_at_its_root() {
     let database = fresh_database().await.expect("a test database");
     ready(&database);
     let (mut server, before) = start_with(&database, &[("TETSU_SERVES", "staff")]);
     assert!(before.is_empty(), "{before:?}");
     let root = get(&server, "/");
     assert!(
-        root.to_ascii_lowercase().contains("\r\nlocation: /app\r\n"),
+        root.to_ascii_lowercase()
+            .contains("\r\nlocation: /login\r\n"),
         "{root}"
     );
-    assert!(get(&server, "/app/login").starts_with("HTTP/1.1 200"));
-    for elsewhere in ["/admin/login", "/admin/mailbox", "/sample-gym"] {
+    let login = get(&server, "/login");
+    assert!(login.starts_with("HTTP/1.1 200"), "{login}");
+    assert!(
+        login.contains("Ask the business&#39;s owner for an invite."),
+        "{login}"
+    );
+    for elsewhere in ["/mailbox", "/sample-gym"] {
         let page = get(&server, elsewhere);
-        assert!(page.starts_with("HTTP/1.1 404"), "{elsewhere}: {page}");
+        assert!(
+            page.to_ascii_lowercase()
+                .contains(&format!("\r\nlocation: /login?next={elsewhere}\r\n")),
+            "{elsewhere}: {page}"
+        );
     }
     stop(&mut server);
 }
 
-/// A service on the admins' own host serves their pages and the assets they load, sends its root to them, and
-/// serves no business's page and no staff page (ADR-0040, #169).
+/// A service on the admins' own host serves their pages at its root and the assets they load, sends its root to log
+/// in, sends an address with a trailing slash to the one without, and serves no business's page (ADR-0040,
+/// ADR-0094).
 #[tokio::test]
-async fn an_admin_host_serves_the_admins_pages_alone() {
+async fn an_admin_host_serves_the_admins_pages_at_its_root() {
     let database = fresh_database().await.expect("a test database");
     ready(&database);
     let (mut server, before) = start_with(&database, &[("TETSU_SERVES", "admin")]);
@@ -731,15 +786,83 @@ async fn an_admin_host_serves_the_admins_pages_alone() {
     assert!(root.starts_with("HTTP/1.1 303"), "{root}");
     assert!(
         root.to_ascii_lowercase()
-            .contains("\r\nlocation: /admin\r\n"),
+            .contains("\r\nlocation: /login\r\n"),
         "{root}"
     );
-    assert!(get(&server, "/admin/login").starts_with("HTTP/1.1 200"));
-    for elsewhere in ["/app/login", "/sample-gym"] {
-        let page = get(&server, elsewhere);
-        assert!(page.starts_with("HTTP/1.1 404"), "{elsewhere}: {page}");
-    }
+    let login = get(&server, "/login");
+    assert!(login.starts_with("HTTP/1.1 200"), "{login}");
+    assert!(login.contains("Ask an admin for an invite."), "{login}");
+    let slashed = get(&server, "/login/");
+    assert!(slashed.starts_with("HTTP/1.1 308"), "{slashed}");
+    assert!(
+        slashed
+            .to_ascii_lowercase()
+            .contains("\r\nlocation: /login\r\n"),
+        "{slashed}"
+    );
+    let tenant = get(&server, "/sample-gym");
+    assert!(!tenant.contains("Sample Gym"), "{tenant}");
     stop(&mut server);
+}
+
+/// A service serving every host, as this machine does, gives each its own port: the site at `PORT`, and each realm
+/// at its origin's, so each realm has an origin of its own (ADR-0094).
+#[tokio::test]
+async fn serving_every_host_gives_each_a_port_of_its_own() {
+    /// Stops the server however the test ends, so a failed assertion leaves no server running.
+    struct Stopped(std::process::Child);
+    impl Drop for Stopped {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let database = fresh_database().await.expect("a test database");
+    ready(&database);
+    let [site, admin, staff] = [free_port(), free_port(), free_port()];
+    let mut child = tetsu(&database, &["serve"])
+        .env("PORT", site.to_string())
+        .env("TETSU_SERVES", "site,admin,staff")
+        .env(
+            "TETSU_ADMIN_ORIGIN",
+            format!("http://admin.localhost:{admin}"),
+        )
+        .env(
+            "TETSU_STAFF_ORIGIN",
+            format!("http://app.localhost:{staff}"),
+        )
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("the binary runs");
+    let stdout = child.stdout.take().unwrap();
+    let _server = Stopped(child);
+    let (_stdout, lines) = until_listening(std::io::BufReader::new(stdout), 3);
+    let listening: Vec<_> = lines.iter().filter_map(|line| message(line)).collect();
+    for port in [site, admin, staff] {
+        assert!(
+            listening.contains(&format!("serving on http://0.0.0.0:{port}")),
+            "{listening:?}"
+        );
+    }
+    assert!(get_at(site, "/").contains("Booking software,"));
+    assert!(get_at(admin, "/login").contains("Ask an admin for an invite."));
+    assert!(get_at(staff, "/login").contains("Ask the business&#39;s owner for an invite."));
+}
+
+/// Two hosts may not share a port, so serving refuses to start rather than bind one and fail the other.
+#[tokio::test]
+async fn it_refuses_two_hosts_on_one_port() {
+    let database = fresh_database().await.expect("a test database");
+    ready(&database);
+    let output = refused(
+        tetsu(&database, &["serve"])
+            .env("PORT", "8080")
+            .env("TETSU_SERVES", "site,admin")
+            .env("TETSU_ADMIN_ORIGIN", "http://admin.localhost:8080"),
+    );
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("needs a port of its own"), "{stderr}");
 }
 
 #[tokio::test]

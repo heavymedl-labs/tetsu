@@ -120,9 +120,54 @@ impl Requester {
     }
 }
 
+/// Whether `path` is one or more segments after a slash, each written only in ASCII letters, digits, `-`, `_`, and
+/// `.`, and none empty, `.`, or `..`. Such a path names a page on this host alone and needs no decoding, so a
+/// redirect to it cannot be read as another site's address, as `//evil.example` or `/\evil.example` could (OWASP,
+/// "Unvalidated Redirects and Forwards").
+#[must_use]
+pub fn plain_path(path: &str) -> bool {
+    path.strip_prefix('/').is_some_and(|rest| {
+        rest.split('/').all(|segment| {
+            !matches!(segment, "" | "." | "..")
+                && segment
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+        })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_plain_path_is_plain_segments_after_a_slash() {
+        assert_eq!(
+            ["/studio", "/a/b.c", "/a-b/c_d/2026"].map(plain_path),
+            [true, true, true]
+        );
+        assert_eq!(
+            [
+                "",
+                "/",
+                "studio",
+                "//",
+                "//evil.example",
+                "/a//b",
+                "/a/",
+                "/./a",
+                "/a/..",
+                "/%2e",
+                "/a b",
+                "/\\evil.example",
+                "/é",
+                "/a?b",
+                "/a#b",
+            ]
+            .map(plain_path),
+            [false; 15]
+        );
+    }
 
     fn ip(text: &str) -> IpAddr {
         text.parse().unwrap()

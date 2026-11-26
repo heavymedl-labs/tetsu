@@ -11,7 +11,7 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
-use axum::extract::{MatchedPath, Request};
+use axum::extract::{MatchedPath, Request, State};
 use axum::middleware::Next;
 use axum::response::Response;
 use opentelemetry::KeyValue;
@@ -28,16 +28,6 @@ use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::layer::SubscriberExt;
 
 use crate::settings::{Export, LogFormat};
-
-/// The realm a request is for: the admins' at a path Identity's admin pages serve, and the customers' at any
-/// other (ADR-0048). Only the path, never its text, decides, so the label names no person.
-fn realm_of(path: &str) -> &'static str {
-    if tetsu_identity::PATHS.contains(&path) {
-        "admin"
-    } else {
-        "customer"
-    }
-}
 
 #[cfg(test)]
 const REALM: &str = "customer";
@@ -187,14 +177,14 @@ fn report_panics() {
     }));
 }
 
-/// Runs a request inside its own span, then logs one line with its status and how long it took, marked as a
-/// server error alert when the status is 5xx. A module records the tenant on the span as `tenant_id` once it knows
+/// Runs a request inside its own span, labelled with the `realm` of the host it came to (ADR-0048, ADR-0094), then
+/// logs one line with its status and how long it took, marked as a server error alert when the status is 5xx. A module records the tenant on the span as `tenant_id` once it knows
 /// it, and [`route`] records the route that answered.
-pub async fn request(request: Request, next: Next) -> Response {
+pub async fn request(State(realm): State<&'static str>, request: Request, next: Next) -> Response {
     let span = tracing::info_span!(
         "request",
         request_id = request_id(),
-        realm = realm_of(request.uri().path()),
+        realm,
         http.request.method = method_name(request.method()),
         http.route = Empty,
         tenant_id = Empty,
@@ -327,24 +317,14 @@ mod tests {
             .collect()
     }
 
-    /// A request to an admin page is the admins' realm; any other is the customers'.
+    /// A request is labelled with the realm of the host it came to (ADR-0094): the admins' and staff's on their own
+    /// hosts, and the customers' on the site. Only the host decides, so the label names no person.
     #[test]
-    fn a_request_is_labelled_with_its_realm() {
-        let realms = [
-            "/admin",
-            "/admin/login",
-            "/admin/logout",
-            "/",
-            "/sample-studio",
-            "/admin-studio",
-            "/admin/nothing",
-        ]
-        .map(realm_of);
+    fn a_request_is_labelled_with_its_hosts_realm() {
+        use crate::serve::Host;
         assert_eq!(
-            realms,
-            [
-                "admin", "admin", "admin", "customer", "customer", "customer", "customer"
-            ]
+            [Host::Site, Host::Admin, Host::Staff].map(Host::realm),
+            ["customer", "admin", "staff"]
         );
     }
 

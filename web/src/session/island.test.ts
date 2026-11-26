@@ -358,7 +358,7 @@ describe("readying a session island", () => {
 
 describe("a session island in its realm", () => {
   it("leaves one in a realm it cannot trust, or none, alone", async () => {
-    for (const base of [null, "", "//evil.example", "/admin/session"]) {
+    for (const base of [null, "/", "//evil.example", "/admin/session"]) {
       const { page } = browser();
       const host = island(PARTS, base);
       ready(host, page);
@@ -366,6 +366,17 @@ describe("a session island in its realm", () => {
       expect([asked.mock.calls.length, host.dataset.ready], String(base)).toEqual([0, undefined]);
     }
   });
+  it("works at the root of its realm's own host", async () => {
+    const { page } = browser();
+    page.location.pathname = "/settings/profile";
+    const host = island(PARTS.replace("/admin/logout", "/logout"), "");
+    answers([900, 28_800]);
+    ready(host, page);
+    await elapse(0);
+    expect(asked).toHaveBeenCalledWith("/session", expect.any(AbortSignal));
+    expect(host.querySelector("form")?.getAttribute("action")).toBe("/logout?next=/settings/profile");
+  });
+
   it("works in its own realm: reads and stays there, logs out there, and sends an ending to its login", async () => {
     const { page, listeners } = browser();
     page.location.pathname = "/app/settings/profile";

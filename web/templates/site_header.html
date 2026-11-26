@@ -1,4 +1,6 @@
-{#- Tetsu's own header (ADR-0035): the wordmark home, and in a demo the site's sections and plans. Tetsu's pages and the site's not-found page share it. It reads `demo`. -#}
+{#- Tetsu's own header (ADR-0035): the wordmark home, in a demo the site's sections and plans, and "Log in", straight to
+    staff login on its own host (ADR-0093, ADR-0094), on a page that names it. Tetsu's pages and the site's not-found
+    page share it. It reads `demo`, and `login`, the staff login's address or none. -#}
 {% import "../../../web/templates/components.html" as ui %}
 {%-
   let nav = [("/#product", "Product"), ("/#customers", "Customers"), ("/#why", "Why Tetsu"), ("/#pricing", "Pricing")]
@@ -10,6 +12,10 @@
       {%- endfor %}
     </div>{% endif %}
   <div class="flex items-center gap-3 text-mini">
+    {%- if let Some(login) = login %}<a
+        href="{{ login }}"
+        class="rounded-sm px-1 text-muted transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      >Log in</a>{% endif %}
     {% if demo %}<div class="hidden sm:contents">{% call ui::button("/#pricing", small = true) %}See plans{%
           endcall
         %}</div>

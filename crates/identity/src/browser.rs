@@ -205,11 +205,18 @@ fn origin_from(text: &str) -> Result<String, Error> {
     }
 }
 
-/// An `https` host of dot-separated labels, or this machine over `http`.
+/// An `https` host of dot-separated labels, or this machine over `http`: `localhost`, `127.0.0.1`, or a name ending
+/// in `.localhost`, which browsers send only to this machine and treat as a secure context, so each realm can have an
+/// origin of its own here (ADR-0094).
 fn host_fits(scheme: &str, host: &str) -> bool {
     match scheme {
         "https" => host.split('.').all(label),
-        "http" => matches!(host, "localhost" | "127.0.0.1"),
+        "http" => {
+            matches!(host, "localhost" | "127.0.0.1")
+                || host
+                    .strip_suffix(".localhost")
+                    .is_some_and(|name| name.split('.').all(label))
+        }
         _ => false,
     }
 }
@@ -236,34 +243,13 @@ fn port_fits(scheme: &str, port: &str) -> bool {
 /// The longest return path a login keeps; a realm's page's address is far shorter.
 const LONGEST_RETURN: usize = 120;
 
-/// Whether `base` is a realm's base path: a slash and lowercase letters, such as `/admin`, so no path under it can
-/// begin another site's address.
-pub(crate) fn realm_base(base: &str) -> bool {
-    base.strip_prefix('/')
-        .is_some_and(|name| !name.is_empty() && name.bytes().all(|byte| byte.is_ascii_lowercase()))
-}
-
-/// Where a login may send the browser next, if `raw` is one of the pages of the realm at `base`, such as `/admin`:
-/// the base, or a path under it written only in ASCII letters, digits, `-`, `_`, and `.`, with no empty, `.`, or `..`
-/// segment. So it can name no other site, scheme, or realm, and needs no decoding, which leaves nothing for a browser
-/// to read differently (OWASP, "Unvalidated Redirects and Forwards"). A base that is no realm's returns nowhere.
+/// Where a login may send the browser next, if `raw` is one of the pages of its realm, which sits at the root of its
+/// own host (ADR-0094): the home, `/`, or a path written only in ASCII letters, digits, `-`, `_`, and `.`, with no
+/// empty, `.`, or `..` segment. So it can name no other site or scheme, and needs no decoding, which leaves nothing for
+/// a browser to read differently (OWASP, "Unvalidated Redirects and Forwards"; `v5.0.0-3.7.2`).
 #[must_use]
-pub fn return_path<'a>(base: &str, raw: &'a str) -> Option<&'a str> {
-    if !realm_base(base) {
-        return None;
-    }
-    let rest = raw.strip_prefix(base)?;
-    let plain = |segment: &str| {
-        !matches!(segment, "" | "." | "..")
-            && segment
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
-    };
-    let fits = raw.len() <= LONGEST_RETURN
-        && (rest.is_empty()
-            || rest
-                .strip_prefix('/')
-                .is_some_and(|rest| rest.split('/').all(plain)));
+pub fn return_path(raw: &str) -> Option<&str> {
+    let fits = raw.len() <= LONGEST_RETURN && (raw == "/" || tetsu_kernel::plain_path(raw));
     fits.then_some(raw)
 }
 
@@ -272,87 +258,52 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
+    /// A realm at the root of its host (ADR-0094) returns to its home, `/`, or any plain path on the host.
     #[test]
-    fn a_return_path_is_an_admin_page_written_plainly() {
-        for path in [
-            "/admin",
-            "/admin/passkeys",
-            "/admin/a-b/c_d/e.f",
-            "/admin/2026",
-        ] {
-            assert_eq!(return_path("/admin", path), Some(path), "{path}");
+    fn a_return_path_at_a_hosts_root_is_any_page_written_plainly() {
+        for path in ["/", "/settings/profile", "/mailbox", "/a-b/c_d/e.f"] {
+            assert_eq!(return_path(path), Some(path), "{path}");
         }
-    }
-
-    /// A base that is no realm's, such as `/` or none, returns nowhere, so no base can open a way to another site.
-    #[test]
-    fn a_return_path_needs_a_realms_base() {
-        for (base, path) in [
-            ("/", "//evil.example"),
-            ("", "/anything"),
-            ("/Admin", "/Admin/a"),
-            ("/a/b", "/a/b/c"),
-            ("/ad-min", "/ad-min/a"),
-        ] {
-            assert_eq!(return_path(base, path), None, "{base} {path}");
-        }
-        assert_eq!([realm_base("/admin"), realm_base("/app")], [true, true]);
-    }
-
-    /// Each realm returns only to its own pages.
-    #[test]
-    fn a_return_path_stays_in_its_realm() {
-        assert_eq!(
-            return_path("/app", "/app/settings/profile"),
-            Some("/app/settings/profile")
-        );
-        for path in ["/admin/passkeys", "/apple", "/app/../admin"] {
-            assert_eq!(return_path("/app", path), None, "{path}");
-        }
-    }
-
-    #[test]
-    fn a_return_path_names_no_other_site_scheme_or_page() {
-        let long = format!("/admin/{}", "a".repeat(200));
+        let long = format!("/{}", "a".repeat(200));
         for path in [
             "",
-            "/",
-            "/adminx",
-            "/admin/",
-            "//evil.example/admin",
-            "/admin//evil.example",
-            "/admin/../login",
-            "/admin/./a",
-            "/admin/a/..",
-            "/admin\\evil.example",
-            "/admin/%2e%2e",
-            "/admin/a?b",
-            "/admin/a#b",
-            "/admin/a b",
-            "/admin/é",
-            "https://evil.example/admin",
+            "//",
+            "//evil.example",
+            "///evil.example",
+            "/\\evil.example",
+            "/settings/",
+            "/settings//profile",
+            "/../login",
+            "/./a",
+            "/%2e%2e",
+            "/a?b",
+            "/a#b",
+            "/a b",
+            "/é",
+            "/a/..",
+            "https://evil.example/",
             "javascript:alert(1)",
-            "admin/a",
+            "settings/profile",
             long.as_str(),
         ] {
-            assert_eq!(return_path("/admin", path), None, "{path}");
+            assert_eq!(return_path(path), None, "{path}");
         }
     }
 
     proptest! {
         #[test]
-        fn a_return_path_is_either_refused_or_a_plain_admin_page(
-            raw in prop_oneof!["\\PC{0,40}", "/admin(/[a-z.%]{0,3}){0,4}"],
+        fn a_return_path_at_a_hosts_root_is_either_refused_or_a_plain_page(
+            raw in prop_oneof!["\\PC{0,40}", "(/[a-z.%\\\\]{0,3}){0,4}"],
         ) {
-            if let Some(path) = return_path("/admin", &raw) {
-                prop_assert!(path == "/admin" || path.starts_with("/admin/"));
-                // With a slash after it, an empty, `.`, or `..` segment shows as one of these anywhere in it.
-                let ended = format!("{path}/");
-                for bad in ["//", "/./", "/../", "%"] {
-                    prop_assert!(!ended.contains(bad), "{} holds {}", path, bad);
+            if let Some(path) = return_path(&raw) {
+                prop_assert!(path.starts_with('/') && !path.starts_with("//"));
+                // Past the home, an empty, `.`, or `..` segment shows as one of these anywhere in it.
+                if path != "/" {
+                    let ended = format!("{path}/");
+                    for bad in ["//", "/./", "/../", "%", "\\"] {
+                        prop_assert!(!ended.contains(bad), "{} holds {}", path, bad);
+                    }
                 }
-            } else {
-                prop_assert_ne!(raw.as_str(), "/admin");
             }
         }
     }
@@ -502,6 +453,8 @@ mod tests {
                 "https://ops2.example.com",
                 "http://localhost:8080",
                 "http://127.0.0.1:8080",
+                "http://admin.localhost:8081",
+                "http://a.b.localhost",
             ])
             .is_ok()
         );
@@ -541,6 +494,21 @@ mod tests {
             Origins::parse(&[]),
             Err(Error::Invalid("at least one origin is needed".to_string()))
         );
+    }
+
+    /// Over `http`, only this machine: a name ending in `.localhost` is one, and nothing that merely contains it.
+    #[test]
+    fn a_localhost_name_is_this_machine_and_nothing_like_it_is() {
+        for origin in [
+            "http://.localhost",
+            "http://Admin.localhost",
+            "http://admin.localhost.evil.example",
+            "http://localhost.evil.example",
+            "http://admin_x.localhost",
+            "http://evil.example/.localhost",
+        ] {
+            assert!(Origins::parse(&[origin]).is_err(), "{origin}");
+        }
     }
 
     #[test]

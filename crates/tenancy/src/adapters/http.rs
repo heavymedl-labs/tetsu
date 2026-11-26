@@ -43,6 +43,8 @@ struct ThemeSheet<'a> {
 struct NotFoundPage {
     demo: bool,
     stylesheet: &'static str,
+    /// The staff login the site header's "Log in" links to (ADR-0094).
+    login: Option<&'static str>,
     /// The radio the site footer's color scheme control checks, from the visitor's cookie (ADR-0070).
     scheme: &'static str,
 }
@@ -63,47 +65,45 @@ const THEME_CACHE: &str = "public, max-age=300";
 /// demo businesses and asks search engines not to index it (ADR-0018). A page that could not be loaded is shown
 /// as unavailable, and `report` gets a line for the log, since where such lines go is the composition
 /// root's choice (#27). Each page links `stylesheet`, the shared sheet's URL, which the composition root knows,
-/// and a tenant's page links its own theme sheet, `/<slug>/theme.css`, after it.
+/// and a tenant's page links its own theme sheet, `/<slug>/theme.css`, after it. The not-found page's header links
+/// "Log in" to `login`, staff login on its own host (ADR-0094).
 pub fn router<S>(
     tenants: Tenants<S>,
     demo: bool,
     stylesheet: &'static str,
+    login: &'static str,
     report: fn(&str),
 ) -> Router
 where
     S: TenantStore + Send + Sync + 'static,
 {
-    routes(tenants, demo, stylesheet, RESOLVE_TIMEOUT, report)
+    routes(Served {
+        tenants,
+        demo,
+        stylesheet,
+        login,
+        timeout: RESOLVE_TIMEOUT,
+        report,
+    })
 }
 
-/// The router, with the time a lookup may take and where failures are reported as parameters, so tests need not
-/// wait out the real timeout and can read what would be logged.
-fn routes<S>(
-    tenants: Tenants<S>,
-    demo: bool,
-    stylesheet: &'static str,
-    timeout: Duration,
-    report: fn(&str),
-) -> Router
+/// The router over what it serves, which holds the time a lookup may take and where failures are reported, so tests
+/// need not wait out the real timeout and can read what would be logged.
+fn routes<S>(served: Served<S>) -> Router
 where
     S: TenantStore + Send + Sync + 'static,
 {
     Router::new()
         .route("/{address}", get(page::<S>))
         .route("/{address}/theme.css", get(theme::<S>))
-        .with_state(Arc::new(Served {
-            tenants,
-            demo,
-            stylesheet,
-            timeout,
-            report,
-        }))
+        .with_state(Arc::new(served))
 }
 
 struct Served<S> {
     tenants: Tenants<S>,
     demo: bool,
     stylesheet: &'static str,
+    login: &'static str,
     timeout: Duration,
     report: fn(&str),
 }
@@ -212,6 +212,7 @@ fn not_found<S>(served: &Served<S>, scheme: Scheme) -> Response {
         &NotFoundPage {
             demo: served.demo,
             stylesheet: served.stylesheet,
+            login: Some(served.login),
             scheme: scheme.as_str(),
         },
     )
@@ -255,6 +256,20 @@ mod tests {
 
     /// Stands in for the shared stylesheet's hashed URL, which the composition root passes.
     const STYLESHEET: &str = "/assets/tetsu-test.css";
+    const LOGIN: &str = "https://app.example.com/login";
+
+    /// What a test's router serves: `tenants`, marked as demos or not, with a short lookup timeout, reporting to
+    /// [`record`].
+    fn served(tenants: Tenants<Memory>, demo: bool) -> Served<Memory> {
+        Served {
+            tenants,
+            demo,
+            stylesheet: STYLESHEET,
+            login: LOGIN,
+            timeout: Duration::from_millis(100),
+            report: record,
+        }
+    }
     use crate::domain::{Color, Location, NewTenant, Slug, TenantId, Theme};
 
     /// Tenants kept in memory, keyed by address, with a switch that makes every lookup fail or stall.
@@ -338,13 +353,7 @@ mod tests {
         for (slug, name) in names {
             tenants.create(&tenant(slug, name)).await.unwrap();
         }
-        routes(
-            tenants,
-            true,
-            STYLESHEET,
-            Duration::from_millis(100),
-            record,
-        )
+        routes(served(tenants, true))
     }
 
     static REPORTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -423,13 +432,7 @@ mod tests {
             tenants.rename("/sample\u{7}", &to).await,
             Err(Error::NotFound)
         );
-        let app = routes(
-            tenants,
-            true,
-            STYLESHEET,
-            Duration::from_millis(100),
-            record,
-        );
+        let app = routes(served(tenants, true));
         assert_eq!(get(app.clone(), "/sample-gym").await.0, StatusCode::OK);
         assert_eq!(get(app, "/sample-studio").await.0, StatusCode::NOT_FOUND);
     }
@@ -507,30 +510,14 @@ mod tests {
             .create(&tenant("anvil-row", "Anvil Row Strength"))
             .await
             .unwrap();
-        let app = routes(
-            tenants,
-            false,
-            STYLESHEET,
-            Duration::from_millis(100),
-            record,
-        );
+        let app = routes(served(tenants, false));
         let (status, _, body) = get(app, "/anvil-row").await;
         assert_eq!(status, StatusCode::OK);
         assert!(body.contains("<h1>Anvil Row Strength</h1>"), "{body}");
         assert!(!body.contains("Demo business."), "{body}");
         assert!(!body.contains("noindex"), "{body}");
         let tenants = Tenants::new(Memory::default());
-        let (status, _, body) = get(
-            routes(
-                tenants,
-                false,
-                STYLESHEET,
-                Duration::from_millis(100),
-                record,
-            ),
-            "/nobody",
-        )
-        .await;
+        let (status, _, body) = get(routes(served(tenants, false)), "/nobody").await;
         assert_eq!(status, StatusCode::NOT_FOUND);
         assert!(
             !body.contains("Demo") && !body.contains("noindex"),
@@ -542,6 +529,8 @@ mod tests {
             "<nav aria-label=\"Tetsu\"",
             "<svg role=\"img\" aria-label=\"404\"",
             "© 2026 Tetsu",
+            // Its header's "Log in" goes straight to staff login, with no redirect on the way (ADR-0094).
+            "href=\"https://app.example.com/login\"",
         ] {
             assert!(body.contains(shown), "{shown} in {body}");
         }
@@ -590,7 +579,11 @@ mod tests {
             .create(&tenant("anvil-row", "Anvil Row Strength"))
             .await
             .unwrap();
-        let (status, _, body) = get(router(tenants, true, STYLESHEET, record), "/anvil-row").await;
+        let (status, _, body) = get(
+            router(tenants, true, STYLESHEET, LOGIN, record),
+            "/anvil-row",
+        )
+        .await;
         assert_eq!(status, StatusCode::OK);
         assert!(body.contains("<h1>Anvil Row Strength</h1>"), "{body}");
     }

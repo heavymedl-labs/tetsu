@@ -432,12 +432,13 @@ async fn each_realms_passkey_cap_is_the_databases() {
     }
 }
 
-/// Staff's router serves staff's pages at `/app`, and none of the admins', not even the mailbox.
+/// Staff's router serves staff's pages at its host's root, and none of the admins', not even the mailbox, which it
+/// answers as any address it does not serve.
 #[tokio::test]
 async fn staffs_router_serves_staff_pages_alone() {
     let (staff, _database, _) = invited().await;
     let address = crate::http_tests::serve(staff, crate::http_tests::sample_mailbox()).await;
-    let login = crate::http_tests::get(address, "/app/login", "").await;
+    let login = crate::http_tests::get(address, "/login", "").await;
     assert_eq!(login.status, 200);
     assert!(
         login
@@ -446,18 +447,16 @@ async fn staffs_router_serves_staff_pages_alone() {
         "{}",
         login.body
     );
-    let profile = crate::http_tests::get(address, "/app/settings/profile", "").await;
+    let profile = crate::http_tests::get(address, "/settings/profile", "").await;
     assert_eq!(
         (profile.status, profile.header("location")),
-        (303, Some("/app/login"))
+        (303, Some("/login"))
     );
-    for admins in ["/admin/login", "/admin/mailbox", "/admin"] {
-        assert_eq!(
-            crate::http_tests::get(address, admins, "").await.status,
-            404,
-            "{admins}"
-        );
-    }
+    let mailbox = crate::http_tests::get(address, "/mailbox", "").await;
+    assert_eq!(
+        (mailbox.status, mailbox.header("location")),
+        (303, Some("/login?next=/mailbox"))
+    );
 }
 
 /// An invite's link says, before anyone acts on it, which business and role it gives and whether its person has
@@ -613,18 +612,13 @@ async fn accept_by_page(
     link: &str,
 ) -> crate::http_tests::Reply {
     let post = crate::http_tests::post;
-    let begun = post(
-        address,
-        "/app/join/accept/begin",
-        "",
-        &json!({ "link": link }),
-    )
-    .await
-    .json();
+    let begun = post(address, "/join/accept/begin", "", &json!({ "link": link }))
+        .await
+        .json();
     let response = authenticate(&begun["options"].to_string(), ORIGIN, kept, true).await;
     let response: Value = serde_json::from_str(&response).expect("JSON");
     let finish = json!({"link": link, "ceremony": begun["ceremony"], "response": response});
-    post(address, "/app/join/accept/finish", "", &finish).await
+    post(address, "/join/accept/finish", "", &finish).await
 }
 
 /// Through staff's pages: an invite's link reads as the business, by name, and role it gives, then whether its
@@ -636,13 +630,7 @@ async fn a_staff_member_joins_then_logs_in_to_accept_through_the_pages() {
     let second = issued(&staff, "Ada Park", "ada@example.com").await;
     let address = crate::http_tests::serve_staff(staff).await;
     let read = |link: String| async move {
-        crate::http_tests::post(
-            address,
-            "/app/join/invitation",
-            "",
-            &json!({ "link": link }),
-        )
-        .await
+        crate::http_tests::post(address, "/join/invitation", "", &json!({ "link": link })).await
     };
     let invitation = read(second.clone()).await;
     assert_eq!(
@@ -655,7 +643,7 @@ async fn a_staff_member_joins_then_logs_in_to_accept_through_the_pages() {
     let accepted = accept_by_page(address, kept.clone(), &second).await;
     assert_eq!(
         (accepted.status, accepted.json()),
-        (200, json!({"next": "/app/settings/profile"}))
+        (200, json!({"next": "/settings/profile"}))
     );
     assert!(
         accepted
@@ -683,7 +671,7 @@ async fn a_staff_member_joins_then_logs_in_to_accept_through_the_pages() {
 async fn staffs_join_page_names_where_the_invite_is_said() {
     let (staff, _database, _) = invited().await;
     let address = crate::http_tests::serve_staff(staff).await;
-    let page = crate::http_tests::get(address, "/app/join", "").await;
+    let page = crate::http_tests::get(address, "/join", "").await;
     assert_eq!(page.status, 200);
     assert!(page.body.contains(r#"id="invitation""#), "{}", page.body);
     assert!(
@@ -698,7 +686,7 @@ async fn staffs_join_page_names_where_the_invite_is_said() {
         page.body
     );
     let (admins, _admins_database, _) = crate::http_tests::serving().await;
-    let page = crate::http_tests::get(admins, "/admin/join", "").await;
+    let page = crate::http_tests::get(admins, "/join", "").await;
     assert!(
         page.body
             .contains("This invite works once, within the hour.")
@@ -713,16 +701,10 @@ async fn reading_or_logging_in_to_accept_can_fail() {
     let (staff, database, link) = invited().await;
     let address = crate::http_tests::serve_staff(staff).await;
     let post = crate::http_tests::post;
-    let read = post(
-        address,
-        "/app/join/invitation",
-        "",
-        &json!({ "link": link }),
-    )
-    .await;
+    let read = post(address, "/join/invitation", "", &json!({ "link": link })).await;
     assert_eq!(read.status, 503);
     let finish = json!({"link": link, "ceremony": "not one", "response": {}});
-    let refused = post(address, "/app/join/accept/finish", "", &finish).await;
+    let refused = post(address, "/join/accept/finish", "", &finish).await;
     assert_eq!(refused.status, 400);
     let failures = "SELECT count(*) FROM identity.limits WHERE kind = 'staff_login_failure'";
     assert_eq!(number(&database, failures).await, 1);
@@ -750,13 +732,7 @@ async fn logging_in_to_accept_is_unavailable_when_storage_fails() {
         let accepted = accept_by_page(address, kept, &second).await;
         assert_eq!(accepted.status, 503, "{broken}");
         let read = crate::http_tests::post;
-        let read = read(
-            address,
-            "/app/join/invitation",
-            "",
-            &json!({ "link": second }),
-        )
-        .await;
+        let read = read(address, "/join/invitation", "", &json!({ "link": second })).await;
         let expected = if broken.contains("staff_invitee") {
             503
         } else {
@@ -772,9 +748,9 @@ async fn reading_and_accepting_an_invite_come_from_the_site() {
     let (staff, _database, _) = invited().await;
     let address = crate::http_tests::serve_staff(staff).await;
     let paths = [
-        "/app/join/invitation",
-        "/app/join/accept/begin",
-        "/app/join/accept/finish",
+        "/join/invitation",
+        "/join/accept/begin",
+        "/join/accept/finish",
     ];
     crate::http_tests::refuses_other_sites(address, &paths).await;
 }

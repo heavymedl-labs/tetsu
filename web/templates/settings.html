@@ -8,8 +8,9 @@
     without popovers shows the menu in place, above the page, since its drawer's look applies only where popovers do,
     and hides the buttons that would open and close it.
 
-    A realm's template extends this, gives the shared page's fields and `scheme`, the visitor's color scheme, and
-    loads the menu's script. It fills `nav` and `menu`, its sidebar for the page and for the menu, each naming its
+    A realm's template extends this, gives the shared page's fields, `scheme`, the visitor's color scheme, and `home`,
+    the page its wordmark and mark link to, written as the page's own address rather than one that redirects to it
+    (ADR-0094), and loads the menu's script. It fills `nav` and `menu`, its sidebar for the page and for the menu, each naming its
     groups with ids of their own; `bar_back`, with `settings_bar_back`, once the realm has an app to go back to;
     `bar_end`; `content`, the page's `h1` and sections; and `after`. -#}
 {% extends "../../../web/templates/page.html" %}
@@ -22,7 +23,7 @@
   <div class="flex min-h-dvh flex-col md:h-dvh md:min-h-0 md:flex-row">
     <nav aria-label="Settings" class="hidden h-dvh w-60 shrink-0 flex-col px-3 pt-4 pb-3 md:flex">
       <a
-        href="/"
+        href="{{ home }}"
         aria-label="Tetsu home"
         class="mb-4 flex h-4 w-fit items-center px-2 text-ink focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
       >{% include "../../../web/templates/wordmark.html" %}</a>
@@ -49,7 +50,7 @@
       >
         <div class="mb-3 flex items-center justify-between">
           <a
-            href="/"
+            href="{{ home }}"
             aria-label="Tetsu home"
             class="ml-2 flex h-4 w-fit items-center text-ink focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
           >{% include "../../../web/templates/wordmark.html" %}</a>
@@ -76,7 +77,7 @@
           >
             {%- include "../../../web/templates/scheme.html" %}
             <a
-              href="/"
+              href="{{ home }}"
               aria-label="Tetsu home"
               class="flex rounded-sm text-soft hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
             >{% call ui::mark() %}{% endcall %}</a>

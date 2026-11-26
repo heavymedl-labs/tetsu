@@ -1,6 +1,6 @@
 // The passkey islands (ADR-0031): light-DOM Web Components that add behavior to markup the server renders.
 //
-// - <tetsu-passkey base="/admin" action="login|join|add" form-token="…" next="…" invitation="…"> wraps a button and a
+// - <tetsu-passkey base="" action="login|join|add" form-token="…" next="…" invitation="…"> wraps a button and a
 //   status line, and runs one passkey ceremony in the realm at `base` when the button is pressed. Its state is an
 //   attribute, data-state, of ready, waiting, done, or failed, for styles to read (ADR-0032). A staff join names in
 //   `invitation` the element it fills with what the invite gives, once read, and logs in to accept instead for

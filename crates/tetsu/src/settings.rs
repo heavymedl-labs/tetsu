@@ -252,6 +252,16 @@ pub const ADMIN_ORIGIN: &str = "TETSU_ADMIN_ORIGIN";
 /// The staff's origin, such as `https://app.example.com`, as [`ADMIN_ORIGIN`] is the admins'.
 pub const STAFF_ORIGIN: &str = "TETSU_STAFF_ORIGIN";
 
+/// The port an origin [`origin`] read is at: the one it names, or its scheme's own.
+#[must_use]
+pub fn port_of(origin: &str) -> u16 {
+    let (scheme, authority) = origin.split_once("://").unwrap_or(("", origin));
+    authority
+        .rsplit_once(':')
+        .and_then(|(_, port)| port.parse().ok())
+        .unwrap_or(if scheme == "https" { 443 } else { 80 })
+}
+
 /// An origin from the setting `name`, one of the two above: only it may send its realm's pages a state-changing
 /// request (ADR-0048). It is written as a browser sends an origin, `https`, or `http` for this machine alone, with no
 /// path, so a typo fails here rather than in a link.
@@ -881,6 +891,20 @@ mod tests {
             ("TETSU_SERVES", Some(value)) => Ok(value.to_string()),
             _ => Err(VarError::NotPresent),
         })
+    }
+
+    /// An origin's port is the one it names, or its scheme's own.
+    #[test]
+    fn an_origins_port_is_its_own_or_its_schemes() {
+        assert_eq!(
+            [
+                port_of("http://admin.localhost:8081"),
+                port_of("https://app.example.com:8443"),
+                port_of("https://admin.example.com"),
+                port_of("http://localhost"),
+            ],
+            [8081, 8443, 443, 80]
+        );
     }
 
     /// Each realm's origin is its own setting, read and checked as the site's is.

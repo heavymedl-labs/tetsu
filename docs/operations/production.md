@@ -122,8 +122,8 @@ it resets or migrates anything.
 | Service | Serves | Service variable | Origin variable |
 | --- | --- | --- | --- |
 | `tetsu-site` (`srv-dc3q286c6qcc73biss9g`) | the site | `SITE_SERVICE` | `SITE_ORIGIN`, `https://tetsu-site.onrender.com` |
-| `tetsu-admin` (`srv-dc3q28ui0phs7387arc0`) | admins, at `/admin` | `ADMIN_SERVICE` | `ADMIN_ORIGIN`, `https://tetsu-admin.onrender.com` |
-| `tetsu-staff` (`srv-dc3q29mc6qcc73bit100`) | staff, at `/app` | `STAFF_SERVICE` | `STAFF_ORIGIN`, `https://tetsu-staff.onrender.com` |
+| `tetsu-admin` (`srv-dc3q28ui0phs7387arc0`) | admins | `ADMIN_SERVICE` | `ADMIN_ORIGIN`, `https://tetsu-admin.onrender.com` |
+| `tetsu-staff` (`srv-dc3q29mc6qcc73bit100`) | staff | `STAFF_SERVICE` | `STAFF_ORIGIN`, `https://tetsu-staff.onrender.com` |
 
 Each was made on 2026-11-26 from `tetsu-demo`'s settings (`srv-dbp542rbc2fs73962k4g`), deleted at the move below.
 Its copy left out the start command, which each service had to be given by hand before its first deploy. The `production` environment, its `main`-only branch rule, and its six variables were set
@@ -146,6 +146,11 @@ Moving from one service to three, done once:
 6. Rename your local `.env.demo` to `.env.production`, and replace its `TETSU_ORIGIN` with the two lines
    [Admins in production](#admins-in-production) gives. Done 2026-11-26.
 
+Before the first deploy of realm pages at their hosts' roots
+([ADR-0094](../adr/0094-realm-paths-at-the-root-of-their-hosts.md)), add `TETSU_STAFF_ORIGIN`, set to
+`STAFF_ORIGIN`'s value, to `tetsu-site` in Render's dashboard: the site refuses to start without it. The deploy's page
+check then confirms the site's `/login` leads to staff login there. Not yet done.
+
 - **Command:** `/usr/local/bin/tetsu serve`. Render's command replaces the image's entrypoint too, so `serve`
   alone exits with status 128.
 - **Environment, on each:** `TETSU_DEMO=true`, `TETSU_TRUSTED_PROXIES=3`, the proxies measured in front of the
@@ -153,9 +158,11 @@ Moving from one service to three, done once:
   under [Logs and alerts](#logs-and-alerts). Render sets `PORT`.
 - **Environment, by service:** `TETSU_SERVES` names what it serves: `site`, `admin`, or `staff`. The admin
   service sets `TETSU_ADMIN_ORIGIN` to its own origin, which its passkeys belong to, and the staff service
-  `TETSU_STAFF_ORIGIN` to its own.
+  `TETSU_STAFF_ORIGIN` to its own. The site sets `TETSU_STAFF_ORIGIN` to the staff's origin too, which its "Log in"
+  and `/login` lead to ([ADR-0094](../adr/0094-realm-paths-at-the-root-of-their-hosts.md)), and refuses to start
+  without it.
 - **Health check:** `/`, which the site answers with its home page and each realm's host with a redirect to its
-  realm's home. Render's treatment of a redirect as healthy is not yet confirmed; the first deploy shows it.
+  login. Render's treatment of a redirect as healthy is not yet confirmed; the first deploy shows it.
 - **Free instances:** each sleeps after 15 minutes without traffic, and nothing keeps one awake, so the three
   share the workspace's 750 free hours only while used. Waking takes about 12 seconds, Neon's included, and once
   in 50 tries took 8 minutes ([test 9](../research/hosting.md#first-deploy-2026-11-09)).

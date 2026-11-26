@@ -237,7 +237,7 @@ async fn issued(
     origin: &str,
     token: &InviteToken,
 ) -> Vec<String> {
-    let url = operator::link_url(origin, "/admin/join", token);
+    let url = operator::link_url(origin, "/join", token);
     let emailed = match admins.email(id).await {
         Ok(Some(to)) => match invite_message(to.clone(), &url, token) {
             Some(message) => operator::delivered(&to, mailer.send(&message).await),
@@ -473,7 +473,7 @@ mod tests {
         assert_eq!(created.len(), 3, "{created:?}");
         assert_eq!(created[0], "created admin 1, Kurt Medley");
         assert!(created[1].starts_with(
-            "invite link, good once and for an hour: https://admin.example.com/admin/join#"
+            "invite link, good once and for an hour: https://admin.example.com/join#"
         ));
         assert!(created[2].starts_with("did not email the invite to kurt@example.com, since"));
         assert_eq!(office.captured().await.unwrap(), vec![]);
@@ -574,8 +574,7 @@ mod tests {
         let kurt = AccountId::parse("1").unwrap();
         let created = said(&admins, &office, creating("Kurt Medley")).await;
         assert_eq!(created[0], "created admin 1, Kurt Medley");
-        let prefix =
-            "invite link, good once and for an hour: https://admin.example.com/admin/join#";
+        let prefix = "invite link, good once and for an hour: https://admin.example.com/join#";
         for line in [
             &created[1],
             &said(&admins, &office, Admin::Invite { id: kurt }).await[0],

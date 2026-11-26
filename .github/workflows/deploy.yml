@@ -239,7 +239,7 @@ jobs:
           ADMIN: ${{ vars.ADMIN_ORIGIN }}
           STAFF: ${{ vars.STAFF_ORIGIN }}
         run: |
-          python3 scripts/smoke_check.py "$SITE" --serves site
+          python3 scripts/smoke_check.py "$SITE" --serves site --login "$STAFF/login"
           python3 scripts/smoke_check.py "$ADMIN" --serves admin
           python3 scripts/smoke_check.py "$STAFF" --serves staff
       # Housekeeping after a good deploy, so a failure warns rather than failing the run.

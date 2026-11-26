@@ -19,7 +19,7 @@
     {%- call shared::settings_link(security, "shield", "Security", here) %}{% endcall %}
   {% endcall %}
   {% if admin %}{% call shared::settings_group(platform, "Platform") %}
-      {%- call shared::settings_link("/admin/mailbox", "inbox", "Mailbox", here) %}{% endcall %}
+      {%- call shared::settings_link("/mailbox", "inbox", "Mailbox", here) %}{% endcall %}
     {% endcall %}{% endif %}
   {% call shared::settings_account(name, initials, role, logout, form) %}{% endcall %}
 {% endmacro %}

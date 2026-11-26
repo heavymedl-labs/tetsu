@@ -19,11 +19,12 @@ const ENDED: &str = "You were logged out. Sessions end after 15 minutes without 
 async fn a_logged_in_admin_is_sent_on_from_the_login_page() {
     let (address, _database, cookie, _) = logged_in().await;
     for (path, to) in [
-        ("/admin/login", PROFILE),
-        ("/admin/login?next=/admin/passkeys", "/admin/passkeys"),
-        ("/admin/login?ended=1&next=/admin/a", "/admin/a"),
-        ("/admin/login?next=//evil.example", PROFILE),
-        ("/admin/login?next=/login", PROFILE),
+        ("/login", PROFILE),
+        ("/login?next=/passkeys", "/passkeys"),
+        ("/login?ended=1&next=/a", "/a"),
+        ("/login?next=//evil.example", PROFILE),
+        ("/login?next=/login", PROFILE),
+        ("/login?next=/join", PROFILE),
     ] {
         let page = get(address, path, &cookie).await;
         assert_eq!(
@@ -39,16 +40,16 @@ async fn a_logged_in_admin_is_sent_on_from_the_login_page() {
 #[tokio::test]
 async fn the_login_page_keeps_a_checked_return_and_says_why_it_shows() {
     let (address, _database, _) = serving().await;
-    let page = get(address, "/admin/login?next=/admin/passkeys&ended=1", "").await;
+    let page = get(address, "/login?next=/passkeys&ended=1", "").await;
     assert_eq!(page.status, 200);
-    for shown in ["next=\"/admin/passkeys\"", ENDED] {
+    for shown in ["next=\"/passkeys\"", ENDED] {
         assert!(page.body.contains(shown), "{shown} in {}", page.body);
     }
     for path in [
-        "/admin/login",
-        "/admin/login?next=//evil.example",
-        "/admin/login?next=",
-        "/admin/login?ended=0",
+        "/login",
+        "/login?next=//evil.example",
+        "/login?next=",
+        "/login?ended=0",
     ] {
         let page = get(address, path, "").await;
         assert_eq!(page.status, 200, "{path}");
@@ -63,7 +64,7 @@ async fn the_login_page_keeps_a_checked_return_and_says_why_it_shows() {
 #[tokio::test]
 async fn a_login_returns_where_the_page_asked_once_checked() {
     for (sent, next) in [
-        (Some("/admin/passkeys"), "/admin/passkeys"),
+        (Some("/passkeys"), "/passkeys"),
         (Some("//evil.example"), PROFILE),
         (Some("https://evil.example/admin"), PROFILE),
         (None, PROFILE),
@@ -116,7 +117,7 @@ async fn a_page_reads_its_sessions_time_left_without_renewing_it() {
     away(&database, 5).await;
     let seen = "SELECT last_seen_at::text FROM identity.admin_sessions";
     let before = text(&database, seen).await;
-    let answer = get(address, "/admin/session", &cookie).await;
+    let answer = get(address, "/session", &cookie).await;
     assert_eq!(
         (answer.status, answer.header("cache-control")),
         (200, Some("no-store"))
@@ -137,15 +138,15 @@ async fn a_page_reads_its_sessions_time_left_without_renewing_it() {
 async fn a_session_past_its_idle_limit_has_no_time_left() {
     let (address, database, cookie, _) = logged_in().await;
     away(&database, 15).await;
-    let answer = get(address, "/admin/session", &cookie).await;
+    let answer = get(address, "/session", &cookie).await;
     assert_eq!(
         (answer.status, answer.json()),
         (401, json!({ "error": "you are logged out; log in again" }))
     );
-    let page = get(address, "/admin", &cookie).await;
+    let page = get(address, "/", &cookie).await;
     assert_eq!(
         (page.status, page.header("location")),
-        (303, Some("/admin/login"))
+        (303, Some("/login"))
     );
 }
 
@@ -155,14 +156,14 @@ async fn a_session_past_its_idle_limit_has_no_time_left() {
 async fn staying_logged_in_renews_the_session() {
     let (address, database, cookie, form) = logged_in().await;
     away(&database, 10).await;
-    let stayed = post(address, "/admin/session", &cookie, &json!({ "form": form })).await;
+    let stayed = post(address, "/session", &cookie, &json!({ "form": form })).await;
     assert_eq!(stayed.status, 200);
     let (idle, _) = left(&stayed.json());
     assert!((895..=900).contains(&idle), "{idle}");
-    let refused = post(address, "/admin/session", &cookie, &json!({})).await;
+    let refused = post(address, "/session", &cookie, &json!({})).await;
     assert_eq!(refused.status, 403);
     away(&database, 15).await;
-    let ended = post(address, "/admin/session", &cookie, &json!({ "form": form })).await;
+    let ended = post(address, "/session", &cookie, &json!({ "form": form })).await;
     assert_eq!(ended.status, 401);
 }
 
@@ -172,11 +173,11 @@ async fn staying_logged_in_renews_the_session() {
 async fn logged_in_pages_carry_the_session_island() {
     let (address, _database, cookie, _) = logged_in().await;
     let script = format!("<script type=\"module\" src=\"{SESSION_SCRIPT}\">");
-    for path in [PROFILE, "/admin/settings/security", "/admin/mailbox"] {
+    for path in [PROFILE, "/settings/security", "/mailbox"] {
         let page = get(address, path, &cookie).await;
         // Each page masks its form token afresh, so the island carries the one this page's logout form does.
         let island = format!(
-            "<tetsu-session base=\"/admin\" form-token=\"{}\"",
+            "<tetsu-session base=\"\" form-token=\"{}\"",
             form_on(&page.body)
         );
         for shown in [&script, &island] {
@@ -190,7 +191,7 @@ async fn logged_in_pages_carry_the_session_island() {
         );
         assert_eq!(page.body.matches("autofocus").count(), 1, "{path}");
     }
-    let login = get(address, "/admin/login?next=/admin", "").await;
+    let login = get(address, "/login?next=/", "").await;
     assert!(!login.body.contains("tetsu-session"), "{}", login.body);
 }
 
@@ -204,7 +205,7 @@ async fn a_failed_read_of_the_time_left_is_unavailable() {
         "REVOKE EXECUTE ON FUNCTION identity.session_left(bytea, text) FROM tetsu_identity",
     )
     .await;
-    let left = get(address, "/admin/session", &cookie).await;
+    let left = get(address, "/session", &cookie).await;
     assert_eq!(
         (left.status, left.json()),
         (503, json!({ "error": UNAVAILABLE }))
@@ -219,13 +220,10 @@ async fn a_failed_read_of_the_time_left_is_unavailable() {
 #[tokio::test]
 async fn logging_out_may_return_to_a_checked_page_after_the_next_login() {
     for (path, to) in [
-        (
-            "/admin/logout?next=/admin/passkeys",
-            "/admin/login?next=/admin/passkeys",
-        ),
-        ("/admin/logout?next=//evil.example", "/admin/login"),
-        ("/admin/logout?next=/admin", "/admin/login"),
-        ("/admin/logout", "/admin/login"),
+        ("/logout?next=/passkeys", "/login?next=/passkeys"),
+        ("/logout?next=//evil.example", "/login"),
+        ("/logout?next=/", "/login"),
+        ("/logout", "/login"),
     ] {
         let (address, _database, cookie, form) = logged_in().await;
         let headers = [("Origin", ORIGIN), ("Cookie", cookie.as_str())];
@@ -244,9 +242,9 @@ async fn logging_out_may_return_to_a_checked_page_after_the_next_login() {
 async fn the_login_page_says_how_long_a_session_may_sit_idle() {
     let (address, _database, _) = serving().await;
     let told = "You were logged out. Sessions end after 15 minutes without activity.";
-    let page = get(address, "/admin/login?ended=1", "").await;
+    let page = get(address, "/login?ended=1", "").await;
     assert!(page.body.contains(told), "{}", page.body);
-    let page = get(address, "/admin/login", "").await;
+    let page = get(address, "/login", "").await;
     assert!(!page.body.contains("without activity"), "{}", page.body);
     // The one line: where someone with no passkey in the realm turns.
     let hint = "No passkey? Ask an admin for an invite.";
@@ -257,7 +255,7 @@ async fn the_login_page_says_how_long_a_session_may_sit_idle() {
 #[tokio::test]
 async fn a_browser_without_a_session_has_no_time_left() {
     let (address, _database, _) = serving().await;
-    let left = get(address, "/admin/session", "").await;
+    let left = get(address, "/session", "").await;
     assert_eq!(
         (left.status, left.json()),
         (401, json!({ "error": "you are logged out; log in again" }))
@@ -273,7 +271,7 @@ async fn a_login_page_that_cannot_check_the_session_is_unavailable() {
         "REVOKE EXECUTE ON FUNCTION identity.use_session(bytea, text) FROM tetsu_identity",
     )
     .await;
-    let page = get(address, "/admin/login", &cookie).await;
+    let page = get(address, "/login", &cookie).await;
     assert_eq!(
         (page.status, page.header("cache-control")),
         (503, Some("no-store"))
@@ -302,7 +300,7 @@ async fn an_unreadable_time_left_is_unavailable() {
             ),
         )
         .await;
-        let left = get(address, "/admin/session", &cookie).await;
+        let left = get(address, "/session", &cookie).await;
         assert_eq!(
             (left.status, left.json()),
             (503, json!({ "error": UNAVAILABLE })),
@@ -317,10 +315,10 @@ async fn an_unreadable_time_left_is_unavailable() {
 #[tokio::test]
 async fn the_pages_say_the_limits_the_database_keeps() {
     let (address, _database, cookie, _) = logged_in().await;
-    let (idle, absolute) = left(&get(address, "/admin/session", &cookie).await.json());
+    let (idle, absolute) = left(&get(address, "/session", &cookie).await.json());
     let minutes = (idle + 59) / 60;
     let hours = (absolute + 3599) / 3600;
-    let login = get(address, "/admin/login?ended=1", "").await;
+    let login = get(address, "/login?ended=1", "").await;
     let idle_told = format!("Sessions end after {minutes} minutes without activity");
     assert!(
         login.body.contains(&idle_told),
@@ -341,9 +339,9 @@ async fn the_pages_say_the_limits_the_database_keeps() {
 #[tokio::test]
 async fn a_login_after_the_session_ended_clears_the_cache() {
     let (address, _database, _) = serving().await;
-    let ended = get(address, "/admin/login?ended=1", "").await;
+    let ended = get(address, "/login?ended=1", "").await;
     assert_eq!(ended.header("clear-site-data"), Some("\"cache\""));
-    let plain = get(address, "/admin/login", "").await;
+    let plain = get(address, "/login", "").await;
     assert_eq!(plain.header("clear-site-data"), None);
 }
 
@@ -353,7 +351,7 @@ async fn a_login_after_the_session_ended_clears_the_cache() {
 async fn joining_logs_in_with_a_session_that_is_never_fresh() {
     let (address, database, link) = serving().await;
     let (_, cookie) = join(address, &link).await;
-    let page = get(address, "/admin/settings/security", &cookie).await;
+    let page = get(address, "/settings/security", &cookie).await;
     assert_eq!(page.status, 200);
     assert!(
         page.body.contains("Log in again to add a passkey."),
@@ -363,7 +361,7 @@ async fn joining_logs_in_with_a_session_that_is_never_fresh() {
     assert!(!page.body.contains("action=\"add\""), "{}", page.body);
     let begun = post(
         address,
-        "/admin/passkeys/begin",
+        "/passkeys/begin",
         &cookie,
         &json!({ "form": form_on(&page.body) }),
     )
@@ -383,13 +381,13 @@ async fn admin_pages_arrive_in_the_kept_scheme() {
     let (address, _database, cookie, _) = logged_in().await;
     let script = "<script type=\"module\" src=\"/assets/scheme-test.js\">";
     for (path, kept) in [
-        ("/admin/login", "theme=dark"),
-        ("/admin/join", "theme=dark"),
+        ("/login", "theme=dark"),
+        ("/join", "theme=dark"),
         (PROFILE, "theme=dark"),
-        ("/admin/mailbox", "theme=dark"),
+        ("/mailbox", "theme=dark"),
     ] {
         let both = format!("{cookie}; {kept}");
-        let sent = if path.starts_with("/admin/log") || path == "/admin/join" {
+        let sent = if path.starts_with("/log") || path == "/join" {
             kept
         } else {
             both.as_str()
@@ -404,7 +402,7 @@ async fn admin_pages_arrive_in_the_kept_scheme() {
             assert!(page.body.contains(shown), "{shown} on {path}");
         }
     }
-    let plain = get(address, "/admin/login", "").await;
+    let plain = get(address, "/login", "").await;
     assert!(
         plain
             .body

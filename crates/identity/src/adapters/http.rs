@@ -1,4 +1,4 @@
-//! Identity's inbound HTTP adapter: the admin pages at `/admin`, and the JSON endpoints their passkey script calls
+//! Identity's inbound HTTP adapter: each realm's pages at the root of its own host (ADR-0094), and the JSON endpoints their passkey script calls
 //! (ADR-0048). Every state-changing request is checked through [`Origins::admit`], and once logged in through
 //! [`Accounts::session_for_change`], so no other site can act through a logged-in browser.
 
@@ -24,10 +24,13 @@ use crate::ports::{BusinessNames, LoginStore, StaffStore};
 use crate::use_cases::{Accounts, invite_ended, joining_refused};
 use tetsu_kernel::{Mailbox, Requester, Scheme};
 
-/// A realm's pages and endpoints, all below its base path (ADR-0084), so its pages, redirects, and recorded routes
-/// name only its own. Each realm has one, kept whole here so a recorded route stays a fixed string.
+/// A realm's pages and endpoints, at the root of the realm's own host (ADR-0094), so its pages, redirects, and
+/// recorded routes name only its own. Each realm has one, kept whole here so a recorded route stays a fixed string.
 struct Paths {
-    /// The realm itself, which sends its people to their Profile, as the account area is their home (ADR-0086).
+    /// The path the realm's pages sit below, which its forms and islands build their requests on: none at a host's
+    /// root.
+    base: &'static str,
+    /// The realm's home, which sends its people to their Profile, as the account area is their home (ADR-0086).
     home: &'static str,
     /// The account (#156): who they are, and how they log in and where. Logging in lands on Profile.
     profile: &'static str,
@@ -45,64 +48,39 @@ struct Paths {
     end_sessions: &'static str,
     /// How long the browser's session has left (GET), and staying logged in (POST), for the session island.
     session: &'static str,
-    /// Any other path below the base: a login for anyone logged out, and not found for anyone logged in.
+    /// Any other path on the host: a login for anyone logged out, and not found for anyone logged in.
     elsewhere: &'static str,
 }
 
-/// The admins' realm (ADR-0084).
-const ADMIN: Paths = Paths {
-    home: "/admin",
-    profile: "/admin/settings/profile",
-    security: "/admin/settings/security",
-    login: "/admin/login",
-    login_begin: "/admin/login/begin",
-    login_finish: "/admin/login/finish",
-    join: "/admin/join",
-    join_begin: "/admin/join/begin",
-    join_finish: "/admin/join/finish",
-    add_begin: "/admin/passkeys/begin",
-    add_finish: "/admin/passkeys/finish",
-    logout: "/admin/logout",
-    end_sessions: "/admin/sessions/end",
-    session: "/admin/session",
-    elsewhere: "/admin/{*rest}",
-};
-
-/// The staff realm (ADR-0084, ADR-0089), whose pages are the person's own, apart from any business's.
-const STAFF: Paths = Paths {
-    home: "/app",
-    profile: "/app/settings/profile",
-    security: "/app/settings/security",
-    login: "/app/login",
-    login_begin: "/app/login/begin",
-    login_finish: "/app/login/finish",
-    join: "/app/join",
-    join_begin: "/app/join/begin",
-    join_finish: "/app/join/finish",
-    add_begin: "/app/passkeys/begin",
-    add_finish: "/app/passkeys/finish",
-    logout: "/app/logout",
-    end_sessions: "/app/sessions/end",
-    session: "/app/session",
-    elsewhere: "/app/{*rest}",
+/// Every realm's paths, the same on each realm's own host (ADR-0094). Staff's are the person's own, apart from any
+/// business's (ADR-0089).
+const REALM: Paths = Paths {
+    base: "",
+    home: "/",
+    profile: "/settings/profile",
+    security: "/settings/security",
+    login: "/login",
+    login_begin: "/login/begin",
+    login_finish: "/login/finish",
+    join: "/join",
+    join_begin: "/join/begin",
+    join_finish: "/join/finish",
+    add_begin: "/passkeys/begin",
+    add_finish: "/passkeys/finish",
+    logout: "/logout",
+    end_sessions: "/sessions/end",
+    session: "/session",
+    elsewhere: "/{*rest}",
 };
 
 /// The admins' mailbox: email kept rather than sent (ADR-0074), a page only admins have.
-const MAILBOX: &str = "/admin/mailbox";
+const MAILBOX: &str = "/mailbox";
 
 /// What a staff invite's link gives, which the join page reads before anyone acts on it (#111).
-const STAFF_INVITATION: &str = "/app/join/invitation";
+const STAFF_INVITATION: &str = "/join/invitation";
 /// Logging in to accept a staff invite, in one step, for someone who has a passkey (ADR-0089).
-const STAFF_ACCEPT_BEGIN: &str = "/app/join/accept/begin";
-const STAFF_ACCEPT_FINISH: &str = "/app/join/accept/finish";
-
-/// A realm's paths.
-const fn paths(realm: Realm) -> &'static Paths {
-    match realm {
-        Realm::Admin => &ADMIN,
-        Realm::Staff => &STAFF,
-    }
-}
+const STAFF_ACCEPT_BEGIN: &str = "/join/accept/begin";
+const STAFF_ACCEPT_FINISH: &str = "/join/accept/finish";
 
 /// A realm's person's role, as its sidebar, menu, and Profile name it.
 const fn role(realm: Realm) -> &'static str {
@@ -148,45 +126,28 @@ fn spoken(limit: Duration) -> String {
     }
 }
 
-/// The paths of the realm a store keeps.
-const fn at<S: LoginStore>() -> &'static Paths {
-    paths(S::REALM)
-}
+/// Every realm's login page, on its own host, which the site's "Log in" leads to on staff's (ADR-0094).
+pub const LOGIN: &str = REALM.login;
 
 /// Every path Identity serves, in every realm, which the composition root checks each start with a name no tenant may
 /// hold.
-pub const PATHS: [&str; 34] = [
-    ADMIN.home,
-    ADMIN.profile,
-    ADMIN.security,
-    ADMIN.login,
-    ADMIN.login_begin,
-    ADMIN.login_finish,
-    ADMIN.join,
-    ADMIN.join_begin,
-    ADMIN.join_finish,
-    ADMIN.add_begin,
-    ADMIN.add_finish,
-    ADMIN.logout,
-    ADMIN.end_sessions,
-    ADMIN.session,
+pub const PATHS: [&str; 19] = [
+    REALM.home,
+    REALM.profile,
+    REALM.security,
+    REALM.login,
+    REALM.login_begin,
+    REALM.login_finish,
+    REALM.join,
+    REALM.join_begin,
+    REALM.join_finish,
+    REALM.add_begin,
+    REALM.add_finish,
+    REALM.logout,
+    REALM.end_sessions,
+    REALM.session,
+    REALM.elsewhere,
     MAILBOX,
-    ADMIN.elsewhere,
-    STAFF.home,
-    STAFF.profile,
-    STAFF.security,
-    STAFF.login,
-    STAFF.login_begin,
-    STAFF.login_finish,
-    STAFF.join,
-    STAFF.join_begin,
-    STAFF.join_finish,
-    STAFF.add_begin,
-    STAFF.add_finish,
-    STAFF.logout,
-    STAFF.end_sessions,
-    STAFF.session,
-    STAFF.elsewhere,
     STAFF_INVITATION,
     STAFF_ACCEPT_BEGIN,
     STAFF_ACCEPT_FINISH,
@@ -307,6 +268,8 @@ struct Shell {
     menu_script: &'static str,
     /// The realm's base path, which the page's forms and islands work below.
     base: &'static str,
+    /// The page the shell's wordmark and mark link to: Profile, the realm's home (ADR-0086), at its own address.
+    home: &'static str,
     /// The realm's Profile, Security, and logout paths, which its sidebar and menu link to.
     profile: &'static str,
     security: &'static str,
@@ -333,9 +296,10 @@ impl Shell {
         form: String,
         here: &'static str,
     ) -> Self {
-        let at = at::<S>();
+        let at = &REALM;
         Self {
-            base: at.home,
+            base: at.base,
+            home: at.profile,
             profile: at.profile,
             security: at.security,
             logout: at.logout,
@@ -418,6 +382,8 @@ struct Kept {
 struct NotFoundPage {
     demo: bool,
     stylesheet: &'static str,
+    /// No "Log in" in the header on a realm's own host, where the person is at their realm's login already.
+    login: Option<&'static str>,
     /// The radio the site footer's color scheme control checks, from the visitor's cookie (ADR-0070).
     scheme: &'static str,
 }
@@ -479,33 +445,27 @@ fn serve_routes<S: Send + Sync + 'static>(
 /// Every realm's routes.
 fn realm_routes<S: LoginStore + Send + Sync + 'static>() -> Router<Arc<Served<S>>> {
     let routes = Router::new()
-        .route(at::<S>().home, get(home::<S>))
-        .route(at::<S>().profile, get(profile::<S>))
-        .route(at::<S>().security, get(security::<S>))
-        .route(at::<S>().login, get(login_page::<S>))
-        .route(at::<S>().login_begin, before_route::<S>(Before::BeginLogin))
+        .route(REALM.home, get(home::<S>))
+        .route(REALM.profile, get(profile::<S>))
+        .route(REALM.security, get(security::<S>))
+        .route(REALM.login, get(login_page::<S>))
+        .route(REALM.login_begin, before_route::<S>(Before::BeginLogin))
+        .route(REALM.login_finish, before_route::<S>(Before::FinishLogin))
+        .route(REALM.join, get(join_page::<S>))
+        .route(REALM.join_begin, before_route::<S>(Before::BeginJoin))
+        .route(REALM.join_finish, before_route::<S>(Before::FinishJoin))
+        .route(REALM.add_begin, logged_in_route::<S>(LoggedIn::BeginAdding))
         .route(
-            at::<S>().login_finish,
-            before_route::<S>(Before::FinishLogin),
-        )
-        .route(at::<S>().join, get(join_page::<S>))
-        .route(at::<S>().join_begin, before_route::<S>(Before::BeginJoin))
-        .route(at::<S>().join_finish, before_route::<S>(Before::FinishJoin))
-        .route(
-            at::<S>().add_begin,
-            logged_in_route::<S>(LoggedIn::BeginAdding),
-        )
-        .route(
-            at::<S>().add_finish,
+            REALM.add_finish,
             logged_in_route::<S>(LoggedIn::FinishAdding),
         )
-        .route(at::<S>().logout, post(logout::<S>))
-        .route(at::<S>().end_sessions, post(end_sessions::<S>))
+        .route(REALM.logout, post(logout::<S>))
+        .route(REALM.end_sessions, post(end_sessions::<S>))
         .route(
-            at::<S>().session,
+            REALM.session,
             get(time_left::<S>).merge(logged_in_route::<S>(LoggedIn::Stay)),
         )
-        .route(at::<S>().elsewhere, get(elsewhere::<S>));
+        .route(REALM.elsewhere, get(elsewhere::<S>));
     platform_pages(S::REALM)
         .iter()
         .fold(routes, |routes, path| routes.route(path, get(mailbox::<S>)))
@@ -558,14 +518,14 @@ async fn login_page<S: LoginStore>(
     uri: Uri,
 ) -> Response {
     let web = &served.web;
-    let next = query(&uri, "next").and_then(|next| return_path(at::<S>().home, next));
+    let next = query(&uri, "next").and_then(|next| back_to(&REALM, next));
     match served.admins.session(cookies(&headers)).await {
-        Ok(Some(_)) => see_other(next.unwrap_or(at::<S>().profile)),
+        Ok(Some(_)) => see_other(next.unwrap_or(REALM.profile)),
         Ok(None) => {
             let ended = query(&uri, "ended") == Some("1");
             let mut shown = page(&LoginPage {
                 demo: web.demo,
-                base: at::<S>().home,
+                base: REALM.base,
                 idle: spoken(S::REALM.limits().idle),
                 hint: invite_hint(S::REALM),
                 stylesheet: web.stylesheet,
@@ -594,7 +554,7 @@ async fn join_page<S: LoginStore>(State(served): Shared<S>, headers: HeaderMap) 
     let web = &served.web;
     page(&JoinPage {
         demo: web.demo,
-        base: at::<S>().home,
+        base: REALM.base,
         stylesheet: web.stylesheet,
         script: web.script,
         scheme_script: web.scheme_script,
@@ -621,12 +581,12 @@ const fn invitation_of(realm: Realm) -> &'static str {
     }
 }
 
-/// The admins' realm itself (ADR-0084): it sends a logged-in admin to their Profile, as the account area is their
-/// home (ADR-0086), and anyone else to log in.
+/// The realm's home, its host's root (ADR-0094): it sends a logged-in person to their Profile, as the account area is
+/// their home (ADR-0086), and anyone else to log in.
 async fn home<S: LoginStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
     match served.admins.session(cookies(&headers)).await {
-        Ok(Some(_)) => see_other(at::<S>().profile),
-        Ok(None) => see_other(at::<S>().login),
+        Ok(Some(_)) => see_other(REALM.profile),
+        Ok(None) => see_other(REALM.login),
         Err(error) => unavailable_page(&served.web, "could not show an admin's page", &error),
     }
 }
@@ -637,12 +597,12 @@ async fn profile<S: LoginStore>(State(served): Shared<S>, headers: HeaderMap) ->
     let web = &served.web;
     let (account, form) = match viewer(&served, &headers).await {
         Ok(Some(viewer)) => viewer,
-        Ok(None) => return see_other(&return_to(at::<S>(), at::<S>().profile)),
+        Ok(None) => return see_other(&return_to(&REALM, REALM.profile)),
         Err(error) => return unavailable_page(web, "could not show an admin's profile", &error),
     };
     page(&ProfilePage {
         email: account.email.map(|email| email.as_str().to_string()),
-        shell: Shell::of::<S>(web, &headers, account.name, form, at::<S>().profile),
+        shell: Shell::of::<S>(web, &headers, account.name, form, REALM.profile),
     })
 }
 
@@ -651,7 +611,7 @@ async fn profile<S: LoginStore>(State(served): Shared<S>, headers: HeaderMap) ->
 async fn security<S: LoginStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
     match shown(&served, &headers).await {
         Ok(Some(page)) => page,
-        Ok(None) => see_other(&return_to(at::<S>(), at::<S>().security)),
+        Ok(None) => see_other(&return_to(&REALM, REALM.security)),
         Err(error) => unavailable_page(&served.web, "could not show an admin's security", &error),
     }
 }
@@ -666,7 +626,7 @@ async fn mailbox<S: LoginStore>(
     // A session found live names an enabled admin, so an account is missing only if they were disabled since.
     let (account, viewer) = match viewer(&served, &headers).await {
         Ok(Some(viewer)) => viewer,
-        Ok(None) => return see_other(&return_to(at::<S>(), uri.path())),
+        Ok(None) => return see_other(&return_to(&REALM, uri.path())),
         Err(error) => return unavailable_page(web, "could not show the mailbox", &error),
     };
     let Ok(captured) = web.mailbox.captured().await else {
@@ -727,9 +687,9 @@ fn ago(at: SystemTime, now: SystemTime) -> String {
     }
 }
 
-/// A path under `/admin` that Identity does not serve. Anyone without a live session is sent to log in, returning here
-/// after, as at `/admin`, so the admin pages cannot be mapped from outside; an admin gets the site's not-found
-/// page, as any wrong address does.
+/// A path on a realm's host that Identity does not serve. Anyone without a live session is sent to log in, returning
+/// here after, as at the realm's home, so its pages cannot be mapped from outside; someone logged in gets the
+/// not-found page, as any wrong address does.
 async fn elsewhere<S: LoginStore>(
     State(served): Shared<S>,
     headers: HeaderMap,
@@ -742,11 +702,12 @@ async fn elsewhere<S: LoginStore>(
             page(&NotFoundPage {
                 demo: web.demo,
                 stylesheet: web.stylesheet,
+                login: None,
                 scheme: scheme_of(&headers).as_str(),
             }),
         )
             .into_response(),
-        Ok(None) => see_other(&return_to(at::<S>(), uri.path())),
+        Ok(None) => see_other(&return_to(&REALM, uri.path())),
         Err(error) => unavailable_page(web, "could not answer an unknown admin path", &error),
     }
 }
@@ -798,7 +759,7 @@ async fn shown<S: LoginStore>(
                 .into_iter()
                 .map(|listed| Shown::of(listed, now))
                 .collect(),
-            shell: Shell::of::<S>(web, headers, account.name, form, at::<S>().security),
+            shell: Shell::of::<S>(web, headers, account.name, form, REALM.security),
         })
     }))
 }
@@ -909,7 +870,7 @@ async fn before<S: LoginStore>(
         from: &from,
         headers: &headers,
     };
-    let at = (step.path(at::<S>()), step.limit());
+    let at = (step.path(&REALM), step.limit());
     held_to(asked, &body, at, async |sent| {
         stepped(&served, &headers, sent, step).await
     })
@@ -1039,7 +1000,7 @@ async fn accepted<S: StaffStore>(
 fn accepted_at(token: &SessionToken, accepted: Acceptance) -> Response {
     let why = match accepted {
         Acceptance::Accepted | Acceptance::Member => {
-            return logged_in_at(Realm::Staff, token, STAFF.profile);
+            return logged_in_at(Realm::Staff, token, REALM.profile);
         }
         Acceptance::Expired => invite_ended(Realm::Staff),
         Acceptance::Other => {
@@ -1082,10 +1043,8 @@ async fn stepped<S: LoginStore>(
             .finish_login(&web.party, answer, &cookies(headers), &actor)
             .await
             .map(|token| {
-                let to = sent["next"]
-                    .as_str()
-                    .and_then(|next| return_path(at::<S>().home, next));
-                logged_in_at(S::REALM, &token, to.unwrap_or(at::<S>().profile))
+                let to = sent["next"].as_str().and_then(|next| back_to(&REALM, next));
+                logged_in_at(S::REALM, &token, to.unwrap_or(REALM.profile))
             }),
         Before::BeginJoin => admins
             .begin_join(&web.party, sent["link"].as_str().unwrap_or_default())
@@ -1095,7 +1054,7 @@ async fn stepped<S: LoginStore>(
         Before::FinishJoin => admins
             .finish_join(&web.party, answer, &cookies(headers), &actor)
             .await
-            .map(|(_, token)| logged_in_at(S::REALM, &token, at::<S>().profile)),
+            .map(|(_, token)| logged_in_at(S::REALM, &token, REALM.profile)),
     }
 }
 
@@ -1109,8 +1068,8 @@ async fn logged_in<S: LoginStore>(
     step: LoggedIn,
 ) -> Result<Response, Refused> {
     // The origin before the body, so another site's form, which a browser sends without asking, is recorded as one.
-    let sent = admitted(&served, &from, &headers, &body, step.path(at::<S>())).await?;
-    let checked = acting(&served, &from, &headers, &sent, step.path(at::<S>())).await?;
+    let sent = admitted(&served, &from, &headers, &body, step.path(&REALM)).await?;
+    let checked = acting(&served, &from, &headers, &sent, step.path(&REALM)).await?;
     let (web, admins) = (&served.web, &served.admins);
     let answered_with = match step {
         LoggedIn::BeginAdding => admins
@@ -1127,7 +1086,7 @@ async fn logged_in<S: LoginStore>(
             admins
                 .finish_adding_passkey(&web.party, &checked, answer, &actor)
                 .await
-                .map(|()| next(at::<S>().security))
+                .map(|()| next(REALM.security))
         }
         LoggedIn::Stay => admins.time_left(cookies(&headers)).await.map(left_json),
     };
@@ -1156,19 +1115,16 @@ async fn logout<S: LoginStore>(
         .await
     {
         Ok(Logout::Refused(check)) => {
-            refused_form(&served, &from, &headers, at::<S>().logout, check).await
+            refused_form(&served, &from, &headers, REALM.logout, check).await
         }
         // The browser also drops what it cached of the pages, so Back shows none of them. Only the cache: clearing
-        // cookies would end its sessions in every realm on the host.
+        // cookies would end every other cookie the host keeps, such as the color scheme.
         Ok(Logout::Ended | Logout::NothingToEnd) => (
             [
                 (header::SET_COOKIE, S::REALM.cleared_cookie()),
                 (CLEAR_SITE_DATA, "\"cache\"".to_string()),
             ],
-            see_other(&return_to(
-                at::<S>(),
-                query(&uri, "next").unwrap_or_default(),
-            )),
+            see_other(&return_to(&REALM, query(&uri, "next").unwrap_or_default())),
         )
             .into_response(),
         Err(error) => unavailable_page(&served.web, "could not log an admin out", &error),
@@ -1219,7 +1175,7 @@ async fn end_sessions<S: LoginStore>(
                     .verified(S::REALM, &web.origins)
                     .err()
                     .unwrap_or(FailedCheck::Field);
-                return refused_form(&served, &from, &headers, at::<S>().end_sessions, check).await;
+                return refused_form(&served, &from, &headers, REALM.end_sessions, check).await;
             };
             Some(id)
         }
@@ -1230,10 +1186,10 @@ async fn end_sessions<S: LoginStore>(
         .end_others(&web.origins, &change, only.as_ref(), device)
         .await
     {
-        Ok(Ending::Ended(_) | Ending::NotFresh) => see_other(at::<S>().security),
-        Ok(Ending::NoSession) => see_other(at::<S>().login),
+        Ok(Ending::Ended(_) | Ending::NotFresh) => see_other(REALM.security),
+        Ok(Ending::NoSession) => see_other(REALM.login),
         Ok(Ending::Refused(check)) => {
-            refused_form(&served, &from, &headers, at::<S>().end_sessions, check).await
+            refused_form(&served, &from, &headers, REALM.end_sessions, check).await
         }
         Err(error) => unavailable_page(web, "could not end an admin's sessions", &error),
     }
@@ -1481,12 +1437,18 @@ fn see_other(path: &str) -> Response {
 /// The login page, asked to return to `path` when that is a page a login may return to other than the realm's own
 /// or Profile, where a login goes anyway.
 fn return_to(at: &Paths, path: &str) -> String {
-    return_path(at.home, path)
+    back_to(at, path)
         .filter(|path| *path != at.home && *path != at.profile)
         .map_or_else(
             || at.login.to_string(),
             |path| format!("{}?next={path}", at.login),
         )
+}
+
+/// The realm's page a login may return to, once [`return_path`] checks it: never the login or join page itself,
+/// which would send a logged-in person back where they started.
+fn back_to<'a>(at: &Paths, raw: &'a str) -> Option<&'a str> {
+    return_path(raw).filter(|path| *path != at.login && *path != at.join)
 }
 
 /// A value the address's query gives `name`, as written. Only values the pages check before use are read, and a
@@ -1564,7 +1526,7 @@ mod tests {
             let body: Value = serde_json::from_slice(&body).expect("JSON");
             seen.push((status, cookie, body));
         }
-        let profile = (200, true, json!({"next": "/app/settings/profile"}));
+        let profile = (200, true, json!({"next": "/settings/profile"}));
         let refused = |why: &str| (400, true, json!({ "error": why }));
         let again = refused("this invite couldn't be accepted. Try again");
         assert_eq!(
@@ -1597,17 +1559,6 @@ mod tests {
                 ("Admin", "Ask an admin for an invite.", true),
                 ("Staff", "Ask the business's owner for an invite.", false),
             ]
-        );
-    }
-
-    /// Every realm's base path is one `return_path` accepts, so a login can return to its pages.
-    #[test]
-    fn every_realms_base_is_a_realm_base() {
-        let realms = [Realm::Admin, Realm::Staff];
-        assert!(
-            realms
-                .iter()
-                .all(|realm| crate::browser::realm_base(paths(*realm).home))
         );
     }
 

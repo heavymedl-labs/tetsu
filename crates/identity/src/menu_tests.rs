@@ -20,9 +20,9 @@ const MENU_PARTS: [&str; 12] = [
     ">Kurt Medley</p>",
     ">Admin</p>",
     "no-popovers:mt-0 no-popovers:flex\">",
-    "href=\"/admin/settings/profile\"",
+    "href=\"/settings/profile\"",
     "pointer-coarse:py-3\">Account</a>",
-    "<form method=\"post\" action=\"/admin/logout\"",
+    "<form method=\"post\" action=\"/logout\"",
     "name=\"form\" value=\"",
     "pointer-coarse:py-3\">Log out</button>",
 ];
@@ -31,7 +31,7 @@ const MENU_PARTS: [&str; 12] = [
 #[tokio::test]
 async fn every_admin_page_has_the_menu() {
     let (address, _database, cookie, _) = logged_in().await;
-    for path in [PROFILE, "/admin/settings/security", "/admin/mailbox"] {
+    for path in [PROFILE, "/settings/security", "/mailbox"] {
         let page = get(address, path, &cookie).await;
         assert_eq!(page.status, 200, "{path}");
         assert_in_order(&page, &MENU_PARTS, path);
@@ -44,9 +44,9 @@ async fn every_admin_page_has_the_menu() {
 async fn pages_without_a_session_show_no_menu() {
     let (address, database, cookie, form) = logged_in().await;
     let mut pages = vec![
-        get(address, "/admin/login", "").await,
-        get(address, "/admin/join", "").await,
-        get(address, "/admin/nowhere", &cookie).await,
+        get(address, "/login", "").await,
+        get(address, "/join", "").await,
+        get(address, "/nowhere", &cookie).await,
     ];
     let elsewhere = [
         ("Origin", "https://evil.example"),
@@ -55,7 +55,7 @@ async fn pages_without_a_session_show_no_menu() {
     let refused = send(
         address,
         "POST",
-        "/admin/logout",
+        "/logout",
         &elsewhere,
         &format!("form={form}"),
     )
@@ -84,10 +84,7 @@ async fn a_page_without_an_account_goes_to_log_in() {
                    transports text, backup_eligible boolean, backup_state boolean)";
     let none = "SELECT 1::bigint, ''::bytea, ''::text, ''::text, ''::bytea, ''::text, true, true WHERE false";
     replace(&database, "account(bytea)", returns, none).await;
-    for (path, to) in [
-        ("/admin/mailbox", "/admin/login?next=/admin/mailbox"),
-        (PROFILE, "/admin/login"),
-    ] {
+    for (path, to) in [("/mailbox", "/login?next=/mailbox"), (PROFILE, "/login")] {
         let page = get(address, path, &cookie).await;
         assert_eq!(
             (page.status, page.header("location")),
@@ -120,7 +117,7 @@ async fn a_page_whose_account_cannot_be_read_is_unavailable() {
         "REVOKE EXECUTE ON FUNCTION identity.account(bytea) FROM tetsu_identity",
     )
     .await;
-    assert_eq!(get(address, "/admin/mailbox", &cookie).await.status, 503);
+    assert_eq!(get(address, "/mailbox", &cookie).await.status, 503);
 }
 
 /// An admin's name is shown as text everywhere the menu and the sidebar put it, however it reads (`v5.0.0-3.2.2`).

@@ -108,7 +108,7 @@ async fn invited(
         .invite_staff(invite, &acting.by)
         .await
         .map_err(|error| error.to_string())?;
-    let url = operator::link_url(&acting.origin, "/app/join", &issued.token);
+    let url = operator::link_url(&acting.origin, "/join", &issued.token);
     let mut said = whom(&issued, invite, called);
     said.push(format!("invite link, good once and for seven days: {url}"));
     said.push(emailed(mailer, invite, called, &url, &issued.token).await);
@@ -291,9 +291,7 @@ mod tests {
             "created staff member 1, Ada Park, and invited them to Fern Studio as owner"
         );
         let token = first[1]
-            .strip_prefix(
-                "invite link, good once and for seven days: https://tetsu.example/app/join#",
-            )
+            .strip_prefix("invite link, good once and for seven days: https://tetsu.example/join#")
             .unwrap_or_else(|| panic!("{}", first[1]));
         assert!(
             token.len() == 64 && token.bytes().all(|b| b.is_ascii_hexdigit()),

@@ -16,7 +16,7 @@ An admin may hold an email address ([ADR-0074](../../docs/adr/0074-operator-emai
 `invite_message` renders their invite from templates, and `staff_invite_message` a staff member's, naming the business as escaped text, never kept for the mailbox, and `notices(mailer)` is an outbox
 consumer of Identity's own events that emails an admin or a staff member when a login, an added passkey, or a join goes through, keyed on the event, with no link in it
 (`v5.0.0-6.3.5`, `v5.0.0-6.3.7`). A notice that cannot go just now is retried; one the mail server refuses is
-dropped. `/admin/mailbox` shows a logged-in admin the email kept rather than sent, newest first, as text, through
+dropped. `/mailbox` shows a logged-in admin the email kept rather than sent, newest first, as text, through
 the kernel's `Mailbox` port, which Mail implements; a message's HTML is never shown.
 
 - **Session tokens are 256 random bits** from the operating system's source, written as 64 lowercase hexadecimal
@@ -31,10 +31,10 @@ the kernel's `Mailbox` port, which Mail implements; a message's HTML is never sh
   Requests at the same moment never end a live session or revive a spent one, and the last request never moves back.
 - **Logging out removes the session** on the server. It changes state, so it passes the origin and form-token
   checks first.
-- **An admin sees and ends their own sessions** at `/admin/settings/security` (ADR-0059, `v5.0.0-7.5.2`), as Linear lists them:
+- **An admin sees and ends their own sessions** at `/settings/security` (ADR-0059, `v5.0.0-7.5.2`), as Linear lists them:
   each live one by its public id, with the coarse device it started on, such as Firefox on Linux, when it started,
   and when it was last used, this one first. `sessions_of` finds them from the presented session alone and renews
-  none. `POST /admin/sessions/end` ends one other session, or every other one, passing logging out's checks, and only
+  none. `POST /sessions/end` ends one other session, or every other one, passing logging out's checks, and only
   from a login within ten minutes, as adding a passkey needs (ADR-0048, `v5.0.0-7.5.1`); this session is never ended
   there. Each attempt that reaches storage is recorded as `identity.other_sessions_ended`, with the session it
   named, if any, the admin and the asking session's public id where storage found them, and how many ended, or
@@ -95,7 +95,7 @@ the kernel's `Mailbox` port, which Mail implements; a message's HTML is never sh
   command prints
   it only to a terminal, a guard against it landing in a log by accident; the trust boundary is access to the
   database. The token sits in the link's fragment, which a browser never sends to a server, though its history
-  keeps it. The page a link opens, `/admin/join`, reads the token from the fragment and clears it from the address
+  keeps it. The page a link opens, `/join`, reads the token from the fragment and clears it from the address
   bar at once.
 - **Names are unique.** A create retried after its output was lost is refused, naming the admin who holds the
   name, rather than making a second.
@@ -215,9 +215,9 @@ the kernel's `Mailbox` port, which Mail implements; a message's HTML is never sh
 
 ## The admin pages
 
-`adapters/http.rs` serves the admins' realm at `/admin` ([ADR-0084](../../docs/adr/0084-realm-routes.md)):
-`/admin/login`, `/admin/join`, their account's `/admin/settings/profile` and `/admin/settings/security`, and
-`/admin/mailbox`, with the JSON
+`adapters/http.rs` serves each realm at the root of its own host
+([ADR-0094](../../docs/adr/0094-realm-paths-at-the-root-of-their-hosts.md)), the admins' as `/login`, `/join`, their
+account's `/settings/profile` and `/settings/security`, and `/mailbox`, with the JSON
 endpoints the passkey islands in `web/src/passkey/` call: `<tetsu-passkey>` runs a page's one passkey action, and
 `<tetsu-passkeys>` wraps the admin's list of passkeys. Pages take Linear's look, as ADR-0035 gives Tetsu's own
 pages, in a layout of Tetsu's own, load only Tetsu's own script, under a policy of their own, and are never cached.
@@ -225,13 +225,13 @@ Logging in is by passkey alone, as ADR-0040 sets for admins. Endpoints read only
 `application/json`, answer `no-store`, and give each ceremony's one refusal; a failure of the server is `503` to
 the browser and logged. Logging in ends the session the browser presented, in the transaction
 that starts the new one. Logging out is a plain form that clears the cookie and the browser's cache of the pages. The
-account area is the admins' home (ADR-0086): `/admin` sends them to Profile, where logging in and joining land too. Every admin
+account area is the admins' home (ADR-0086): `/` sends them to Profile, where logging in and joining land too. Every admin
 page takes Linear's settings mode (#156): the shared settings shell, `web/templates/settings.html`, with a sidebar of
 Tetsu's wordmark, the Personal pages, a Platform group of pages only admins have, now the mailbox, and the
 admin with Log out at its foot, which below a tablet's width opens from "Menu" as a native popover, beside the
 initials menu (#148, `v5.0.0-7.4.4`). The initials open a menu, a native popover that works without script, with the
 admin's name, "Admin", Account, and the Log out form; it and the header it came with are shared components in
-`web/templates/components.html`, which the public site's header uses too. An address under `/admin` that no page
+`web/templates/components.html`, which the public site's header uses too. An address on the host that no page
 holds gets the site's own not-found page, as any wrong address does. Pages before login and the refused and
 unavailable pages have no menu. Profile shows the
 admin's name, email address, and role; Security lists their sessions, then their passkeys. Security
@@ -240,14 +240,14 @@ offers a second passkey only within ten minutes of logging in, as the database a
 
 The edges of a login follow [the admin lifecycles research](../../docs/research/identity/operator-lifecycles.md).
 A logged-in admin who opens the login page is sent on. A login returns to the page it was asked for, through
-`browser::return_path`, which accepts only `/admin` or a plain path under it, checked on the page and again when the
-login finishes. Every admin page extends `account_shell.html`, which loads the session island in
-`web/src/session/`. `<tetsu-session>` reads `GET /admin/session`, the seconds to each limit by the database's clock,
+`browser::return_path`, which accepts only a plain path on the realm's host other than its login and join pages,
+checked on the page and again when the login finishes. Every admin page extends `account_shell.html`, which loads the session island in
+`web/src/session/`. `<tetsu-session>` reads `GET /session`, the seconds to each limit by the database's clock,
 which renews nothing, each minute while its page is visible, so an ending no limit foretold is seen within a minute,
 and two minutes before a limit opens the page's dialog: before the idle limit to stay logged
 in, a `POST` with the form token that renews the session, and before the 8 hour limit to log in again, a logout that returns to the page after the next login. It keeps the
 site's tabs in step over a `BroadcastChannel`, asks again when the page is shown, and sends a page whose session has
-ended to `/admin/login?ended=1`, which says the admin was logged out and how long a session may sit idle.
+ended to `/login?ended=1`, which says the admin was logged out and how long a session may sit idle.
 
 ## Not yet
 

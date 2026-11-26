@@ -12,7 +12,7 @@ server-rendered pages) calls the module's use cases. An outbound adapter
 implements a driven port with a specific technology, such as Postgres or a
 payment processor.
 
-**Admin.** A person who works for Tetsu itself, not for a tenant, and logs in to Tetsu's own tools at `/admin`
+**Admin.** A person who works for Tetsu itself, not for a tenant, and logs in to Tetsu's own tools on the admins' host
 ([ADR-0040](adr/0040-identity-and-sign-in.md), [ADR-0085](adr/0085-admins-not-operators.md)). ADRs before ADR-0085
 call them operators.
 

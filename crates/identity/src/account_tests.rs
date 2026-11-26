@@ -7,8 +7,8 @@
 use crate::http_tests::{MENU_SCRIPT, PROFILE, assert_in_order, get, logged_in, logs_out_from};
 use crate::join_tests::as_db_admin;
 
-const SECURITY: &str = "/admin/settings/security";
-const MAILBOX: &str = "/admin/mailbox";
+const SECURITY: &str = "/settings/security";
+const MAILBOX: &str = "/mailbox";
 
 /// What each page in the shell holds, in the order a reader meets it.
 const SHELL_PARTS: [&str; 11] = [
@@ -16,11 +16,11 @@ const SHELL_PARTS: [&str; 11] = [
     "<nav aria-label=\"Settings\"",
     "aria-label=\"Tetsu home\"",
     ">Personal</p>",
-    "href=\"/admin/settings/profile\"",
-    "href=\"/admin/settings/security\"",
+    "href=\"/settings/profile\"",
+    "href=\"/settings/security\"",
     ">Platform</p>",
-    "href=\"/admin/mailbox\"",
-    "<form method=\"post\" action=\"/admin/logout\"",
+    "href=\"/mailbox\"",
+    "<form method=\"post\" action=\"/logout\"",
     "<main id=\"main\"",
     "<h1",
 ];
@@ -130,7 +130,7 @@ async fn security_lists_sessions_then_passkeys() {
         "This session",
         "<tetsu-passkeys",
         "<ul role=\"list\" aria-label=\"Passkeys\"",
-        "<tetsu-passkey base=\"/admin\" action=\"add\"",
+        "<tetsu-passkey base=\"\" action=\"add\"",
         "Turn on JavaScript to use passkeys.</p></noscript>",
     ] {
         assert!(page.body.contains(part), "{part}: {}", page.body);
@@ -143,9 +143,9 @@ async fn security_lists_sessions_then_passkeys() {
 async fn an_account_page_without_a_session_goes_to_log_in() {
     let (address, _database, _, _) = logged_in().await;
     for (path, back) in [
-        (PROFILE, "/admin/login"),
-        (SECURITY, "/admin/login?next=/admin/settings/security"),
-        (MAILBOX, "/admin/login?next=/admin/mailbox"),
+        (PROFILE, "/login"),
+        (SECURITY, "/login?next=/settings/security"),
+        (MAILBOX, "/login?next=/mailbox"),
     ] {
         let page = get(address, path, "").await;
         assert_eq!(
@@ -161,8 +161,8 @@ async fn an_account_page_without_a_session_goes_to_log_in() {
 #[tokio::test]
 async fn the_realms_address_goes_to_profile() {
     let (address, _database, cookie, _) = logged_in().await;
-    for (cookie, to) in [(cookie.as_str(), PROFILE), ("", "/admin/login")] {
-        let page = get(address, "/admin", cookie).await;
+    for (cookie, to) in [(cookie.as_str(), PROFILE), ("", "/login")] {
+        let page = get(address, "/", cookie).await;
         assert_eq!((page.status, page.header("location")), (303, Some(to)));
     }
 }
