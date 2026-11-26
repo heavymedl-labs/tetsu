@@ -23,6 +23,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 3,
         sql: include_str!("../../migrations/0003_rename.sql"),
     },
+    Migration {
+        version: 4,
+        sql: include_str!("../../migrations/0004_tenant_name.sql"),
+    },
 ];
 /// Tenancy's schema, which names the role its transactions act as (ADR-0042).
 const SCHEMA: &str = "tenancy";
@@ -33,6 +37,7 @@ const FIND_TENANT: &str = include_str!("../../sql/find_tenant_by_address.sql");
 const FIND_LOCATIONS: &str = include_str!("../../sql/find_locations.sql");
 const FIND_ADDRESSES_IN_USE: &str = include_str!("../../sql/find_addresses_in_use.sql");
 const RENAME_TENANT: &str = include_str!("../../sql/rename_tenant.sql");
+const FIND_TENANT_NAME: &str = include_str!("../../sql/find_tenant_name.sql");
 /// Tenancy over Postgres, for the composition root. It returns the use cases, never the store itself
 /// (ADR-0021).
 ///
@@ -142,6 +147,31 @@ impl TenantStore for PostgresTenants {
         let result = rename(&mut client, address, to).await;
         clear_if_stale(&self.pool, result)
     }
+
+    async fn find_name(&self, id: i64) -> Result<Option<String>, Error> {
+        let mut client = self.pool.get().await.map_err(pool_error)?;
+        let result = name(&mut client, id).await;
+        clear_if_stale(&self.pool, result)
+    }
+}
+
+/// A tenant's name through Tenancy's function, one tenant a call.
+async fn name(client: &mut Object, id: i64) -> Result<Option<String>, Error> {
+    let transaction = ModuleTransaction::begin(client, SCHEMA)
+        .await
+        .map_err(|e| database(&e))?;
+    let statement = transaction
+        .prepare_cached(FIND_TENANT_NAME)
+        .await
+        .map_err(|e| database(&e))?;
+    let name = transaction
+        .query_one(&statement, &[&id])
+        .await
+        .map_err(|e| database(&e))?
+        .try_get("name")
+        .map_err(|e| database(&e))?;
+    transaction.commit().await.map_err(|e| commit_error(&e))?;
+    Ok(name)
 }
 
 /// Renames through Tenancy's function, the only way its role changes a slug or an address.

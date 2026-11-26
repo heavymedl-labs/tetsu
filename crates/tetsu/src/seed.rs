@@ -215,6 +215,10 @@ mod tests {
         ) -> impl Future<Output = Result<Vec<String>, Error>> + Send {
             std::future::ready(Err(self.0.clone()))
         }
+        fn find_name(&self, _: i64) -> impl Future<Output = Result<Option<String>, Error>> + Send {
+            std::future::ready(Err(self.0.clone()))
+        }
+
         fn rename(
             &self,
             _: &str,

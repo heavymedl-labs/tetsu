@@ -59,6 +59,23 @@ async fn a_created_tenant_resolves_by_its_slug() {
     assert_eq!(names, ["Main Street", "Second Street"]);
 }
 
+/// A business's name is found by its id, as a staff invite names its business by id alone; an id no tenant has
+/// finds none.
+#[tokio::test]
+async fn a_tenants_name_is_found_by_its_id() {
+    let (store, _database) = store_and_settings().await;
+    let created = store
+        .create(&tenant(
+            "sample-studio",
+            &[("Main Street", "America/Denver")],
+        ))
+        .await
+        .expect("creates");
+    let id = created.id().get();
+    assert_eq!(store.name(id).await, Ok(Some("Sample Studio".to_string())));
+    assert_eq!(store.name(id + 1).await, Ok(None));
+}
+
 #[tokio::test]
 async fn an_address_is_matched_without_case_or_spaces() {
     let (store, _database) = store_and_settings().await;
@@ -518,8 +535,8 @@ async fn every_query_file_prepares() {
             .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
         prepared += 1;
     }
-    // One per use the adapter makes of the database, rename_tenant.sql the newest (#135).
-    assert_eq!(prepared, 6);
+    // One per use the adapter makes of the database, find_tenant_name.sql the newest (#111).
+    assert_eq!(prepared, 7);
 }
 
 /// Logged in as the application role, as `tetsu serve` is, so row-level security applies (ADR-0042).

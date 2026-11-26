@@ -39,6 +39,15 @@ impl<S: TenantStore> Tenants<S> {
             .ok_or(Error::NotFound)
     }
 
+    /// The name of the business with an id, for a page that knows it only by id, such as a staff invite's; none
+    /// for an id no tenant has.
+    ///
+    /// # Errors
+    /// Fails if storage fails.
+    pub async fn name(&self, id: i64) -> Result<Option<String>, Error> {
+        self.store.find_name(id).await
+    }
+
     /// Moves the tenant at an address to a new slug and its address, such as one whose address a release has
     /// since reserved for Tetsu's own pages (#90). The address may be reserved; the new slug may not, since it
     /// passed [`Slug::parse`].

@@ -105,7 +105,11 @@ the application's own filters as a second layer.
   functions read or write. Each function sets a fixed `search_path`, has `EXECUTE` revoked from `PUBLIC` in the
   migration that creates it, and runs in its own short transaction. (Clarified 2026-11-11, with the maintainer's
   approval: one lookup role per module, since roles belong to the whole server and one per function would
-  multiply them.)
+  multiply them.) (Clarified 2026-11-26, with the maintainer's approval: two lookups take a serial ID, so their
+  module's role can list what they answer. Identity's `staff_email` gives the address a staff member's login and
+  passkey notices go to; no key could narrow it, since Identity's role writes the events that would carry one, and
+  admins' addresses are read the same way. Tenancy's `tenant_name` gives a business's name, which its own page
+  shows to anyone.)
 - **Staff identities and their passkeys are global,** as ADR-0040's realms require, while staff roles are
   tenant-owned. "Which businesses can I work at" is one such function, keyed on the logged-in identity.
   (Clarified 2026-11-24, with the maintainer's approval: such a function reads a tenant-owned table through
