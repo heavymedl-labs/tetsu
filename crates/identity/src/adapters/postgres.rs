@@ -13,12 +13,12 @@ use tokio_postgres::types::{FromSql, ToSql};
 
 use crate::domain::{
     Acceptance, Account, AccountId, Actor, Addition, AdminSummary, BusinessId, CeremonyKind,
-    Disabling, Ending, Error, FailedCheck, HeldPasskey, Invitation, Invitee, Issue, ListedSession,
-    Login, NewPasskey, NewStaffInvite, PersonName, RateLimit, Realm, Redemption, Refusal, Removal,
-    Role, Session, SessionId, SessionStart, Signer, StaffIssue, TakenAddition, TakenCeremony,
-    TimeLeft,
+    Disabling, Ending, Error, FailedCheck, HeldPasskey, Invitation, InviteId, Invitee, Issue,
+    ListedSession, Login, Member, NewPasskey, NewStaffInvite, OpenInvite, PersonName, RateLimit,
+    Realm, Redemption, Refusal, Removal, Role, Session, SessionId, SessionStart, Signer,
+    StaffIssue, TakenAddition, TakenCeremony, Team, TeamChange, TeamMember, TimeLeft,
 };
-use crate::ports::{AdminDirectory, AdminStore, LoginStore, StaffDirectory, StaffStore};
+use crate::ports::{AdminDirectory, AdminStore, LoginStore, StaffDirectory, StaffStore, TeamStore};
 use crate::use_cases::Accounts;
 
 /// The login flow every realm shares, written once as the admin realm's (ADR-0091).
@@ -135,6 +135,14 @@ pub static MIGRATIONS: LazyLock<Vec<Migration>> = LazyLock::new(|| {
             version: 18,
             sql: include_str!("../../migrations/0018_staff_notice.sql"),
         },
+        Migration {
+            version: 19,
+            sql: include_str!("../../migrations/0019_staff_team.sql"),
+        },
+        Migration {
+            version: 20,
+            sql: include_str!("../../migrations/0020_validate_invite_limit.sql"),
+        },
     ]
 });
 /// Identity's schema, which names the role its transactions act as (ADR-0042).
@@ -151,6 +159,14 @@ const STAFF_ISSUE_INVITE: &str = include_str!("../../sql/staff_issue_invite.sql"
 const STAFF_INVITATION: &str = include_str!("../../sql/staff_invitation.sql");
 const STAFF_ACCEPT_INVITE: &str = include_str!("../../sql/staff_accept_invite.sql");
 const STAFF_BUSINESS: &str = include_str!("../../sql/staff_business.sql");
+const STAFF_ROLE: &str = include_str!("../../sql/staff_role.sql");
+const STAFF_FIRST_BUSINESS: &str = include_str!("../../sql/staff_first_business.sql");
+const STAFF_TEAM: &str = include_str!("../../sql/staff_team.sql");
+const STAFF_OPEN_INVITES: &str = include_str!("../../sql/staff_open_invites.sql");
+const STAFF_INVITE_FROM: &str = include_str!("../../sql/staff_invite_from.sql");
+const STAFF_CHANGE_ROLE: &str = include_str!("../../sql/staff_change_role.sql");
+const STAFF_REMOVE: &str = include_str!("../../sql/staff_remove.sql");
+const STAFF_CANCEL_INVITE: &str = include_str!("../../sql/staff_cancel_invite.sql");
 const DISABLE_ADMIN: &str = include_str!("../../sql/disable_admin.sql");
 const END_ADMIN_SESSIONS: &str = include_str!("../../sql/end_admin_sessions.sql");
 const END_REALM_SESSIONS: &str = include_str!("../../sql/end_realm_sessions.sql");
@@ -1160,6 +1176,287 @@ impl StaffDirectory for PostgresStaff {
         .await?
         .ok_or_else(answered_nothing)
     }
+}
+
+impl TeamStore for PostgresStaff {
+    async fn role_at(&self, business: BusinessId, staff: AccountId) -> Result<Option<Role>, Error> {
+        let rows = self
+            .query_recording_in(
+                Place::Business(business.get()),
+                STAFF_ROLE,
+                &[&staff.get()],
+                &|_| Ok(None),
+            )
+            .await?;
+        rows.first()
+            .map(|row| role_in(row, "role_name"))
+            .transpose()
+    }
+
+    async fn first_business(&self, staff: AccountId) -> Result<Option<BusinessId>, Error> {
+        let rows = self.query(STAFF_FIRST_BUSINESS, &[&staff.get()]).await?;
+        let first = rows
+            .first()
+            .map(|row| column::<Option<i64>>(row, "tenant_id"));
+        Ok(first.transpose()?.flatten().map(BusinessId::new))
+    }
+
+    async fn team(&self, business: BusinessId) -> Result<Team, Error> {
+        let place = Place::Business(business.get());
+        let none: MakesEvent<'_> = &|_| Ok(None);
+        let members = self
+            .query_recording_in(place, STAFF_TEAM, &[], none)
+            .await?;
+        let invites = self
+            .query_recording_in(place, STAFF_OPEN_INVITES, &[], none)
+            .await?;
+        Ok(Team {
+            members: members.iter().map(member_from).collect::<Result<_, _>>()?,
+            invites: invites
+                .iter()
+                .map(open_invite_from)
+                .collect::<Result<_, _>>()?,
+        })
+    }
+
+    async fn invite_from(
+        &self,
+        member: &Member,
+        invite: &NewStaffInvite,
+        hash: &[u8; 32],
+        actor: &Actor,
+    ) -> Result<(TeamChange, bool), Error> {
+        let reachable: Vec<&str> = Role::ALL
+            .into_iter()
+            .filter(|role| member.role.reaches(*role))
+            .map(Role::as_str)
+            .collect();
+        let parameters: [&(dyn ToSql + Sync); 7] = [
+            &member.staff.get(),
+            &member.role.as_str(),
+            &reachable,
+            &hash.as_slice(),
+            &invite.name.as_str(),
+            &invite.email.as_str(),
+            &invite.role.as_str(),
+        ];
+        let role = invite.role;
+        self.decided(
+            Place::Business(member.business.get()),
+            STAFF_INVITE_FROM,
+            &parameters,
+            |rows| sent_from_team(rows, role, actor),
+        )
+        .await?
+        .ok_or_else(answered_nothing)
+    }
+
+    async fn change_role(
+        &self,
+        member: &Member,
+        staff: AccountId,
+        held: Role,
+        wanted: Role,
+        actor: &Actor,
+    ) -> Result<TeamChange, Error> {
+        let id = staff.get();
+        let parameters: [&(dyn ToSql + Sync); 5] = [
+            &member.staff.get(),
+            &member.role.as_str(),
+            &id,
+            &held.as_str(),
+            &wanted.as_str(),
+        ];
+        let payload = json!({"staff_id": id, "from": held.as_str(), "to": wanted.as_str()});
+        self.team_change(
+            member,
+            STAFF_CHANGE_ROLE,
+            &parameters,
+            ("identity.staff_role_changed", "changed"),
+            payload,
+            actor,
+        )
+        .await
+    }
+
+    async fn remove_staff(
+        &self,
+        member: &Member,
+        staff: AccountId,
+        held: Role,
+        actor: &Actor,
+    ) -> Result<TeamChange, Error> {
+        let id = staff.get();
+        let parameters: [&(dyn ToSql + Sync); 4] = [
+            &member.staff.get(),
+            &member.role.as_str(),
+            &id,
+            &held.as_str(),
+        ];
+        let payload = json!({"staff_id": id, "role": held.as_str()});
+        self.team_change(
+            member,
+            STAFF_REMOVE,
+            &parameters,
+            ("identity.staff_removed", "removed"),
+            payload,
+            actor,
+        )
+        .await
+    }
+
+    async fn cancel_invite(
+        &self,
+        member: &Member,
+        invite: &InviteId,
+        held: Role,
+        actor: &Actor,
+    ) -> Result<TeamChange, Error> {
+        let parameters: [&(dyn ToSql + Sync); 4] = [
+            &member.staff.get(),
+            &member.role.as_str(),
+            &invite.as_str(),
+            &held.as_str(),
+        ];
+        let payload = json!({"invite_id": invite.as_str(), "role": held.as_str()});
+        self.team_change(
+            member,
+            STAFF_CANCEL_INVITE,
+            &parameters,
+            ("identity.staff_invite_cancelled", "cancelled"),
+            payload,
+            actor,
+        )
+        .await
+    }
+
+    async fn admit_inviter(&self, staff: AccountId) -> Result<Option<Duration>, Error> {
+        // A limit's key is 16 bytes, as a network's is; a staff member's id fills the last eight, under a kind no
+        // network's limit shares.
+        let mut key = [0; 16];
+        key[8..].copy_from_slice(&staff.get().to_be_bytes());
+        let rows = self
+            .query(ADMIT, &[&"staff_invite", &key.as_slice()])
+            .await?;
+        rows.first()
+            .map(|row| column::<Option<i64>>(row, "wait"))
+            .transpose()
+            .map(|wait| {
+                wait.flatten()
+                    .map(|seconds| Duration::from_secs(seconds.unsigned_abs()))
+            })
+    }
+}
+
+impl PostgresStaff {
+    /// Runs one of the Team page's changes in the member's business, reading its outcome, and records it there as
+    /// `kind`, changed when storage answered `done`, unchanged for a role held already, and refused otherwise, with
+    /// the reason.
+    async fn team_change(
+        &self,
+        member: &Member,
+        statement: &str,
+        parameters: &[&(dyn ToSql + Sync)],
+        (kind, done): (&'static str, &'static str),
+        payload: Value,
+        actor: &Actor,
+    ) -> Result<TeamChange, Error> {
+        self.decided(
+            Place::Business(member.business.get()),
+            statement,
+            parameters,
+            |rows| team_changed(rows, kind, done, payload.clone(), actor),
+        )
+        .await?
+        .ok_or_else(answered_nothing)
+    }
+}
+
+/// A role in a row's column; one Identity never writes is a storage failure.
+fn role_in(row: &Row, name: &str) -> Result<Role, Error> {
+    let role: String = column(row, name)?;
+    Role::parse(&role).ok_or_else(|| Error::Storage(format!("a staff role is {role:?}")))
+}
+
+fn member_from(row: &Row) -> Result<TeamMember, Error> {
+    Ok(TeamMember {
+        staff: AccountId::new(column(row, "staff_id")?),
+        name: column(row, "name")?,
+        email: column(row, "email")?,
+        role: role_in(row, "role_name")?,
+        joined_at: column(row, "joined_at")?,
+    })
+}
+
+fn open_invite_from(row: &Row) -> Result<OpenInvite, Error> {
+    Ok(OpenInvite {
+        id: InviteId(column(row, "invite_id")?),
+        staff: AccountId::new(column(row, "staff_id")?),
+        name: column(row, "name")?,
+        email: column(row, "email")?,
+        role: role_in(row, "role_name")?,
+        ends_at: column(row, "ends_at")?,
+    })
+}
+
+/// Reads what one of the Team page's changes came to, and makes the event it records in the business's own record.
+/// An outcome Identity's database never writes is a storage failure.
+fn team_changed(
+    rows: &[Row],
+    kind: &'static str,
+    done: &str,
+    payload: Value,
+    actor: &Actor,
+) -> Decided<TeamChange> {
+    let row = rows.first().ok_or_else(answered_nothing)?;
+    let outcome: String = column(row, "outcome")?;
+    let (change, said) = match outcome.as_str() {
+        _ if outcome == done => (TeamChange::Done, "changed"),
+        "unchanged" => (TeamChange::Unchanged, "unchanged"),
+        "stale" => (TeamChange::Stale, "refused"),
+        "last_owner" => (TeamChange::LastOwner, "refused"),
+        _ => {
+            return Err(Error::Storage(format!(
+                "a change to a team answered {outcome:?}"
+            )));
+        }
+    };
+    let mut payload = payload;
+    payload["reason"] = json!((said == "refused").then_some(outcome.as_str()));
+    Ok((Some(change), Some(event(kind, actor, said, payload))))
+}
+
+/// Reads what an invite from the Team page came to, and makes the event it records in the business's own record:
+/// changed, naming the staff member, when one was issued, and refused otherwise, with the reason. A disabled staff
+/// member is recorded as not issued, naming no one, and answers as sent, so the business learns nothing another
+/// gave them (ADR-0096).
+fn sent_from_team(rows: &[Row], role: Role, actor: &Actor) -> Decided<(TeamChange, bool)> {
+    let row = rows.first().ok_or_else(answered_nothing)?;
+    let outcome: String = column(row, "outcome")?;
+    let (change, reason) = match outcome.as_str() {
+        "issued" => (TeamChange::Done, None),
+        "disabled" => (TeamChange::Done, Some("not_issued")),
+        "member" => (TeamChange::Member, Some("member")),
+        "stale" => (TeamChange::Stale, Some("stale")),
+        "beyond" => (TeamChange::Refused, Some("beyond")),
+        _ => {
+            return Err(Error::Storage(format!(
+                "inviting from a team answered {outcome:?}"
+            )));
+        }
+    };
+    let issued = outcome == "issued";
+    let named = issued || outcome == "member";
+    let staff = if named {
+        Some(column::<i64>(row, "invited")?)
+    } else {
+        None
+    };
+    let payload = json!({"staff_id": staff, "role": role.as_str()});
+    Ok((
+        Some((change, issued)),
+        Some(reasoned("identity.staff_invited", actor, reason, payload)),
+    ))
 }
 
 /// An open invite's business, role, and whether its person has joined; a role Identity never writes is a storage

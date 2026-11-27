@@ -1,7 +1,7 @@
-//! The staff command (ADR-0089): invites a business's first owner, with `tetsu staff invite <business> <name>
-//! <email> --role owner`. The composition root finds the business through Tenancy, and Identity, which never reads
-//! Tenancy's tables, invites the person under that business's ID. The link is printed only to a terminal and emailed
-//! only to the invited address, as an admin's is.
+//! The staff command (ADR-0089): invites someone to a business, such as its first owner, with `tetsu staff invite
+//! <business> <name> <email> --role owner`, or any of the four roles (ADR-0096). The composition root finds the
+//! business through Tenancy, and Identity, which never reads Tenancy's tables, invites the person under that
+//! business's ID. The link is printed only to a terminal and emailed only to the invited address, as an admin's is.
 
 use tetsu_identity::{
     Accounts, BusinessId, InviteToken, NewStaffInvite, PersonName, Role, StaffDirectory,
@@ -24,7 +24,8 @@ pub enum Staff {
     },
 }
 
-const USAGE: &str = "staff takes invite <business> <name> <email> --role owner";
+const USAGE: &str =
+    "staff takes invite <business> <name> <email> --role owner|manager|front_desk|instructor";
 
 /// The staff command its words name, with its arguments checked.
 pub fn parse(rest: &[String]) -> Result<Staff, String> {
@@ -39,7 +40,7 @@ pub fn parse(rest: &[String]) -> Result<Staff, String> {
         name: PersonName::parse(name).map_err(|error| error.to_string())?,
         email: Address::parse(email).ok_or(format!("{email:?} is not a plain email address"))?,
         role: Role::parse(role).ok_or(format!(
-            "{role:?} is not a role staff can be invited to yet; only owner is, until the other roles come"
+            "{role:?} is not a role; staff are invited as owner, manager, front_desk, or instructor"
         ))?,
     })
 }
@@ -227,9 +228,22 @@ mod tests {
             "\"Ada <ada@example.com>\" is not a plain email address"
         );
         assert_eq!(
-            with(5, "manager"),
-            "\"manager\" is not a role staff can be invited to yet; only owner is, until the other roles come"
+            with(5, "admin"),
+            "\"admin\" is not a role; staff are invited as owner, manager, front_desk, or instructor"
         );
+    }
+
+    /// Staff are invited as any of the four roles, by the name the database keeps.
+    #[test]
+    fn staff_are_invited_as_any_role() {
+        for role in Role::ALL {
+            let mut words = WORDS;
+            words[5] = role.as_str();
+            let Ok(Staff::Invite { role: given, .. }) = parse(&args(&words)) else {
+                panic!("{role:?} parses");
+            };
+            assert_eq!(given, role);
+        }
     }
 
     /// A link is issued only to a terminal, checked before any setting is read.

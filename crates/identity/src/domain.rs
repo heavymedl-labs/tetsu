@@ -831,11 +831,33 @@ pub struct SessionId(pub(crate) String);
 impl SessionId {
     #[must_use]
     pub fn parse(text: &str) -> Option<Self> {
-        let groups = text.split('-').map(str::len);
-        let hex = text
-            .bytes()
-            .all(|byte| byte == b'-' || matches!(byte, b'0'..=b'9' | b'a'..=b'f'));
-        (hex && groups.eq([8, 4, 4, 4, 12])).then(|| Self(text.to_string()))
+        public_id(text).then(|| Self(text.to_string()))
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Whether `text` is a UUID in its lowercase form, as a random public id is written.
+fn public_id(text: &str) -> bool {
+    let groups = text.split('-').map(str::len);
+    let hex = text
+        .bytes()
+        .all(|byte| byte == b'-' || matches!(byte, b'0'..=b'9' | b'a'..=b'f'));
+    hex && groups.eq([8, 4, 4, 4, 12])
+}
+
+/// An open staff invite's random public id, as the Team page lists it and cancelling one names it (ADR-0096): a
+/// UUID in its lowercase form, never anything of its link. One that is not is refused before it reaches storage.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InviteId(pub(crate) String);
+
+impl InviteId {
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        public_id(text).then(|| Self(text.to_string()))
     }
 
     #[must_use]
@@ -924,29 +946,186 @@ impl BusinessId {
     }
 }
 
-/// What a staff member may do at a business (ADR-0048). Only owners exist until sub-slice 4 adds the other roles
-/// and their checks.
+/// What a staff member may do at a business (ADR-0048): one role each, read on every request to that business's
+/// pages (ADR-0096).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {
     Owner,
+    Manager,
+    FrontDesk,
+    Instructor,
 }
 
 impl Role {
+    /// Every role, highest first, as the Team page offers them.
+    pub const ALL: [Self; 4] = [
+        Self::Owner,
+        Self::Manager,
+        Self::FrontDesk,
+        Self::Instructor,
+    ];
+
     /// The role by the name the staff command and Identity's database write.
     #[must_use]
     pub fn parse(name: &str) -> Option<Self> {
-        match name {
-            "owner" => Some(Self::Owner),
-            _ => None,
-        }
+        Self::ALL.into_iter().find(|role| role.as_str() == name)
     }
 
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Owner => "owner",
+            Self::Manager => "manager",
+            Self::FrontDesk => "front_desk",
+            Self::Instructor => "instructor",
         }
     }
+
+    /// The role as a page names it.
+    #[must_use]
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::Owner => "Owner",
+            Self::Manager => "Manager",
+            Self::FrontDesk => "Front desk",
+            Self::Instructor => "Instructor",
+        }
+    }
+
+    /// Whether the role holds `permission`, by ADR-0096's table. Every check names a permission, never a role
+    /// (`v5.0.0-8.2.1`).
+    #[must_use]
+    pub const fn may(self, permission: Permission) -> bool {
+        match permission {
+            Permission::SeeTeam
+            | Permission::InviteStaff
+            | Permission::CancelInvite
+            | Permission::ChangeRole
+            | Permission::RemoveStaff => matches!(self, Self::Owner | Self::Manager),
+        }
+    }
+
+    /// Whether someone in this role reaches `other`'s, as a person, an invite, or a role to grant: an owner reaches
+    /// every role, and anyone else only roles below their own (ADR-0096).
+    #[must_use]
+    pub const fn reaches(self, other: Self) -> bool {
+        matches!(self, Self::Owner) || self.rank() > other.rank()
+    }
+
+    /// The role's place: owner, then manager, then front desk and instructor alike.
+    const fn rank(self) -> u8 {
+        match self {
+            Self::Owner => 2,
+            Self::Manager => 1,
+            Self::FrontDesk | Self::Instructor => 0,
+        }
+    }
+}
+
+/// What a check at a business asks of a staff member's role (ADR-0096). Later checks add their own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Permission {
+    /// Seeing the business's Team page: its staff and open invites.
+    SeeTeam,
+    /// Inviting someone to the business.
+    InviteStaff,
+    /// Cancelling an open invite.
+    CancelInvite,
+    /// Changing a staff member's role.
+    ChangeRole,
+    /// Removing a staff member from the business.
+    RemoveStaff,
+}
+
+impl Permission {
+    /// Every permission, so each has its negative test.
+    pub const ALL: [Self; 5] = [
+        Self::SeeTeam,
+        Self::InviteStaff,
+        Self::CancelInvite,
+        Self::ChangeRole,
+        Self::RemoveStaff,
+    ];
+}
+
+/// A staff member acting at a business, with the role they hold there, read on this request (ADR-0096). Only
+/// [`crate::Accounts::member_at`] makes one, so a check always weighs the role the business gives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Member {
+    pub(crate) staff: AccountId,
+    pub(crate) business: BusinessId,
+    pub(crate) role: Role,
+}
+
+impl Member {
+    #[must_use]
+    pub const fn staff(&self) -> AccountId {
+        self.staff
+    }
+
+    #[must_use]
+    pub const fn business(&self) -> BusinessId {
+        self.business
+    }
+
+    #[must_use]
+    pub const fn role(&self) -> Role {
+        self.role
+    }
+
+    /// Whether the member may do what `permission` names to someone, or an invite, in role `other`: they must hold
+    /// the permission and reach the role (ADR-0096).
+    #[must_use]
+    pub const fn may_reach(&self, permission: Permission, other: Role) -> bool {
+        self.role.may(permission) && self.role.reaches(other)
+    }
+}
+
+/// One of a business's staff, as its Team page lists them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TeamMember {
+    pub staff: AccountId,
+    pub name: String,
+    pub email: String,
+    pub role: Role,
+    pub joined_at: SystemTime,
+}
+
+/// One of a business's open invites, as its Team page lists it: whom it names, by the name and email they hold,
+/// and the role it gives.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenInvite {
+    pub id: InviteId,
+    pub staff: AccountId,
+    pub name: String,
+    pub email: String,
+    pub role: Role,
+    pub ends_at: SystemTime,
+}
+
+/// A business's staff and open invites, the longest standing first.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Team {
+    pub members: Vec<TeamMember>,
+    pub invites: Vec<OpenInvite>,
+}
+
+/// What a change on the Team page came to (ADR-0096).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TeamChange {
+    /// Made: a role changed, someone removed, or an invite cancelled or sent.
+    Done,
+    /// Nothing to change: the role is the one held already.
+    Unchanged,
+    /// Not allowed: the member lacks the permission, does not reach the role, or acts on themselves. Decided before
+    /// storage is asked.
+    Refused,
+    /// A role it was decided on changed meanwhile, or the person or invite is gone, so nothing changed.
+    Stale,
+    /// It would leave the business without an owner.
+    LastOwner,
+    /// Not sent: the person holds a role at the business already.
+    Member,
 }
 
 /// What issuing a staff invite came to.
@@ -1142,13 +1321,42 @@ impl std::error::Error for Error {}
 mod tests {
     use super::*;
 
-    /// A role reads back from the name it writes, and no other name is a role yet, in any case.
+    /// A role reads back from the name it writes, and no other name is a role, in any case.
     #[test]
     fn a_role_is_read_only_by_its_own_name() {
-        assert_eq!(Role::parse(Role::Owner.as_str()), Some(Role::Owner));
-        for other in ["Owner", "manager", "front_desk", "instructor", ""] {
+        for role in Role::ALL {
+            assert_eq!(Role::parse(role.as_str()), Some(role), "{role:?}");
+        }
+        assert_eq!(
+            Role::ALL.map(Role::as_str),
+            ["owner", "manager", "front_desk", "instructor"]
+        );
+        assert_eq!(
+            Role::ALL.map(Role::title),
+            ["Owner", "Manager", "Front desk", "Instructor"]
+        );
+        for other in ["Owner", "front desk", "Front desk", "admin", ""] {
             assert_eq!(Role::parse(other), None, "{other:?}");
         }
+    }
+
+    /// Each permission is held by owners and managers, and refused to every other role (`v5.0.0-8.2.1`).
+    #[test]
+    fn each_permission_is_refused_to_every_role_without_it() {
+        for permission in Permission::ALL {
+            let holders = Role::ALL.map(|role| role.may(permission));
+            assert_eq!(holders, [true, true, false, false], "{permission:?}");
+        }
+    }
+
+    /// An owner reaches every role, a manager only front desk and instructors, and they reach none.
+    #[test]
+    fn a_role_reaches_only_roles_below_it_but_an_owner_reaches_all() {
+        let reached = |role: Role| Role::ALL.map(|other| role.reaches(other));
+        assert_eq!(reached(Role::Owner), [true, true, true, true]);
+        assert_eq!(reached(Role::Manager), [false, false, true, true]);
+        assert_eq!(reached(Role::FrontDesk), [false, false, false, false]);
+        assert_eq!(reached(Role::Instructor), [false, false, false, false]);
     }
 
     /// Printing a session leaves out the hash of its token, which finds it.

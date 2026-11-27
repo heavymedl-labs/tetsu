@@ -2,14 +2,15 @@
 
 use crate::browser::{Change, CheckedSession, ForChange, Logout, Origins};
 use crate::domain::{
-    Acceptance, Accepting, Account, AccountId, Actor, Addition, AdminSummary, Answer, Ceremony,
-    CeremonyKind, CeremonyToken, Device, Disabling, Ending, Error, FailedCheck, Fill, Invitation,
-    InviteToken, Issue, ListedSession, Login, NewPasskey, NewStaffInvite, PersonName, RateLimit,
-    Realm, Redemption, Refusal, Removal, Session, SessionId, SessionStart, SessionToken, Signer,
-    StaffInvite, StaffIssue, TimeLeft,
+    Acceptance, Accepting, Account, AccountId, Actor, Addition, AdminSummary, Answer, BusinessId,
+    Ceremony, CeremonyKind, CeremonyToken, Device, Disabling, Ending, Error, FailedCheck, Fill,
+    Invitation, InviteId, InviteToken, Issue, ListedSession, Login, Member, NewPasskey,
+    NewStaffInvite, Permission, PersonName, RateLimit, Realm, Redemption, Refusal, Removal, Role,
+    Session, SessionId, SessionStart, SessionToken, Signer, StaffInvite, StaffIssue, Team,
+    TeamChange, TimeLeft,
 };
 use crate::passkeys::RelyingParty;
-use crate::ports::{AdminDirectory, LoginStore, StaffDirectory, StaffStore};
+use crate::ports::{AdminDirectory, LoginStore, StaffDirectory, StaffStore, TeamStore};
 use tetsu_kernel::{Address, Requester};
 
 /// A realm's use cases over its store, in the realm the store names (ADR-0088). It offers nothing that reaches the
@@ -260,6 +261,156 @@ impl<S: StaffDirectory> Accounts<S> {
                 "the staff member at {to} holds a role at this business already"
             ))),
         }
+    }
+}
+
+/// What inviting someone from the Team page came to, with the link to email when one was issued. It derives no
+/// `Debug`, as the link is a secret.
+pub struct Invited {
+    pub change: TeamChange,
+    pub token: Option<InviteToken>,
+}
+
+impl<S: TeamStore> Accounts<S> {
+    /// The staff member a live session names, acting at `business` with the role they hold there, read on every
+    /// request to the business's pages, so a role removed is refused at once (ADR-0096, `v5.0.0-7.4.2`); none for
+    /// one who holds no role there.
+    ///
+    /// # Errors
+    /// Fails if storage fails.
+    pub async fn member_at(
+        &self,
+        session: &Session,
+        business: BusinessId,
+    ) -> Result<Option<Member>, Error> {
+        let staff = session.admin();
+        let role = self.store.role_at(business, staff).await?;
+        Ok(role.map(|role| Member {
+            staff,
+            business,
+            role,
+        }))
+    }
+
+    /// The business a live session's staff member joined first, which their personal pages name; none for one who
+    /// holds no role.
+    ///
+    /// # Errors
+    /// Fails if storage fails.
+    pub async fn first_business(&self, session: &Session) -> Result<Option<BusinessId>, Error> {
+        self.store.first_business(session.admin()).await
+    }
+
+    /// The member's business's staff and open invites, for a member who may see them; none otherwise.
+    ///
+    /// # Errors
+    /// Fails if storage fails.
+    pub async fn team(&self, member: &Member) -> Result<Option<Team>, Error> {
+        if !member.role.may(Permission::SeeTeam) {
+            return Ok(None);
+        }
+        self.store.team(member.business).await.map(Some)
+    }
+
+    /// Invites someone to the member's business as `role` from its Team page, by a link good once and for seven
+    /// days, for a member who may invite and reaches the role (ADR-0096). The link comes back only when one was
+    /// issued, for the page to email; the answer is the same for a disabled staff member, who is issued none.
+    ///
+    /// # Errors
+    /// Fails with [`Error::Limited`] when the member has sent their hour's invites, if no secure random source can
+    /// be read, or if storage fails.
+    pub async fn invite_from_team(
+        &self,
+        member: &Member,
+        name: PersonName,
+        email: Address,
+        role: Role,
+        actor: &Actor,
+    ) -> Result<Invited, Error> {
+        if !member.may_reach(Permission::InviteStaff, role) {
+            return Ok(Invited {
+                change: TeamChange::Refused,
+                token: None,
+            });
+        }
+        if let Some(wait) = self.store.admit_inviter(member.staff).await? {
+            return Err(Error::Limited(wait));
+        }
+        let token = InviteToken::generate(self.fill)?;
+        let invite = NewStaffInvite {
+            business: member.business,
+            name,
+            email,
+            role,
+        };
+        let (change, issued) = self
+            .store
+            .invite_from(member, &invite, &token.hash(), actor)
+            .await?;
+        Ok(Invited {
+            change,
+            token: issued.then_some(token),
+        })
+    }
+
+    /// Changes `staff`'s role at the member's business from `held` to `wanted`, for a member who may change roles
+    /// and reaches both, never their own.
+    ///
+    /// # Errors
+    /// Fails if storage fails.
+    pub async fn change_role(
+        &self,
+        member: &Member,
+        staff: AccountId,
+        held: Role,
+        wanted: Role,
+        actor: &Actor,
+    ) -> Result<TeamChange, Error> {
+        let allowed = staff != member.staff
+            && member.may_reach(Permission::ChangeRole, held)
+            && member.may_reach(Permission::ChangeRole, wanted);
+        if !allowed {
+            return Ok(TeamChange::Refused);
+        }
+        self.store
+            .change_role(member, staff, held, wanted, actor)
+            .await
+    }
+
+    /// Removes `staff`, who holds `held`, from the member's business, for a member who may remove staff and reaches
+    /// the role, never themselves.
+    ///
+    /// # Errors
+    /// Fails if storage fails.
+    pub async fn remove_staff(
+        &self,
+        member: &Member,
+        staff: AccountId,
+        held: Role,
+        actor: &Actor,
+    ) -> Result<TeamChange, Error> {
+        if staff == member.staff || !member.may_reach(Permission::RemoveStaff, held) {
+            return Ok(TeamChange::Refused);
+        }
+        self.store.remove_staff(member, staff, held, actor).await
+    }
+
+    /// Cancels an open invite at the member's business, which gives `held`, for a member who may cancel invites and
+    /// reaches the role.
+    ///
+    /// # Errors
+    /// Fails if storage fails.
+    pub async fn cancel_invite(
+        &self,
+        member: &Member,
+        invite: &InviteId,
+        held: Role,
+        actor: &Actor,
+    ) -> Result<TeamChange, Error> {
+        if !member.may_reach(Permission::CancelInvite, held) {
+            return Ok(TeamChange::Refused);
+        }
+        self.store.cancel_invite(member, invite, held, actor).await
     }
 }
 

@@ -70,6 +70,9 @@ pub fn staff_invite_message(
 ) -> Option<Message> {
     let role = match role {
         Role::Owner => "its owner",
+        Role::Manager => "a manager",
+        Role::FrontDesk => "front desk staff",
+        Role::Instructor => "an instructor",
     };
     invite(
         to,
@@ -241,6 +244,29 @@ mod tests {
                 .html()
                 .contains(r#"<a href="https://tetsu.example/join#abc&#38;def">"#),
         );
+    }
+
+    /// Each role reads as the invite's sentence needs it.
+    #[test]
+    fn a_staff_invite_names_each_role_in_its_sentence() {
+        let token = token(&"cd".repeat(32));
+        let said = |role| {
+            let to = Address::parse("ada@example.com").unwrap();
+            let message =
+                staff_invite_message(to, "Fern Studio", role, "https://t.example/join#x", &token);
+            message.unwrap().text().to_string()
+        };
+        for (role, words) in [
+            (Role::Owner, "as its owner."),
+            (Role::Manager, "as a manager."),
+            (Role::FrontDesk, "as front desk staff."),
+            (Role::Instructor, "as an instructor."),
+        ] {
+            assert!(
+                said(role).contains(&format!("Fern Studio on Tetsu, {words}")),
+                "{role:?}"
+            );
+        }
     }
 
     #[test]

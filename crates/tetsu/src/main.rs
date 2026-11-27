@@ -32,7 +32,7 @@ const USAGE: &str = "usage: tetsu [--env <name>] [setup | migrate | seed [--chec
                      | replay <schema> <event id> | rename <address> <new slug> \
                      | admin <create <name> <email> | invite <id> | list | disable <id> | enable <id> \
                      | remove-passkeys <id> | end-sessions <id | --all>> \
-                     | staff invite <business> <name> <email> --role owner]";
+                     | staff invite <business> <name> <email> --role <role>]";
 
 #[derive(Debug, PartialEq, Eq)]
 enum Command {

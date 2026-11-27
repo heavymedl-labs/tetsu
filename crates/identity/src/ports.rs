@@ -2,9 +2,10 @@
 
 use crate::domain::{
     Acceptance, Account, AccountId, Actor, Addition, AdminSummary, BusinessId, Disabling, Ending,
-    Error, FailedCheck, Invitation, Invitee, Issue, ListedSession, Login, NewPasskey,
-    NewStaffInvite, PersonName, RateLimit, Realm, Redemption, Refusal, Removal, Session, SessionId,
-    SessionStart, Signer, StaffIssue, TakenAddition, TakenCeremony, TimeLeft,
+    Error, FailedCheck, Invitation, InviteId, Invitee, Issue, ListedSession, Login, Member,
+    NewPasskey, NewStaffInvite, PersonName, RateLimit, Realm, Redemption, Refusal, Removal, Role,
+    Session, SessionId, SessionStart, Signer, StaffIssue, TakenAddition, TakenCeremony, Team,
+    TeamChange, TimeLeft,
 };
 use std::future::Future;
 use std::pin::Pin;
@@ -25,10 +26,10 @@ pub trait AdminStore: LoginStore + AdminDirectory {}
 
 impl<T: LoginStore + AdminDirectory> AdminStore for T {}
 
-/// The staff realm's store: its login flow and its directory.
-pub trait StaffStore: LoginStore + StaffDirectory {}
+/// The staff realm's store: its login flow, its directory, and each business's team.
+pub trait StaffStore: LoginStore + StaffDirectory + TeamStore {}
 
-impl<T: LoginStore + StaffDirectory> StaffStore for T {}
+impl<T: LoginStore + StaffDirectory + TeamStore> StaffStore for T {}
 
 /// Where a realm's accounts log in: sessions, invites, ceremonies, passkeys, and limits (ADR-0088). A session is reached
 /// only by its token's hash and realm, one at a time (ADR-0048), and the store keeps each realm's limits beside its own
@@ -336,4 +337,73 @@ pub trait StaffDirectory {
         staff: AccountId,
         actor: &Actor,
     ) -> impl Future<Output = Result<Acceptance, Error>> + Send;
+}
+
+/// A business's team, as its Team page reads and changes it (ADR-0096). Every call runs in the business's own
+/// transaction, under its row security, so it never reaches another business. Each change takes the [`Member`]
+/// acting and the roles the use case decided on, and changes nothing unless they still hold, while the business's
+/// owners are locked; it records an audit event naming its actor, with its outcome, in the business's own record.
+pub trait TeamStore {
+    /// The role a staff member holds at a business, or none.
+    fn role_at(
+        &self,
+        business: BusinessId,
+        staff: AccountId,
+    ) -> impl Future<Output = Result<Option<Role>, Error>> + Send;
+
+    /// A business's staff and open invites.
+    fn team(&self, business: BusinessId) -> impl Future<Output = Result<Team, Error>> + Send;
+
+    /// The business a staff member joined first, or none for one who holds no role.
+    fn first_business(
+        &self,
+        staff: AccountId,
+    ) -> impl Future<Output = Result<Option<BusinessId>, Error>> + Send;
+
+    /// Issues `invite` at the member's business under an invite link's hash, as
+    /// [`StaffDirectory::issue_staff_invite`] does, and says whether it was issued. It answers
+    /// [`TeamChange::Done`] for a disabled staff member too, issuing them nothing, so the business learns nothing
+    /// another gave them, and records that only as not issued. Over an open invite to a role the member does not
+    /// reach, it answers [`TeamChange::Refused`].
+    fn invite_from(
+        &self,
+        member: &Member,
+        invite: &NewStaffInvite,
+        hash: &[u8; 32],
+        actor: &Actor,
+    ) -> impl Future<Output = Result<(TeamChange, bool), Error>> + Send;
+
+    /// Changes `staff`'s role at the member's business from `held` to `wanted`.
+    fn change_role(
+        &self,
+        member: &Member,
+        staff: AccountId,
+        held: Role,
+        wanted: Role,
+        actor: &Actor,
+    ) -> impl Future<Output = Result<TeamChange, Error>> + Send;
+
+    /// Removes `staff`, who holds `held`, from the member's business, with any invite of theirs there.
+    fn remove_staff(
+        &self,
+        member: &Member,
+        staff: AccountId,
+        held: Role,
+        actor: &Actor,
+    ) -> impl Future<Output = Result<TeamChange, Error>> + Send;
+
+    /// Cancels the open invite `invite`, which gives `held`, at the member's business.
+    fn cancel_invite(
+        &self,
+        member: &Member,
+        invite: &InviteId,
+        held: Role,
+        actor: &Actor,
+    ) -> impl Future<Output = Result<TeamChange, Error>> + Send;
+
+    /// Admits one more invite from a staff member under their limit, or says how long they must wait.
+    fn admit_inviter(
+        &self,
+        staff: AccountId,
+    ) -> impl Future<Output = Result<Option<Duration>, Error>> + Send;
 }

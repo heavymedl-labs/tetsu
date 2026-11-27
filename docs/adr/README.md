@@ -100,6 +100,7 @@ number, and add a row below. Never renumber.
 | [0093](0093-log-in-leads-to-staff.md) | "Log in" leads to staff login | Changing the site header's login, or where admins log in | Accepted |
 | [0094](0094-realm-paths-at-the-root-of-their-hosts.md) | Realm paths at the root of their hosts | Adding a realm's page, link, or redirect, or serving realms locally | Accepted |
 | [0095](0095-the-color-scheme-on-a-preferences-page.md) | The color scheme on a Preferences page | Changing where a person picks the color scheme, or a page's footer | Accepted |
+| [0096](0096-staff-permissions-and-the-team-page.md) | Staff permissions and the Team page | Adding a staff permission or check, or changing a business's Team page | Accepted |
 | [0068](0068-no-demo-note.md) | No demo note | Changing what marks a demo page | Proposed |
 
 ## Open decisions
