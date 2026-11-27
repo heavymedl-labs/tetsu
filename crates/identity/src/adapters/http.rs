@@ -35,6 +35,8 @@ struct Paths {
     /// The account (#156): who they are, and how they log in and where. Logging in lands on Profile.
     profile: &'static str,
     security: &'static str,
+    /// The person's choices for how Tetsu looks on this device, now the color scheme (ADR-0095).
+    preferences: &'static str,
     login: &'static str,
     login_begin: &'static str,
     login_finish: &'static str,
@@ -59,6 +61,7 @@ const REALM: Paths = Paths {
     home: "/",
     profile: "/settings/profile",
     security: "/settings/security",
+    preferences: "/settings/preferences",
     login: "/login",
     login_begin: "/login/begin",
     login_finish: "/login/finish",
@@ -131,10 +134,11 @@ pub const LOGIN: &str = REALM.login;
 
 /// Every path Identity serves, in every realm, which the composition root checks each start with a name no tenant may
 /// hold.
-pub const PATHS: [&str; 19] = [
+pub const PATHS: [&str; 20] = [
     REALM.home,
     REALM.profile,
     REALM.security,
+    REALM.preferences,
     REALM.login,
     REALM.login_begin,
     REALM.login_finish,
@@ -206,7 +210,6 @@ struct LoginPage<'a> {
     hint: &'static str,
     stylesheet: &'static str,
     script: &'static str,
-    scheme_script: &'static str,
     /// The radio the color scheme control checks, from the visitor's cookie (ADR-0070).
     scheme: &'static str,
     /// The checked page a login returns to, or empty for the admin's own.
@@ -223,7 +226,6 @@ struct JoinPage {
     base: &'static str,
     stylesheet: &'static str,
     script: &'static str,
-    scheme_script: &'static str,
     /// The radio the color scheme control checks, from the visitor's cookie (ADR-0070).
     scheme: &'static str,
     /// The element a staff join's island fills with what the invite gives, or none for admins, whose invites name no
@@ -239,6 +241,12 @@ struct ProfilePage {
     shell: Shell,
     /// The admin's email address, if they have one.
     email: Option<String>,
+}
+
+#[derive(Template)]
+#[template(path = "account_preferences.html")]
+struct PreferencesPage {
+    shell: Shell,
 }
 
 #[derive(Template)]
@@ -270,9 +278,10 @@ struct Shell {
     base: &'static str,
     /// The page the shell's wordmark and mark link to: Profile, the realm's home (ADR-0086), at its own address.
     home: &'static str,
-    /// The realm's Profile, Security, and logout paths, which its sidebar and menu link to.
+    /// The realm's Profile, Security, Preferences, and logout paths, which its sidebar and menu link to.
     profile: &'static str,
     security: &'static str,
+    preferences: &'static str,
     logout: &'static str,
     /// The person's role in the realm, as the sidebar, the menu, and Profile name it.
     role: &'static str,
@@ -302,6 +311,7 @@ impl Shell {
             home: at.profile,
             profile: at.profile,
             security: at.security,
+            preferences: at.preferences,
             logout: at.logout,
             role: role(S::REALM),
             admin: platform(S::REALM),
@@ -333,7 +343,7 @@ macro_rules! through_shell {
     )+};
 }
 
-through_shell!(ProfilePage, SecurityPage, MailboxPage);
+through_shell!(ProfilePage, SecurityPage, PreferencesPage, MailboxPage);
 
 /// A session as the admin's page lists it: its id, which ending it names, its device, whether that is a phone,
 /// which its icon shows, and how long ago it started and was last used.
@@ -448,6 +458,7 @@ fn realm_routes<S: LoginStore + Send + Sync + 'static>() -> Router<Arc<Served<S>
         .route(REALM.home, get(home::<S>))
         .route(REALM.profile, get(profile::<S>))
         .route(REALM.security, get(security::<S>))
+        .route(REALM.preferences, get(preferences::<S>))
         .route(REALM.login, get(login_page::<S>))
         .route(REALM.login_begin, before_route::<S>(Before::BeginLogin))
         .route(REALM.login_finish, before_route::<S>(Before::FinishLogin))
@@ -530,7 +541,6 @@ async fn login_page<S: LoginStore>(
                 hint: invite_hint(S::REALM),
                 stylesheet: web.stylesheet,
                 script: web.script,
-                scheme_script: web.scheme_script,
                 scheme: scheme_of(&headers).as_str(),
                 next: next.unwrap_or_default(),
                 ended,
@@ -557,7 +567,6 @@ async fn join_page<S: LoginStore>(State(served): Shared<S>, headers: HeaderMap) 
         base: REALM.base,
         stylesheet: web.stylesheet,
         script: web.script,
-        scheme_script: web.scheme_script,
         scheme: scheme_of(&headers).as_str(),
         invitation: invitation_of(S::REALM),
         lasts: invite_lasts(S::REALM),
@@ -614,6 +623,22 @@ async fn security<S: LoginStore>(State(served): Shared<S>, headers: HeaderMap) -
         Ok(None) => see_other(&return_to(&REALM, REALM.security)),
         Err(error) => unavailable_page(&served.web, "could not show an admin's security", &error),
     }
+}
+
+/// A person's Preferences (ADR-0095): the color scheme on this device, which the page's control keeps in its cookie.
+/// Anyone without a live session is sent to log in, returning here after.
+async fn preferences<S: LoginStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
+    let web = &served.web;
+    let (account, form) = match viewer(&served, &headers).await {
+        Ok(Some(viewer)) => viewer,
+        Ok(None) => return see_other(&return_to(&REALM, REALM.preferences)),
+        Err(error) => {
+            return unavailable_page(web, "could not show a person's preferences", &error);
+        }
+    };
+    page(&PreferencesPage {
+        shell: Shell::of::<S>(web, &headers, account.name, form, REALM.preferences),
+    })
 }
 
 /// The admins' mailbox. Anyone without a live session is sent to log in, returning here after.

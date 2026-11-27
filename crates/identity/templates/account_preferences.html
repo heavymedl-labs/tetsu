@@ -1,0 +1,13 @@
+{#- A person's Preferences (ADR-0095): how Tetsu looks on this device, now its color scheme, System, Light, or Dark,
+    kept in the device's `theme` cookie, as Linear and Slack keep theirs. -#}
+{% extends "account_shell.html" %}
+{% import "../../../web/templates/components.html" as shared %}
+{% block title %}Preferences – Tetsu{% endblock %}
+{% block content %}
+  <h1 class="text-2xl font-medium text-balance text-ink">Preferences</h1>
+  <div class="mt-8 {% call shared::settings_card_style() %}{% endcall %}">
+    {%
+      call shared::settings_row("Theme", "How Tetsu looks on this device. System follows the device's own setting.")
+    %}{% call shared::scheme_control(scheme, true) %}{% endcall %}{% endcall %}
+  </div>
+{% endblock %}

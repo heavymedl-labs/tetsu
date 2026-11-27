@@ -71,7 +71,7 @@ The site's templates:
 
 | Path | Holds |
 | --- | --- |
-| `site.html` | The head tags of Tetsu's own pages, around the shared header and footer (`web/templates/site_header.html`, `site_footer.html`), whose color scheme control (`scheme.html`) the admin pages share |
+| `site.html` | The head tags of Tetsu's own pages, around the shared header and footer (`web/templates/site_header.html`, `site_footer.html`), whose color scheme control (`scheme.html`) is the same `ui::scheme_control` macro each realm's Preferences page shows, labelled (ADR-0095) |
 | `not_found.html` | The site's not-found page, around the shared one (`web/templates/not_found.html`), which Tenancy also shows |
 | `home.html`, `home/` | The root page, which lists its sections, one file each |
 | `home/art/` | Each product picture on the root page, a drawing the formatter leaves as written (ADR-0083) |

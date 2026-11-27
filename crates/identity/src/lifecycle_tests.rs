@@ -375,35 +375,70 @@ async fn joining_logs_in_with_a_session_that_is_never_fresh() {
     assert_eq!(text(&database, proven).await, "true");
 }
 
-/// Every admin page carries the color scheme control in its footer, with the visitor's kept scheme checked, and
-/// loads the script that keeps a new choice (ADR-0070).
+/// Every admin page arrives in the visitor's kept scheme (ADR-0070), and only Preferences holds the control, with
+/// that scheme checked; no page has a footer holding it or Tetsu's mark (ADR-0095).
+#[tokio::test]
+async fn preferences_is_an_account_page_of_its_own() {
+    let (address, _database, cookie, _) = logged_in().await;
+    let away = get(address, "/settings/preferences", "").await;
+    assert_eq!(
+        (away.status, away.header("location")),
+        (303, Some("/login?next=/settings/preferences"))
+    );
+    let page = get(address, "/settings/preferences", &cookie).await;
+    assert_eq!(page.status, 200, "{}", page.body);
+    for shown in [
+        "<title>Preferences – Tetsu</title>",
+        "href=\"/settings/preferences\" aria-current=\"page\"",
+        ">Theme</p>",
+        ">System</span>",
+    ] {
+        assert!(page.body.contains(shown), "{shown} in {}", page.body);
+    }
+    let profile = get(address, PROFILE, &cookie).await;
+    assert!(
+        profile.body.contains("href=\"/settings/preferences\""),
+        "{}",
+        profile.body
+    );
+}
+
 #[tokio::test]
 async fn admin_pages_arrive_in_the_kept_scheme() {
     let (address, _database, cookie, _) = logged_in().await;
     let script = "<script type=\"module\" src=\"/assets/scheme-test.js\">";
-    for (path, kept) in [
-        ("/login", "theme=dark"),
-        ("/join", "theme=dark"),
-        (PROFILE, "theme=dark"),
-        ("/mailbox", "theme=dark"),
+    for (path, logged) in [
+        ("/login", false),
+        ("/join", false),
+        (PROFILE, true),
+        ("/mailbox", true),
+        ("/settings/preferences", true),
     ] {
-        let both = format!("{cookie}; {kept}");
-        let sent = if path.starts_with("/log") || path == "/join" {
-            kept
-        } else {
-            both.as_str()
-        };
-        let page = get(address, path, sent).await;
+        let both = format!("{cookie}; theme=dark");
+        let page = get(address, path, if logged { &both } else { "theme=dark" }).await;
         for shown in [
-            script,
-            "<tetsu-scheme",
-            "id=\"tetsu-scheme-dark\" class=\"sr-only\" checked",
+            "data-scheme=\"dark\"",
             "<meta name=\"color-scheme\" content=\"dark\">",
         ] {
             assert!(page.body.contains(shown), "{shown} on {path}");
         }
+        // Only Preferences holds the control, and no footer holds it or Tetsu's mark (ADR-0095).
+        let preferences = path == "/settings/preferences";
+        assert_eq!(page.body.contains("<tetsu-scheme"), preferences, "{path}");
+        assert_eq!(
+            page.body
+                .contains("id=\"tetsu-scheme-dark\" class=\"sr-only\" checked"),
+            preferences,
+            "{path}"
+        );
+        assert_eq!(
+            page.body.contains(script),
+            path != "/login" && path != "/join",
+            "{path}"
+        );
+        assert!(!page.body.contains("<footer"), "{path}");
     }
-    let plain = get(address, "/login", "").await;
+    let plain = get(address, "/settings/preferences", &cookie).await;
     assert!(
         plain
             .body

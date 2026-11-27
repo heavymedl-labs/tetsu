@@ -1,10 +1,10 @@
 {#- The settings shell (#156): any realm's account pages, after Linear's settings mode. From `md`, a full-height sidebar
     headed by Tetsu's wordmark beside a panel that runs to the screen's right edge, shading from `surface` to
-    `canvas`, its top and left borders fading out; the page never scrolls, the panel does, and a strip under the
-    panel holds the color scheme control and Tetsu's mark. Below `md`, a bar with "Menu", a link back to the realm's
+    `canvas`, its top and left borders fading out; the page never scrolls, the panel does. The color scheme control
+    sits on the realm's Preferences page, not in a footer (ADR-0095). Below `md`, a bar with "Menu", a link back to the realm's
     app while it has one, and what the realm puts at the bar's end; "Menu" opens the sidebar as a native popover that
     Escape or a tap outside closes. Its island, `<tetsu-menu>` (web/src/menu), moves focus in as it opens and closes
-    it as focus leaves, so focus never rests on what it covers. The control and mark sit at the page's foot. A browser
+    it as focus leaves, so focus never rests on what it covers. A browser
     without popovers shows the menu in place, above the page, since its drawer's look applies only where popovers do,
     and hides the buttons that would open and close it.
     The drawer's starting place is a plain `translate`, not Tailwind's `-translate-x-full`, since WebKit, in Safari
@@ -12,7 +12,7 @@
     would show the drawer without sliding it in.
 
     A realm's template extends this, gives the shared page's fields, `scheme`, the visitor's color scheme, and `home`,
-    the page its wordmark and mark link to, written as the page's own address rather than one that redirects to it
+    the page its wordmark links to, written as the page's own address rather than one that redirects to it
     (ADR-0094), and loads the menu's script. It fills `nav` and `menu`, its sidebar for the page and for the menu, each naming its
     groups with ids of their own; `bar_back`, with `settings_bar_back`, once the realm has an app to go back to;
     `bar_end`; `content`, the page's `h1` and sections; and `after`. -#}
@@ -68,23 +68,13 @@
         <nav aria-label="Settings" class="flex min-h-0 flex-1 flex-col">{% block menu %}{% endblock %}</nav>
       </div></tetsu-menu>
     <div
-      class="relative isolate flex min-w-0 flex-1 flex-col md:mt-2 md:mb-9 md:h-[calc(100dvh-2.75rem)] md:rounded-tl-xl md:bg-linear-to-b md:from-surface md:to-canvas md:before:pointer-events-none md:before:absolute md:before:inset-0 md:before:rounded-tl-xl md:before:border-t md:before:border-l md:before:border-edge-soft md:before:content-[''] md:before:[mask-image:linear-gradient(black_45%,transparent_92%),linear-gradient(to_right,black_55%,transparent_96%)] md:before:[mask-composite:intersect]"
+      class="relative isolate flex min-w-0 flex-1 flex-col md:mt-2 md:h-[calc(100dvh-0.5rem)] md:rounded-tl-xl md:bg-linear-to-b md:from-surface md:to-canvas md:before:pointer-events-none md:before:absolute md:before:inset-0 md:before:rounded-tl-xl md:before:border-t md:before:border-l md:before:border-edge-soft md:before:content-[''] md:before:[mask-image:linear-gradient(black_45%,transparent_92%),linear-gradient(to_right,black_55%,transparent_96%)] md:before:[mask-composite:intersect]"
     >
       <main id="main" class="flex flex-1 flex-col md:h-full md:overflow-y-auto">
         <div
           class="mx-auto flex w-full max-w-160 flex-1 flex-col px-(--tetsu-gutter) pt-8 pb-4 md:block md:flex-none md:px-4 md:pt-14 md:pb-12"
         >
           {% block content %}{% endblock %}
-          <footer
-            class="mt-auto flex items-center justify-end gap-3 pt-12 md:fixed md:right-3 md:bottom-0 md:h-9 md:pt-0"
-          >
-            {%- include "../../../web/templates/scheme.html" %}
-            <a
-              href="{{ home }}"
-              aria-label="Tetsu home"
-              class="flex rounded-sm text-soft hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-            >{% call ui::mark() %}{% endcall %}</a>
-          </footer>
         </div>
       </main>
     </div>

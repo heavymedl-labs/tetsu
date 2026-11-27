@@ -32,6 +32,12 @@
         stroke-linejoin="round"
         d="M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z"
       />
+    {%- else if name == "adjustments" %}
+      <path
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"
+      />
     {%- else if name == "check" %}
       <path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" />
     {%- else if name == "back" %}
@@ -384,3 +390,33 @@
     else
   %}text-ink hover:bg-ink/7{% endif %}
 {%- endmacro %}
+
+{#- The color scheme control (ADR-0070): System, Light, or Dark, as radios that switch the page without script
+    (tetsu.css). `scheme` names the one the visitor chose, from their `theme` cookie, so the page arrives in it, and
+    `<tetsu-scheme>` keeps a new choice in that cookie. Each choice shows its icon, and with `labelled`, as on the
+    Preferences page (ADR-0095), its name beside it; otherwise its name is for screen readers alone. -#}
+{% macro scheme_control(scheme, labelled = false) %}
+  <tetsu-scheme class="contents">
+    <fieldset
+      class="flex rounded-full p-0.5 text-muted [&_svg]:size-4 {% if labelled %}gap-0.5 bg-ink/5 ring-1 ring-edge-soft{% endif %}"
+    >
+      <legend class="sr-only">Color scheme</legend>
+      {%- for (key, name) in [("system", "System"), ("light", "Light"), ("dark", "Dark")] %}
+        <label
+          class="flex cursor-pointer items-center gap-1.5 rounded-full hover:text-ink has-checked:bg-line has-checked:text-ink has-focus-visible:outline-2 has-focus-visible:outline-accent {% if labelled %}px-2.5 py-1 text-mini pointer-coarse:py-2{% else %}p-1{% endif %}"
+        ><input
+            type="radio"
+            name="scheme"
+            value="{{ key }}"
+            id="tetsu-scheme-{{ key }}"
+            class="sr-only"
+            {% if *key == scheme %}checked{% endif %}
+          >{% if *key == "system" %}{% call icon("system") %}{% endcall %}{% else if *key == "light" %}{%
+              call icon("sun")
+            %}{% endcall %}{% else %}{% call icon("moon") %}{% endcall %}{% endif %}<span
+            class="{% if !labelled %}sr-only{% endif %}"
+          >{{ name }}</span></label>
+      {%- endfor %}
+    </fieldset>
+  </tetsu-scheme>
+{% endmacro %}

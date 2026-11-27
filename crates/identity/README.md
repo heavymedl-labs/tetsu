@@ -217,7 +217,8 @@ the kernel's `Mailbox` port, which Mail implements; a message's HTML is never sh
 
 `adapters/http.rs` serves each realm at the root of its own host
 ([ADR-0094](../../docs/adr/0094-realm-paths-at-the-root-of-their-hosts.md)), the admins' as `/login`, `/join`, their
-account's `/settings/profile` and `/settings/security`, and `/mailbox`, with the JSON
+account's `/settings/profile`, `/settings/security`, and `/settings/preferences`, which holds the color scheme
+control (ADR-0095), and `/mailbox`, with the JSON
 endpoints the passkey islands in `web/src/passkey/` call: `<tetsu-passkey>` runs a page's one passkey action, and
 `<tetsu-passkeys>` wraps the admin's list of passkeys. Pages take Linear's look, as ADR-0035 gives Tetsu's own
 pages, in a layout of Tetsu's own, load only Tetsu's own script, under a policy of their own, and are never cached.

@@ -175,10 +175,10 @@ async fn a_session_shows_the_kind_of_device_it_is_on() {
     const DESKTOP: &str = "d=\"M9 17.25v1.007";
     let (address, database, cookie, _) = logged_in().await;
     for (device, phones, desktops) in [
-        ("Safari on iOS", 1, 1),
-        ("Chrome on Android", 1, 1),
-        ("Safari on iPadOS", 0, 2),
-        ("Firefox on Linux", 0, 2),
+        ("Safari on iOS", 1, 0),
+        ("Chrome on Android", 1, 0),
+        ("Safari on iPadOS", 0, 1),
+        ("Firefox on Linux", 0, 1),
     ] {
         as_db_admin(
             &database,

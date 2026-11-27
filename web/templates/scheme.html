@@ -1,23 +1,4 @@
-{#- The color scheme control (ADR-0070): System, Light, or Dark, as radios that switch the page without script
-    (tetsu.css). `scheme` names the one the visitor chose, from their `theme` cookie, so the page arrives in it, and
-    `<tetsu-scheme>` keeps a new choice in that cookie. -#}
+{#- The color scheme control in a footer of the site's own pages (ADR-0070), as `ui::scheme_control` draws it. It
+    reads `scheme`. -#}
 {% import "../../../web/templates/components.html" as ui %}
-<tetsu-scheme class="contents">
-  <fieldset class="flex rounded-full p-0.5 text-muted [&_svg]:size-4">
-    <legend class="sr-only">Color scheme</legend>
-    {%- for (key, name) in [("system", "System"), ("light", "Light"), ("dark", "Dark")] %}
-      <label
-        class="cursor-pointer rounded-full p-1 hover:text-ink has-checked:bg-line has-checked:text-ink has-focus-visible:outline-2 has-focus-visible:outline-accent"
-      ><input
-          type="radio"
-          name="scheme"
-          value="{{ key }}"
-          id="tetsu-scheme-{{ key }}"
-          class="sr-only"
-          {% if *key == scheme %}checked{% endif %}
-        ><span class="sr-only">{{ name }}</span>{% if *key == "system" %}{% call ui::icon("system") %}{% endcall %}{%
-          else if *key == "light"
-        %}{% call ui::icon("sun") %}{% endcall %}{% else %}{% call ui::icon("moon") %}{% endcall %}{% endif %}</label>
-    {%- endfor %}
-  </fieldset>
-</tetsu-scheme>
+{% call ui::scheme_control(scheme) %}{% endcall %}
