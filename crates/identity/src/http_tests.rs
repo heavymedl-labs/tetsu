@@ -819,11 +819,14 @@ async fn failures_of_the_server_are_unavailable() {
     };
     let (address, database, cookie, form) = logged_in().await;
     as_db_admin(&database, &revoke("account(bytea)")).await;
-    let page = get(address, PROFILE, &cookie).await;
-    assert_eq!(
-        (page.status, page.header("cache-control")),
-        (503, Some("no-store"))
-    );
+    for path in [PROFILE, "/settings/preferences"] {
+        let page = get(address, path, &cookie).await;
+        assert_eq!(
+            (page.status, page.header("cache-control")),
+            (503, Some("no-store")),
+            "{path}"
+        );
+    }
     as_db_admin(&database, &revoke("log_out(bytea, text)")).await;
     let out = logout(address, ORIGIN, &cookie, &form).await;
     assert_eq!(out.status, 503);

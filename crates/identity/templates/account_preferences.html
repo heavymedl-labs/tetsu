@@ -3,6 +3,8 @@
 {% extends "account_shell.html" %}
 {% import "../../../web/templates/components.html" as shared %}
 {% block title %}Preferences – Tetsu{% endblock %}
+{#- Only this page holds the color scheme control, so only it loads the script that keeps a new choice. -#}
+{% block scheme_head %}<script type="module" src="{{ scheme_script }}"></script>{% endblock %}
 {% block content %}
   <h1 class="text-2xl font-medium text-balance text-ink">Preferences</h1>
   <div class="mt-8 {% call shared::settings_card_style() %}{% endcall %}">

@@ -7,8 +7,8 @@
 {% import "../../../web/templates/components.html" as shared %}
 {% block head %}<script type="module" src="{{ script }}"></script><script
     type="module"
-    src="{{ scheme_script }}"
-  ></script><script type="module" src="{{ session_script }}"></script><script
+    src="{{ session_script }}"
+  ></script>{% block scheme_head %}{% endblock %}<script
     type="module"
     src="{{ menu_script }}"
   ></script>{% endblock %}

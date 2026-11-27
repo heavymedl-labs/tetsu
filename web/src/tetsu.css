@@ -115,9 +115,9 @@
 }
 
 /* Tailwind's dark variant, for the tokens below and any dark: utility: the system's scheme, unless the visitor picks
-   one (ADR-0070). The pick is the footer control's checked radio once the browser has read it, and before then the
-   scheme the server wrote on <html> (data-scheme), so the top of a long page, drawn before its footer is read, is
-   already in the kept scheme rather than the system's for a moment. */
+   one (ADR-0070). The pick is the control's checked radio once the browser has read it, on a page that has it, the
+   site's own with it in their footer and Preferences (ADR-0095), and otherwise, and before then, the scheme the server
+   wrote on <html> (data-scheme), so a page is in the kept scheme from its first byte rather than the system's. */
 @custom-variant dark {
   @media (prefers-color-scheme: dark) {
     &:where(

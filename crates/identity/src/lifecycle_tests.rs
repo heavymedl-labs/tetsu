@@ -174,7 +174,12 @@ async fn staying_logged_in_renews_the_session() {
 async fn logged_in_pages_carry_the_session_island() {
     let (address, _database, cookie, _) = logged_in().await;
     let script = format!("<script type=\"module\" src=\"{SESSION_SCRIPT}\">");
-    for path in [PROFILE, "/settings/security", "/mailbox"] {
+    for path in [
+        PROFILE,
+        "/settings/security",
+        "/settings/preferences",
+        "/mailbox",
+    ] {
         let page = get(address, path, &cookie).await;
         // Each page masks its form token afresh, so the island carries the one this page's logout form does.
         let island = format!(
@@ -431,11 +436,7 @@ async fn admin_pages_arrive_in_the_kept_scheme() {
             preferences,
             "{path}"
         );
-        assert_eq!(
-            page.body.contains(script),
-            path != "/login" && path != "/join",
-            "{path}"
-        );
+        assert_eq!(page.body.contains(script), preferences, "{path}");
         assert!(!page.body.contains("<footer"), "{path}");
     }
     let plain = get(address, "/settings/preferences", &cookie).await;

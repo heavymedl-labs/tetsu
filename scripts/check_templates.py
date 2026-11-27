@@ -22,8 +22,25 @@ TAG = re.compile(r"\{%.*?%\}", re.DOTALL)
 # A class selector as Tailwind writes it, with special characters escaped by a backslash.
 SELECTOR = re.compile(r"\.((?:\\.|[A-Za-z0-9_-])+)")
 MARKERS = re.compile(r"^(group|peer)(/[\w-]+)?$")
-# A `starting:` class whose utility sets a transform through Tailwind's registered variables.
-STARTING_TRANSFORM = re.compile(r"^(?:[\w-]+:)*starting:(?:[\w-]+:)*-?(?:translate|scale|rotate|skew)-")
+# A utility that sets a transform through Tailwind's registered variables, after any `!` and `-`.
+TRANSFORM = re.compile(r"^!?-?(?:translate|scale|rotate|skew)-")
+
+
+def parts(name):
+    """A class's variants and its utility, split at each colon outside brackets."""
+    found, depth, start = [], 0, 0
+    for at, char in enumerate(name):
+        depth += {"[": 1, "]": -1}.get(char, 0)
+        if char == ":" and depth == 0:
+            found.append(name[start:at])
+            start = at + 1
+    return found, name[start:]
+
+
+def starting_transform(name):
+    """Whether `name` is a transform utility inside `starting:`, which WebKit would not animate."""
+    variants, utility = parts(name)
+    return "starting" in variants and bool(TRANSFORM.match(utility))
 
 
 def defined(css):
@@ -47,7 +64,7 @@ def problems(path, text, classes):
         found.extend(
             f"{path}:{line}: {name} animates nothing in WebKit; write a plain value, as [translate:-100%_0]"
             for name in TAG.sub(" ", value).split()
-            if STARTING_TRANSFORM.match(name)
+            if starting_transform(name)
         )
         missing = [n for n in TAG.sub(" ", value).split() if n not in classes and not MARKERS.match(n)]
         found.extend(f"{path}:{line}: {name} is not in the built stylesheet" for name in missing)

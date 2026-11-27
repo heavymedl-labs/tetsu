@@ -58,12 +58,26 @@ class TemplateCheckTest(unittest.TestCase):
 
     def test_a_transform_utility_inside_starting_fails(self):
         # WebKit ignores Tailwind's registered transform variables in @starting-style, so nothing slides.
-        for name in ["starting:open:-translate-x-full", "md:starting:scale-95", "starting:rotate-3"]:
+        for name in [
+            "starting:open:-translate-x-full",
+            "md:starting:scale-95",
+            "starting:rotate-3",
+            "starting:[&:popover-open]:-translate-x-full",
+            "popovers:[&:not(:popover-open)]:starting:scale-95",
+            "group-hover/menu:starting:scale-95",
+            "starting:open:!-translate-x-full",
+            "starting:[@media(x)]:rotate-3",
+        ]:
             self.assert_fails(f'<div class="{name}">', name, "animates nothing in WebKit")
 
     def test_a_plain_transform_inside_starting_passes_the_rule(self):
-        result = self.check('<div class="starting:open:[translate:-100%_0]">')
-        self.assertNotIn("animates nothing", result.stderr)
+        for name in [
+            "starting:open:[translate:-100%_0]",
+            "starting:open:opacity-0",
+            "open:-translate-x-full",
+        ]:
+            result = self.check(f'<div class="{name}">')
+            self.assertNotIn("animates nothing", result.stderr, name)
 
     def test_a_class_split_over_lines_is_read(self):
         self.assert_fails('<div class="flex\n  nope">x</div>', "nope")

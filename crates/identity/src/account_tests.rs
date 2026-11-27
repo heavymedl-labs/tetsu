@@ -9,6 +9,7 @@ use crate::join_tests::as_db_admin;
 
 const SECURITY: &str = "/settings/security";
 const MAILBOX: &str = "/mailbox";
+const PREFERENCES: &str = "/settings/preferences";
 
 /// What each page in the shell holds, in the order a reader meets it.
 const SHELL_PARTS: [&str; 11] = [
@@ -46,7 +47,7 @@ async fn each_account_page_has_the_settings_shell() {
             "{path}"
         );
         assert!(!page.body.contains("Back to app"), "{path}");
-        for other in [PROFILE, SECURITY, MAILBOX] {
+        for other in [PROFILE, SECURITY, PREFERENCES, MAILBOX] {
             let current = format!("href=\"{other}\" aria-current=\"page\"");
             assert_eq!(
                 page.body.contains(&current),
@@ -87,7 +88,7 @@ async fn the_narrow_menu_is_a_popover() {
 /// The sidebar's Log out carries the page's own form token, so it logs the admin out from any page in it.
 #[tokio::test]
 async fn each_account_page_logs_out() {
-    for path in [PROFILE, SECURITY, MAILBOX] {
+    for path in [PROFILE, SECURITY, PREFERENCES, MAILBOX] {
         logs_out_from(path).await;
     }
 }

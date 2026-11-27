@@ -31,7 +31,12 @@ const MENU_PARTS: [&str; 12] = [
 #[tokio::test]
 async fn every_admin_page_has_the_menu() {
     let (address, _database, cookie, _) = logged_in().await;
-    for path in [PROFILE, "/settings/security", "/mailbox"] {
+    for path in [
+        PROFILE,
+        "/settings/security",
+        "/settings/preferences",
+        "/mailbox",
+    ] {
         let page = get(address, path, &cookie).await;
         assert_eq!(page.status, 200, "{path}");
         assert_in_order(&page, &MENU_PARTS, path);

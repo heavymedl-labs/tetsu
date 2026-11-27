@@ -403,7 +403,7 @@
       <legend class="sr-only">Color scheme</legend>
       {%- for (key, name) in [("system", "System"), ("light", "Light"), ("dark", "Dark")] %}
         <label
-          class="flex cursor-pointer items-center gap-1.5 rounded-full hover:text-ink has-checked:bg-line has-checked:text-ink has-focus-visible:outline-2 has-focus-visible:outline-accent {% if labelled %}px-2.5 py-1 text-mini pointer-coarse:py-2{% else %}p-1{% endif %}"
+          class="flex cursor-pointer items-center gap-1.5 rounded-full hover:text-ink has-checked:bg-line has-checked:text-ink has-focus-visible:outline-2 has-focus-visible:outline-accent forced-colors:has-checked:outline-2 forced-colors:has-checked:outline-offset-1 {% if labelled %}px-2.5 py-1 text-mini pointer-coarse:py-2{% else %}p-1{% endif %}"
         ><input
             type="radio"
             name="scheme"
