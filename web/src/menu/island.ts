@@ -15,7 +15,51 @@
 /** How long a close may take before the menu is hidden anyway: its 200ms transition, with room to spare. */
 export const CLOSING_LIMIT = 400;
 
-/** Readies a `<tetsu-menu>`: its popover takes focus as it opens, and slides out before it closes. */
+/** Makes everything outside `menu` inert, up to the body, or with `on` false nothing, and returns what it made inert,
+ * leaving what was inert already alone. */
+function isolate(menu: HTMLElement, on: boolean): Element[] {
+  const made: Element[] = [];
+  const body = menu.ownerDocument.body;
+  for (
+    let inside: Element = menu;
+    on && inside !== body && inside.parentElement;
+    inside = inside.parentElement
+  ) {
+    for (const sibling of inside.parentElement.children) {
+      if (sibling !== inside && !sibling.hasAttribute("inert")) {
+        sibling.setAttribute("inert", "");
+        made.push(sibling);
+      }
+    }
+  }
+  return made;
+}
+
+/** Slides `menu` out, by marking it `data-closing`, and hides it once that slide ends, after `CLOSING_LIMIT` at the
+ * latest, or at once where motion is reduced. */
+function slideOut(menu: HTMLElement): void {
+  if (globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+    menu.hidePopover();
+    return;
+  }
+  menu.setAttribute("data-closing", "");
+  const done = () => {
+    clearTimeout(timer);
+    menu.removeEventListener("transitionend", ended);
+    menu.removeAttribute("data-closing");
+    menu.hidePopover();
+  };
+  const ended = (event: Event) => {
+    if (event.target === menu && (event as TransitionEvent).propertyName === "translate") {
+      done();
+    }
+  };
+  const timer = setTimeout(done, CLOSING_LIMIT);
+  menu.addEventListener("transitionend", ended);
+}
+
+/** Readies a `<tetsu-menu>`: its popover takes focus as it opens, keeps the page behind it inert, and slides out
+ * before it closes. */
 export function ready(host: HTMLElement): void {
   const menu = host.querySelector<HTMLElement>("[popover]");
   if (!menu || !("hidePopover" in menu)) {
@@ -24,52 +68,18 @@ export function ready(host: HTMLElement): void {
   menu.setAttribute("popover", "manual");
   let open = false;
   let made: Element[] = [];
-  /** Makes everything outside the menu inert while it is open, and only what this island made inert live again. */
-  const isolate = (on: boolean) => {
-    for (const element of made) {
-      element.removeAttribute("inert");
+  const close = (event?: Event) => {
+    event?.preventDefault();
+    if (open && !menu.hasAttribute("data-closing")) {
+      slideOut(menu);
     }
-    made = [];
-    const body = menu.ownerDocument.body;
-    for (
-      let inside: Element = menu;
-      on && inside !== body && inside.parentElement;
-      inside = inside.parentElement
-    ) {
-      for (const sibling of inside.parentElement.children) {
-        if (sibling !== inside && !sibling.hasAttribute("inert")) {
-          sibling.setAttribute("inert", "");
-          made.push(sibling);
-        }
-      }
-    }
-  };
-  const close = () => {
-    if (!open || menu.hasAttribute("data-closing")) {
-      return;
-    }
-    if (globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
-      menu.hidePopover();
-      return;
-    }
-    menu.setAttribute("data-closing", "");
-    const done = () => {
-      clearTimeout(timer);
-      menu.removeEventListener("transitionend", ended);
-      menu.removeAttribute("data-closing");
-      menu.hidePopover();
-    };
-    const ended = (event: Event) => {
-      if (event.target === menu && (event as TransitionEvent).propertyName === "translate") {
-        done();
-      }
-    };
-    const timer = setTimeout(done, CLOSING_LIMIT);
-    menu.addEventListener("transitionend", ended);
   };
   menu.addEventListener("toggle", (event) => {
     open = (event as ToggleEvent).newState === "open";
-    isolate(open);
+    for (const element of made) {
+      element.removeAttribute("inert");
+    }
+    made = isolate(menu, open);
     if (open) {
       const current = menu.querySelector<HTMLElement>("[aria-current=page]");
       (current ?? menu.querySelector<HTMLElement>("a, button"))?.focus();
@@ -81,23 +91,16 @@ export function ready(host: HTMLElement): void {
       close();
     }
   });
-  menu.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      close();
-    }
-  });
+  menu.addEventListener("keydown", (event) => event.key === "Escape" && close(event));
   menu.addEventListener("click", (event) => {
     if ((event.target as Element).closest("[popovertargetaction=hide]")) {
-      event.preventDefault();
-      close();
+      close(event);
     }
   });
   // A tap on the backdrop lands on the page behind it, outside the menu. A menu taken off the page closes nothing.
   host.ownerDocument.addEventListener("click", (event) => {
     if (open && menu.isConnected && !menu.contains(event.target as Node)) {
-      event.preventDefault();
-      close();
+      close(event);
     }
   });
 }

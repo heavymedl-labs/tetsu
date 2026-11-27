@@ -125,7 +125,9 @@ describe("a menu island, closing", () => {
     vi.advanceTimersByTime(CLOSING_LIMIT);
     expect(hide).toHaveBeenCalledOnce();
   });
+});
 
+describe("a menu island, closing once", () => {
   it("closes once, however often it is asked while closing", () => {
     const { menu, hide, byId } = opened();
     leave(byId("security"), byId("after"));
@@ -151,7 +153,9 @@ describe("a menu island, closing", () => {
     leave(byId("security"), byId("after"));
     expect([menu.hasAttribute("data-closing"), hide.mock.calls.length]).toEqual([true, 0]);
   });
+});
 
+describe("a menu island, what closes it", () => {
   it("closes on Escape, which a manual popover leaves to it", () => {
     const { menu, byId } = opened();
     const pressed = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
@@ -200,7 +204,9 @@ describe("a menu island, closing", () => {
     byId("profile").dispatchEvent(click);
     expect([click.defaultPrevented, menu.hasAttribute("data-closing")]).toEqual([false, false]);
   });
+});
 
+describe("a menu island, what leaves it open", () => {
   it("stays open while focus moves within it, or leaves the page", () => {
     const { menu, hide, byId } = opened();
     leave(byId("profile"), byId("security"));
