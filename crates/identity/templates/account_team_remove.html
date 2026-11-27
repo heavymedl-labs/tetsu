@@ -1,0 +1,20 @@
+{#- Confirming that someone is to be removed from a business (ADR-0096), as a page, so it works without script: what
+    removing does, and a form that does it. -#}
+{% extends "account_shell.html" %}
+{% import "../../../web/templates/components.html" as shared %}
+{% block title %}Remove {{ name }} – {{ called }} – Tetsu{% endblock %}
+{% block content %}
+  <h1 class="text-2xl font-medium text-balance text-ink">Remove {{ name }}?</h1>
+  <p class="mt-2 max-w-prose text-mini text-pretty text-muted"
+  >They lose access to {{ called }} at once. Their Tetsu account, and any other business they work at, stay as they
+    are.</p>
+  <form method="post" action="{{ team }}/remove" class="mt-6 flex flex-wrap items-center gap-3">
+    <input type="hidden" name="form" value="{{ form }}">
+    <input type="hidden" name="staff" value="{{ id }}">
+    <input type="hidden" name="held" value="{{ held }}">
+    <button type="submit" class="{% call shared::quiet_button_style(true) %}{% endcall %}">Remove from {{
+        called
+      }}</button>
+    <a href="{{ team }}" class="{% call shared::button_style(true, true) %}{% endcall %}">Keep them</a>
+  </form>
+{% endblock %}

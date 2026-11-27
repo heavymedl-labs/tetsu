@@ -2,6 +2,8 @@
 //! (ADR-0048). Every state-changing request is checked through [`Origins::admit`], and once logged in through
 //! [`Accounts::session_for_change`], so no other site can act through a logged-in browser.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -20,7 +22,7 @@ use crate::domain::{
     ListedSession, RateLimit, Realm, Session, SessionId, SessionToken, TimeLeft,
 };
 use crate::passkeys::{RelyingParty, base64url};
-use crate::ports::{BusinessNames, LoginStore, StaffStore};
+use crate::ports::{BusinessNames, LoginStore, Post, StaffStore};
 use crate::use_cases::{Accounts, invite_ended, joining_refused};
 use tetsu_kernel::{Mailbox, Requester, Scheme};
 
@@ -50,8 +52,11 @@ struct Paths {
     end_sessions: &'static str,
     /// How long the browser's session has left (GET), and staying logged in (POST), for the session island.
     session: &'static str,
-    /// Any other path on the host: a login for anyone logged out, and not found for anyone logged in.
+    /// Any other path on the host, of one segment or more: a login for anyone logged out, and not found for anyone
+    /// logged in. Two routes, since the router lets a business's pages, `/{segment}/settings/...` on staff's host
+    /// (ADR-0096), sit beside a first segment's parameter but not beside a catch-all in its place.
     elsewhere: &'static str,
+    elsewhere_deeper: &'static str,
 }
 
 /// Every realm's paths, the same on each realm's own host (ADR-0094). Staff's are the person's own, apart from any
@@ -73,7 +78,8 @@ const REALM: Paths = Paths {
     logout: "/logout",
     end_sessions: "/sessions/end",
     session: "/session",
-    elsewhere: "/{*rest}",
+    elsewhere: "/{segment}",
+    elsewhere_deeper: "/{segment}/{*rest}",
 };
 
 /// The admins' mailbox: email kept rather than sent (ADR-0074), a page only admins have.
@@ -134,7 +140,7 @@ pub const LOGIN: &str = REALM.login;
 
 /// Every path Identity serves, in every realm, which the composition root checks each start with a name no tenant may
 /// hold.
-pub const PATHS: [&str; 20] = [
+pub const PATHS: [&str; 21] = [
     REALM.home,
     REALM.profile,
     REALM.security,
@@ -151,6 +157,7 @@ pub const PATHS: [&str; 20] = [
     REALM.end_sessions,
     REALM.session,
     REALM.elsewhere,
+    REALM.elsewhere_deeper,
     MAILBOX,
     STAFF_INVITATION,
     STAFF_ACCEPT_BEGIN,
@@ -193,8 +200,12 @@ pub struct Web {
     pub menu_script: &'static str,
     /// The messages Mail kept rather than sent, which the mailbox page shows (ADR-0074).
     pub mailbox: Arc<dyn Mailbox>,
-    /// Businesses' names, which a staff invite's page shows.
+    /// Sends the email a page asks for, such as an invite from a Team page (ADR-0096).
+    pub post: Arc<dyn Post>,
+    /// Businesses, which a staff invite's page names and a business's own pages find by slug.
     pub businesses: Arc<dyn BusinessNames>,
+    /// The realm's own origin, which a link in an email the pages send points at.
+    pub links: String,
     pub report: fn(&str),
 }
 
@@ -283,8 +294,11 @@ struct Shell {
     security: &'static str,
     preferences: &'static str,
     logout: &'static str,
-    /// The person's role in the realm, as the sidebar, the menu, and Profile name it.
+    /// The person's role in the realm, or at the business whose page this is, as the sidebar, the menu, and Profile
+    /// name it.
     role: &'static str,
+    /// The business group the sidebar shows, for a staff member who may see a business's team (ADR-0096).
+    business: Option<Group>,
     /// Whether the realm is the admins', whose sidebar has a Platform group no other realm has.
     admin: bool,
     /// How long a session in the realm lasts at most, as the session dialog says it.
@@ -294,17 +308,26 @@ struct Shell {
     initials: String,
     form: String,
     /// The page's own path, which the menu marks as current when it is the account's.
-    here: &'static str,
+    here: String,
+}
+
+/// Who a logged-in page is for, as its shell names them: their name, the form token the page carries, and the
+/// business group their sidebar shows, if any.
+struct Person {
+    name: String,
+    form: String,
+    group: Option<Group>,
+}
+
+/// A business's group in the sidebar: the business's name, and its Team page (ADR-0096).
+struct Group {
+    name: String,
+    team: String,
 }
 
 impl Shell {
-    fn of<S: LoginStore>(
-        web: &Web,
-        headers: &HeaderMap,
-        name: String,
-        form: String,
-        here: &'static str,
-    ) -> Self {
+    fn of<S: LoginStore>(web: &Web, headers: &HeaderMap, person: Person, here: &str) -> Self {
+        let Person { name, form, group } = person;
         let at = &REALM;
         Self {
             base: at.base,
@@ -314,6 +337,7 @@ impl Shell {
             preferences: at.preferences,
             logout: at.logout,
             role: role(S::REALM),
+            business: group,
             admin: platform(S::REALM),
             absolute: spoken(S::REALM.limits().absolute),
             demo: web.demo,
@@ -326,7 +350,7 @@ impl Shell {
             initials: initials(&name),
             name,
             form,
-            here,
+            here: here.to_string(),
         }
     }
 }
@@ -344,6 +368,8 @@ macro_rules! through_shell {
 }
 
 through_shell!(ProfilePage, SecurityPage, PreferencesPage, MailboxPage);
+
+mod team;
 
 /// A session as the admin's page lists it: its id, which ending it names, its device, whether that is a phone,
 /// which its icon shows, and how long ago it started and was last used.
@@ -415,6 +441,18 @@ struct UnavailablePage {
 struct Served<S> {
     admins: Accounts<S>,
     web: Web,
+    /// Finds the business group a person's sidebar shows on their own pages: staff's first business, and none for
+    /// admins (ADR-0096).
+    group: Grouping<S>,
+}
+
+/// What finding a sidebar's business group comes to, boxed so [`Served`] can hold the finder as a plain function.
+type Grouped<'a> = Pin<Box<dyn Future<Output = Result<Option<Group>, Error>> + Send + 'a>>;
+type Grouping<S> = for<'a> fn(&'a Served<S>, &'a Session) -> Grouped<'a>;
+
+/// The business group of a realm whose people work for no business: none.
+fn no_group<'a, S>(_: &'a Served<S>, _: &'a Session) -> Grouped<'a> {
+    Box::pin(std::future::ready(Ok(None)))
 }
 
 type Shared<S> = State<Arc<Served<S>>>;
@@ -424,10 +462,18 @@ pub fn router<S>(admins: Accounts<S>, web: Web) -> Router
 where
     S: LoginStore + Send + Sync + 'static,
 {
-    serve_routes(realm_routes::<S>(), Served { admins, web })
+    serve_routes(
+        realm_routes::<S>(),
+        Served {
+            admins,
+            web,
+            group: no_group::<S>,
+        },
+    )
 }
 
-/// Staff's routes: the realm's, and reading and logging in to accept an invite, which only staff have (#111).
+/// Staff's routes: the realm's, reading and logging in to accept an invite, and each business's Team page, which
+/// only staff have (#111, ADR-0096).
 pub fn staff_router<S>(staff: Accounts<S>, web: Web) -> Router
 where
     S: StaffStore + Send + Sync + 'static,
@@ -439,7 +485,12 @@ where
             STAFF_ACCEPT_FINISH,
             accepting_route::<S>(AcceptStep::Finish),
         );
-    serve_routes(routes, Served { admins: staff, web })
+    let served = Served {
+        admins: staff,
+        web,
+        group: team::first_group::<S>,
+    };
+    serve_routes(team::routes(routes), served)
 }
 
 /// Routes, each with the body limit, over what they serve.
@@ -476,7 +527,8 @@ fn realm_routes<S: LoginStore + Send + Sync + 'static>() -> Router<Arc<Served<S>
             REALM.session,
             get(time_left::<S>).merge(logged_in_route::<S>(LoggedIn::Stay)),
         )
-        .route(REALM.elsewhere, get(elsewhere::<S>));
+        .route(REALM.elsewhere, get(elsewhere::<S>))
+        .route(REALM.elsewhere_deeper, get(elsewhere::<S>));
     platform_pages(S::REALM)
         .iter()
         .fold(routes, |routes, path| routes.route(path, get(mailbox::<S>)))
@@ -604,14 +656,14 @@ async fn home<S: LoginStore>(State(served): Shared<S>, headers: HeaderMap) -> Re
 /// log in, returning here after.
 async fn profile<S: LoginStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
     let web = &served.web;
-    let (account, form) = match viewer(&served, &headers).await {
+    let (_, account, person) = match viewer(&served, &headers).await {
         Ok(Some(viewer)) => viewer,
         Ok(None) => return see_other(&return_to(&REALM, REALM.profile)),
         Err(error) => return unavailable_page(web, "could not show an admin's profile", &error),
     };
     page(&ProfilePage {
         email: account.email.map(|email| email.as_str().to_string()),
-        shell: Shell::of::<S>(web, &headers, account.name, form, REALM.profile),
+        shell: Shell::of::<S>(web, &headers, person, REALM.profile),
     })
 }
 
@@ -629,7 +681,7 @@ async fn security<S: LoginStore>(State(served): Shared<S>, headers: HeaderMap) -
 /// Anyone without a live session is sent to log in, returning here after.
 async fn preferences<S: LoginStore>(State(served): Shared<S>, headers: HeaderMap) -> Response {
     let web = &served.web;
-    let (account, form) = match viewer(&served, &headers).await {
+    let (_, _, person) = match viewer(&served, &headers).await {
         Ok(Some(viewer)) => viewer,
         Ok(None) => return see_other(&return_to(&REALM, REALM.preferences)),
         Err(error) => {
@@ -637,7 +689,7 @@ async fn preferences<S: LoginStore>(State(served): Shared<S>, headers: HeaderMap
         }
     };
     page(&PreferencesPage {
-        shell: Shell::of::<S>(web, &headers, account.name, form, REALM.preferences),
+        shell: Shell::of::<S>(web, &headers, person, REALM.preferences),
     })
 }
 
@@ -648,8 +700,7 @@ async fn mailbox<S: LoginStore>(
     uri: Uri,
 ) -> Response {
     let web = &served.web;
-    // A session found live names an enabled admin, so an account is missing only if they were disabled since.
-    let (account, viewer) = match viewer(&served, &headers).await {
+    let (_, _, person) = match viewer(&served, &headers).await {
         Ok(Some(viewer)) => viewer,
         Ok(None) => return see_other(&return_to(&REALM, uri.path())),
         Err(error) => return unavailable_page(web, "could not show the mailbox", &error),
@@ -660,7 +711,7 @@ async fn mailbox<S: LoginStore>(
     };
     let now = SystemTime::now();
     page(&MailboxPage {
-        shell: Shell::of::<S>(web, &headers, account.name, viewer, MAILBOX),
+        shell: Shell::of::<S>(web, &headers, person, MAILBOX),
         messages: captured
             .into_iter()
             .map(|message| Kept {
@@ -673,17 +724,27 @@ async fn mailbox<S: LoginStore>(
     })
 }
 
-/// The account of the live session a page's request comes with, and a form token for the page to carry; none for a
-/// request with no live session, or whose admin was disabled since it was checked.
+/// The live session a page's request comes with, its account, and the person the page's shell names, with a form
+/// token for the page to carry; none for a request with no live session, or whose admin was disabled since it was
+/// checked.
 async fn viewer<S: LoginStore>(
     served: &Served<S>,
     headers: &HeaderMap,
-) -> Result<Option<(Account, String)>, Error> {
+) -> Result<Option<(Session, Account, Person)>, Error> {
     let Some((session, form)) = viewing(served, headers).await? else {
         return Ok(None);
     };
+    // A session found live names an enabled admin, so an account is missing only if they were disabled since.
     let account = served.admins.account(&session).await?;
-    Ok(account.map(|account| (account, form)))
+    let group = (served.group)(served, &session).await?;
+    Ok(account.map(|account| {
+        let person = Person {
+            name: account.name.clone(),
+            form,
+            group,
+        };
+        (session, account, person)
+    }))
 }
 
 /// A name's initials as the header's menu button shows them: the first letters of its first and last words, in
@@ -760,33 +821,29 @@ async fn shown<S: LoginStore>(
     served: &Served<S>,
     headers: &HeaderMap,
 ) -> Result<Option<Response>, Error> {
-    let Some((session, form)) = viewing(served, headers).await? else {
+    let Some((session, account, person)) = viewer(served, headers).await? else {
         return Ok(None);
     };
-    // A session found live names an enabled admin, so an account is missing only if they were disabled since.
-    let account = served.admins.account(&session).await?;
     let sessions = served.admins.sessions(&session).await?;
     let web = &served.web;
     let now = SystemTime::now();
-    Ok(account.map(|account| {
-        page(&SecurityPage {
-            user: base64url(&account.user_handle),
-            credentials: account
-                .passkeys
-                .iter()
-                .map(|passkey| base64url(&passkey.credential))
-                .collect::<Vec<_>>()
-                .join(" "),
-            can_add: account.passkeys.len() < S::REALM.passkey_cap(),
-            fresh: fresh(session.proven_at(), now),
-            passkeys: account.passkeys.iter().map(described).collect(),
-            sessions: sessions
-                .into_iter()
-                .map(|listed| Shown::of(listed, now))
-                .collect(),
-            shell: Shell::of::<S>(web, headers, account.name, form, REALM.security),
-        })
-    }))
+    Ok(Some(page(&SecurityPage {
+        user: base64url(&account.user_handle),
+        credentials: account
+            .passkeys
+            .iter()
+            .map(|passkey| base64url(&passkey.credential))
+            .collect::<Vec<_>>()
+            .join(" "),
+        can_add: account.passkeys.len() < S::REALM.passkey_cap(),
+        fresh: fresh(session.proven_at(), now),
+        passkeys: account.passkeys.iter().map(described).collect(),
+        sessions: sessions
+            .into_iter()
+            .map(|listed| Shown::of(listed, now))
+            .collect(),
+        shell: Shell::of::<S>(web, headers, person, REALM.security),
+    })))
 }
 
 /// How long the browser's session has left, read without renewing it, for the session island's clock: only the
@@ -988,10 +1045,10 @@ async fn accepted<S: StaffStore>(
                 .invitation(link)
                 .await?
                 .ok_or_else(|| joining_refused(Realm::Staff))?;
-            let business = web.businesses.name(invitation.business).await?;
+            let business = web.businesses.found(invitation.business).await?;
             let read = json!({
-                "business": business,
-                "role": invitation.role.as_str(),
+                "business": business.map(|business| business.name),
+                "role": invitation.role.invited_as(),
                 "joined": invitation.joined,
             });
             Ok(json_out(StatusCode::OK, &read))

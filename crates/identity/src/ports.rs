@@ -4,21 +4,45 @@ use crate::domain::{
     Acceptance, Account, AccountId, Actor, Addition, AdminSummary, BusinessId, Disabling, Ending,
     Error, FailedCheck, Invitation, InviteId, Invitee, Issue, ListedSession, Login, Member,
     NewPasskey, NewStaffInvite, PersonName, RateLimit, Realm, Redemption, Refusal, Removal, Role,
-    Session, SessionId, SessionStart, Signer, StaffIssue, TakenAddition, TakenCeremony, Team,
-    TeamChange, TimeLeft,
+    RoleChange, Session, SessionId, SessionStart, Signer, StaffIssue, TakenAddition, TakenCeremony,
+    Team, TeamChange, TeamInvite, TimeLeft,
 };
 use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
-use tetsu_kernel::{Address, Requester};
+use tetsu_kernel::{Address, Delivery, MailError, Mailer, Message, Requester};
 
-/// A business's name as [`BusinessNames`] reads it, boxed so a page can hold any as `dyn BusinessNames`.
-pub type Naming<'a> = Pin<Box<dyn Future<Output = Result<Option<String>, Error>> + Send + 'a>>;
+/// A business as Identity's pages name and link to it: its id, the slug of its address, and its name, all Tenancy's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Business {
+    pub id: BusinessId,
+    pub slug: String,
+    pub name: String,
+}
 
-/// Where Identity reads a business's name, which Tenancy keeps, for a page that knows the business only by id, such
-/// as a staff invite's. The composition root fills it; none for an id no business has.
+/// A business as [`BusinessNames`] finds it, boxed so a page can hold any as `dyn BusinessNames`.
+pub type Finding<'a> = Pin<Box<dyn Future<Output = Result<Option<Business>, Error>> + Send + 'a>>;
+
+/// Where Identity finds a business, which Tenancy keeps: by id, for a page that knows it only by id, such as a staff
+/// invite's, and by slug, for a business's own pages (ADR-0096). The composition root fills it; none for an id or a
+/// slug no business has.
 pub trait BusinessNames: Send + Sync {
-    fn name(&self, business: BusinessId) -> Naming<'_>;
+    fn found(&self, business: BusinessId) -> Finding<'_>;
+    fn at<'a>(&'a self, slug: &'a str) -> Finding<'a>;
+}
+
+/// What sending an email came to, boxed so a page can hold any mailer as `dyn Post`.
+pub type Posting<'a> = Pin<Box<dyn Future<Output = Result<Delivery, MailError>> + Send + 'a>>;
+
+/// Sends the email a page asks for, such as an invite from a Team page, as [`Mailer`] does (ADR-0044).
+pub trait Post: Send + Sync {
+    fn post<'a>(&'a self, message: &'a Message) -> Posting<'a>;
+}
+
+impl<M: Mailer> Post for M {
+    fn post<'a>(&'a self, message: &'a Message) -> Posting<'a> {
+        Box::pin(self.send(message))
+    }
 }
 
 /// The admin realm's store: its login flow and its directory.
@@ -368,18 +392,16 @@ pub trait TeamStore {
     fn invite_from(
         &self,
         member: &Member,
-        invite: &NewStaffInvite,
+        invite: &TeamInvite,
         hash: &[u8; 32],
         actor: &Actor,
     ) -> impl Future<Output = Result<(TeamChange, bool), Error>> + Send;
 
-    /// Changes `staff`'s role at the member's business from `held` to `wanted`.
+    /// Changes a staff member's role at the member's business, as `change` names it.
     fn change_role(
         &self,
         member: &Member,
-        staff: AccountId,
-        held: Role,
-        wanted: Role,
+        change: RoleChange,
         actor: &Actor,
     ) -> impl Future<Output = Result<TeamChange, Error>> + Send;
 

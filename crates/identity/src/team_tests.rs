@@ -12,24 +12,24 @@ use crate::join_tests::{actor, app_pool, as_db_admin, number};
 use crate::ports::TeamStore;
 use crate::{
     AccountId, Accounts, BusinessId, Error, Identity, InviteId, Member, PersonName, Realm, Role,
-    Session, TeamChange,
+    RoleChange, Session, TeamChange, TeamInvite,
 };
 
-/// The business the team works at, and another, which nothing here may reach.
-const BUSINESS: i64 = 3;
+/// The business the team works at, Fern Studio to the pages' tests, and another, which nothing here may reach.
+pub(crate) const BUSINESS: i64 = 4;
 const OTHER: i64 = 5;
 
 /// Its staff, by id: Olu owns it, Mae manages it, Fen works its front desk, and Ike teaches; Zed works only at the
 /// other business, where Olu teaches too.
-const OLU: i64 = 1;
-const MAE: i64 = 2;
-const FEN: i64 = 3;
-const IKE: i64 = 4;
+pub(crate) const OLU: i64 = 1;
+pub(crate) const MAE: i64 = 2;
+pub(crate) const FEN: i64 = 3;
+pub(crate) const IKE: i64 = 4;
 const ZED: i64 = 5;
 
 /// Staff's use cases over a fresh migrated database holding the team, an open invite to the front desk for Pip, an
 /// ended one for Rue, and one at the other business for Zed.
-async fn team() -> (Accounts<impl crate::ports::StaffStore>, TestDatabase) {
+pub(crate) async fn team() -> (Accounts<impl crate::ports::StaffStore>, TestDatabase) {
     let database = migrated_database(&[&Identity])
         .await
         .expect("a migrated test database");
@@ -64,7 +64,7 @@ async fn team() -> (Accounts<impl crate::ports::StaffStore>, TestDatabase) {
 }
 
 /// Pip's open invite at the business.
-const PIP_INVITE: &str = "01900000-0000-7000-8000-000000000001";
+pub(crate) const PIP_INVITE: &str = "01900000-0000-7000-8000-000000000001";
 
 /// A member of the business, as [`Accounts::member_at`] would read them.
 fn member(staff: i64, role: Role) -> Member {
@@ -159,9 +159,27 @@ async fn change(
     held: Role,
     wanted: Role,
 ) -> TeamChange {
-    let who = AccountId::new(who);
-    let changed = staff.change_role(&by, who, held, wanted, &actor()).await;
+    let change = moving(who, held, wanted);
+    let changed = staff.change_role(&by, change, &actor()).await;
     changed.expect("answers")
+}
+
+/// Moving `who` from `held` to `wanted`.
+fn moving(who: i64, held: Role, wanted: Role) -> RoleChange {
+    RoleChange {
+        staff: AccountId::new(who),
+        held,
+        wanted,
+    }
+}
+
+/// Kai Dunn, at `email`, to invite as an instructor.
+fn kai_at(email: &str) -> TeamInvite {
+    TeamInvite {
+        name: Some(PersonName::parse("Kai Dunn").expect("a name")),
+        email: Address::parse(email).expect("an address"),
+        role: Role::Instructor,
+    }
 }
 
 /// What removing `who`, who holds `held`, came to.
@@ -238,25 +256,11 @@ async fn the_team_shows_its_own_staff_and_open_invites_to_those_who_may_see_it()
     let invites: Vec<_> = shown
         .invites
         .iter()
-        .map(|i| {
-            (
-                i.id.as_str(),
-                i.staff.get(),
-                i.name.as_str(),
-                i.email.as_str(),
-                i.role,
-            )
-        })
+        .map(|i| (i.id.as_str(), i.staff.get(), i.email.as_str(), i.role))
         .collect();
     assert_eq!(
         invites,
-        [(
-            PIP_INVITE,
-            6,
-            "Pip Moss",
-            "pip@example.com",
-            Role::FrontDesk
-        )]
+        [(PIP_INVITE, 6, "pip@example.com", Role::FrontDesk)]
     );
     assert!(shown.invites[0].ends_at > SystemTime::now());
     for role in [Role::FrontDesk, Role::Instructor] {
@@ -359,7 +363,7 @@ async fn the_last_owner_stays() {
     let store = &crate::adapters::postgres::PostgresStaff::new(app_pool(&database));
     let me = AccountId::new(OLU);
     let demoted = store
-        .change_role(&olu, me, Role::Owner, Role::Manager, &actor())
+        .change_role(&olu, moving(OLU, Role::Owner, Role::Manager), &actor())
         .await;
     assert_eq!(demoted, Ok(TeamChange::LastOwner));
     let removed = store.remove_staff(&olu, me, Role::Owner, &actor()).await;
@@ -369,7 +373,7 @@ async fn the_last_owner_stays() {
     assert_eq!(reasons(&database, "identity.staff_removed").await, [last]);
     change(&staff, olu, MAE, Role::Manager, Role::Owner).await;
     let demoted = store
-        .change_role(&olu, me, Role::Owner, Role::Manager, &actor())
+        .change_role(&olu, moving(OLU, Role::Owner, Role::Manager), &actor())
         .await;
     assert_eq!(demoted, Ok(TeamChange::Done));
 }
@@ -499,14 +503,15 @@ mod inviting {
     async fn invite(
         staff: &Accounts<impl TeamStore>,
         by: Member,
-        (name, email): (&str, &str),
+        who: (&str, &str),
         role: Role,
     ) -> (TeamChange, Option<crate::InviteToken>) {
-        let name = PersonName::parse(name).expect("a name");
-        let email = Address::parse(email).expect("an address");
-        let invited = staff
-            .invite_from_team(&by, name, email, role, &actor())
-            .await;
+        let invite = TeamInvite {
+            name: Some(PersonName::parse(who.0).expect("a name")),
+            email: Address::parse(who.1).expect("an address"),
+            role,
+        };
+        let invited = staff.invite_from_team(&by, invite, &actor()).await;
         let invited = invited.expect("answers");
         (invited.change, invited.token)
     }
@@ -577,8 +582,21 @@ mod inviting {
         let (change, token) =
             invite(&staff, olu, ("Zed Ray", "zed@example.com"), Role::Manager).await;
         assert_eq!((change, token.is_none()), (TeamChange::Done, true));
-        let zeds = format!("SELECT count(*) FROM identity.staff_invites WHERE staff_id = {ZED}");
-        assert_eq!(number(&database, &zeds).await, 0);
+        // The Team page lists Zed's invite as it would anyone's, though no link went out.
+        let listed = staff
+            .team(&olu)
+            .await
+            .expect("reads")
+            .expect("shown")
+            .invites;
+        let emails: Vec<_> = listed.iter().map(|i| (i.email.as_str(), i.role)).collect();
+        assert_eq!(
+            emails,
+            [
+                ("pip@example.com", Role::FrontDesk),
+                ("zed@example.com", Role::Manager)
+            ]
+        );
         let invited =
             |id: Value, role, reason| json!({"staff_id": id, "role": role, "reason": reason});
         assert_eq!(
@@ -588,6 +606,51 @@ mod inviting {
                 said(invited(json!(null), "manager", "not_issued"), "refused"),
             ]
         );
+    }
+
+    /// A resend names no one, and invites whoever the open invite names, under the name they hold; with no open
+    /// invite to resend, it is stale, and makes no one.
+    #[tokio::test]
+    async fn a_resend_names_no_one() {
+        let (staff, database) = team().await;
+        let mae = member(MAE, Role::Manager);
+        let resend = |email: &str| TeamInvite {
+            name: None,
+            email: Address::parse(email).expect("an address"),
+            role: Role::FrontDesk,
+        };
+        let sent = staff
+            .invite_from_team(&mae, resend("pip@example.com"), &actor())
+            .await;
+        let sent = sent.expect("answers");
+        assert_eq!(
+            (sent.change, sent.token.is_some()),
+            (TeamChange::Done, true)
+        );
+        let pips = "SELECT count(*) FROM identity.staff WHERE name = 'Pip Moss'";
+        assert_eq!(number(&database, pips).await, 1);
+        let stale = staff
+            .invite_from_team(&mae, resend("kai@example.com"), &actor())
+            .await;
+        let stale = stale.expect("answers");
+        assert_eq!(
+            (stale.change, stale.token.is_none()),
+            (TeamChange::Stale, true)
+        );
+        assert_eq!(number(&database, KAIS).await, 0);
+    }
+
+    /// A disabled staff member who holds a role at the business already is a member, as anyone would be.
+    #[tokio::test]
+    async fn a_disabled_member_is_a_member() {
+        let (staff, database) = team().await;
+        let disable = format!("UPDATE identity.staff SET disabled_at = now() WHERE id = {FEN}");
+        as_db_admin(&database, &disable).await;
+        let fen = ("Fen Ito", "fen@example.com");
+        let (change, token) = invite(&staff, member(OLU, Role::Owner), fen, Role::Instructor).await;
+        assert_eq!((change, token.is_none()), (TeamChange::Member, true));
+        let fens = format!("SELECT count(*) FROM identity.staff_invites WHERE staff_id = {FEN}");
+        assert_eq!(number(&database, &fens).await, 0);
     }
 
     /// An open invite to a role the inviter does not reach is never replaced, and one decided on a role the inviter
@@ -628,11 +691,8 @@ mod inviting {
         let send = |by: Member, n: usize| {
             let staff = &staff;
             async move {
-                let name = PersonName::parse("Kai Dunn").expect("a name");
-                let to = Address::parse(&format!("kai{n}@example.com")).expect("an address");
-                staff
-                    .invite_from_team(&by, name, to, Role::Instructor, &actor())
-                    .await
+                let invite = kai_at(&format!("kai{n}@example.com"));
+                staff.invite_from_team(&by, invite, &actor()).await
             }
         };
         let mae = member(MAE, Role::Manager);
@@ -650,4 +710,48 @@ mod inviting {
         let olu = member(OLU, Role::Owner);
         assert_eq!(send(olu, 21).await.expect("sent").change, TeamChange::Done);
     }
+}
+
+/// Each read and change of the team fails as storage does, and an invite fails without a secure random source.
+#[tokio::test]
+async fn the_team_fails_as_its_storage_does() {
+    let olu = member(OLU, Role::Owner);
+    for broken in [
+        "REVOKE SELECT ON identity.staff_roles FROM tetsu_identity",
+        "REVOKE EXECUTE ON FUNCTION identity.staff_first_business(bigint) FROM tetsu_identity",
+        "REVOKE EXECUTE ON FUNCTION identity.staff_team() FROM tetsu_identity",
+        "REVOKE EXECUTE ON FUNCTION identity.staff_open_invites() FROM tetsu_identity",
+        "REVOKE EXECUTE ON FUNCTION identity.admit(text, bytea) FROM tetsu_identity",
+    ] {
+        let (staff, database) = team().await;
+        as_db_admin(&database, broken).await;
+        let at = staff
+            .member_at(&session_of(OLU), BusinessId::new(BUSINESS))
+            .await;
+        let first = staff.first_business(&session_of(OLU)).await;
+        let shown = staff.team(&olu).await;
+        let invite = kai_at("kai@example.com");
+        let invited = staff.invite_from_team(&olu, invite, &actor()).await;
+        let failed = [
+            at.is_err(),
+            first.is_err(),
+            shown.is_err(),
+            invited.is_err(),
+        ];
+        let expected = match broken {
+            b if b.contains("staff_roles") => [true, false, true, true],
+            b if b.contains("first_business") => [false, true, false, false],
+            b if b.contains("admit") => [false, false, false, true],
+            _ => [false, false, true, false],
+        };
+        assert_eq!(failed, expected, "{broken}");
+    }
+    let (_, database) = team().await;
+    let failing = Accounts::with_fill(
+        crate::adapters::postgres::PostgresStaff::new(app_pool(&database)),
+        |_| Err(getrandom::Error::UNSUPPORTED),
+    );
+    let invite = kai_at("kai@example.com");
+    let invited = failing.invite_from_team(&olu, invite, &actor()).await;
+    assert!(matches!(invited, Err(Error::Unavailable(_))));
 }

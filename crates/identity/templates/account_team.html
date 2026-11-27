@@ -1,0 +1,153 @@
+{#- A business's Team page (ADR-0096): what the last change came to, a form to invite someone to the roles the
+    person viewing may grant, the business's staff, the longest here first, each with their role and, where the
+    person reaches it, a form to change it and a link to remove them, and its open invites, each with resend and
+    cancel where the person reaches its role. Every form posts the session's form token, and works without script. -#}
+{% extends "account_shell.html" %}
+{% import "../../../web/templates/components.html" as shared %}
+{% block title %}Team – {{ called }} – Tetsu{% endblock %}
+{% block content %}
+  <h1 class="text-2xl font-medium text-balance text-ink">Team</h1>
+  <p class="mt-1 text-mini text-muted">{{ called }}</p>
+  {%- if let Some(said) = said %}
+    <p role="status" class="mt-6 rounded-lg bg-ink/5 px-4 py-3 text-mini text-pretty text-ink">{{ said }}</p>
+  {%- endif %}
+  {%- if !invitable.is_empty() %}
+    {%
+      call shared::settings_section(
+        "invite",
+        "Invite someone",
+        "They get an email with a link that works once, for seven days."
+      )
+    %}
+      <form method="post" action="{{ team }}/invite" class="mt-4 {% call shared::settings_card_style() %}{% endcall %}">
+        <input type="hidden" name="form" value="{{ form }}">
+        <div class="grid gap-4 p-4 sm:grid-cols-2">
+          <div>
+            <label for="tetsu-invite-name" class="{% call shared::field_label_style() %}{% endcall %}">Name</label>
+            <input
+              id="tetsu-invite-name"
+              name="name"
+              type="text"
+              required
+              maxlength="100"
+              autocomplete="off"
+              class="mt-1.5 {% call shared::field_style() %}{% endcall %}"
+            >
+          </div>
+          <div>
+            <label for="tetsu-invite-email" class="{% call shared::field_label_style() %}{% endcall %}">Email</label>
+            <input
+              id="tetsu-invite-email"
+              name="email"
+              type="email"
+              required
+              maxlength="254"
+              autocomplete="off"
+              spellcheck="false"
+              class="mt-1.5 {% call shared::field_style() %}{% endcall %}"
+            >
+          </div>
+          <div>
+            <label for="tetsu-invite-role" class="{% call shared::field_label_style() %}{% endcall %}">Role</label>
+            <select id="tetsu-invite-role" name="role" class="mt-1.5 {% call shared::field_style() %}{% endcall %}">
+              {%- for choice in invitable %}
+                <option value="{{ choice.value }}" {% if loop.last %}selected{% endif %}>{{ choice.title }}</option>
+              {%- endfor %}
+            </select>
+          </div>
+          <div class="flex items-end">
+            <button type="submit" class="{% call shared::button_style(false, true) %}{% endcall %}">Send invite</button>
+          </div>
+        </div>
+      </form>
+    {% endcall %}
+  {%- endif %}
+  {% call shared::settings_section("staff", "Staff", "") %}
+    <div class="mt-4 {% call shared::settings_card_style() %}{% endcall %}">
+      <ul role="list" aria-label="Staff" class="divide-y divide-edge-soft">
+        {%- for listed in members %}
+          <li class="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div class="min-w-0">
+              <p class="truncate text-mini font-medium text-ink">{{ listed.name }}{% if listed.you %}<span
+                    class="font-normal text-muted"
+                  >
+                    (you)</span>{% endif %}</p>
+              <p class="mt-0.5 truncate text-xs text-muted">{{ listed.email }} · Joined {{ listed.joined }}</p>
+            </div>
+            <div class="flex shrink-0 items-center gap-2">
+              {%- if listed.roles.is_empty() %}
+                <p class="text-mini text-soft">{{ listed.role }}</p>
+              {%- else %}
+                <form method="post" action="{{ team }}/role" class="flex items-center gap-2">
+                  <input type="hidden" name="form" value="{{ form }}">
+                  <input type="hidden" name="staff" value="{{ listed.id }}">
+                  <input type="hidden" name="held" value="{{ listed.held }}">
+                  <label for="tetsu-role-{{ listed.id }}" class="sr-only">Role for {{ listed.name }}</label>
+                  <select
+                    id="tetsu-role-{{ listed.id }}"
+                    name="role"
+                    class="{% call shared::field_style() %}{% endcall %} h-7 w-auto"
+                  >
+                    {%- for choice in listed.roles %}
+                      <option value="{{ choice.value }}" {% if choice.value == listed.held %}selected{% endif %}>{{
+                        choice.title
+                      }}</option>
+                    {%- endfor %}
+                  </select>
+                  <button type="submit" class="{% call shared::quiet_button_style(false) %}{% endcall %}">Change<span
+                      class="sr-only"
+                    >
+                      role for {{ listed.name }}</span></button>
+                </form>
+              {%- endif %}
+              {%- if listed.removable %}
+                <a
+                  href="{{ team }}/remove?staff={{ listed.id }}"
+                  class="{% call shared::quiet_button_style(true) %}{% endcall %}"
+                >Remove<span class="sr-only"> {{ listed.name }}</span></a>
+              {%- endif %}
+            </div>
+          </li>
+        {%- endfor %}
+      </ul>
+    </div>
+  {% endcall %}
+  {%- if !invites.is_empty() %}
+    {% call shared::settings_section("invites", "Open invites", "") %}
+      <div class="mt-4 {% call shared::settings_card_style() %}{% endcall %}">
+        <ul role="list" aria-label="Open invites" class="divide-y divide-edge-soft">
+          {%- for pending in invites %}
+            <li class="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div class="min-w-0">
+                <p class="truncate text-mini font-medium text-ink">{{ pending.email }}</p>
+                <p class="mt-0.5 truncate text-xs text-muted">{{ pending.role }} · {{ pending.ends }}</p>
+              </div>
+              {%- if pending.actionable %}
+                <div class="flex shrink-0 items-center gap-2">
+                  <form method="post" action="{{ team }}/invite">
+                    <input type="hidden" name="form" value="{{ form }}">
+                    <input type="hidden" name="email" value="{{ pending.email }}">
+                    <input type="hidden" name="role" value="{{ pending.held }}">
+                    <button type="submit" class="{% call shared::quiet_button_style(false) %}{% endcall %}">Resend<span
+                        class="sr-only"
+                      >
+                        the invite to {{ pending.email }}</span></button>
+                  </form>
+                  <form method="post" action="{{ team }}/cancel">
+                    <input type="hidden" name="form" value="{{ form }}">
+                    <input type="hidden" name="invite" value="{{ pending.id }}">
+                    <input type="hidden" name="held" value="{{ pending.held }}">
+                    <button type="submit" class="{% call shared::quiet_button_style(true) %}{% endcall %}">Cancel<span
+                        class="sr-only"
+                      >
+                        the invite to {{ pending.email }}</span></button>
+                  </form>
+                </div>
+              {%- endif %}
+            </li>
+          {%- endfor %}
+        </ul>
+      </div>
+    {% endcall %}
+  {%- endif %}
+{% endblock %}

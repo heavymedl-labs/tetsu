@@ -120,6 +120,27 @@ impl Requester {
     }
 }
 
+/// Percent-decodes text, or `None` if an escape is not two hex digits or the result is not UTF-8, so a value decodes
+/// one way or not at all.
+#[must_use]
+pub fn percent_decoded(text: &str) -> Option<String> {
+    let mut bytes = Vec::new();
+    let mut rest = text.as_bytes();
+    while let Some((&byte, after)) = rest.split_first() {
+        if byte == b'%' {
+            let hex = after
+                .get(..2)
+                .filter(|hex| hex.iter().all(u8::is_ascii_hexdigit))?;
+            bytes.push(u8::from_str_radix(std::str::from_utf8(hex).ok()?, 16).ok()?);
+            rest = &after[2..];
+        } else {
+            bytes.push(byte);
+            rest = after;
+        }
+    }
+    String::from_utf8(bytes).ok()
+}
+
 /// Whether `path` is one or more segments after a slash, each written only in ASCII letters, digits, `-`, `_`, and
 /// `.`, and none empty, `.`, or `..`. Such a path names a page on this host alone and needs no decoding, so a
 /// redirect to it cannot be read as another site's address, as `//evil.example` or `/\evil.example` could (OWASP,
@@ -139,6 +160,25 @@ pub fn plain_path(path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Escapes decode to their bytes, everything else stays, and a broken escape or bytes that are not UTF-8
+    /// decode to nothing.
+    #[test]
+    fn percent_escapes_decode_one_way_or_not_at_all() {
+        assert_eq!(
+            ["a%40b.c", "%E2%9C%93+", "plain", ""].map(percent_decoded),
+            [
+                Some("a@b.c".to_string()),
+                Some("✓+".to_string()),
+                Some("plain".to_string()),
+                Some(String::new())
+            ]
+        );
+        assert_eq!(
+            ["%4", "%zz", "%", "%FF", "a%2"].map(percent_decoded),
+            [None, None, None, None, None]
+        );
+    }
 
     #[test]
     fn a_plain_path_is_plain_segments_after_a_slash() {

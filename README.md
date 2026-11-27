@@ -23,8 +23,9 @@ business is a tenant, isolated in the database itself, and industries add only w
 - **Tenancy:** each business's address and page, kept apart by row-level security
 - **Audit:** a record of security events that is never lost
 - **Identity:** admins and staff, each realm at the root of a host of its own, who join with a passkey
-  from a one-time invite link and log in with it; staff accept an invite to another business by logging in. Sessions
-  are server-side, and their tokens are stored only as hashes
+  from a one-time invite link and log in with it; staff accept an invite to another business by logging in. Staff hold
+  one of four roles at each business, and its owners and managers invite, change, and remove staff on its Team page.
+  Sessions are server-side, and their tokens are stored only as hashes
 - **Domain events:** delivered once through an outbox, retried, and logged when they stop
 - **Mail:** admins' and staff's invites and notices, sent by SMTP to listed addresses and otherwise kept for a mailbox page
 - **Operations:** JSON logs with alert fields, exported to any OTLP backend

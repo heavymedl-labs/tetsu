@@ -69,12 +69,13 @@ AS $$
     ORDER BY r.created_at, r.staff_id
 $$;
 
--- This business's open invites, the oldest first, by their random ids.
+-- This business's open invites, the oldest first, by their random ids, each
+-- with the email it was sent to but never a name, which may be one another
+-- business gave.
 CREATE FUNCTION identity.staff_open_invites()
 RETURNS TABLE (
     invite_id text,
     staff_id bigint,
-    name text,
     email text,
     role_name text,
     ends_at timestamptz
@@ -82,7 +83,7 @@ RETURNS TABLE (
 LANGUAGE sql STABLE SECURITY INVOKER
 SET search_path = pg_catalog, pg_temp
 AS $$
-    SELECT e.id::text, e.staff_id, n.name, n.email, e.role_name, e.ends_at
+    SELECT e.id::text, e.staff_id, n.email, e.role_name, e.ends_at
     FROM identity.staff_invites AS e
     CROSS JOIN LATERAL identity.staff_named(e.staff_id) AS n
     WHERE e.ends_at > statement_timestamp()
@@ -129,23 +130,41 @@ BEGIN
 END
 $$;
 
--- Whether this business keeps an owner once the staff member it names no
--- longer is one, read while its owners are locked.
-CREATE FUNCTION identity.staff_owner_remains(leaving_staff bigint)
-RETURNS boolean
-LANGUAGE sql STABLE SECURITY INVOKER
+-- Why a change to a staff member here, decided on the roles given, may not
+-- be made, while this business's owners are locked: stale, when either role
+-- no longer holds, or last_owner, when the staff member stops being an owner
+-- and no other is left; nothing when it may be made.
+CREATE FUNCTION identity.staff_change_blocked(
+    acting_staff bigint,
+    acting_role text,
+    wanted_staff bigint,
+    held_role text,
+    leaving_owner boolean
+)
+RETURNS text
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER
 SET search_path = pg_catalog, pg_temp
 AS $$
-    SELECT EXISTS (
+BEGIN
+    IF
+        NOT identity.staff_still_acting(acting_staff, acting_role)
+        OR identity.staff_role_here(wanted_staff) IS DISTINCT FROM held_role
+    THEN
+        RETURN 'stale';
+    END IF;
+    IF leaving_owner AND NOT EXISTS (
         SELECT FROM identity.staff_roles AS r
-        WHERE r.role_name = 'owner' AND r.staff_id <> leaving_staff
-    )
+        WHERE r.role_name = 'owner' AND r.staff_id <> wanted_staff
+    ) THEN
+        RETURN 'last_owner';
+    END IF;
+    RETURN null;
+END
 $$;
 
 -- Changes a staff member's role here from the one it was decided on, and
 -- says what came of it: changed; unchanged, for the role they hold already;
--- stale, when either role no longer holds; or last_owner, which no change
--- leaves without an owner.
+-- or why not, as staff_change_blocked says.
 CREATE FUNCTION identity.staff_change_role(
     acting_staff bigint,
     acting_role text,
@@ -157,21 +176,17 @@ RETURNS text
 LANGUAGE plpgsql VOLATILE SECURITY INVOKER
 SET search_path = pg_catalog, pg_temp
 AS $$
+DECLARE
+    blocked text := identity.staff_change_blocked(
+        acting_staff, acting_role, wanted_staff, held_role,
+        held_role = 'owner' AND wanted_role <> 'owner'
+    );
 BEGIN
-    IF
-        NOT identity.staff_still_acting(acting_staff, acting_role)
-        OR identity.staff_role_here(wanted_staff) IS DISTINCT FROM held_role
-    THEN
-        RETURN 'stale';
+    IF blocked IS NOT NULL THEN
+        RETURN blocked;
     END IF;
     IF held_role = wanted_role THEN
         RETURN 'unchanged';
-    END IF;
-    IF
-        held_role = 'owner'
-        AND NOT identity.staff_owner_remains(wanted_staff)
-    THEN
-        RETURN 'last_owner';
     END IF;
     UPDATE identity.staff_roles AS r
     SET role_name = wanted_role
@@ -181,8 +196,8 @@ END
 $$;
 
 -- Removes a staff member from this business, with any invite of theirs here,
--- from the role it was decided on, and says what came of it: removed, stale,
--- or last_owner, as staff_change_role does.
+-- from the role it was decided on, and says what came of it: removed, or why
+-- not, as staff_change_blocked says.
 CREATE FUNCTION identity.staff_remove(
     acting_staff bigint,
     acting_role text,
@@ -193,18 +208,14 @@ RETURNS text
 LANGUAGE plpgsql VOLATILE SECURITY INVOKER
 SET search_path = pg_catalog, pg_temp
 AS $$
-BEGIN
-    IF
-        NOT identity.staff_still_acting(acting_staff, acting_role)
-        OR identity.staff_role_here(wanted_staff) IS DISTINCT FROM held_role
-    THEN
-        RETURN 'stale';
-    END IF;
-    IF
+DECLARE
+    blocked text := identity.staff_change_blocked(
+        acting_staff, acting_role, wanted_staff, held_role,
         held_role = 'owner'
-        AND NOT identity.staff_owner_remains(wanted_staff)
-    THEN
-        RETURN 'last_owner';
+    );
+BEGIN
+    IF blocked IS NOT NULL THEN
+        RETURN blocked;
     END IF;
     DELETE FROM identity.staff_roles AS r WHERE r.staff_id = wanted_staff;
     DELETE FROM identity.staff_invites AS e WHERE e.staff_id = wanted_staff;
@@ -245,7 +256,13 @@ $$;
 -- the role it was decided on still holds, and only over an open invite of
 -- theirs here that gives one of the roles the staff member acting reaches, so
 -- no one replaces an invite above them; stale, or beyond, with nothing else,
--- when either does not hold.
+-- when either does not hold. A resend names no one, and invites the person an
+-- open invite here names, under the name they hold; with no such invite, it
+-- is stale. A staff member who is disabled, which may come from another
+-- business, still gets an open invite here, as anyone else would, so the
+-- Team page lists them the same: its link is never sent, and joining or
+-- accepting refuses a disabled staff member (ADR-0096). One who holds a role
+-- here already is a member, as staff_issue_invite says for anyone else.
 CREATE FUNCTION identity.staff_invite_from(
     acting_staff bigint,
     acting_role text,
@@ -264,12 +281,13 @@ SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
     replaced text;
+    held_name text;
 BEGIN
     IF NOT identity.staff_still_acting(acting_staff, acting_role) THEN
         outcome := 'stale';
         RETURN;
     END IF;
-    SELECT e.role_name INTO replaced
+    SELECT e.role_name, n.name INTO replaced, held_name
     FROM identity.staff_invites AS e
     CROSS JOIN LATERAL identity.staff_named(e.staff_id) AS n
     WHERE
@@ -280,11 +298,52 @@ BEGIN
         outcome := 'beyond';
         RETURN;
     END IF;
+    IF wanted_name IS NULL AND held_name IS NULL THEN
+        outcome := 'stale';
+        RETURN;
+    END IF;
     SELECT i.outcome, i.invited, i.created, i.renamed
     INTO outcome, invited, created, renamed
     FROM identity.staff_issue_invite(
-        wanted_link, wanted_name, wanted_email, wanted_role
+        wanted_link, coalesce(wanted_name, held_name), wanted_email,
+        wanted_role
     ) AS i;
+    IF outcome = 'disabled' THEN
+        outcome := identity.staff_hold_invite(wanted_link, invited, wanted_role);
+    END IF;
+END
+$$;
+
+-- Keeps an open invite here for a disabled staff member, never sent, as
+-- staff_invite_from says: a member, for one who holds a role here already, or
+-- disabled, once the invite is held.
+CREATE FUNCTION identity.staff_hold_invite(
+    wanted_link bytea, wanted_staff bigint, wanted_role text
+)
+RETURNS text
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    now_at timestamptz := clock_timestamp();
+BEGIN
+    IF identity.staff_role_here(wanted_staff) IS NOT NULL THEN
+        RETURN 'member';
+    END IF;
+    INSERT INTO identity.staff_invites AS e (
+        tenant_id, staff_id, role_name, token_hash, ends_at, issued_at
+    )
+    SELECT
+        (SELECT nullif(current_setting('app.tenant_id', TRUE), '')::bigint),
+        wanted_staff, wanted_role, wanted_link, now_at + interval '7 days',
+        now_at
+    ON CONFLICT (tenant_id, staff_id) DO UPDATE
+        SET
+            role_name = excluded.role_name,
+            token_hash = excluded.token_hash,
+            ends_at = excluded.ends_at,
+            issued_at = excluded.issued_at;
+    RETURN 'disabled';
 END
 $$;
 
@@ -294,11 +353,12 @@ identity.staff_team(),
 identity.staff_open_invites(),
 identity.staff_role_here(bigint),
 identity.staff_still_acting(bigint, text),
-identity.staff_owner_remains(bigint),
+identity.staff_change_blocked(bigint, text, bigint, text, boolean),
 identity.staff_change_role(bigint, text, bigint, text, text),
 identity.staff_remove(bigint, text, bigint, text),
 identity.staff_cancel_invite(bigint, text, text, text),
-identity.staff_invite_from(bigint, text, text[], bytea, text, text, text)
+identity.staff_invite_from(bigint, text, text[], bytea, text, text, text),
+identity.staff_hold_invite(bytea, bigint, text)
 TO tetsu_identity;
 
 -- A new owner needs CREATE on the schema at the moment it takes a function,
@@ -333,24 +393,31 @@ CREATE OR REPLACE FUNCTION limit_rule(
     OUT first_wait interval,
     OUT longest interval
 )
-LANGUAGE sql IMMUTABLE
+LANGUAGE plpgsql IMMUTABLE
 SET search_path = pg_catalog, pg_temp
 AS $$
-    WITH rules (kind, span, room, first_wait, longest) AS (
+BEGIN
+    IF wanted_kind = 'staff_invite' THEN
+        span := interval '1 hour';
+        room := 20;
+        RETURN;
+    END IF;
+    -- 0010's rules, as it gives them.
+    SELECT r.span, r.room, r.first_wait, r.longest
+    INTO span, room, first_wait, longest
+    FROM (
         VALUES
-        ('refusal', interval '15 minutes', 10, NULL::interval, NULL::interval),
-        ('refusal_flood', interval '15 minutes', 1, NULL, NULL),
-        ('join', interval '1 hour', 10, NULL, NULL),
-        ('login_failure', interval '15 minutes', 10, interval '1 minute',
-            interval '1 hour'),
-        ('login_begin', interval '15 minutes', 30, NULL, NULL),
-        ('staff_invite', interval '1 hour', 20, NULL, NULL)
-    )
-
-    SELECT rules.span, rules.room, rules.first_wait, rules.longest
-    FROM rules
+        ('refusal_flood', '15 minutes'::interval, 1, NULL::interval,
+            NULL::interval),
+        ('refusal', '15 minutes'::interval, 10, NULL, NULL),
+        ('join', '1 hour'::interval, 10, NULL, NULL),
+        ('login_failure', '15 minutes'::interval, 10, '1 minute'::interval,
+            '1 hour'::interval),
+        ('login_begin', '15 minutes'::interval, 30, NULL, NULL)
+    ) AS r (kind, span, room, first_wait, longest)
     WHERE
-        rules.kind = wanted_kind
-        OR 'staff_' || rules.kind = wanted_kind
-        AND rules.kind IN ('login_begin', 'login_failure', 'join')
+        wanted_kind = r.kind
+        OR wanted_kind = 'staff_' || r.kind
+        AND r.kind IN ('login_begin', 'login_failure', 'join');
+END
 $$;

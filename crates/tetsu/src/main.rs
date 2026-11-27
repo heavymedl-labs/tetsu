@@ -553,22 +553,61 @@ fn realm_pages(
         scheme_script: assets::SCHEME_SCRIPT,
         menu_script: assets::MENU_SCRIPT,
         mailbox: office.clone(),
+        post: office.clone(),
         businesses: businesses.clone(),
+        links: origin,
         report,
     };
     Ok((web, port))
 }
 
-/// Businesses' names, read from Tenancy for Identity's staff invite page (#111).
+/// Businesses as Identity's staff pages find them, read from Tenancy: by id for a staff invite's page (#111) and a
+/// staff member's first business, and by slug for a business's own pages (ADR-0096).
 struct Businesses<S>(tetsu_tenancy::Tenants<S>);
 
 impl<S: tetsu_tenancy::TenantStore + Send + Sync> tetsu_identity::BusinessNames for Businesses<S> {
-    fn name(&self, business: tetsu_identity::BusinessId) -> tetsu_identity::Naming<'_> {
+    fn found(&self, business: tetsu_identity::BusinessId) -> tetsu_identity::Finding<'_> {
         Box::pin(async move {
-            let named = self.0.name(business.get()).await;
-            named.map_err(|error| tetsu_identity::Error::Storage(error.to_string()))
+            let id = business.get();
+            let name = self
+                .0
+                .name(id)
+                .await
+                .map_err(|error| tenancy_failed(&error))?;
+            let slug = self
+                .0
+                .slug(id)
+                .await
+                .map_err(|error| tenancy_failed(&error))?;
+            Ok(name.zip(slug).map(|(name, slug)| tetsu_identity::Business {
+                id: business,
+                slug,
+                name,
+            }))
         })
     }
+
+    fn at<'a>(&'a self, slug: &'a str) -> tetsu_identity::Finding<'a> {
+        Box::pin(async move {
+            let Ok(slug) = tetsu_tenancy::Slug::parse(slug) else {
+                return Ok(None);
+            };
+            match self.0.resolve(&slug.address()).await {
+                Ok(tenant) => Ok(Some(tetsu_identity::Business {
+                    id: tetsu_identity::BusinessId::new(tenant.id().get()),
+                    slug: tenant.slug().as_str().to_string(),
+                    name: tenant.name().to_string(),
+                })),
+                Err(tetsu_tenancy::Error::NotFound) => Ok(None),
+                Err(error) => Err(tenancy_failed(&error)),
+            }
+        })
+    }
+}
+
+/// A failure of Tenancy's store, as Identity's pages take it.
+fn tenancy_failed(error: &tetsu_tenancy::Error) -> tetsu_identity::Error {
+    tetsu_identity::Error::Storage(error.to_string())
 }
 
 /// Logs what a module reports, as an error on the request it happened in.
@@ -676,6 +715,39 @@ fn summary(modules: &[&dyn Module]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Identity's staff pages find a business by id or slug through Tenancy, find none for an id or slug no business
+    /// has, or a slug no address can hold, and fail as Tenancy's store does.
+    #[tokio::test]
+    async fn identitys_pages_find_businesses_through_tenancy() {
+        use tetsu_identity::{BusinessId, BusinessNames};
+        let database = tetsu_postgres::test_support::migrated_database(&[&tetsu_tenancy::Tenancy])
+            .await
+            .unwrap();
+        let (tenants, tenant) = staff::tests::fern_studio(&database).await;
+        let id = BusinessId::new(tenant.id().get());
+        let businesses = Businesses(tenants);
+        let fern = Some(tetsu_identity::Business {
+            id,
+            slug: "fern-studio".to_string(),
+            name: "Fern Studio".to_string(),
+        });
+        assert_eq!(businesses.found(id).await, Ok(fern.clone()));
+        assert_eq!(businesses.at("fern-studio").await, Ok(fern));
+        let unknown = BusinessId::new(id.get() + 1);
+        assert_eq!(businesses.found(unknown).await, Ok(None));
+        for slug in ["oak-yoga", "Fern Studio", "login"] {
+            assert_eq!(businesses.at(slug).await, Ok(None), "{slug}");
+        }
+        let nowhere = tetsu_postgres::pool(&tetsu_postgres::Settings::from_values(
+            "postgres://nobody@127.0.0.1:1/none",
+            Some("disable"),
+        ))
+        .unwrap();
+        let down = Businesses(tetsu_tenancy::postgres_store(nowhere));
+        assert!(down.found(id).await.is_err());
+        assert!(down.at("fern-studio").await.is_err());
+    }
 
     /// A service has a router for each host `TETSU_SERVES` names, a realm's with its origin's port; building the
     /// routers reaches no database.

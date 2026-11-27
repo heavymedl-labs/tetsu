@@ -645,7 +645,7 @@ async fn a_staff_member_joins_then_logs_in_to_accept_through_the_pages() {
         (invitation.status, invitation.json()),
         (
             200,
-            json!({"business": "Fern Studio", "role": "owner", "joined": true})
+            json!({"business": "Fern Studio", "role": "its owner", "joined": true})
         )
     );
     let accepted = accept_by_page(address, kept.clone(), &second).await;

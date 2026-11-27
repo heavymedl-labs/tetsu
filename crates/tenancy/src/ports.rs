@@ -24,6 +24,9 @@ pub trait TenantStore {
     /// The name of the tenant with an id, if one has it.
     fn find_name(&self, id: i64) -> impl Future<Output = Result<Option<String>, Error>> + Send;
 
+    /// The slug of the tenant with an id, if one has it.
+    fn find_slug(&self, id: i64) -> impl Future<Output = Result<Option<String>, Error>> + Send;
+
     /// Gives the tenant at a normalized address a new slug and its address, and says whether a tenant was there.
     fn rename(&self, address: &str, to: &Slug) -> impl Future<Output = Result<bool, Error>> + Send;
 }

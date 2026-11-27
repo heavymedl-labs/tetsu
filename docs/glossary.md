@@ -145,10 +145,14 @@ for more than one vertical, such as scheduling, booking, or the ledger.
 **Staff member.** A person who works for one or more tenants, with one identity and a staff role at each ([ADR-0040](adr/0040-identity-and-sign-in.md)).
 
 **Staff role.** A staff member's role at one tenant: owner, manager, front desk, or instructor
-([ADR-0048](adr/0048-sign-in-design.md)).
+([ADR-0048](adr/0048-sign-in-design.md)). It holds a fixed set of **permissions**, one for each check, and reaches
+only roles below it, except an owner's, which reaches every role ([ADR-0096](adr/0096-staff-permissions-and-the-team-page.md)).
 
 **Surface.** A way people reach Tetsu: booking pages in a browser, hosted or embedded,
 the staff app, native apps, or the public API. Every surface uses the same use cases.
+
+**Team page.** A tenant's list of its staff and open invites, at `/<business>/settings/team` on the staff host,
+where its owners and managers invite, change, and remove staff ([ADR-0096](adr/0096-staff-permissions-and-the-team-page.md)).
 
 **Tenant.** A business using Tetsu, such as a boutique fitness brand,
 together with all of its locations. Tenant data is isolated from every

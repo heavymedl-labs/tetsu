@@ -6,8 +6,8 @@ use crate::domain::{
     Ceremony, CeremonyKind, CeremonyToken, Device, Disabling, Ending, Error, FailedCheck, Fill,
     Invitation, InviteId, InviteToken, Issue, ListedSession, Login, Member, NewPasskey,
     NewStaffInvite, Permission, PersonName, RateLimit, Realm, Redemption, Refusal, Removal, Role,
-    Session, SessionId, SessionStart, SessionToken, Signer, StaffInvite, StaffIssue, Team,
-    TeamChange, TimeLeft,
+    RoleChange, Session, SessionId, SessionStart, SessionToken, Signer, StaffInvite, StaffIssue,
+    Team, TeamChange, TeamInvite, TimeLeft,
 };
 use crate::passkeys::RelyingParty;
 use crate::ports::{AdminDirectory, LoginStore, StaffDirectory, StaffStore, TeamStore};
@@ -312,8 +312,8 @@ impl<S: TeamStore> Accounts<S> {
         self.store.team(member.business).await.map(Some)
     }
 
-    /// Invites someone to the member's business as `role` from its Team page, by a link good once and for seven
-    /// days, for a member who may invite and reaches the role (ADR-0096). The link comes back only when one was
+    /// Invites someone to the member's business from its Team page, by a link good once and for seven days, for a
+    /// member who may invite and reaches the invite's role (ADR-0096). The link comes back only when one was
     /// issued, for the page to email; the answer is the same for a disabled staff member, who is issued none.
     ///
     /// # Errors
@@ -322,12 +322,10 @@ impl<S: TeamStore> Accounts<S> {
     pub async fn invite_from_team(
         &self,
         member: &Member,
-        name: PersonName,
-        email: Address,
-        role: Role,
+        invite: TeamInvite,
         actor: &Actor,
     ) -> Result<Invited, Error> {
-        if !member.may_reach(Permission::InviteStaff, role) {
+        if !member.may_reach(Permission::InviteStaff, invite.role) {
             return Ok(Invited {
                 change: TeamChange::Refused,
                 token: None,
@@ -337,12 +335,6 @@ impl<S: TeamStore> Accounts<S> {
             return Err(Error::Limited(wait));
         }
         let token = InviteToken::generate(self.fill)?;
-        let invite = NewStaffInvite {
-            business: member.business,
-            name,
-            email,
-            role,
-        };
         let (change, issued) = self
             .store
             .invite_from(member, &invite, &token.hash(), actor)
@@ -353,28 +345,24 @@ impl<S: TeamStore> Accounts<S> {
         })
     }
 
-    /// Changes `staff`'s role at the member's business from `held` to `wanted`, for a member who may change roles
-    /// and reaches both, never their own.
+    /// Changes a staff member's role at the member's business, as `change` names it, for a member who may change
+    /// roles and reaches both, never their own.
     ///
     /// # Errors
     /// Fails if storage fails.
     pub async fn change_role(
         &self,
         member: &Member,
-        staff: AccountId,
-        held: Role,
-        wanted: Role,
+        change: RoleChange,
         actor: &Actor,
     ) -> Result<TeamChange, Error> {
-        let allowed = staff != member.staff
-            && member.may_reach(Permission::ChangeRole, held)
-            && member.may_reach(Permission::ChangeRole, wanted);
+        let allowed = change.staff != member.staff
+            && member.may_reach(Permission::ChangeRole, change.held)
+            && member.may_reach(Permission::ChangeRole, change.wanted);
         if !allowed {
             return Ok(TeamChange::Refused);
         }
-        self.store
-            .change_role(member, staff, held, wanted, actor)
-            .await
+        self.store.change_role(member, change, actor).await
     }
 
     /// Removes `staff`, who holds `held`, from the member's business, for a member who may remove staff and reaches

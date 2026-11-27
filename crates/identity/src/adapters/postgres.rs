@@ -15,8 +15,9 @@ use crate::domain::{
     Acceptance, Account, AccountId, Actor, Addition, AdminSummary, BusinessId, CeremonyKind,
     Disabling, Ending, Error, FailedCheck, HeldPasskey, Invitation, InviteId, Invitee, Issue,
     ListedSession, Login, Member, NewPasskey, NewStaffInvite, OpenInvite, PersonName, RateLimit,
-    Realm, Redemption, Refusal, Removal, Role, Session, SessionId, SessionStart, Signer,
-    StaffIssue, TakenAddition, TakenCeremony, Team, TeamChange, TeamMember, TimeLeft,
+    Realm, Redemption, Refusal, Removal, Role, RoleChange, Session, SessionId, SessionStart,
+    Signer, StaffIssue, TakenAddition, TakenCeremony, Team, TeamChange, TeamInvite, TeamMember,
+    TimeLeft,
 };
 use crate::ports::{AdminDirectory, AdminStore, LoginStore, StaffDirectory, StaffStore, TeamStore};
 use crate::use_cases::Accounts;
@@ -763,13 +764,7 @@ impl<R: PostgresRealm> LoginStore for PostgresLogin<R> {
                 &[&limit_kind(R::REALM, limit), &from.as_bytes().as_slice()],
             )
             .await?;
-        rows.first()
-            .map(|row| column::<Option<i64>>(row, "wait"))
-            .transpose()
-            .map(|wait| {
-                wait.flatten()
-                    .map(|seconds| Duration::from_secs(seconds.unsigned_abs()))
-            })
+        wait_in(&rows)
     }
 
     async fn record_refusal(
@@ -1195,10 +1190,7 @@ impl TeamStore for PostgresStaff {
 
     async fn first_business(&self, staff: AccountId) -> Result<Option<BusinessId>, Error> {
         let rows = self.query(STAFF_FIRST_BUSINESS, &[&staff.get()]).await?;
-        let first = rows
-            .first()
-            .map(|row| column::<Option<i64>>(row, "tenant_id"));
-        Ok(first.transpose()?.flatten().map(BusinessId::new))
+        first_business_in(&rows)
     }
 
     async fn team(&self, business: BusinessId) -> Result<Team, Error> {
@@ -1210,19 +1202,13 @@ impl TeamStore for PostgresStaff {
         let invites = self
             .query_recording_in(place, STAFF_OPEN_INVITES, &[], none)
             .await?;
-        Ok(Team {
-            members: members.iter().map(member_from).collect::<Result<_, _>>()?,
-            invites: invites
-                .iter()
-                .map(open_invite_from)
-                .collect::<Result<_, _>>()?,
-        })
+        team_from(&members, &invites)
     }
 
     async fn invite_from(
         &self,
         member: &Member,
-        invite: &NewStaffInvite,
+        invite: &TeamInvite,
         hash: &[u8; 32],
         actor: &Actor,
     ) -> Result<(TeamChange, bool), Error> {
@@ -1236,7 +1222,7 @@ impl TeamStore for PostgresStaff {
             &member.role.as_str(),
             &reachable,
             &hash.as_slice(),
-            &invite.name.as_str(),
+            &invite.name.as_ref().map(PersonName::as_str),
             &invite.email.as_str(),
             &invite.role.as_str(),
         ];
@@ -1254,11 +1240,14 @@ impl TeamStore for PostgresStaff {
     async fn change_role(
         &self,
         member: &Member,
-        staff: AccountId,
-        held: Role,
-        wanted: Role,
+        change: RoleChange,
         actor: &Actor,
     ) -> Result<TeamChange, Error> {
+        let RoleChange {
+            staff,
+            held,
+            wanted,
+        } = change;
         let id = staff.get();
         let parameters: [&(dyn ToSql + Sync); 5] = [
             &member.staff.get(),
@@ -1267,16 +1256,14 @@ impl TeamStore for PostgresStaff {
             &held.as_str(),
             &wanted.as_str(),
         ];
-        let payload = json!({"staff_id": id, "from": held.as_str(), "to": wanted.as_str()});
-        self.team_change(
-            member,
-            STAFF_CHANGE_ROLE,
-            &parameters,
-            ("identity.staff_role_changed", "changed"),
-            payload,
-            actor,
-        )
-        .await
+        let recording = Recording {
+            statement: STAFF_CHANGE_ROLE,
+            parameters: &parameters,
+            kind: "identity.staff_role_changed",
+            done: "changed",
+            payload: json!({"staff_id": id, "from": held.as_str(), "to": wanted.as_str()}),
+        };
+        self.team_change(member, recording, actor).await
     }
 
     async fn remove_staff(
@@ -1293,16 +1280,14 @@ impl TeamStore for PostgresStaff {
             &id,
             &held.as_str(),
         ];
-        let payload = json!({"staff_id": id, "role": held.as_str()});
-        self.team_change(
-            member,
-            STAFF_REMOVE,
-            &parameters,
-            ("identity.staff_removed", "removed"),
-            payload,
-            actor,
-        )
-        .await
+        let recording = Recording {
+            statement: STAFF_REMOVE,
+            parameters: &parameters,
+            kind: "identity.staff_removed",
+            done: "removed",
+            payload: json!({"staff_id": id, "role": held.as_str()}),
+        };
+        self.team_change(member, recording, actor).await
     }
 
     async fn cancel_invite(
@@ -1318,16 +1303,14 @@ impl TeamStore for PostgresStaff {
             &invite.as_str(),
             &held.as_str(),
         ];
-        let payload = json!({"invite_id": invite.as_str(), "role": held.as_str()});
-        self.team_change(
-            member,
-            STAFF_CANCEL_INVITE,
-            &parameters,
-            ("identity.staff_invite_cancelled", "cancelled"),
-            payload,
-            actor,
-        )
-        .await
+        let recording = Recording {
+            statement: STAFF_CANCEL_INVITE,
+            parameters: &parameters,
+            kind: "identity.staff_invite_cancelled",
+            done: "cancelled",
+            payload: json!({"invite_id": invite.as_str(), "role": held.as_str()}),
+        };
+        self.team_change(member, recording, actor).await
     }
 
     async fn admit_inviter(&self, staff: AccountId) -> Result<Option<Duration>, Error> {
@@ -1338,29 +1321,37 @@ impl TeamStore for PostgresStaff {
         let rows = self
             .query(ADMIT, &[&"staff_invite", &key.as_slice()])
             .await?;
-        rows.first()
-            .map(|row| column::<Option<i64>>(row, "wait"))
-            .transpose()
-            .map(|wait| {
-                wait.flatten()
-                    .map(|seconds| Duration::from_secs(seconds.unsigned_abs()))
-            })
+        wait_in(&rows)
     }
+}
+
+/// A Team page change: its statement and parameters, and how it is recorded: its event's kind, the outcome storage
+/// answers once it is made, and the event's payload, to which the outcome is added.
+struct Recording<'a> {
+    statement: &'a str,
+    parameters: &'a [&'a (dyn ToSql + Sync)],
+    kind: &'static str,
+    done: &'static str,
+    payload: Value,
 }
 
 impl PostgresStaff {
     /// Runs one of the Team page's changes in the member's business, reading its outcome, and records it there as
-    /// `kind`, changed when storage answered `done`, unchanged for a role held already, and refused otherwise, with
-    /// the reason.
+    /// the recording says: changed when storage answered its `done`, unchanged for a role held already, and refused
+    /// otherwise, with the reason.
     async fn team_change(
         &self,
         member: &Member,
-        statement: &str,
-        parameters: &[&(dyn ToSql + Sync)],
-        (kind, done): (&'static str, &'static str),
-        payload: Value,
+        recording: Recording<'_>,
         actor: &Actor,
     ) -> Result<TeamChange, Error> {
+        let Recording {
+            statement,
+            parameters,
+            kind,
+            done,
+            payload,
+        } = recording;
         self.decided(
             Place::Business(member.business.get()),
             statement,
@@ -1370,6 +1361,36 @@ impl PostgresStaff {
         .await?
         .ok_or_else(answered_nothing)
     }
+}
+
+/// How long an attempt must wait under a limit, as admitting it answers, or none for one admitted.
+fn wait_in(rows: &[Row]) -> Result<Option<Duration>, Error> {
+    rows.first()
+        .map(|row| column::<Option<i64>>(row, "wait"))
+        .transpose()
+        .map(|wait| {
+            wait.flatten()
+                .map(|seconds| Duration::from_secs(seconds.unsigned_abs()))
+        })
+}
+
+/// A business's team, from its staff's rows and its open invites'.
+fn team_from(members: &[Row], invites: &[Row]) -> Result<Team, Error> {
+    Ok(Team {
+        members: members.iter().map(member_from).collect::<Result<_, _>>()?,
+        invites: invites
+            .iter()
+            .map(open_invite_from)
+            .collect::<Result<_, _>>()?,
+    })
+}
+
+/// The business a staff member's first role is at, as storage answers it, or none.
+fn first_business_in(rows: &[Row]) -> Result<Option<BusinessId>, Error> {
+    let first = rows
+        .first()
+        .map(|row| column::<Option<i64>>(row, "tenant_id"));
+    Ok(first.transpose()?.flatten().map(BusinessId::new))
 }
 
 /// A role in a row's column; one Identity never writes is a storage failure.
@@ -1390,9 +1411,8 @@ fn member_from(row: &Row) -> Result<TeamMember, Error> {
 
 fn open_invite_from(row: &Row) -> Result<OpenInvite, Error> {
     Ok(OpenInvite {
-        id: InviteId(column(row, "invite_id")?),
+        id: InviteId(SessionId(column(row, "invite_id")?)),
         staff: AccountId::new(column(row, "staff_id")?),
-        name: column(row, "name")?,
         email: column(row, "email")?,
         role: role_in(row, "role_name")?,
         ends_at: column(row, "ends_at")?,
@@ -1426,6 +1446,15 @@ fn team_changed(
     Ok((Some(change), Some(event(kind, actor, said, payload))))
 }
 
+/// What each answer to an invite from the Team page comes to, and the reason its record gives.
+const SENT: [(&str, TeamChange, Option<&str>); 5] = [
+    ("issued", TeamChange::Done, None),
+    ("disabled", TeamChange::Done, Some("not_issued")),
+    ("member", TeamChange::Member, Some("member")),
+    ("stale", TeamChange::Stale, Some("stale")),
+    ("beyond", TeamChange::Refused, Some("beyond")),
+];
+
 /// Reads what an invite from the Team page came to, and makes the event it records in the business's own record:
 /// changed, naming the staff member, when one was issued, and refused otherwise, with the reason. A disabled staff
 /// member is recorded as not issued, naming no one, and answers as sent, so the business learns nothing another
@@ -1433,18 +1462,12 @@ fn team_changed(
 fn sent_from_team(rows: &[Row], role: Role, actor: &Actor) -> Decided<(TeamChange, bool)> {
     let row = rows.first().ok_or_else(answered_nothing)?;
     let outcome: String = column(row, "outcome")?;
-    let (change, reason) = match outcome.as_str() {
-        "issued" => (TeamChange::Done, None),
-        "disabled" => (TeamChange::Done, Some("not_issued")),
-        "member" => (TeamChange::Member, Some("member")),
-        "stale" => (TeamChange::Stale, Some("stale")),
-        "beyond" => (TeamChange::Refused, Some("beyond")),
-        _ => {
-            return Err(Error::Storage(format!(
-                "inviting from a team answered {outcome:?}"
-            )));
-        }
+    let Some((_, change, reason)) = SENT.iter().find(|(said, _, _)| *said == outcome) else {
+        return Err(Error::Storage(format!(
+            "inviting from a team answered {outcome:?}"
+        )));
     };
+    let (change, reason) = (*change, *reason);
     let issued = outcome == "issued";
     let named = issued || outcome == "member";
     let staff = if named {
@@ -2480,6 +2503,132 @@ mod tests {
             .query(&format!("SELECT {select}"), &[])
             .await
             .expect("answers")
+    }
+
+    /// A change on the Team page reads each answer the database writes, and takes any other as a storage failure; an
+    /// invite from it does too.
+    #[tokio::test]
+    async fn a_team_change_reads_only_the_answers_storage_writes() {
+        let (pool, _database) = support::migrated().await;
+        let client = pool.get().await.expect("a connection");
+        let changed = |outcome: &str| {
+            let client = &client;
+            let sql = format!("SELECT '{outcome}'::text AS outcome");
+            async move {
+                let rows = client.query(&sql, &[]).await.expect("answers");
+                team_changed(
+                    &rows,
+                    "identity.staff_removed",
+                    "removed",
+                    json!({}),
+                    &support::actor(),
+                )
+                .map(|(change, _)| change)
+            }
+        };
+        assert_eq!(changed("removed").await, Ok(Some(TeamChange::Done)));
+        assert_eq!(
+            changed("maybe").await,
+            Err(Error::Storage(
+                "a change to a team answered \"maybe\"".to_string()
+            ))
+        );
+        let sql = "SELECT 'maybe'::text AS outcome, 7::bigint AS invited";
+        let rows = client.query(sql, &[]).await.expect("answers");
+        assert_eq!(
+            sent_from_team(&rows, Role::Owner, &support::actor()).map(|(sent, _)| sent),
+            Err(Error::Storage(
+                "inviting from a team answered \"maybe\"".to_string()
+            ))
+        );
+    }
+
+    /// Whether a result failed as storage does, read from what it says, so the test takes no branch of its own.
+    fn storage_failure<T>(result: Result<T, Error>) -> bool {
+        result
+            .err()
+            .is_some_and(|error| error.to_string().starts_with("storage failed"))
+    }
+
+    /// A Team page row of the wrong type, in any column, or naming a role Identity never writes, is a storage
+    /// failure, never a guess; so is an answer with no row, or of the wrong type, to a change or an invite.
+    #[tokio::test]
+    async fn a_team_answer_of_the_wrong_type_is_a_storage_failure() {
+        let (pool, _database) = support::migrated().await;
+        let client = pool.get().await.expect("a connection");
+        let member = [
+            "7::bigint",
+            "'Ada'::text",
+            "'ada@example.com'::text",
+            "'owner'::text",
+            "now()",
+        ];
+        let columns = ["staff_id", "name", "email", "role_name", "joined_at"];
+        for (at, wrong) in ["1", "1", "1", "1", "1"].into_iter().enumerate() {
+            let mut values = member;
+            values[at] = wrong;
+            let rows = selected(&client, &values, &columns).await;
+            assert!(storage_failure(member_from(&rows[0])), "{at}");
+        }
+        let invite = [
+            "'01900000-0000-7000-8000-000000000001'::text",
+            "7::bigint",
+            "'ada@example.com'::text",
+            "'owner'::text",
+            "now()",
+        ];
+        let columns = ["invite_id", "staff_id", "email", "role_name", "ends_at"];
+        for (at, wrong) in ["1", "1", "1", "1", "1"].into_iter().enumerate() {
+            let mut values = invite;
+            values[at] = wrong;
+            let rows = selected(&client, &values, &columns).await;
+            assert!(storage_failure(open_invite_from(&rows[0])), "{at}");
+        }
+    }
+
+    /// An answer with no row, or of the wrong type, to a Team page change or invite, or to a first business, is a
+    /// storage failure.
+    #[tokio::test]
+    async fn a_team_change_answer_of_the_wrong_type_is_a_storage_failure() {
+        let (pool, _database) = support::migrated().await;
+        let client = pool.get().await.expect("a connection");
+        let chef = selected(&client, &["'chef'::text"], &["role_name"]).await;
+        let read = role_in(&chef[0], "role_name");
+        assert_eq!(
+            read,
+            Err(Error::Storage("a staff role is \"chef\"".to_string()))
+        );
+        let actor = support::actor();
+        let none = team_changed(&[], "identity.staff_removed", "removed", json!({}), &actor);
+        assert!(storage_failure(none));
+        let wrong = selected(&client, &["1"], &["outcome"]).await;
+        let changed = team_changed(
+            &wrong,
+            "identity.staff_removed",
+            "removed",
+            json!({}),
+            &actor,
+        );
+        assert!(storage_failure(changed));
+        assert!(storage_failure(sent_from_team(&[], Role::Owner, &actor)));
+        assert!(storage_failure(sent_from_team(&wrong, Role::Owner, &actor)));
+        let issued = selected(
+            &client,
+            &["'issued'::text", "7::integer"],
+            &["outcome", "invited"],
+        )
+        .await;
+        assert!(storage_failure(sent_from_team(
+            &issued,
+            Role::Owner,
+            &actor
+        )));
+        let first = selected(&client, &["'3'::text"], &["tenant_id"]).await;
+        assert!(storage_failure(first_business_in(&first)));
+        let bad = selected(&client, &["1"], &["staff_id"]).await;
+        assert!(storage_failure(team_from(&bad, &[])));
+        assert!(storage_failure(team_from(&[], &bad)));
+        assert_eq!(first_business_in(&[]), Ok(None));
     }
 
     /// A staff invite's answer of the wrong type, in any column, is a storage failure, never a guess.

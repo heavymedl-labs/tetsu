@@ -840,6 +840,23 @@ impl SessionId {
     }
 }
 
+/// An open staff invite's random public id, as the Team page lists it and cancelling one names it (ADR-0096), written
+/// as a session's is, never anything of its link.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InviteId(pub(crate) SessionId);
+
+impl InviteId {
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        SessionId::parse(text).map(Self)
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
 /// Whether `text` is a UUID in its lowercase form, as a random public id is written.
 fn public_id(text: &str) -> bool {
     let groups = text.split('-').map(str::len);
@@ -847,23 +864,6 @@ fn public_id(text: &str) -> bool {
         .bytes()
         .all(|byte| byte == b'-' || matches!(byte, b'0'..=b'9' | b'a'..=b'f'));
     hex && groups.eq([8, 4, 4, 4, 12])
-}
-
-/// An open staff invite's random public id, as the Team page lists it and cancelling one names it (ADR-0096): a
-/// UUID in its lowercase form, never anything of its link. One that is not is refused before it reaches storage.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InviteId(pub(crate) String);
-
-impl InviteId {
-    #[must_use]
-    pub fn parse(text: &str) -> Option<Self> {
-        public_id(text).then(|| Self(text.to_string()))
-    }
-
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
 }
 
 /// One of an admin's live sessions, as their page lists it (ADR-0059, `v5.0.0-7.5.2`): its random id, when it
@@ -992,6 +992,17 @@ impl Role {
         }
     }
 
+    /// The role as an invite's sentence says it, after "as": "as its owner", "as front desk staff".
+    #[must_use]
+    pub const fn invited_as(self) -> &'static str {
+        match self {
+            Self::Owner => "its owner",
+            Self::Manager => "a manager",
+            Self::FrontDesk => "front desk staff",
+            Self::Instructor => "an instructor",
+        }
+    }
+
     /// Whether the role holds `permission`, by ADR-0096's table. Every check names a permission, never a role
     /// (`v5.0.0-8.2.1`).
     #[must_use]
@@ -1081,6 +1092,23 @@ impl Member {
     }
 }
 
+/// A change of one staff member's role at a business: from the role it was decided on, `held`, to `wanted`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RoleChange {
+    pub staff: AccountId,
+    pub held: Role,
+    pub wanted: Role,
+}
+
+/// Someone to invite to a business from its Team page: their name, used only if they are new, and none for a resend,
+/// which invites whoever an open invite there names; their email; and the role joining gives.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TeamInvite {
+    pub name: Option<PersonName>,
+    pub email: tetsu_kernel::Address,
+    pub role: Role,
+}
+
 /// One of a business's staff, as its Team page lists them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TeamMember {
@@ -1091,13 +1119,12 @@ pub struct TeamMember {
     pub joined_at: SystemTime,
 }
 
-/// One of a business's open invites, as its Team page lists it: whom it names, by the name and email they hold,
-/// and the role it gives.
+/// One of a business's open invites, as its Team page lists it: whom it names, by the email it was sent to, and the role it
+/// gives, never a name, which another business may have given.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenInvite {
     pub id: InviteId,
     pub staff: AccountId,
-    pub name: String,
     pub email: String,
     pub role: Role,
     pub ends_at: SystemTime,

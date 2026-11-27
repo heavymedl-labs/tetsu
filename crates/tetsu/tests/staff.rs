@@ -63,7 +63,7 @@ fn wrong_staff_commands_are_usage_errors() {
             "Ada Park",
             "ada@example.com",
             "--role",
-            "manager",
+            "chef",
         ],
         &["list"],
     ] {

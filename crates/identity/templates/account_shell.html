@@ -1,8 +1,10 @@
 {#- A realm's account pages in the settings shell any realm fills (web/templates/settings.html): their Personal pages,
-    Profile and Security (#156) and Preferences (ADR-0095), at the realm's own paths, and for admins the Platform group only they have (ADR-0084), with the person, their
-    role, and Log out at the sidebar's foot; the narrow bar's initials menu (#148); and the session island, so the page
-    warns before the session ends. The account area is the admins' home (ADR-0086), so the sidebar has no "Back to
-    app". A page's struct is a `Shell`'s, as every logged-in account page's is. -#}
+    Profile and Security (#156) and Preferences (ADR-0095), at the realm's own paths; for admins the Platform group
+    only they have (ADR-0084); for a staff member who may see a business's team, a group named for the business,
+    with its Team page (ADR-0096); and the person, their role, and Log out at the sidebar's foot. Then the narrow
+    bar's initials menu (#148), and the session island, so the page warns before the session ends. The account area
+    is the admins' home (ADR-0086), so the sidebar has no "Back to app". A page's struct is a `Shell`'s, as every
+    logged-in account page's is. -#}
 {% extends "../../../web/templates/settings.html" %}
 {% import "../../../web/templates/components.html" as shared %}
 {% block head %}<script type="module" src="{{ script }}"></script><script
@@ -14,6 +16,7 @@
   ></script>{% endblock %}
 {#- The sidebar, for the page or for the narrow menu, each copy naming its groups with ids of its own. -#}
 {% macro sidebar(personal, platform, here, name, initials, form) %}
+  {#- A business's group, for the page or the menu, takes the platform group's id, as no realm has both. -#}
   {% call shared::settings_group(personal, "Personal") %}
     {%- call shared::settings_link(profile, "person", "Profile", here) %}{% endcall %}
     {%- call shared::settings_link(security, "shield", "Security", here) %}{% endcall %}
@@ -21,6 +24,9 @@
   {% endcall %}
   {% if admin %}{% call shared::settings_group(platform, "Platform") %}
       {%- call shared::settings_link("/mailbox", "inbox", "Mailbox", here) %}{% endcall %}
+    {% endcall %}{% endif %}
+  {% if let Some(group) = business %}{% call shared::settings_group(platform, group.name) %}
+      {%- call shared::settings_link(group.team, "users", "Team", here) %}{% endcall %}
     {% endcall %}{% endif %}
   {% call shared::settings_account(name, initials, role, logout, form) %}{% endcall %}
 {% endmacro %}

@@ -10,7 +10,9 @@ their passkeys, and starts, finds, and ends their sessions. The login flow runs 
 managing accounts over the admin realm's `AdminDirectory` alone, so each realm keeps its own tables
 ([ADR-0088](../../docs/adr/0088-admins-apart-from-staff.md)). `postgres_store(pool)` returns the admins' over Postgres,
 and `postgres_staff_store(pool)` staff's, whose `StaffDirectory` invites a staff member to a business by email, making
-them if new, in that business's own transaction ([ADR-0089](../../docs/adr/0089-staff-join-and-login.md)).
+them if new, in that business's own transaction ([ADR-0089](../../docs/adr/0089-staff-join-and-login.md)), and whose
+`TeamStore` lists, invites, changes, and removes a business's staff and cancels its invites
+([ADR-0096](../../docs/adr/0096-staff-permissions-and-the-team-page.md)).
 
 An admin may hold an email address ([ADR-0074](../../docs/adr/0074-operator-email-in-development.md)).
 `invite_message` renders their invite from templates, and `staff_invite_message` a staff member's, naming the business as escaped text, never kept for the mailbox, and `notices(mailer)` is an outbox
@@ -249,6 +251,23 @@ and two minutes before a limit opens the page's dialog: before the idle limit to
 in, a `POST` with the form token that renews the session, and before the 8 hour limit to log in again, a logout that returns to the page after the next login. It keeps the
 site's tabs in step over a `BroadcastChannel`, asks again when the page is shown, and sends a page whose session has
 ended to `/login?ended=1`, which says the admin was logged out and how long a session may sit idle.
+
+## The Team page
+
+Each business's staff pages sit at `/<business>/settings/...` on the staff host, starting with
+`/<business>/settings/team` ([ADR-0096](../../docs/adr/0096-staff-permissions-and-the-team-page.md)). Every request finds
+the business by its slug through `BusinessNames`, which the composition root fills from Tenancy, and reads the
+person's role there in the business's own transaction, so a role removed is refused on the next request. A business
+the person holds no role at, or whose team their role may not see, answers as the not-found page. Checks name a
+`Permission`, never a role, and `Member::may_reach` adds the rank rule; each change then locks the business's owners
+in the database and changes nothing unless the roles it was decided on still hold, so the last owner stays. The page's
+forms post the session's form token, as every change does, and return to the page with one word, such as
+`?said=sent`, that the page turns into a fixed sentence. An invite from the page is limited to twenty an hour per
+staff member, records an event in the business's own record, and answers "Invite sent" for a disabled staff member
+too, holding an invite for them that is never sent and that joining refuses, so the page lists it as any other. Open
+invites show only the email each was sent to, never a name, which another business may have given, and resending one
+posts no name. A staff member's own pages show their first business's group while their role may see its
+team.
 
 ## Not yet
 

@@ -2,7 +2,6 @@
 SELECT
     i.invite_id,
     i.staff_id,
-    i.name,
     i.email,
     i.role_name,
     i.ends_at

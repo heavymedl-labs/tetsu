@@ -317,6 +317,10 @@ mod tests {
             std::future::ready(Ok(None))
         }
 
+        fn find_slug(&self, _: i64) -> impl Future<Output = Result<Option<String>, Error>> + Send {
+            std::future::ready(Ok(None))
+        }
+
         /// Moves the tenant to the new slug's address; enough for routing, which is all these tests serve.
         fn rename(
             &self,

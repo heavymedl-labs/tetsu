@@ -48,6 +48,15 @@ impl<S: TenantStore> Tenants<S> {
         self.store.find_name(id).await
     }
 
+    /// The slug of the business with an id, for a page that links to it knowing only its id, such as a staff
+    /// member's link to their business's Team page; none for an id no tenant has.
+    ///
+    /// # Errors
+    /// Fails if storage fails.
+    pub async fn slug(&self, id: i64) -> Result<Option<String>, Error> {
+        self.store.find_slug(id).await
+    }
+
     /// Moves the tenant at an address to a new slug and its address, such as one whose address a release has
     /// since reserved for Tetsu's own pages (#90). The address may be reserved; the new slug may not, since it
     /// passed [`Slug::parse`].

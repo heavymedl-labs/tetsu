@@ -68,12 +68,7 @@ pub fn staff_invite_message(
     link: &str,
     token: &InviteToken,
 ) -> Option<Message> {
-    let role = match role {
-        Role::Owner => "its owner",
-        Role::Manager => "a manager",
-        Role::FrontDesk => "front desk staff",
-        Role::Instructor => "an instructor",
-    };
+    let role = role.invited_as();
     invite(
         to,
         token,

@@ -104,7 +104,44 @@ pub(crate) async fn serve<S: crate::ports::LoginStore + Send + Sync + 'static>(
 pub(crate) async fn serve_staff<S: crate::ports::StaffStore + Send + Sync + 'static>(
     staff: Accounts<S>,
 ) -> SocketAddr {
-    listening(crate::staff_router(staff, web(sample_mailbox()))).await
+    serve_staff_posting(staff, Arc::new(Posted::default())).await
+}
+
+/// Serves staff's routes, sending the email they ask for to `post`.
+pub(crate) async fn serve_staff_posting<S: crate::ports::StaffStore + Send + Sync + 'static>(
+    staff: Accounts<S>,
+    post: Arc<Posted>,
+) -> SocketAddr {
+    let web = Web {
+        post,
+        ..web(sample_mailbox())
+    };
+    listening(crate::staff_router(staff, web)).await
+}
+
+/// Every message a page sent, in order, or a refusal of each once told to fail.
+#[derive(Default)]
+pub(crate) struct Posted {
+    pub(crate) sent: Mutex<Vec<tetsu_kernel::Message>>,
+    pub(crate) failing: std::sync::atomic::AtomicBool,
+}
+
+impl tetsu_kernel::Mailer for Posted {
+    fn send(
+        &self,
+        message: &tetsu_kernel::Message,
+    ) -> impl Future<Output = Result<tetsu_kernel::Delivery, MailError>> + Send {
+        let failing = self.failing.load(std::sync::atomic::Ordering::SeqCst);
+        if !failing {
+            self.sent.lock().expect("records").push(message.clone());
+        }
+        let answer = if failing {
+            Err(MailError::Unavailable)
+        } else {
+            Ok(tetsu_kernel::Delivery::Sent)
+        };
+        std::future::ready(answer)
+    }
 }
 
 /// The pages' settings every test serves, with `mailbox` as the one Mail keeps.
@@ -119,25 +156,52 @@ fn web(mailbox: Arc<dyn Mailbox>) -> Web {
         scheme_script: "/assets/scheme-test.js",
         menu_script: MENU_SCRIPT,
         mailbox,
+        post: Arc::new(Posted::default()),
         businesses: Arc::new(Businesses),
+        links: ORIGIN.to_string(),
         report,
     }
 }
 
-/// Businesses as tests name them: Fern Studio is business 4, business 3's name cannot be read, as when Tenancy's
-/// store is down, and no other has one.
-struct Businesses;
+/// Businesses as tests find them: Fern Studio is business 4, at `fern-studio`, business 3 cannot be read, as when
+/// Tenancy's store is down, nor can the slug `down`, business 6, at `nul-studio`, has a name no email can hold, and
+/// no other id or slug is a business's.
+pub(crate) struct Businesses;
 
-impl crate::BusinessNames for Businesses {
-    fn name(&self, business: crate::BusinessId) -> crate::Naming<'_> {
-        let named = match business.get() {
-            3 => Err(crate::Error::Unavailable(
+impl Businesses {
+    fn answer(found: Option<i64>) -> Result<Option<crate::Business>, crate::Error> {
+        match found {
+            Some(3) => Err(crate::Error::Unavailable(
                 "tenancy's store is down".to_string(),
             )),
-            4 => Ok(Some("Fern Studio".to_string())),
+            Some(4) => Ok(Some(crate::Business {
+                id: crate::BusinessId::new(4),
+                slug: "fern-studio".to_string(),
+                name: "Fern Studio".to_string(),
+            })),
+            Some(6) => Ok(Some(crate::Business {
+                id: crate::BusinessId::new(6),
+                slug: "nul-studio".to_string(),
+                name: "Nul\0Studio".to_string(),
+            })),
             _ => Ok(None),
+        }
+    }
+}
+
+impl crate::BusinessNames for Businesses {
+    fn found(&self, business: crate::BusinessId) -> crate::Finding<'_> {
+        Box::pin(std::future::ready(Self::answer(Some(business.get()))))
+    }
+
+    fn at<'a>(&'a self, slug: &'a str) -> crate::Finding<'a> {
+        let id = match slug {
+            "fern-studio" => Some(4),
+            "down" => Some(3),
+            "nul-studio" => Some(6),
+            _ => None,
         };
-        Box::pin(std::future::ready(named))
+        Box::pin(std::future::ready(Self::answer(id)))
     }
 }
 

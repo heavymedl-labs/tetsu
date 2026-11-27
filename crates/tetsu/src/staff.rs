@@ -155,7 +155,7 @@ async fn emailed(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::args;
     use tetsu_identity::Actor;
@@ -335,12 +335,10 @@ mod tests {
         );
     }
 
-    /// A business is found by its slug's address, and an unknown one is named.
-    #[tokio::test]
-    async fn a_business_is_found_by_its_slug() {
-        let database = tetsu_postgres::test_support::migrated_database(&[&tetsu_tenancy::Tenancy])
-            .await
-            .unwrap();
+    /// Tenancy's use cases over a test database, as the app's role, and Fern Studio, made there.
+    pub(crate) async fn fern_studio(
+        database: &tetsu_postgres::test_support::TestDatabase,
+    ) -> (Tenants<impl TenantStore>, tetsu_tenancy::Tenant) {
         let tenants =
             tetsu_tenancy::postgres_store(tetsu_postgres::pool(&database.as_app()).unwrap());
         let theme = tetsu_tenancy::Theme {
@@ -348,12 +346,19 @@ mod tests {
             accent: tetsu_tenancy::Color::parse("#445566").unwrap(),
         };
         let fern = Slug::parse("fern-studio").unwrap();
-        let tenant = tenants
-            .create(
-                &tetsu_tenancy::NewTenant::new(fern.clone(), "Fern Studio", theme, vec![]).unwrap(),
-            )
+        let new = tetsu_tenancy::NewTenant::new(fern, "Fern Studio", theme, vec![]).unwrap();
+        let tenant = tenants.create(&new).await.unwrap();
+        (tenants, tenant)
+    }
+
+    /// A business is found by its slug's address, and an unknown one is named.
+    #[tokio::test]
+    async fn a_business_is_found_by_its_slug() {
+        let database = tetsu_postgres::test_support::migrated_database(&[&tetsu_tenancy::Tenancy])
             .await
             .unwrap();
+        let (tenants, tenant) = fern_studio(&database).await;
+        let fern = Slug::parse("fern-studio").unwrap();
         assert_eq!(
             found(&tenants, &fern).await,
             Ok((

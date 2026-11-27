@@ -526,21 +526,7 @@ fn pairs(
 
 /// Percent-decodes text, or `None` if an escape is not two hex digits or the result is not UTF-8.
 fn decoded(text: impl AsRef<str>) -> Option<String> {
-    let mut bytes = Vec::new();
-    let mut rest = text.as_ref().as_bytes();
-    while let Some((&byte, after)) = rest.split_first() {
-        if byte == b'%' {
-            let hex = after
-                .get(..2)
-                .filter(|hex| hex.iter().all(u8::is_ascii_hexdigit))?;
-            bytes.push(u8::from_str_radix(std::str::from_utf8(hex).ok()?, 16).ok()?);
-            rest = &after[2..];
-        } else {
-            bytes.push(byte);
-            rest = after;
-        }
-    }
-    String::from_utf8(bytes).ok()
+    tetsu_kernel::percent_decoded(text.as_ref())
 }
 
 /// How long one SMTP send may take. A notice sends inside a transaction Postgres ends after 10 idle seconds

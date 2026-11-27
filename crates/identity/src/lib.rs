@@ -36,6 +36,8 @@ mod sessions_tests;
 #[cfg(test)]
 mod staff_tests;
 #[cfg(test)]
+mod team_page_tests;
+#[cfg(test)]
 mod team_tests;
 
 pub use adapters::events::notices;
@@ -47,14 +49,15 @@ pub use domain::{
     Ceremony, CeremonyKind, CeremonyToken, Device, Disabling, Ending, Error, FailedCheck,
     HeldPasskey, Invitation, InviteId, InviteToken, Invitee, Issue, Limits, ListedSession, Login,
     Member, NewPasskey, NewStaffInvite, OpenInvite, Permission, PersonName, RateLimit, Realm,
-    Redemption, Refusal, Removal, Role, Session, SessionId, SessionStart, SessionToken, Signer,
-    StaffInvite, StaffIssue, TakenAddition, TakenCeremony, Team, TeamChange, TeamMember, TimeLeft,
+    Redemption, Refusal, Removal, Role, RoleChange, Session, SessionId, SessionStart, SessionToken,
+    Signer, StaffInvite, StaffIssue, TakenAddition, TakenCeremony, Team, TeamChange, TeamInvite,
+    TeamMember, TimeLeft,
 };
 pub use mail::{invite_message, staff_invite_message};
 pub use passkeys::RelyingParty;
 pub use ports::{
-    AdminDirectory, AdminStore, BusinessNames, LoginStore, Naming, StaffDirectory, StaffStore,
-    TeamStore,
+    AdminDirectory, AdminStore, Business, BusinessNames, Finding, LoginStore, Post, Posting,
+    StaffDirectory, StaffStore, TeamStore,
 };
 pub use use_cases::{Accounts, Invited};
 
