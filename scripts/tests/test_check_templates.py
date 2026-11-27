@@ -56,6 +56,15 @@ class TemplateCheckTest(unittest.TestCase):
         self.assertEqual(self.check(html).returncode, 0)
         self.assert_fails('<div class="{% if demo %}flex{% else %}nope{% endif %}">x</div>', "nope")
 
+    def test_a_transform_utility_inside_starting_fails(self):
+        # WebKit ignores Tailwind's registered transform variables in @starting-style, so nothing slides.
+        for name in ["starting:open:-translate-x-full", "md:starting:scale-95", "starting:rotate-3"]:
+            self.assert_fails(f'<div class="{name}">', name, "animates nothing in WebKit")
+
+    def test_a_plain_transform_inside_starting_passes_the_rule(self):
+        result = self.check('<div class="starting:open:[translate:-100%_0]">')
+        self.assertNotIn("animates nothing", result.stderr)
+
     def test_a_class_split_over_lines_is_read(self):
         self.assert_fails('<div class="flex\n  nope">x</div>', "nope")
 

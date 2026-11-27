@@ -1,9 +1,10 @@
-"""Checks templates against the built stylesheet (ADR-0032).
-
-Fails on a class the stylesheet does not define, which Tailwind drops without a word; on `{{ }}` inside a
-class attribute, since Tailwind finds only class names written whole; and on a `style=` attribute, which the
-content security policy blocks. Marker classes such as `group` and `peer` style nothing themselves, so they
-pass.
+"""Checks templates against the built stylesheet (ADR-0032). Fails on a class the stylesheet does not define,
+which Tailwind drops without a word; on `{{ }}` inside a class attribute, since Tailwind finds only class
+names written whole; and on a `style=` attribute, which the content security policy blocks; and on a
+transform utility, such as `-translate-x-full`, inside `starting:`, since WebKit ignores the variables
+Tailwind registers for it in `@starting-style`, so nothing would animate in Safari or any iOS browser; write
+a plain value, such as `starting:open:[translate:-100%_0]`. Marker classes such as `group` and `peer` style
+nothing themselves, so they pass.
 
 Usage: check_templates.py STYLESHEET TEMPLATE...
 """
@@ -18,6 +19,8 @@ TAG = re.compile(r"\{%.*?%\}", re.DOTALL)
 # A class selector as Tailwind writes it, with special characters escaped by a backslash.
 SELECTOR = re.compile(r"\.((?:\\.|[A-Za-z0-9_-])+)")
 MARKERS = re.compile(r"^(group|peer)(/[\w-]+)?$")
+# A `starting:` class whose utility sets a transform through Tailwind's registered variables.
+STARTING_TRANSFORM = re.compile(r"^(?:[\w-]+:)*starting:(?:[\w-]+:)*-?(?:translate|scale|rotate|skew)-")
 
 
 def defined(css):
@@ -38,7 +41,13 @@ def problems(path, text, classes):
         if "{{" in value:
             found.append(f"{path}:{line}: {{{{ }}}} inside a class; write each class name whole")
             continue
-        missing = [n for n in TAG.sub(" ", value).split() if n not in classes and not MARKERS.match(n)]
+        names = TAG.sub(" ", value).split()
+        found.extend(
+            f"{path}:{line}: {name} animates nothing in WebKit; write a plain value, as [translate:-100%_0]"
+            for name in names
+            if STARTING_TRANSFORM.match(name)
+        )
+        missing = [n for n in names if n not in classes and not MARKERS.match(n)]
         found.extend(f"{path}:{line}: {name} is not in the built stylesheet" for name in missing)
     return found
 
