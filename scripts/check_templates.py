@@ -9,6 +9,10 @@ Also fails on a transform utility, such as `-translate-x-full`, inside `starting
 every iOS browser, ignores the variables Tailwind registers for it in `@starting-style`, so nothing would
 animate. Write a plain value, such as `starting:open:[translate:-100%_0]`.
 
+Also fails on a class list with `transition-discrete`, the closing transition of a popover or dialog, and no
+`[&[data-closing]]:` class: only Chromium plays it as the element leaves the top layer, so it snaps shut in
+WebKit, unless a script closes it, as the menu island does, by marking it `data-closing` before hiding it.
+
 Usage: check_templates.py STYLESHEET TEMPLATE...
 """
 
@@ -66,6 +70,13 @@ def problems(path, text, classes):
             for name in TAG.sub(" ", value).split()
             if starting_transform(name)
         )
+        every = TAG.sub(" ", value).split()
+        if any(parts(name)[1] == "transition-discrete" for name in every) and not any(
+            name.startswith("[&[data-closing]]:") for name in every
+        ):
+            found.append(
+                f"{path}:{line}: only Chromium plays this closing transition; close it by [&[data-closing]]:"
+            )
         missing = [n for n in TAG.sub(" ", value).split() if n not in classes and not MARKERS.match(n)]
         found.extend(f"{path}:{line}: {name} is not in the built stylesheet" for name in missing)
     return found

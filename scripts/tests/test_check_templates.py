@@ -79,6 +79,14 @@ class TemplateCheckTest(unittest.TestCase):
             result = self.check(f'<div class="{name}">')
             self.assertNotIn("animates nothing", result.stderr, name)
 
+    def test_a_closing_transition_needs_a_scripted_close(self):
+        # Only Chromium plays a popover's closing transition; WebKit hides it at once, unless by script.
+        self.assert_fails('<div class="motion-safe:transition-discrete">', "only Chromium plays")
+        result = self.check(
+            '<div class="motion-safe:transition-discrete [&[data-closing]]:[translate:-100%_0]">'
+        )
+        self.assertNotIn("only Chromium plays", result.stderr)
+
     def test_a_class_split_over_lines_is_read(self):
         self.assert_fails('<div class="flex\n  nope">x</div>', "nope")
 
