@@ -100,7 +100,7 @@ describe("a menu island, closing", () => {
   it("slides the menu out when focus leaves it, and hides it once the slide ends", () => {
     const { menu, hide, byId } = opened();
     leave(byId("security"), byId("after"));
-    expect([menu.hasAttribute("data-closing"), hide.mock.calls.length]).toEqual([true, 0]);
+    expect([menu.getAttribute("data-closing"), hide.mock.calls.length]).toEqual(["", 0]);
     ended(menu);
     expect([menu.hasAttribute("data-closing"), hide.mock.calls.length]).toEqual([false, 1]);
     vi.advanceTimersByTime(CLOSING_LIMIT);
@@ -233,6 +233,7 @@ describe("a menu island, modal", () => {
     const inert = () =>
       [byId("opener"), byId("after"), host, menu, document.head].map((e) => e.hasAttribute("inert"));
     expect(inert()).toEqual([true, true, false, false, false]);
+    expect(byId("after").getAttribute("inert")).toBe("");
     toggled(menu, "closed");
     expect(inert()).toEqual([false, false, false, false, false]);
   });
