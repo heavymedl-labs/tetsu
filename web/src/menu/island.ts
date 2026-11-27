@@ -10,25 +10,40 @@
 // its classes slide out, and hides it once that transition ends. Without script, the popover closes on its own.
 //
 // While the menu is open, the rest of the page is inert, so nothing behind its backdrop can be tapped or reached, as
-// behind a modal; the page's stylesheet keeps the page from scrolling then (web/src/tetsu.css).
+// behind a modal, save live regions, which must still be heard; the page's stylesheet keeps the page from scrolling
+// then (web/src/tetsu.css). Escape closes it wherever focus is, closing gives focus back to what opened it (WCAG
+// 2.4.3), and the screen widening to show the sidebar hides it, so the page is never left inert.
 
 /** How long a close may take before the menu is hidden anyway: its 200ms transition, with room to spare. */
 export const CLOSING_LIMIT = 400;
 
-/** Makes everything outside `menu` inert, up to the body, or with `on` false nothing, and returns what it made inert,
- * leaving what was inert already alone. */
-function isolate(menu: HTMLElement, on: boolean): Element[] {
+/** The width from which the settings shell shows its sidebar, Tailwind's `md`, where the menu is hidden. */
+const WIDE = "(min-width: 48rem)";
+
+/** Makes `element` inert, into `made`, unless it is inert already, or is or holds a live region, whose announcements
+ * must still be heard: then only its parts without one. */
+function quiet(element: Element, made: Element[]): void {
+  if (element.hasAttribute("inert") || element.matches("[aria-live]")) {
+    return;
+  }
+  if (element.querySelector("[aria-live]")) {
+    for (const part of element.children) {
+      quiet(part, made);
+    }
+    return;
+  }
+  element.setAttribute("inert", "");
+  made.push(element);
+}
+
+/** Makes everything outside `menu` inert, up to the body, and returns what it made inert. */
+function isolate(menu: HTMLElement): Element[] {
   const made: Element[] = [];
   const body = menu.ownerDocument.body;
-  for (
-    let inside: Element = menu;
-    on && inside !== body && inside.parentElement;
-    inside = inside.parentElement
-  ) {
+  for (let inside: Element = menu; inside !== body && inside.parentElement; inside = inside.parentElement) {
     for (const sibling of inside.parentElement.children) {
-      if (sibling !== inside && !sibling.hasAttribute("inert")) {
-        sibling.setAttribute("inert", "");
-        made.push(sibling);
+      if (sibling !== inside) {
+        quiet(sibling, made);
       }
     }
   }
@@ -58,16 +73,18 @@ function slideOut(menu: HTMLElement): void {
   menu.addEventListener("transitionend", ended);
 }
 
-/** Readies a `<tetsu-menu>`: its popover takes focus as it opens, keeps the page behind it inert, and slides out
- * before it closes. */
+/** Readies a `<tetsu-menu>`: its popover takes focus as it opens, keeps the page behind it inert, slides out before
+ * it closes, and gives focus back to what opened it. */
 export function ready(host: HTMLElement): void {
   const menu = host.querySelector<HTMLElement>("[popover]");
   if (!menu || !("hidePopover" in menu)) {
     return;
   }
   menu.setAttribute("popover", "manual");
+  const page = host.ownerDocument;
   let open = false;
   let made: Element[] = [];
+  let opener: HTMLElement | null = null;
   const close = (event?: Event) => {
     event?.preventDefault();
     if (open && !menu.hasAttribute("data-closing")) {
@@ -79,10 +96,17 @@ export function ready(host: HTMLElement): void {
     for (const element of made) {
       element.removeAttribute("inert");
     }
-    made = isolate(menu, open);
+    made = [];
     if (open) {
+      opener =
+        page.activeElement instanceof HTMLElement && !menu.contains(page.activeElement)
+          ? page.activeElement
+          : null;
+      made = isolate(menu);
       const current = menu.querySelector<HTMLElement>("[aria-current=page]");
       (current ?? menu.querySelector<HTMLElement>("a, button"))?.focus();
+    } else if (page.activeElement === page.body || menu.contains(page.activeElement)) {
+      opener?.focus();
     }
   });
   menu.addEventListener("focusout", (event) => {
@@ -91,16 +115,28 @@ export function ready(host: HTMLElement): void {
       close();
     }
   });
-  menu.addEventListener("keydown", (event) => event.key === "Escape" && close(event));
   menu.addEventListener("click", (event) => {
     if ((event.target as Element).closest("[popovertargetaction=hide]")) {
       close(event);
     }
   });
-  // A tap on the backdrop lands on the page behind it, outside the menu. A menu taken off the page closes nothing.
-  host.ownerDocument.addEventListener("click", (event) => {
-    if (open && menu.isConnected && !menu.contains(event.target as Node)) {
+  watch(menu, () => open && menu.isConnected, close);
+}
+
+/** Closes `menu`, while it is `shown`, from outside it: Escape wherever focus is, as a native popover's does, even on
+ * the page's body after a tap on the menu's own background, and a tap on the backdrop, which lands outside the menu.
+ * Once the screen is wide enough for the sidebar, the menu hides at once, so the page is never left inert behind it. */
+function watch(menu: HTMLElement, shown: () => boolean, close: (event?: Event) => void): void {
+  const page = menu.ownerDocument;
+  page.addEventListener("keydown", (event) => shown() && event.key === "Escape" && close(event));
+  page.addEventListener("click", (event) => {
+    if (shown() && !menu.contains(event.target as Node)) {
       close(event);
+    }
+  });
+  globalThis.matchMedia?.(WIDE).addEventListener?.("change", (event) => {
+    if (shown() && (event as MediaQueryListEvent).matches) {
+      menu.hidePopover();
     }
   });
 }

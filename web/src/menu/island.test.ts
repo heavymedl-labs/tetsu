@@ -258,6 +258,91 @@ describe("a menu island, modal", () => {
   });
 });
 
+describe("a menu island, after it closes", () => {
+  it("gives focus back to what opened it, once the page is live again", () => {
+    vi.useFakeTimers();
+    const { host, menu, byId } = island();
+    readied(host, menu);
+    byId("opener").focus();
+    toggled(menu, "open");
+    byId("security").blur();
+    toggled(menu, "closed");
+    expect([document.activeElement, byId("opener").hasAttribute("inert")]).toEqual([byId("opener"), false]);
+  });
+
+  it("keeps nothing to give focus back to when focus was already inside the menu as it opened", () => {
+    vi.useFakeTimers();
+    const { host, menu, byId } = island();
+    readied(host, menu);
+    byId("profile").focus();
+    toggled(menu, "open");
+    byId("security").blur();
+    expect(() => toggled(menu, "closed")).not.toThrow();
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it("leaves focus where it went outside the menu, and on the body when nothing opened it", () => {
+    vi.useFakeTimers();
+    const { host, menu, byId } = island();
+    readied(host, menu);
+    toggled(menu, "open");
+    byId("security").blur();
+    toggled(menu, "closed");
+    expect(document.activeElement).toBe(document.body);
+    byId("opener").focus();
+    toggled(menu, "open");
+    toggled(menu, "closed");
+    byId("after").focus();
+    toggled(menu, "closed");
+    expect(document.activeElement).toBe(byId("after"));
+  });
+});
+
+describe("a menu island, closed from anywhere", () => {
+  it("hears Escape wherever focus is while the menu is open, and not once it is closed", () => {
+    const { menu } = opened();
+    const pressed = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    document.body.dispatchEvent(pressed);
+    expect([pressed.defaultPrevented, menu.hasAttribute("data-closing")]).toEqual([true, true]);
+    menu.removeAttribute("data-closing");
+    toggled(menu, "closed");
+    const later = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    document.body.dispatchEvent(later);
+    expect(later.defaultPrevented).toBe(false);
+  });
+
+  it("hides at once when the screen widens to show the sidebar, and not when it narrows or is closed", () => {
+    const listeners: ((event: { matches: boolean }) => void)[] = [];
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: false,
+      addEventListener: (type: string, listener: (event: { matches: boolean }) => void) =>
+        query === "(min-width: 48rem)" && type === "change" && listeners.push(listener),
+    }));
+    const { menu, hide } = opened();
+    for (const listener of listeners) listener({ matches: false });
+    expect(hide).not.toHaveBeenCalled();
+    for (const listener of listeners) listener({ matches: true });
+    expect(hide).toHaveBeenCalledOnce();
+    toggled(menu, "closed");
+    for (const listener of listeners) listener({ matches: true });
+    expect(hide).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a live region heard while the menu is open, quieting only what holds none", () => {
+    vi.useFakeTimers();
+    document.body.innerHTML =
+      '<div id="shell"><p id="said" aria-live="polite"></p><p id="beside">x</p></div><p id="alone" aria-live="polite"></p>' +
+      "<tetsu-menu><div popover><a href='/x'>x</a></div></tetsu-menu>";
+    const host = document.querySelector("tetsu-menu") as HTMLElement;
+    const menu = host.querySelector("[popover]") as HTMLElement;
+    Object.assign(menu, { hidePopover: vi.fn() });
+    readied(host, menu);
+    toggled(menu, "open");
+    const inert = (id: string) => (document.getElementById(id) as HTMLElement).hasAttribute("inert");
+    expect(["shell", "said", "beside", "alone"].map(inert)).toEqual([false, false, true, false]);
+  });
+});
+
 describe("a menu island, set up", () => {
   it("leaves a browser without popovers alone, which shows the menu in place", () => {
     const { host, menu, byId } = island(true, false);
