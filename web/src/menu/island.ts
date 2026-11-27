@@ -8,6 +8,9 @@
 // has no way to transition a popover out of the top layer, and hides one at once. The island makes the popover
 // manual, then on its close button, Escape, a tap on the backdrop, or focus leaving, marks it `data-closing`, which
 // its classes slide out, and hides it once that transition ends. Without script, the popover closes on its own.
+//
+// While the menu is open, the rest of the page is inert, so nothing behind its backdrop can be tapped or reached, as
+// behind a modal; the page's stylesheet keeps the page from scrolling then (web/src/tetsu.css).
 
 /** How long a close may take before the menu is hidden anyway: its 200ms transition, with room to spare. */
 export const CLOSING_LIMIT = 400;
@@ -20,6 +23,27 @@ export function ready(host: HTMLElement): void {
   }
   menu.setAttribute("popover", "manual");
   let open = false;
+  let made: Element[] = [];
+  /** Makes everything outside the menu inert while it is open, and only what this island made inert live again. */
+  const isolate = (on: boolean) => {
+    for (const element of made) {
+      element.removeAttribute("inert");
+    }
+    made = [];
+    const body = menu.ownerDocument.body;
+    for (
+      let inside: Element = menu;
+      on && inside !== body && inside.parentElement;
+      inside = inside.parentElement
+    ) {
+      for (const sibling of inside.parentElement.children) {
+        if (sibling !== inside && !sibling.hasAttribute("inert")) {
+          sibling.setAttribute("inert", "");
+          made.push(sibling);
+        }
+      }
+    }
+  };
   const close = () => {
     if (!open || menu.hasAttribute("data-closing")) {
       return;
@@ -45,6 +69,7 @@ export function ready(host: HTMLElement): void {
   };
   menu.addEventListener("toggle", (event) => {
     open = (event as ToggleEvent).newState === "open";
+    isolate(open);
     if (open) {
       const current = menu.querySelector<HTMLElement>("[aria-current=page]");
       (current ?? menu.querySelector<HTMLElement>("a, button"))?.focus();

@@ -98,6 +98,12 @@
   --color-success: var(--tetsu-color-success);
 }
 
+/* An open menu island's popover is modal: the page behind it does not scroll (web/src/menu/island.ts makes the rest
+   of the page inert). */
+html:has(tetsu-menu [popover]:popover-open) {
+  overflow: hidden;
+}
+
 /* Where the browser has popovers, whether one is open or closing: a drawer keeps its shape there as it slides out, which
    `open:` would drop the moment it starts closing. A browser without popovers shows the menu in place, unstyled by it. */
 @custom-variant popovers {

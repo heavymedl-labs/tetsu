@@ -227,6 +227,30 @@ describe("a menu island, closing", () => {
   });
 });
 
+describe("a menu island, modal", () => {
+  it("makes everything outside the open menu inert, up to the body, and live again once it closes", () => {
+    const { menu, byId, host } = opened();
+    const inert = () =>
+      [byId("opener"), byId("after"), host, menu, document.head].map((e) => e.hasAttribute("inert"));
+    expect(inert()).toEqual([true, true, false, false, false]);
+    toggled(menu, "closed");
+    expect(inert()).toEqual([false, false, false, false, false]);
+  });
+
+  it("leaves inert what was inert before it opened", () => {
+    vi.useFakeTimers();
+    const { host, menu, byId } = island();
+    byId("after").setAttribute("inert", "");
+    readied(host, menu);
+    toggled(menu, "open");
+    toggled(menu, "closed");
+    expect([byId("after").hasAttribute("inert"), byId("opener").hasAttribute("inert")]).toEqual([
+      true,
+      false,
+    ]);
+  });
+});
+
 describe("a menu island, set up", () => {
   it("leaves a browser without popovers alone, which shows the menu in place", () => {
     const { host, menu, byId } = island(true, false);
