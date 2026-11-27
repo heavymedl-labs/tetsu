@@ -99,6 +99,7 @@ number, and add a row below. Never renumber.
 | [0092](0092-a-service-per-realm-before-domains.md) | A service per realm before domains | Deploying, adding a realm, or setting a realm's host | Accepted |
 | [0093](0093-log-in-leads-to-staff.md) | "Log in" leads to staff login | Changing the site header's login, or where admins log in | Accepted |
 | [0094](0094-realm-paths-at-the-root-of-their-hosts.md) | Realm paths at the root of their hosts | Adding a realm's page, link, or redirect, or serving realms locally | Accepted |
+| [0095](0095-the-color-scheme-on-a-preferences-page.md) | The color scheme on a Preferences page | Changing where a person picks the color scheme, or a page's footer | Accepted |
 | [0068](0068-no-demo-note.md) | No demo note | Changing what marks a demo page | Proposed |
 
 ## Open decisions

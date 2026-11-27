@@ -3,6 +3,8 @@
 - Status: Accepted
 - Date: 2026-11-17
 - Supersedes [ADR-0038](0038-color-scheme-control.md)
+- The control in the footer of the admin pages, now every realm's account area and login pages, superseded by
+  [ADR-0095](0095-the-color-scheme-on-a-preferences-page.md): a Preferences page
 
 ## Context
 
