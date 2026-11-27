@@ -592,12 +592,16 @@ impl Device {
     /// browser` or `another system`.
     #[must_use]
     pub fn from_user_agent(user_agent: Option<&str>) -> Option<Self> {
-        // Order matters: Edge and Opera name Chrome too, Chrome names Safari, and Android names Linux.
-        const BROWSERS: [(&str, &str); 5] = [
+        // Order matters: Edge and Opera name Chrome too, Chrome names Safari, and Android names Linux. On iOS every
+        // browser is Safari's engine and names Safari, so each is told by its own mark first.
+        const BROWSERS: [(&str, &str); 8] = [
             ("Edg/", "Edge"),
+            ("EdgiOS/", "Edge"),
             ("OPR/", "Opera"),
             ("Firefox/", "Firefox"),
+            ("FxiOS/", "Firefox"),
             ("Chrome/", "Chrome"),
+            ("CriOS/", "Chrome"),
             ("Safari/", "Safari"),
         ];
         const SYSTEMS: [(&str, &str); 7] = [
@@ -1260,6 +1264,9 @@ mod tests {
             "Mozilla/5.0 (X11; CrOS x86_64 16000.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 OPR/120.0.0.0",
             "Mozilla/5.0 (iPad; CPU OS 26_0 like Mac OS X)",
             "curl/8.15.0",
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/141.0.7390.96 Mobile/15E148 Safari/604.1",
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/144.0 Mobile/15E148 Safari/605.1.15",
+            "Mozilla/5.0 (iPad; CPU OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) EdgiOS/141.0.3537.71 Version/26.0 Mobile/15E148 Safari/604.1",
         ];
         assert_eq!(
             agents.map(|agent| Device::from_user_agent(Some(agent))
@@ -1273,7 +1280,10 @@ mod tests {
                 "Chrome on Android",
                 "Opera on ChromeOS",
                 "another browser on iPadOS",
-                "another browser on another system"
+                "another browser on another system",
+                "Chrome on iOS",
+                "Firefox on iOS",
+                "Edge on iPadOS"
             ]
         );
         assert_eq!(Device::from_user_agent(None), None);
