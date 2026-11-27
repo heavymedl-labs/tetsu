@@ -120,6 +120,16 @@ async fn an_owner_sees_the_whole_team() {
         !body.contains("remove?staff=1\""),
         "no one removes themselves"
     );
+    assert!(
+        !body.contains(r#"id="tetsu-role-1""#),
+        "no one changes their own role"
+    );
+    for other in ["2", "3", "4"] {
+        assert!(
+            body.contains(&format!(r#"id="tetsu-role-{other}""#)),
+            "{other}"
+        );
+    }
     assert!(!body.contains(r#"role="status""#), "no notice");
 }
 
