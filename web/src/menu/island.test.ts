@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { define, ready } from "./island";
+import { CLOSING_LIMIT, define, ready } from "./island";
 
 afterEach(() => {
   document.body.innerHTML = "";
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 /** A `<tetsu-menu>` as the settings shell renders it: a popover with a close button and links, one of them the
@@ -10,7 +12,7 @@ afterEach(() => {
  * popover gets a stand-in `hidePopover`, which a browser without popovers lacks. */
 function island(current = true, popovers = true) {
   document.body.innerHTML =
-    '<button id="opener">Menu</button><tetsu-menu><div popover><button id="close">Close</button>' +
+    '<button id="opener">Menu</button><tetsu-menu><div popover><button id="close" popovertargetaction="hide">Close</button>' +
     '<a href="/profile" id="profile">Profile</a>' +
     `<a href="/security" id="security"${current ? ' aria-current="page"' : ""}>Security</a></div></tetsu-menu>` +
     '<button id="after">After</button>';
@@ -74,37 +76,153 @@ describe("a menu island, opening", () => {
   });
 });
 
+/** The menu's slide out ending, or another transition, from the menu or one of its parts. */
+function ended(target: HTMLElement, propertyName = "translate") {
+  target.dispatchEvent(Object.assign(new Event("transitionend", { bubbles: true }), { propertyName }));
+}
+
+/** An open menu, readied, with timers the test moves. */
+function opened() {
+  vi.useFakeTimers();
+  const parts = island();
+  readied(parts.host, parts.menu);
+  toggled(parts.menu, "open");
+  return parts;
+}
+
 describe("a menu island, closing", () => {
-  it("closes the open menu when focus leaves it, so focus never rests on what the menu covers", () => {
-    const { host, menu, hide, byId } = island();
-    readied(host, menu);
-    toggled(menu, "open");
+  it("makes the popover manual, so it decides when the menu closes", () => {
+    const { host, menu } = island();
+    ready(host);
+    expect(menu.getAttribute("popover")).toBe("manual");
+  });
+
+  it("slides the menu out when focus leaves it, and hides it once the slide ends", () => {
+    const { menu, hide, byId } = opened();
     leave(byId("security"), byId("after"));
+    expect([menu.hasAttribute("data-closing"), hide.mock.calls.length]).toEqual([true, 0]);
+    ended(menu);
+    expect([menu.hasAttribute("data-closing"), hide.mock.calls.length]).toEqual([false, 1]);
+    vi.advanceTimersByTime(CLOSING_LIMIT);
     expect(hide).toHaveBeenCalledOnce();
   });
 
+  it("waits for its own slide, not a part's or another property's", () => {
+    const { menu, hide, byId } = opened();
+    leave(byId("security"), byId("after"));
+    ended(byId("profile"));
+    ended(menu, "opacity");
+    expect(hide).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(CLOSING_LIMIT - 1);
+    expect(hide).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect([menu.hasAttribute("data-closing"), hide.mock.calls.length]).toEqual([false, 1]);
+  });
+
+  it("hides the menu anyway when no slide ends, as when motion is off in its classes", () => {
+    const { hide, byId } = opened();
+    leave(byId("security"), byId("after"));
+    vi.advanceTimersByTime(CLOSING_LIMIT);
+    expect(hide).toHaveBeenCalledOnce();
+  });
+
+  it("closes once, however often it is asked while closing", () => {
+    const { menu, hide, byId } = opened();
+    leave(byId("security"), byId("after"));
+    leave(byId("profile"), byId("after"));
+    ended(menu);
+    ended(menu);
+    vi.advanceTimersByTime(CLOSING_LIMIT);
+    expect(hide).toHaveBeenCalledOnce();
+  });
+
+  it("closes at once where motion is reduced", () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query === "(prefers-reduced-motion: reduce)",
+    }));
+    const { menu, hide, byId } = opened();
+    leave(byId("security"), byId("after"));
+    expect([menu.hasAttribute("data-closing"), hide.mock.calls.length]).toEqual([false, 1]);
+  });
+
+  it("slides where motion is allowed", () => {
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    const { menu, hide, byId } = opened();
+    leave(byId("security"), byId("after"));
+    expect([menu.hasAttribute("data-closing"), hide.mock.calls.length]).toEqual([true, 0]);
+  });
+
+  it("closes on Escape, which a manual popover leaves to it", () => {
+    const { menu, byId } = opened();
+    const pressed = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    byId("profile").dispatchEvent(pressed);
+    expect([pressed.defaultPrevented, menu.hasAttribute("data-closing")]).toEqual([true, true]);
+    const other = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    menu.removeAttribute("data-closing");
+    byId("profile").dispatchEvent(other);
+    expect(other.defaultPrevented).toBe(false);
+  });
+
+  it("closes from its close button, in place of the browser hiding it at once", () => {
+    const { menu, byId } = opened();
+    const click = new MouseEvent("click", { bubbles: true, cancelable: true });
+    byId("close").dispatchEvent(click);
+    expect([click.defaultPrevented, menu.hasAttribute("data-closing")]).toEqual([true, true]);
+  });
+
+  it("closes from a tap on the backdrop, which lands outside the menu, in place of what it would have done", () => {
+    const { menu, byId } = opened();
+    const click = new MouseEvent("click", { bubbles: true, cancelable: true });
+    byId("after").dispatchEvent(click);
+    expect([click.defaultPrevented, menu.hasAttribute("data-closing")]).toEqual([true, true]);
+  });
+
+  it("leaves a tap alone once its open menu is taken off the page", () => {
+    const { menu } = opened();
+    menu.remove();
+    document.body.innerHTML = '<button id="later">Later</button>';
+    const click = new MouseEvent("click", { bubbles: true, cancelable: true });
+    (document.getElementById("later") as HTMLElement).dispatchEvent(click);
+    expect([click.defaultPrevented, menu.hasAttribute("data-closing")]).toEqual([false, false]);
+  });
+
+  it("leaves a tap outside alone while the menu is closed", () => {
+    const { menu, byId } = opened();
+    toggled(menu, "closed");
+    const click = new MouseEvent("click", { bubbles: true, cancelable: true });
+    byId("after").dispatchEvent(click);
+    expect([click.defaultPrevented, menu.hasAttribute("data-closing")]).toEqual([false, false]);
+  });
+
+  it("leaves a link's tap alone", () => {
+    const { menu, byId } = opened();
+    const click = new MouseEvent("click", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 });
+    byId("profile").dispatchEvent(click);
+    expect([click.defaultPrevented, menu.hasAttribute("data-closing")]).toEqual([false, false]);
+  });
+
   it("stays open while focus moves within it, or leaves the page", () => {
-    const { host, menu, hide, byId } = island();
-    readied(host, menu);
-    toggled(menu, "open");
+    const { menu, hide, byId } = opened();
     leave(byId("profile"), byId("security"));
     leave(byId("security"), null);
-    expect(hide).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(CLOSING_LIMIT);
+    expect([menu.hasAttribute("data-closing"), hide.mock.calls.length]).toEqual([false, 0]);
   });
 
   it("closes nothing before the menu first opens", () => {
+    vi.useFakeTimers();
     const { host, menu, hide, byId } = island();
     readied(host, menu);
     leave(byId("security"), byId("after"));
+    vi.advanceTimersByTime(CLOSING_LIMIT);
     expect(hide).not.toHaveBeenCalled();
   });
 
   it("closes nothing once the menu is closed", () => {
-    const { host, menu, hide, byId } = island();
-    readied(host, menu);
-    toggled(menu, "open");
+    const { menu, hide, byId } = opened();
     toggled(menu, "closed");
     leave(byId("security"), byId("after"));
+    vi.advanceTimersByTime(CLOSING_LIMIT);
     expect(hide).not.toHaveBeenCalled();
   });
 });
